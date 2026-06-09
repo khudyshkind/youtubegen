@@ -1,0 +1,226 @@
+-- Enable UUID extension
+create extension if not exists "uuid-ossp";
+
+-- ─────────────────────────────────────────
+-- Tables
+-- ─────────────────────────────────────────
+
+create table if not exists public.profiles (
+  id              uuid references auth.users(id) on delete cascade primary key,
+  email           text        not null,
+  full_name       text,
+  avatar_url      text,
+  plan            text        not null default 'free'
+                    check (plan in ('free', 'starter', 'pro', 'agency')),
+  credits         integer     not null default 5,
+  stripe_customer_id      text unique,
+  stripe_subscription_id  text unique,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create table if not exists public.projects (
+  id              uuid        default uuid_generate_v4() primary key,
+  user_id         uuid        references public.profiles(id) on delete cascade not null,
+  title           text        not null default 'Новый проект',
+  status          text        not null default 'draft'
+                    check (status in (
+                      'draft', 'generating_script', 'generating_audio',
+                      'generating_subtitles', 'generating_images',
+                      'generating_video', 'generating_seo', 'completed', 'failed'
+                    )),
+  topic           text        not null,
+  duration_minutes integer    not null default 5,
+  voice_id        text,
+  script          text,
+  audio_url       text,
+  subtitle_blocks jsonb,
+  scene_images    jsonb,
+  video_url       text,
+  seo             jsonb,
+  credits_spent   integer     not null default 0,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create table if not exists public.credit_transactions (
+  id          uuid        default uuid_generate_v4() primary key,
+  user_id     uuid        references public.profiles(id) on delete cascade not null,
+  amount      integer     not null,
+  operation   text        not null,
+  project_id  uuid        references public.projects(id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+
+-- ─────────────────────────────────────────
+-- Indexes
+-- ─────────────────────────────────────────
+
+create index if not exists projects_user_id_idx          on public.projects(user_id);
+create index if not exists projects_status_idx           on public.projects(status);
+create index if not exists credit_transactions_user_id_idx on public.credit_transactions(user_id);
+
+-- ─────────────────────────────────────────
+-- Auto-update updated_at
+-- ─────────────────────────────────────────
+
+create or replace function public.handle_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+create trigger on_profiles_updated
+  before update on public.profiles
+  for each row execute function public.handle_updated_at();
+
+create trigger on_projects_updated
+  before update on public.projects
+  for each row execute function public.handle_updated_at();
+
+-- ─────────────────────────────────────────
+-- Auto-create profile on signup
+-- ─────────────────────────────────────────
+
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, email, full_name, avatar_url)
+  values (
+    new.id,
+    new.email,
+    new.raw_user_meta_data->>'full_name',
+    new.raw_user_meta_data->>'avatar_url'
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create or replace trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- ─────────────────────────────────────────
+-- Credit functions (atomic, bypass RLS)
+-- ─────────────────────────────────────────
+
+create or replace function public.deduct_credits(
+  p_user_id   uuid,
+  p_amount    integer,
+  p_operation text,
+  p_project_id uuid default null
+)
+returns json as $$
+declare
+  v_credits integer;
+begin
+  select credits into v_credits
+  from public.profiles
+  where id = p_user_id
+  for update;
+
+  if v_credits < p_amount then
+    return json_build_object('success', false, 'remaining', v_credits);
+  end if;
+
+  update public.profiles
+  set credits = credits - p_amount
+  where id = p_user_id;
+
+  insert into public.credit_transactions (user_id, amount, operation, project_id)
+  values (p_user_id, -p_amount, p_operation, p_project_id);
+
+  return json_build_object('success', true, 'remaining', v_credits - p_amount);
+end;
+$$ language plpgsql security definer;
+
+create or replace function public.add_credits(
+  p_user_id    uuid,
+  p_amount     integer,
+  p_operation  text,
+  p_project_id uuid default null
+)
+returns void as $$
+begin
+  update public.profiles
+  set credits = credits + p_amount
+  where id = p_user_id;
+
+  insert into public.credit_transactions (user_id, amount, operation, project_id)
+  values (p_user_id, p_amount, p_operation, p_project_id);
+end;
+$$ language plpgsql security definer;
+
+-- ─────────────────────────────────────────
+-- Row Level Security
+-- ─────────────────────────────────────────
+
+alter table public.profiles             enable row level security;
+alter table public.projects             enable row level security;
+alter table public.credit_transactions  enable row level security;
+
+-- Profiles
+create policy "profiles: own read"
+  on public.profiles for select
+  using (auth.uid() = id);
+
+create policy "profiles: own update"
+  on public.profiles for update
+  using (auth.uid() = id);
+
+-- Projects
+create policy "projects: own select"
+  on public.projects for select
+  using (auth.uid() = user_id);
+
+create policy "projects: own insert"
+  on public.projects for insert
+  with check (auth.uid() = user_id);
+
+create policy "projects: own update"
+  on public.projects for update
+  using (auth.uid() = user_id);
+
+create policy "projects: own delete"
+  on public.projects for delete
+  using (auth.uid() = user_id);
+
+-- Credit transactions
+create policy "transactions: own select"
+  on public.credit_transactions for select
+  using (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────
+-- Storage buckets
+-- ─────────────────────────────────────────
+
+insert into storage.buckets (id, name, public)
+values ('audio', 'audio', false)
+on conflict do nothing;
+
+insert into storage.buckets (id, name, public)
+values ('images', 'images', true)
+on conflict do nothing;
+
+insert into storage.buckets (id, name, public)
+values ('videos', 'videos', false)
+on conflict do nothing;
+
+-- Storage RLS: users can only access their own files
+create policy "audio: own access"
+  on storage.objects for all
+  using (bucket_id = 'audio' and auth.uid()::text = (storage.foldername(name))[1]);
+
+create policy "images: public read"
+  on storage.objects for select
+  using (bucket_id = 'images');
+
+create policy "images: own write"
+  on storage.objects for insert
+  with check (bucket_id = 'images' and auth.uid()::text = (storage.foldername(name))[1]);
+
+create policy "videos: own access"
+  on storage.objects for all
+  using (bucket_id = 'videos' and auth.uid()::text = (storage.foldername(name))[1]);
