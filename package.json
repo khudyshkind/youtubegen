@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.102.0",
     "@elevenlabs/elevenlabs-js": "^2.52.0",
     "@fal-ai/client": "^1.10.1",
+    "@paddle/paddle-node-sdk": "^3.8.0",
     "@stripe/stripe-js": "^9.8.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.0",

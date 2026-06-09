@@ -13,8 +13,8 @@ create table if not exists public.profiles (
   plan            text        not null default 'free'
                     check (plan in ('free', 'starter', 'pro', 'agency')),
   credits         integer     not null default 5,
-  stripe_customer_id      text unique,
-  stripe_subscription_id  text unique,
+  paddle_customer_id      text unique,
+  paddle_subscription_id  text unique,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );

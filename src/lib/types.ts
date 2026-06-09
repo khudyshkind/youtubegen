@@ -22,8 +22,8 @@ export interface Profile {
   avatar_url: string | null
   plan: Plan
   credits: number
-  stripe_customer_id: string | null
-  stripe_subscription_id: string | null
+  paddle_customer_id: string | null
+  paddle_subscription_id: string | null
   created_at: string
   updated_at: string
 }

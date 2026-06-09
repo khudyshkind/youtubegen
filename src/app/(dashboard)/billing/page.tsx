@@ -80,7 +80,7 @@ export default function BillingPage() {
     setLoadingPlan(planId)
 
     try {
-      const res = await fetch('/api/stripe/checkout', {
+      const res = await fetch('/api/paddle/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan: planId }),
@@ -232,7 +232,7 @@ export default function BillingPage() {
       </div>
 
       <p className="text-sm text-gray-500 mt-6 text-center">
-        Оплата через Stripe · Отменить подписку можно в любое время · Кредиты начисляются сразу после оплаты
+        Оплата через Paddle · Отменить подписку можно в любое время · Кредиты начисляются сразу после оплаты
       </p>
     </div>
   )
