@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState, type FormEvent } from 'react'
+import { Suspense, useState, useMemo, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
@@ -15,7 +15,7 @@ function LoginForm() {
   const [error, setError] = useState(searchParams.get('error') ?? '')
   const [loading, setLoading] = useState(false)
 
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()

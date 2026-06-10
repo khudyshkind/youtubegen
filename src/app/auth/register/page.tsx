@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useState, useMemo, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
@@ -15,7 +15,7 @@ export default function RegisterPage() {
   const [success, setSuccess] = useState(false)
   const [loading, setLoading] = useState(false)
 
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -38,9 +38,12 @@ export default function RegisterPage() {
     })
 
     if (authError) {
-      setError(authError.message === 'User already registered'
-        ? 'Пользователь с таким email уже существует'
-        : 'Ошибка регистрации. Попробуйте ещё раз')
+      console.error('[register] authError:', authError)
+      if (authError.message === 'User already registered') {
+        setError('Пользователь с таким email уже существует')
+      } else {
+        setError(`Ошибка: ${authError.message}`)
+      }
       setLoading(false)
       return
     }
