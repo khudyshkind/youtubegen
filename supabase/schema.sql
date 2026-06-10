@@ -156,6 +156,16 @@ end;
 $$ language plpgsql security definer;
 
 -- ─────────────────────────────────────────
+-- Role grants (required for RLS to work)
+-- ─────────────────────────────────────────
+
+grant usage on schema public to anon, authenticated;
+
+grant select, update                          on public.profiles             to authenticated;
+grant select, insert, update, delete          on public.projects             to authenticated;
+grant select                                  on public.credit_transactions  to authenticated;
+
+-- ─────────────────────────────────────────
 -- Row Level Security
 -- ─────────────────────────────────────────
 
