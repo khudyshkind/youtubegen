@@ -132,6 +132,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, data: { subtitle_blocks } })
   } catch (error) {
     console.error('[generate/subtitles]', error)
+    const status = (error as { status?: number }).status
+    if (status === 429) {
+      return NextResponse.json(
+        { ok: false, error: 'Превышена квота OpenAI — пополните баланс на platform.openai.com' },
+        { status: 402 }
+      )
+    }
     return NextResponse.json(
       { ok: false, error: 'Ошибка генерации субтитров' },
       { status: 500 }
