@@ -97,17 +97,39 @@ app.post('/render', verifySecret, async (req, res) => {
       imagePaths.push(imgPath)
     }
 
-    // Build concat.txt — use timecodes when present, fall back to defaultDuration
-    const concatLines = []
-    for (let i = 0; i < images.length; i++) {
-      const hasTc = images[i].timecode_start && images[i].timecode_end
-      const duration = hasTc
-        ? Math.max(1, parseSecs(images[i].timecode_end) - parseSecs(images[i].timecode_start))
+    // Get exact audio duration via ffprobe
+    const audioDuration = await new Promise((resolve, reject) => {
+      execFile('ffprobe', [
+        '-v', 'quiet',
+        '-show_entries', 'format=duration',
+        '-of', 'csv=p=0',
+        audioPath,
+      ], (err, stdout) => {
+        if (err) reject(new Error(`ffprobe failed: ${err.message}`))
+        else resolve(parseFloat(stdout.trim()))
+      })
+    })
+
+    // Compute per-image durations
+    const durations = images.map((img) => {
+      const hasTc = img.timecode_start && img.timecode_end
+      return hasTc
+        ? Math.max(1, parseSecs(img.timecode_end) - parseSecs(img.timecode_start))
         : defaultDuration
-      concatLines.push(`file '${imagePaths[i]}'`)
-      concatLines.push(`duration ${duration}`)
+    })
+
+    // Extend last image to cover any remaining audio
+    const totalImagesDuration = durations.reduce((a, b) => a + b, 0)
+    if (totalImagesDuration < audioDuration) {
+      durations[durations.length - 1] += audioDuration - totalImagesDuration
     }
-    // Repeat last frame (FFmpeg concat demuxer requirement)
+
+    // Build concat.txt (last path repeated without duration — FFmpeg concat demuxer requirement)
+    const concatLines = []
+    for (let i = 0; i < imagePaths.length; i++) {
+      concatLines.push(`file '${imagePaths[i]}'`)
+      concatLines.push(`duration ${durations[i]}`)
+    }
     concatLines.push(`file '${imagePaths[imagePaths.length - 1]}'`)
     const concatPath = path.join(tmpDir, 'concat.txt')
     fs.writeFileSync(concatPath, concatLines.join('\n'))
@@ -146,7 +168,7 @@ app.post('/render', verifySecret, async (req, res) => {
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '128k',
         '-movflags', '+faststart',
-        '-shortest',
+        '-t', String(audioDuration),
         '-y', outputPath,
       ]
 
