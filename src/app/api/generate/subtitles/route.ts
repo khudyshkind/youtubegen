@@ -2,13 +2,13 @@
 import OpenAI from 'openai'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { env } from '@/lib/env'
 import type { SubtitleBlock } from '@/lib/types'
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 interface SubtitlesRequest {
   audio_url: string
   project_id?: string
+  language?: string
 }
 
 interface WhisperSegment {
@@ -36,12 +36,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const check = await requireCredits(user.id, 'subtitles')
+    const check = await requireCredits(user.id, 'subtitles', supabase)
     if (!check.ok) {
       return NextResponse.json(check, { status: 402 })
     }
 
-    const { audio_url, project_id }: SubtitlesRequest = await request.json()
+    const { audio_url, project_id, language }: SubtitlesRequest = await request.json()
 
     // Download audio from storage
     const audioResponse = await fetch(audio_url)
@@ -55,12 +55,13 @@ export async function POST(request: NextRequest) {
     const audioBuffer = await audioResponse.arrayBuffer()
     const audioFile = new File([audioBuffer], 'audio.mp3', { type: 'audio/mpeg' })
 
+    const openai = new OpenAI({ apiKey: env('OPENAI_API_KEY') })
     const transcription = await openai.audio.transcriptions.create({
       file: audioFile,
       model: 'whisper-1',
       response_format: 'verbose_json',
       timestamp_granularities: ['segment'],
-      language: 'ru',
+      language: language ?? 'ru',
     }) as unknown as WhisperVerboseResponse
 
     const subtitle_blocks: SubtitleBlock[] = (transcription.segments ?? []).map(

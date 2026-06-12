@@ -20,6 +20,22 @@
 
 ---
 
+### [2026-06-12] Отсутствует /api/generate/image-single
+**Симптом:** Перегенерация одной иллюстрации в Step5 → 404 Not Found
+**Причина:** Step5Images.tsx вызывает `/api/generate/image-single`, но файл route.ts не был создан
+**Решение:** Создан `src/app/api/generate/image-single/route.ts` — принимает project_id/scene_index/prompt, генерирует через Flux, сохраняет метаданные оригинальной сцены (scene, timecode)
+**Файлы:** `src/app/api/generate/image-single/route.ts` (новый)
+
+---
+
+### [2026-06-12] Whisper язык захардкожен как 'ru'
+**Симптом:** Субтитры генерировались через Whisper с `language: 'ru'` для любого языка видео
+**Причина:** API route hardcode; Step4Subtitles не передавал язык
+**Решение:** Step4 передаёт `language: scriptParams.language`; API принимает с fallback `'ru'`
+**Файлы:** `src/components/studio/Step4Subtitles.tsx`, `src/app/api/generate/subtitles/route.ts`
+
+---
+
 ### [2026-06-09] useSearchParams без Suspense boundary
 **Симптом:** `useSearchParams() should be wrapped in a suspense boundary at page "/auth/login"` — build error при статической генерации
 **Причина:** Next.js требует Suspense wrapper вокруг компонентов с `useSearchParams()` при prerendering
