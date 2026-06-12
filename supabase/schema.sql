@@ -36,6 +36,8 @@ create table if not exists public.projects (
   audio_url       text,
   subtitle_blocks jsonb,
   scene_images    jsonb,
+  image_interval  integer     not null default 10,
+  thumbnail_url   text,
   video_url       text,
   seo             jsonb,
   credits_spent   integer     not null default 0,
@@ -217,7 +219,7 @@ values ('images', 'images', true)
 on conflict do nothing;
 
 insert into storage.buckets (id, name, public)
-values ('videos', 'videos', false)
+values ('videos', 'videos', true)
 on conflict do nothing;
 
 -- Storage RLS: users can only access their own files
@@ -233,6 +235,10 @@ create policy "images: own write"
   on storage.objects for insert
   with check (bucket_id = 'images' and auth.uid()::text = (storage.foldername(name))[1]);
 
-create policy "videos: own access"
-  on storage.objects for all
-  using (bucket_id = 'videos' and auth.uid()::text = (storage.foldername(name))[1]);
+create policy "videos: public read"
+  on storage.objects for select
+  using (bucket_id = 'videos');
+
+create policy "videos: service write"
+  on storage.objects for insert
+  with check (bucket_id = 'videos');

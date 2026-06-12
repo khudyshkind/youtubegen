@@ -115,6 +115,17 @@ NEXT_PUBLIC_APP_URL=
 <!-- ### YYYY-MM-DD — Краткое описание -->
 <!-- Что сделано, какие файлы созданы/изменены -->
 
+### 2026-06-12 — Railway FFmpeg видео-сервер (автосборка MP4)
+Добавлена автосборка MP4 через FFmpeg на Railway:
+- `video-server/index.js` — Express сервер POST /render: скачивает аудио+картинки, строит concat.txt, запускает FFmpeg H.264 1280×720, загружает в Supabase `videos` bucket, возвращает public URL
+- `Dockerfile` — node:20-slim + apt ffmpeg, копирует video-server/
+- `src/app/api/generate/video/render/route.ts` — Vercel proxy (maxDuration=300, 2 credits), пробрасывает запрос на Railway с x-api-secret
+- `Step6Video.tsx` — секция "Собрать MP4" с кнопкой, spinner, видеоплеером, кнопкой скачать
+- `supabase/schema.sql` — videos bucket изменён на public=true (для public URL без подписи)
+- `CREDIT_COSTS` дополнен `video: 2`
+- Новые env vars: `RAILWAY_VIDEO_SERVER_URL`, `RAILWAY_API_SECRET`
+Деплой: dpl_5u7RHvBURreyVpzw4L2GAi5yXpgX — https://youtubegen.vercel.app
+
 ### 2026-06-12 — Финальный аудит и исправление багов (v1.0)
 Проведён полный code-level аудит всех 7 шагов и 11 API-маршрутов.
 Найдено и исправлено:

@@ -1,0 +1,11 @@
+node_modules
+.next
+.env
+.env.local
+src
+supabase
+docs
+public
+tmp
+*.md
+!video-server/

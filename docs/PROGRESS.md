@@ -31,6 +31,7 @@
 - [x] ✅ `src/app/api/paddle/checkout/route.ts` — оплата
 - [x] ✅ `src/app/api/paddle/webhook/route.ts` — webhook кредиты
 - [x] ✅ `src/app/api/generate/video/route.ts` — ZIP-архив (аудио + иллюстрации + SRT + timing + README)
+- [x] ✅ `src/app/api/generate/video/render/route.ts` — Vercel proxy → Railway FFmpeg (maxDuration 300, 2 credits)
 
 ---
 
@@ -60,7 +61,7 @@
 - [x] ✅ `Step3Voice.tsx` — генерация + загрузить .mp3/.wav (signed URL → Supabase) + «Пропустить»
 - [x] ✅ `Step4Subtitles.tsx` — Whisper + загрузить .srt (client-side parse) + «Пропустить»
 - [x] ✅ `Step5Images.tsx` — генерация + загрузить до 20 фото (signed URLs) + «Пропустить»
-- [x] ✅ `Step6Video.tsx` — сборка (скоро), превью материалов (навигация → 5/7)
+- [x] ✅ `Step6Video.tsx` — автосборка MP4 (Railway FFmpeg) + ZIP download + видеоплеер
 - [x] ✅ `Step7Seo.tsx` — генерация SEO + финиш (навигация → 6)
 - [x] ✅ `StepWizard.tsx` — 7 шагов, restore из DB, inferStep обновлён
 
@@ -80,9 +81,10 @@
 | Фаза | Прогресс |
 |---|---|
 | Фаза 1 — Фундамент | 9 / 9 |
-| Фаза 2 — API Routes | 11 / 11 |
+| Фаза 2 — API Routes | 12 / 12 |
 | Фаза 3 — Авторизация | 4 / 4 |
 | Фаза 4 — Лендинг и дашборд | 5 / 5 |
 | Фаза 5 — Студия (7 шагов) | 8 / 8 |
 | Фаза 6 — Деплой | 4 / 4 |
-| **Итого** | **41 / 41** ✅ |
+| Railway FFmpeg видео-сервер | 4 / 4 |
+| **Итого** | **46 / 46** ✅ |
