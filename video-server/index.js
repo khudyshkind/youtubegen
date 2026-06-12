@@ -6,7 +6,6 @@ const path = require('path')
 const os = require('os')
 const https = require('https')
 const http = require('http')
-const { createClient } = require('@supabase/supabase-js')
 
 const app = express()
 app.use(express.json({ limit: '2mb' }))
@@ -157,23 +156,27 @@ app.post('/render', verifySecret, async (req, res) => {
       })
     })
 
-    // Upload MP4 to Supabase Storage (Realtime disabled — only Storage is used)
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-      realtime: { enabled: false },
-    })
+    // Upload MP4 to Supabase Storage via REST API (no SDK, no WebSocket)
     const fileBuffer = fs.readFileSync(outputPath)
     const storagePath = `${project_id}/output.mp4`
+    const uploadUrl = `${SUPABASE_URL}/storage/v1/object/videos/${storagePath}`
 
-    const { error: uploadError } = await supabase.storage
-      .from('videos')
-      .upload(storagePath, fileBuffer, { contentType: 'video/mp4', upsert: true })
+    const uploadRes = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        'Content-Type': 'video/mp4',
+        'x-upsert': 'true',
+      },
+      body: fileBuffer,
+    })
 
-    if (uploadError) throw uploadError
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text()
+      throw new Error(`Supabase upload failed ${uploadRes.status}: ${errText}`)
+    }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('videos')
-      .getPublicUrl(storagePath)
-
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/videos/${storagePath}`
     return res.json({ ok: true, video_url: publicUrl })
   } catch (err) {
     console.error('[/render]', err)
