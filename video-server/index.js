@@ -155,11 +155,31 @@ app.post('/render', verifySecret, async (req, res) => {
     const concatPath = path.join(tmpDir, 'concat.txt')
     fs.writeFileSync(concatPath, concatLines.join('\n'))
 
-    // Build -vf filter chain
-    let vfChain =
+    const tempNoSubsPath = path.join(tmpDir, 'temp_no_subs.mp4')
+    const outputPath = path.join(tmpDir, 'output.mp4')
+
+    // Pass 1 — assemble video from images + audio, no subtitles
+    const vfBase =
       'scale=1280:720:force_original_aspect_ratio=decrease,' +
       'pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1'
 
+    await new Promise((resolve, reject) => {
+      execFile('ffmpeg', [
+        '-f', 'concat', '-safe', '0', '-i', concatPath,
+        '-i', finalAudioPath,
+        '-vf', vfBase,
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        '-t', String(audioDuration),
+        '-y', tempNoSubsPath,
+      ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
+        if (err) reject(new Error(`FFmpeg pass 1: ${stderr.slice(-400)}`))
+        else resolve()
+      })
+    })
+
+    // Pass 2 — burn subtitles onto the assembled video (timecodes come from SRT, not image cuts)
     if (subtitle_blocks?.length && subtitle_style?.burnIn) {
       const srtPath = path.join(tmpDir, 'subs.srt')
       fs.writeFileSync(srtPath, blocksToSrt(subtitle_blocks))
@@ -171,44 +191,29 @@ app.post('/render', verifySecret, async (req, res) => {
       const colour = hexToAss(subtitle_style.color)
       const bg = subtitle_style.background
 
-      // Escape colon in absolute path for FFmpeg vf syntax
       const escaped = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:')
-      let forceStyle = `FontSize=${fontSize},PrimaryColour=${colour},Alignment=${alignment},Outline=1`
+      let forceStyle = `FontName=Liberation Sans,FontSize=${fontSize},PrimaryColour=${colour},OutlineColour=&H000000,Outline=2,Bold=1,Alignment=${alignment}`
       if (bg) forceStyle += ',BorderStyle=3,BackColour=&H80000000'
 
-      vfChain += `,subtitles='${escaped}':force_style='${forceStyle}'`
-    }
-
-    const outputPath = path.join(tmpDir, 'output.mp4')
-
-    const baseArgs = [
-      '-f', 'concat', '-safe', '0', '-i', concatPath,
-      '-i', finalAudioPath,
-      '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-      '-c:a', 'aac', '-b:a', '128k',
-      '-movflags', '+faststart',
-      '-t', String(audioDuration),
-      '-y',
-    ]
-
-    const runFFmpeg = (vf, outPath) => new Promise((resolve, reject) => {
-      execFile('ffmpeg', [...baseArgs, '-vf', vf, outPath],
-        { maxBuffer: 20 * 1024 * 1024 },
-        (err, _stdout, stderr) => {
-          if (err) reject(new Error(`FFmpeg: ${stderr.slice(-400)}`))
-          else resolve()
+      try {
+        await new Promise((resolve, reject) => {
+          execFile('ffmpeg', [
+            '-i', tempNoSubsPath,
+            '-vf', `subtitles='${escaped}':force_style='${forceStyle}'`,
+            '-c:a', 'copy',
+            '-y', outputPath,
+          ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
+            if (err) reject(new Error(`FFmpeg pass 2 (subtitles): ${stderr.slice(-400)}`))
+            else resolve()
+          })
         })
-    })
-
-    try {
-      await runFFmpeg(vfChain, outputPath)
-    } catch (ffmpegErr) {
-      // If subtitle burn-in failed, retry without subtitles
-      const hasSubs = vfChain.includes('subtitles=')
-      if (!hasSubs) throw ffmpegErr
-      console.warn('[ffmpeg] subtitle burn-in failed, retrying without subtitles:', ffmpegErr.message)
-      const vfNoSubs = 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1'
-      await runFFmpeg(vfNoSubs, outputPath)
+        console.log('[ffmpeg] subtitle pass complete')
+      } catch (subsErr) {
+        console.warn('[ffmpeg] subtitle burn-in failed, using video without subtitles:', subsErr.message)
+        fs.renameSync(tempNoSubsPath, outputPath)
+      }
+    } else {
+      fs.renameSync(tempNoSubsPath, outputPath)
     }
 
     // Upload MP4 to Supabase Storage via REST API (no SDK, no WebSocket)
