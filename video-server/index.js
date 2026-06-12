@@ -157,8 +157,10 @@ app.post('/render', verifySecret, async (req, res) => {
       })
     })
 
-    // Upload MP4 to Supabase Storage
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    // Upload MP4 to Supabase Storage (Realtime disabled — only Storage is used)
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+      realtime: { enabled: false },
+    })
     const fileBuffer = fs.readFileSync(outputPath)
     const storagePath = `${project_id}/output.mp4`
 
