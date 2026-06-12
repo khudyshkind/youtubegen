@@ -9,6 +9,7 @@ export const maxDuration = 300
 interface RenderRequest {
   project_id: string
   audio_url: string
+  image_interval: number
   images: Pick<SceneImage, 'url' | 'timecode_start' | 'timecode_end'>[]
   subtitle_blocks?: SubtitleBlock[]
   subtitle_style?: Pick<SubtitleStyle, 'size' | 'color' | 'position' | 'background' | 'burnIn'>
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: RenderRequest = await request.json()
-    const { project_id, audio_url, images, subtitle_blocks, subtitle_style } = body
+    const { project_id, audio_url, image_interval, images, subtitle_blocks, subtitle_style } = body
 
     if (!project_id || !audio_url || !images?.length) {
       return NextResponse.json(
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         audio_url,
+        image_interval,
         images,
         subtitle_blocks,
         subtitle_style,

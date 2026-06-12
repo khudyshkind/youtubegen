@@ -101,6 +101,7 @@ export default function Step6Video() {
         body: JSON.stringify({
           project_id: projectId,
           audio_url: audioUrl,
+          image_interval: imageInterval,
           images,
           subtitle_blocks: hasSubs ? subtitleBlocks : undefined,
           subtitle_style: hasSubs ? subtitleStyle : undefined,

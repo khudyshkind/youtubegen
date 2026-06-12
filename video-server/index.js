@@ -76,11 +76,14 @@ app.post('/render', verifySecret, async (req, res) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytgen-'))
 
   try {
-    const { audio_url, images, subtitle_blocks, subtitle_style, project_id } = req.body
+    const { audio_url, images, subtitle_blocks, subtitle_style, project_id, image_interval } = req.body
 
     if (!audio_url || !Array.isArray(images) || !images.length || !project_id) {
       return res.status(400).json({ ok: false, error: 'Missing audio_url, images, or project_id' })
     }
+
+    // Fallback duration per image when timecodes are absent
+    const defaultDuration = Math.max(1, Number(image_interval) || 10)
 
     // Download audio
     const audioPath = path.join(tmpDir, 'audio.mp3')
@@ -94,16 +97,17 @@ app.post('/render', verifySecret, async (req, res) => {
       imagePaths.push(imgPath)
     }
 
-    // Build concat.txt using timecodes for image durations
+    // Build concat.txt — use timecodes when present, fall back to defaultDuration
     const concatLines = []
     for (let i = 0; i < images.length; i++) {
-      const start = parseSecs(images[i].timecode_start)
-      const end = parseSecs(images[i].timecode_end)
-      const duration = Math.max(1, end - start)
+      const hasTc = images[i].timecode_start && images[i].timecode_end
+      const duration = hasTc
+        ? Math.max(1, parseSecs(images[i].timecode_end) - parseSecs(images[i].timecode_start))
+        : defaultDuration
       concatLines.push(`file '${imagePaths[i]}'`)
       concatLines.push(`duration ${duration}`)
     }
-    // Repeat last frame to prevent concat demuxer end-of-stream glitch
+    // Repeat last frame (FFmpeg concat demuxer requirement)
     concatLines.push(`file '${imagePaths[imagePaths.length - 1]}'`)
     const concatPath = path.join(tmpDir, 'concat.txt')
     fs.writeFileSync(concatPath, concatLines.join('\n'))
