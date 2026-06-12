@@ -82,6 +82,11 @@ app.post('/render', verifySecret, async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Missing audio_url, images, or project_id' })
     }
 
+    console.log('[render] project_id:', project_id)
+    console.log('[render] images count:', images.length)
+    console.log('[render] subtitle_blocks count:', subtitle_blocks?.length ?? 0)
+    console.log('[render] subtitle_style:', JSON.stringify(subtitle_style ?? null))
+
     // Fallback duration per image when timecodes are absent
     const defaultDuration = Math.max(1, Number(image_interval) || 10)
 
@@ -180,9 +185,16 @@ app.post('/render', verifySecret, async (req, res) => {
     })
 
     // Pass 2 — burn subtitles onto the assembled video (timecodes come from SRT, not image cuts)
-    if (subtitle_blocks?.length && subtitle_style?.burnIn) {
+    const shouldBurnSubs = !!(subtitle_blocks?.length && subtitle_style?.burnIn)
+    console.log('[render] pass2 will run:', shouldBurnSubs,
+      '| blocks:', subtitle_blocks?.length ?? 0,
+      '| burnIn:', subtitle_style?.burnIn ?? false)
+
+    if (shouldBurnSubs) {
       const srtPath = path.join(tmpDir, 'subs.srt')
-      fs.writeFileSync(srtPath, blocksToSrt(subtitle_blocks))
+      const srtContent = blocksToSrt(subtitle_blocks)
+      fs.writeFileSync(srtPath, srtContent)
+      console.log('[render] SRT written, first 200 chars:', srtContent.slice(0, 200))
 
       const sizeMap = { small: 18, medium: 22, large: 28 }
       const alignMap = { top: 8, center: 5, bottom: 2 }
@@ -195,24 +207,29 @@ app.post('/render', verifySecret, async (req, res) => {
       let forceStyle = `FontName=Liberation Sans,FontSize=${fontSize},PrimaryColour=${colour},OutlineColour=&H000000,Outline=2,Bold=1,Alignment=${alignment}`
       if (bg) forceStyle += ',BorderStyle=3,BackColour=&H80000000'
 
+      const pass2Args = [
+        '-i', tempNoSubsPath,
+        '-vf', `subtitles='${escaped}':force_style='${forceStyle}'`,
+        '-c:a', 'copy',
+        '-y', outputPath,
+      ]
+      console.log('[render] pass2 ffmpeg args:', pass2Args.join(' '))
+
       try {
         await new Promise((resolve, reject) => {
-          execFile('ffmpeg', [
-            '-i', tempNoSubsPath,
-            '-vf', `subtitles='${escaped}':force_style='${forceStyle}'`,
-            '-c:a', 'copy',
-            '-y', outputPath,
-          ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-            if (err) reject(new Error(`FFmpeg pass 2 (subtitles): ${stderr.slice(-400)}`))
-            else resolve()
-          })
+          execFile('ffmpeg', pass2Args,
+            { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
+              if (err) reject(new Error(`FFmpeg pass 2 (subtitles): ${stderr.slice(-400)}`))
+              else resolve()
+            })
         })
-        console.log('[ffmpeg] subtitle pass complete')
+        console.log('[ffmpeg] subtitle pass 2 complete')
       } catch (subsErr) {
         console.warn('[ffmpeg] subtitle burn-in failed, using video without subtitles:', subsErr.message)
         fs.renameSync(tempNoSubsPath, outputPath)
       }
     } else {
+      console.log('[render] pass2 skipped — no subtitles or burnIn=false')
       fs.renameSync(tempNoSubsPath, outputPath)
     }
 

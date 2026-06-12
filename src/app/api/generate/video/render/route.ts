@@ -47,6 +47,16 @@ export async function POST(request: NextRequest) {
     const railwayUrl = env('RAILWAY_VIDEO_SERVER_URL').replace(/\/$/, '')
     const railwaySecret = env('RAILWAY_API_SECRET')
 
+    console.log('[video/render] sending to Railway:', {
+      project_id,
+      audio_url: audio_url?.slice(0, 80),
+      images_count: images.length,
+      subtitle_blocks_count: subtitle_blocks?.length ?? 0,
+      subtitle_style_burnIn: subtitle_style?.burnIn ?? false,
+      subtitle_style_size: subtitle_style?.size,
+      subtitle_style_position: subtitle_style?.position,
+    })
+
     const renderRes = await fetch(`${railwayUrl}/render`, {
       method: 'POST',
       headers: {
