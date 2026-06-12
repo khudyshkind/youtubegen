@@ -160,27 +160,35 @@ app.post('/render', verifySecret, async (req, res) => {
 
     const outputPath = path.join(tmpDir, 'output.mp4')
 
-    await new Promise((resolve, reject) => {
-      const args = [
-        '-f', 'concat', '-safe', '0', '-i', concatPath,
-        '-i', audioPath,
-        '-vf', vfChain,
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-        '-c:a', 'aac', '-b:a', '128k',
-        '-movflags', '+faststart',
-        '-t', String(audioDuration),
-        '-y', outputPath,
-      ]
+    const baseArgs = [
+      '-f', 'concat', '-safe', '0', '-i', concatPath,
+      '-i', audioPath,
+      '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', '+faststart',
+      '-t', String(audioDuration),
+      '-y',
+    ]
 
-      execFile('ffmpeg', args, { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-        if (err) {
-          console.error('[ffmpeg stderr]', stderr.slice(-1000))
-          reject(new Error(`FFmpeg: ${stderr.slice(-300)}`))
-        } else {
-          resolve()
-        }
-      })
+    const runFFmpeg = (vf, outPath) => new Promise((resolve, reject) => {
+      execFile('ffmpeg', [...baseArgs, '-vf', vf, outPath],
+        { maxBuffer: 20 * 1024 * 1024 },
+        (err, _stdout, stderr) => {
+          if (err) reject(new Error(`FFmpeg: ${stderr.slice(-400)}`))
+          else resolve()
+        })
     })
+
+    try {
+      await runFFmpeg(vfChain, outputPath)
+    } catch (ffmpegErr) {
+      // If subtitle burn-in failed, retry without subtitles
+      const hasSubs = vfChain.includes('subtitles=')
+      if (!hasSubs) throw ffmpegErr
+      console.warn('[ffmpeg] subtitle burn-in failed, retrying without subtitles:', ffmpegErr.message)
+      const vfNoSubs = 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1'
+      await runFFmpeg(vfNoSubs, outputPath)
+    }
 
     // Upload MP4 to Supabase Storage via REST API (no SDK, no WebSocket)
     const fileBuffer = fs.readFileSync(outputPath)
