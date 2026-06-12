@@ -89,6 +89,27 @@ app.post('/render', verifySecret, async (req, res) => {
     const audioPath = path.join(tmpDir, 'audio.mp3')
     await downloadFile(audio_url, audioPath)
 
+    // Normalize loudness to -14 LUFS (YouTube standard) — fixes ElevenLabs volume drift on long texts
+    const audioNormPath = path.join(tmpDir, 'audio_norm.mp3')
+    let finalAudioPath = audioPath
+    try {
+      await new Promise((resolve, reject) => {
+        execFile('ffmpeg', [
+          '-i', audioPath,
+          '-filter:a', 'loudnorm=I=-14:LRA=7:TP=-1',
+          '-ar', '44100',
+          '-y', audioNormPath,
+        ], { maxBuffer: 10 * 1024 * 1024 }, (err, _stdout, stderr) => {
+          if (err) reject(new Error(stderr.slice(-300)))
+          else resolve()
+        })
+      })
+      finalAudioPath = audioNormPath
+      console.log('[audio] loudnorm applied →', audioNormPath)
+    } catch (normErr) {
+      console.warn('[audio] loudnorm failed, using original:', normErr.message)
+    }
+
     // Download all scene images in sequence
     const imagePaths = []
     for (let i = 0; i < images.length; i++) {
@@ -103,7 +124,7 @@ app.post('/render', verifySecret, async (req, res) => {
         '-v', 'quiet',
         '-show_entries', 'format=duration',
         '-of', 'csv=p=0',
-        audioPath,
+        finalAudioPath,
       ], (err, stdout) => {
         if (err) reject(new Error(`ffprobe failed: ${err.message}`))
         else resolve(parseFloat(stdout.trim()))
@@ -162,7 +183,7 @@ app.post('/render', verifySecret, async (req, res) => {
 
     const baseArgs = [
       '-f', 'concat', '-safe', '0', '-i', concatPath,
-      '-i', audioPath,
+      '-i', finalAudioPath,
       '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
       '-c:a', 'aac', '-b:a', '128k',
       '-movflags', '+faststart',
