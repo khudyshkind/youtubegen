@@ -3,11 +3,12 @@ import { Paddle, Environment } from '@paddle/paddle-node-sdk'
 import type { Subscription, Transaction } from '@paddle/paddle-node-sdk'
 import { createServiceClient } from '@/lib/supabase-server'
 import { addCredits } from '@/lib/credits'
+import { env } from '@/lib/env'
 import { PLAN_CREDITS } from '@/lib/types'
 import type { Plan } from '@/lib/types'
 
 function getPaddle() {
-  return new Paddle(process.env.PADDLE_API_KEY!, {
+  return new Paddle(env('PADDLE_API_KEY'), {
     environment:
       process.env.NODE_ENV === 'production'
         ? Environment.production
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
   try {
     event = await paddle.webhooks.unmarshal(
       body,
-      process.env.PADDLE_WEBHOOK_SECRET!,
+      env('PADDLE_WEBHOOK_SECRET'),
       signature
     )
   } catch (err) {

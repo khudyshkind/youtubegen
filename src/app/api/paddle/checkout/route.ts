@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Paddle, Environment } from '@paddle/paddle-node-sdk'
 import { createServerSupabase, getProfile } from '@/lib/supabase-server'
+import { env } from '@/lib/env'
 import type { Plan } from '@/lib/types'
 
 function getPaddle() {
-  return new Paddle(process.env.PADDLE_API_KEY!, {
+  return new Paddle(env('PADDLE_API_KEY'), {
     environment:
       process.env.NODE_ENV === 'production'
         ? Environment.production

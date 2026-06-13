@@ -160,7 +160,7 @@ export default function Step6Seo() {
               type="text"
               value={localSeo.title}
               onChange={(e) => setLocalSeo({ ...localSeo, title: e.target.value })}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-400"
             />
           </div>
 
@@ -174,7 +174,7 @@ export default function Step6Seo() {
               rows={4}
               value={localSeo.description}
               onChange={(e) => setLocalSeo({ ...localSeo, description: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-400 leading-relaxed"
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-red-400 leading-relaxed"
             />
           </div>
 
@@ -210,7 +210,7 @@ export default function Step6Seo() {
                 onChange={(e) => setNewTag(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
                 placeholder="Добавить тег..."
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-400"
               />
               <button
                 type="button"

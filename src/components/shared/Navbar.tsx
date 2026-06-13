@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { useStudioStore } from '@/lib/studio-store'
 import type { User } from '@supabase/supabase-js'
 import type { Profile } from '@/lib/types'
 
@@ -13,8 +14,14 @@ export default function Navbar() {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const resetStudio = useStudioStore((s) => s.reset)
 
   const supabase = createClient()
+
+  function handleNewProject() {
+    resetStudio()
+    router.push('/studio')
+  }
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -75,16 +82,17 @@ export default function Navbar() {
                 {profile !== null ? `${profile.credits} кр.` : '—'}
               </div>
 
-              {/* Create video link */}
-              <Link
-                href="/studio"
+              {/* Create video button — resets store first to prevent stale projectId */}
+              <button
+                type="button"
+                onClick={handleNewProject}
                 className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-xl transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
                 Создать видео
-              </Link>
+              </button>
 
               {/* User menu */}
               <div className="relative">

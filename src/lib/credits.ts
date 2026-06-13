@@ -1,10 +1,15 @@
-﻿import { createServiceClient } from './supabase-server'
+import { createServiceClient } from './supabase-server'
 import { CREDIT_COSTS } from './types'
 import type { ApiResponse } from './types'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
-export async function hasCredits(userId: string, amount: number): Promise<boolean> {
-  const supabase = createServiceClient()
-  const { data } = await supabase
+export async function hasCredits(
+  userId: string,
+  amount: number,
+  supabase?: SupabaseClient
+): Promise<boolean> {
+  const client = supabase ?? createServiceClient()
+  const { data } = await client
     .from('profiles')
     .select('credits')
     .eq('id', userId)
@@ -48,18 +53,24 @@ export async function addCredits(
   })
 }
 
-// Call before every paid API operation — returns 402 if not enough credits
+// Pass the user's session supabase client so the JWT satisfies RLS — no service role needed
 export async function requireCredits(
   userId: string,
-  operation: keyof typeof CREDIT_COSTS
+  operation: keyof typeof CREDIT_COSTS,
+  supabase?: SupabaseClient
 ): Promise<ApiResponse<{ credits: number }>> {
   const cost = CREDIT_COSTS[operation]
-  const supabase = createServiceClient()
-  const { data } = await supabase
+  const client = supabase ?? createServiceClient()
+  const { data, error } = await client
     .from('profiles')
     .select('credits')
     .eq('id', userId)
     .single()
+
+  if (error) {
+    console.error('[requireCredits] DB error:', error.message, '| op:', operation)
+    return { ok: false, error: 'Ошибка проверки кредитов', code: 'NO_CREDITS' }
+  }
 
   const credits = data?.credits ?? 0
   if (credits < cost) {

@@ -1,7 +1,10 @@
 import { create } from 'zustand'
-import type { ScriptParams, SubtitleBlock, SceneImage, SeoData } from './types'
+import type {
+  ScriptParams, SubtitleBlock, SceneImage, SeoData,
+  VoiceSettings, SubtitleStyle,
+} from './types'
 
-type Step = 1 | 2 | 3 | 4 | 5 | 6
+export type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7
 
 interface StudioState {
   currentStep: Step
@@ -13,21 +16,26 @@ interface StudioState {
   // Step 2: Script
   script: string | null
 
-  // Step 3: Voice & audio
-  voiceId: string
+  // Step 3: Voice
+  voiceSettings: VoiceSettings
   audioUrl: string | null
+
+  // Step 4: Subtitles
   subtitleBlocks: SubtitleBlock[]
+  subtitleStyle: SubtitleStyle
 
-  // Step 4: Illustrations
+  // Step 5: Illustrations
   sceneImages: SceneImage[]
+  imageInterval: number  // seconds per scene (3–30)
 
-  // Step 5: Video
+  // Step 6: Video
   videoUrl: string | null
 
-  // Step 6: SEO
+  // Step 7: SEO + Thumbnail
   seo: SeoData | null
+  thumbnailUrl: string | null
+  thumbnailBgUrl: string | null
 
-  // Status
   isGenerating: boolean
   generatingStep: string | null
   error: string | null
@@ -37,35 +45,72 @@ interface StudioState {
   setProjectId: (id: string) => void
   setScriptParams: (params: Partial<ScriptParams>) => void
   setScript: (script: string) => void
-  setVoiceId: (id: string) => void
+  setVoiceSettings: (settings: Partial<VoiceSettings>) => void
+  setVoiceId: (id: string) => void          // backwards-compat for DB restore
   setAudioUrl: (url: string) => void
   setSubtitleBlocks: (blocks: SubtitleBlock[]) => void
+  setSubtitleStyle: (style: Partial<SubtitleStyle>) => void
   setSceneImages: (images: SceneImage[]) => void
+  setImageInterval: (interval: number) => void
   setVideoUrl: (url: string) => void
   setSeo: (seo: SeoData) => void
+  setThumbnailUrl: (url: string | null) => void
+  setThumbnailBgUrl: (url: string | null) => void
   setGenerating: (isGenerating: boolean, step?: string) => void
   setError: (error: string | null) => void
   reset: () => void
 }
 
-const defaultParams: ScriptParams = {
+const defaultScriptParams: ScriptParams = {
   topic: '',
   duration_minutes: 5,
-  style: 'educational',
-  target_audience: 'широкая аудитория',
+  language: 'ru',
+  model: 'claude-sonnet',
+  narrative_style: 'storytelling',
+  tone: 'neutral',
+  target_audience: 'wide',
+  hook: false,
+  hook_type: 'question',
+  cta: false,
+  scene_markers: false,
+  pauses: false,
+}
+
+const defaultVoiceSettings: VoiceSettings = {
+  voiceId: 'EXAVITQu4vr4xnSDxMaL',
+  speechRate: 1.0,
+  stability: 0.5,
+  similarityBoost: 0.75,
+  style: 'neutral',
+  clarityBoost: false,
+  paragraphPauses: false,
+}
+
+const defaultSubtitleStyle: SubtitleStyle = {
+  font: 'sans',
+  size: 'medium',
+  color: '#FFFFFF',
+  position: 'bottom',
+  background: true,
+  animation: 'none',
+  burnIn: false,
 }
 
 const initialState = {
   currentStep: 1 as Step,
   projectId: null,
-  scriptParams: defaultParams,
+  scriptParams: defaultScriptParams,
   script: null,
-  voiceId: '',
+  voiceSettings: defaultVoiceSettings,
   audioUrl: null,
   subtitleBlocks: [],
+  subtitleStyle: defaultSubtitleStyle,
   sceneImages: [],
+  imageInterval: 10,
   videoUrl: null,
   seo: null,
+  thumbnailUrl: null,
+  thumbnailBgUrl: null,
   isGenerating: false,
   generatingStep: null,
   error: null,
@@ -79,12 +124,20 @@ export const useStudioStore = create<StudioState>((set) => ({
   setScriptParams: (params) =>
     set((s) => ({ scriptParams: { ...s.scriptParams, ...params } })),
   setScript: (script) => set({ script }),
-  setVoiceId: (id) => set({ voiceId: id }),
+  setVoiceSettings: (settings) =>
+    set((s) => ({ voiceSettings: { ...s.voiceSettings, ...settings } })),
+  setVoiceId: (id) =>
+    set((s) => ({ voiceSettings: { ...s.voiceSettings, voiceId: id } })),
   setAudioUrl: (url) => set({ audioUrl: url }),
   setSubtitleBlocks: (blocks) => set({ subtitleBlocks: blocks }),
+  setSubtitleStyle: (style) =>
+    set((s) => ({ subtitleStyle: { ...s.subtitleStyle, ...style } })),
   setSceneImages: (images) => set({ sceneImages: images }),
+  setImageInterval: (interval) => set({ imageInterval: Math.max(3, Math.min(30, interval)) }),
   setVideoUrl: (url) => set({ videoUrl: url }),
   setSeo: (seo) => set({ seo }),
+  setThumbnailUrl: (url) => set({ thumbnailUrl: url }),
+  setThumbnailBgUrl: (url) => set({ thumbnailBgUrl: url }),
   setGenerating: (isGenerating, step) =>
     set({ isGenerating, generatingStep: step ?? null }),
   setError: (error) => set({ error }),

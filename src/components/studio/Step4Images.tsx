@@ -93,7 +93,7 @@ export default function Step4Images() {
               value={prompt}
               onChange={(e) => updatePrompt(idx, e.target.value)}
               placeholder="Опишите сцену для генерации иллюстрации..."
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-400"
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-red-400"
             />
             <button
               type="button"

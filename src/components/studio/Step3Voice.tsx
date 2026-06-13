@@ -1,52 +1,418 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
+import type { VoiceStyleType } from '@/lib/types'
 
-const VOICES = [
-  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella', gender: 'Ж', desc: 'Мягкий, спокойный' },
-  { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel', gender: 'Ж', desc: 'Нейтральный, чёткий' },
-  { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi', gender: 'Ж', desc: 'Энергичный, уверенный' },
-  { id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli', gender: 'Ж', desc: 'Молодой, живой' },
-  { id: 'ErXwobaYiN019PkySvjV', name: 'Antoni', gender: 'М', desc: 'Спокойный, глубокий' },
-  { id: 'VR6AewLTigWG4xSOukaG', name: 'Arnold', gender: 'М', desc: 'Уверенный, мощный' },
-  { id: 'yoZ06aMxZJJ28mfd3POQ', name: 'Sam', gender: 'М', desc: 'Нейтральный, ровный' },
-  { id: 'ODq5zmih8GrVes37Dy9', name: 'Patrick', gender: 'М', desc: 'Глубокий, авторитетный' },
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+interface ApiVoice {
+  voice_id: string
+  name: string
+  preview_url: string | null
+  gender: 'M' | 'F' | null
+  description: string | null
+  accent: string | null
+  language: string | null
+  is_own: boolean
+}
+
+// ─── Voice styles ───────────────────────────────────────────────────────────────
+
+const VOICE_STYLES: { value: VoiceStyleType; label: string }[] = [
+  { value: 'neutral',        label: 'Нейтральный' },
+  { value: 'conversational', label: 'Разговорный' },
+  { value: 'documentary',   label: 'Документальный' },
+  { value: 'emotional',     label: 'Эмоциональный' },
 ]
+
+const LANGUAGE_OPTIONS = [
+  { value: 'ru', label: '🇷🇺 Русский' },
+  { value: 'en', label: '🇬🇧 English' },
+  { value: 'es', label: '🇪🇸 Español' },
+  { value: 'de', label: '🇩🇪 Deutsch' },
+  { value: 'fr', label: '🇫🇷 Français' },
+  { value: '',   label: '🌐 Все языки' },
+] as const
+
+// ─── Voice dropdown ─────────────────────────────────────────────────────────────
+
+function VoiceDropdown({
+  value,
+  voices,
+  loading: voicesLoading,
+  genderFilter,
+  onChange,
+  onPreview,
+  previewingId,
+}: {
+  value: string
+  voices: ApiVoice[]
+  loading: boolean
+  genderFilter: 'all' | 'M' | 'F'
+  onChange: (id: string) => void
+  onPreview: (id: string) => void
+  previewingId: string | null
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  const selected = voices.find((v) => v.voice_id === value)
+
+  const filtered = voices.filter((v) => {
+    const matchGender = genderFilter === 'all' || v.gender === genderFilter || v.gender === null
+    const q = search.toLowerCase()
+    const matchSearch =
+      !q ||
+      v.name.toLowerCase().includes(q) ||
+      (v.description ?? '').toLowerCase().includes(q) ||
+      (v.accent ?? '').toLowerCase().includes(q)
+    return matchGender && matchSearch
+  })
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const genderBadge = (gender: 'M' | 'F' | null) => {
+    if (!gender) return null
+    return (
+      <span className={`text-xs font-bold px-1.5 py-0.5 rounded shrink-0 ${
+        gender === 'F' ? 'bg-pink-100 text-pink-600' : 'bg-blue-100 text-blue-600'
+      }`}>
+        {gender === 'F' ? 'Ж' : 'М'}
+      </span>
+    )
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-300 rounded-xl text-sm bg-white hover:border-gray-400 transition-colors"
+      >
+        {voicesLoading ? (
+          <span className="text-gray-400 flex items-center gap-2">
+            <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+            </svg>
+            Загрузка голосов...
+          </span>
+        ) : selected ? (
+          <span className="flex items-center gap-2 text-gray-900 min-w-0">
+            {genderBadge(selected.gender)}
+            <span className="font-medium shrink-0">{selected.name}</span>
+            {selected.accent && <span className="text-gray-400 text-xs shrink-0">{selected.accent}</span>}
+            {selected.description && (
+              <span className="text-gray-400 text-xs truncate">— {selected.description}</span>
+            )}
+          </span>
+        ) : (
+          <span className="text-gray-400">Выберите голос...</span>
+        )}
+        <svg
+          className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ml-2 ${open ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-gray-100">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={`Поиск по имени, акценту... (${voices.length} голосов)`}
+              className="w-full px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400"
+              autoFocus
+            />
+          </div>
+
+          <div className="max-h-72 overflow-y-auto">
+            {voicesLoading ? (
+              <div className="flex items-center justify-center py-6 gap-2 text-gray-400 text-sm">
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                Загрузка голосов ElevenLabs...
+              </div>
+            ) : filtered.length === 0 ? (
+              <p className="px-4 py-3 text-sm text-gray-400 text-center">Не найдено</p>
+            ) : (
+              filtered.map((voice) => {
+                const isPreviewing = previewingId === voice.voice_id
+                return (
+                  <div
+                    key={voice.voice_id}
+                    className={`flex items-center justify-between px-3 py-2 hover:bg-gray-50 transition-colors ${
+                      voice.voice_id === value ? 'bg-red-50' : ''
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { onChange(voice.voice_id); setOpen(false); setSearch('') }}
+                      className="flex items-center gap-2 flex-1 text-left min-w-0"
+                    >
+                      {genderBadge(voice.gender)}
+                      <span className={`text-sm font-medium shrink-0 ${
+                        voice.voice_id === value ? 'text-red-600' : 'text-gray-900'
+                      }`}>
+                        {voice.name}
+                      </span>
+                      {voice.accent && (
+                        <span className="text-xs text-gray-500 shrink-0">{voice.accent}</span>
+                      )}
+                      {voice.description && (
+                        <span className="text-xs text-gray-400 truncate">— {voice.description}</span>
+                      )}
+                      {voice.is_own && (
+                        <span className="text-xs bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded shrink-0">мой</span>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onPreview(voice.voice_id) }}
+                      disabled={isPreviewing}
+                      title="Прослушать"
+                      className="shrink-0 ml-2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-default"
+                    >
+                      {isPreviewing ? (
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          {!voicesLoading && (
+            <div className="px-4 py-2 border-t border-gray-100 bg-gray-50 text-xs text-gray-400 text-right">
+              {filtered.length} из {voices.length} голосов
+              {filtered.length < voices.length && ` · попробуйте изменить поиск`}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Slider ────────────────────────────────────────────────────────────────────
+
+function Slider({
+  label, value, min, max, step, onChange, leftLabel, rightLabel, format,
+}: {
+  label: string; value: number; min: number; max: number; step: number
+  onChange: (v: number) => void; leftLabel?: string; rightLabel?: string
+  format?: (v: number) => string
+}) {
+  const display = format ? format(value) : `${Math.round(value * 100)}%`
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-sm font-medium text-gray-700">{label}</p>
+        <span className="text-sm text-gray-500">{display}</span>
+      </div>
+      <input
+        type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-red-500"
+      />
+      {(leftLabel || rightLabel) && (
+        <div className="flex justify-between text-xs text-gray-400 mt-1">
+          <span>{leftLabel}</span>
+          <span>{rightLabel}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Toggle ────────────────────────────────────────────────────────────────────
+
+function Toggle({
+  checked, onChange, label, hint,
+}: {
+  checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string
+}) {
+  return (
+    <div className="flex items-center justify-between py-2.5">
+      <div>
+        <p className="text-sm font-medium text-gray-700">{label}</p>
+        {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${
+          checked ? 'bg-red-500' : 'bg-gray-200'
+        }`}
+      >
+        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-6' : 'translate-x-1'
+        }`} />
+      </button>
+    </div>
+  )
+}
+
+// ─── Main component ────────────────────────────────────────────────────────────
 
 export default function Step3Voice() {
   const {
-    script,
-    projectId,
-    voiceId,
-    audioUrl,
-    subtitleBlocks,
-    setVoiceId,
-    setAudioUrl,
-    setSubtitleBlocks,
-    setStep,
+    script, projectId, voiceSettings, audioUrl,
+    setVoiceSettings, setAudioUrl, setStep,
   } = useStudioStore()
 
-  const [selectedVoice, setSelectedVoice] = useState(voiceId || VOICES[0].id)
-  const [stability, setStability] = useState(0.5)
-  const [loadingAudio, setLoadingAudio] = useState(false)
-  const [loadingSubs, setLoadingSubs] = useState(false)
+  const [voices, setVoices] = useState<ApiVoice[]>([])
+  const [voicesLoading, setVoicesLoading] = useState(true)
+  const [voicesError, setVoicesError] = useState('')
+  const [voiceLanguage, setVoiceLanguage] = useState('ru')
+  const [genderFilter, setGenderFilter] = useState<'all' | 'M' | 'F'>('all')
+  const [loading, setLoading] = useState(false)
+  const [previewingId, setPreviewingId] = useState<string | null>(null)
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null)
   const [error, setError] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+  const audioFileRef = useRef<HTMLInputElement>(null)
+
+  function loadVoices(lang: string) {
+    setVoicesLoading(true)
+    setVoicesError('')
+    const url = lang ? `/api/voices?language=${lang}` : '/api/voices'
+    fetch(url)
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.ok && Array.isArray(json.data?.voices) && json.data.voices.length > 0) {
+          setVoices(json.data.voices as ApiVoice[])
+        } else {
+          setVoicesError(json.error ?? 'Не удалось загрузить голоса ElevenLabs')
+        }
+      })
+      .catch(() => setVoicesError('Ошибка сети при загрузке голосов'))
+      .finally(() => setVoicesLoading(false))
+  }
+
+  useEffect(() => { loadVoices(voiceLanguage) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleLanguageChange(lang: string) {
+    setVoiceLanguage(lang)
+    loadVoices(lang)
+  }
+
+  async function handlePreview(voiceId: string) {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause()
+      currentAudioRef.current = null
+    }
+    if (previewingId === voiceId) {
+      setPreviewingId(null)
+      return
+    }
+
+    setPreviewingId(voiceId)
+
+    try {
+      const voice = voices.find((v) => v.voice_id === voiceId)
+      const directUrl = voice?.preview_url ?? null
+
+      if (directUrl) {
+        const audio = new Audio(directUrl)
+        currentAudioRef.current = audio
+        audio.onended = () => { setPreviewingId(null); currentAudioRef.current = null }
+        audio.onerror = () => { setPreviewingId(null); currentAudioRef.current = null }
+        await audio.play()
+      } else {
+        const res = await fetch('/api/voice-preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voice_id: voiceId }),
+        })
+        if (!res.ok) throw new Error(`preview ${res.status}`)
+        const blob = await res.blob()
+        const blobUrl = URL.createObjectURL(blob)
+        const audio = new Audio(blobUrl)
+        currentAudioRef.current = audio
+        audio.onended = () => { setPreviewingId(null); URL.revokeObjectURL(blobUrl); currentAudioRef.current = null }
+        audio.onerror = () => { setPreviewingId(null); URL.revokeObjectURL(blobUrl); currentAudioRef.current = null }
+        await audio.play()
+      }
+    } catch (err) {
+      console.warn('[voice-preview]', err instanceof Error ? err.message : err)
+      setPreviewingId(null)
+    }
+  }
+
+  const handleAudioUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!projectId) { setUploadError('Сначала создайте проект (шаг 1)'); return }
+    setUploadError('')
+    setUploading(true)
+    try {
+      const signRes = await fetch('/api/upload/sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'audio', project_id: projectId, content_type: file.type || 'audio/mpeg' }),
+      })
+      const signJson = await signRes.json()
+      if (!signJson.ok) throw new Error(signJson.error)
+
+      const { signed_url, access_url } = signJson.data
+      const uploadRes = await fetch(signed_url, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'audio/mpeg' },
+        body: file,
+      })
+      if (!uploadRes.ok) throw new Error('Ошибка загрузки файла на сервер')
+      setAudioUrl(access_url)
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Ошибка загрузки аудио')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }, [projectId, setAudioUrl])
 
   async function handleGenerateAudio() {
     if (!script) return
     setError('')
-    setLoadingAudio(true)
+    setLoading(true)
     try {
       const res = await fetch('/api/generate/audio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: script,
-          voice_id: selectedVoice,
+          voice_id: voiceSettings.voiceId,
           project_id: projectId,
-          stability,
-          similarity_boost: 0.75,
+          stability: voiceSettings.stability,
+          similarity_boost: voiceSettings.similarityBoost,
+          speech_rate: voiceSettings.speechRate,
+          voice_style: voiceSettings.style,
+          clarity_boost: voiceSettings.clarityBoost,
+          paragraph_pauses: voiceSettings.paragraphPauses,
         }),
       })
       const json = await res.json()
@@ -57,32 +423,11 @@ export default function Step3Voice() {
         }
         throw new Error(json.error)
       }
-      setVoiceId(selectedVoice)
       setAudioUrl(json.data.audio_url)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка генерации аудио')
     } finally {
-      setLoadingAudio(false)
-    }
-  }
-
-  async function handleGenerateSubtitles() {
-    if (!audioUrl) return
-    setError('')
-    setLoadingSubs(true)
-    try {
-      const res = await fetch('/api/generate/subtitles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audio_url: audioUrl, project_id: projectId }),
-      })
-      const json = await res.json()
-      if (!json.ok) throw new Error(json.error)
-      setSubtitleBlocks(json.data.subtitle_blocks)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка генерации субтитров')
-    } finally {
-      setLoadingSubs(false)
+      setLoading(false)
     }
   }
 
@@ -91,68 +436,170 @@ export default function Step3Voice() {
       <div>
         <h2 className="text-lg font-semibold text-gray-900 mb-1">Шаг 3: Озвучка</h2>
         <p className="text-sm text-gray-500">
-          Выберите голос и сгенерируйте аудио
+          Выберите голос и настройте параметры
+          {!voicesLoading && voices.length > 0 && (
+            <span className="ml-1 text-gray-400">· {voices.length} голосов</span>
+          )}
         </p>
       </div>
 
-      {/* Voice grid */}
+      {/* Voices load error */}
+      {voicesError && !voicesLoading && (
+        <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-red-700">Не удалось загрузить голоса</p>
+            <p className="text-xs text-red-500 mt-0.5">{voicesError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => loadVoices(voiceLanguage)}
+            className="shrink-0 text-xs text-red-600 hover:text-red-700 font-medium underline"
+          >
+            Повторить
+          </button>
+        </div>
+      )}
+
+      {/* Language filter */}
       <div>
-        <p className="text-sm font-medium text-gray-700 mb-2">Голос</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {VOICES.map((voice) => (
+        <p className="text-sm font-medium text-gray-700 mb-2">Язык голоса</p>
+        <div className="flex flex-wrap gap-2">
+          {LANGUAGE_OPTIONS.map((opt) => (
             <button
-              key={voice.id}
+              key={opt.value}
               type="button"
-              onClick={() => setSelectedVoice(voice.id)}
-              className={`text-left px-3 py-2.5 rounded-xl border-2 transition-all ${
-                selectedVoice === voice.id
-                  ? 'border-red-400 bg-red-50'
-                  : 'border-gray-200 hover:border-gray-300'
+              onClick={() => handleLanguageChange(opt.value)}
+              disabled={voicesLoading}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all disabled:opacity-50 ${
+                voiceLanguage === opt.value
+                  ? 'border-red-400 bg-red-50 text-red-600'
+                  : 'border-gray-200 text-gray-600 hover:border-gray-300 bg-white'
               }`}
             >
-              <div className="flex items-center gap-1.5">
-                <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
-                  voice.gender === 'Ж' ? 'bg-pink-100 text-pink-600' : 'bg-blue-100 text-blue-600'
-                }`}>
-                  {voice.gender}
+              {voicesLoading && voiceLanguage === opt.value ? (
+                <span className="flex items-center gap-1">
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  {opt.label}
                 </span>
-                <span className="text-sm font-semibold text-gray-900">{voice.name}</span>
-              </div>
-              <p className="text-xs text-gray-500 mt-0.5">{voice.desc}</p>
+              ) : opt.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Stability slider */}
+      {/* Gender filter */}
       <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <p className="text-sm font-medium text-gray-700">Стабильность голоса</p>
-          <span className="text-sm text-gray-500">{Math.round(stability * 100)}%</span>
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={stability}
-          onChange={(e) => setStability(Number(e.target.value))}
-          className="w-full accent-red-500"
-        />
-        <div className="flex justify-between text-xs text-gray-400 mt-1">
-          <span>Выразительно</span>
-          <span>Стабильно</span>
+        <p className="text-sm font-medium text-gray-700 mb-2">Пол голоса</p>
+        <div className="inline-flex rounded-xl border border-gray-200 overflow-hidden">
+          {(['all', 'F', 'M'] as const).map((g) => (
+            <button
+              key={g}
+              type="button"
+              onClick={() => setGenderFilter(g)}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${
+                genderFilter === g
+                  ? 'bg-gray-900 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {g === 'all' ? 'Все' : g === 'F' ? 'Женский' : 'Мужской'}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Generate audio */}
+      {/* Voice selector */}
+      <div>
+        <p className="text-sm font-medium text-gray-700 mb-2">Голос</p>
+        <VoiceDropdown
+          value={voiceSettings.voiceId}
+          voices={voices}
+          loading={voicesLoading}
+          genderFilter={genderFilter}
+          onChange={(id) => setVoiceSettings({ voiceId: id })}
+          onPreview={handlePreview}
+          previewingId={previewingId}
+        />
+      </div>
+
+      {/* Voice style */}
+      <div>
+        <p className="text-sm font-medium text-gray-700 mb-2">Стиль озвучки</p>
+        <div className="grid grid-cols-4 gap-2">
+          {VOICE_STYLES.map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              onClick={() => setVoiceSettings({ style: s.value })}
+              className={`py-2 text-xs font-medium rounded-xl border-2 transition-all ${
+                voiceSettings.style === s.value
+                  ? 'border-red-400 bg-red-50 text-red-600'
+                  : 'border-gray-200 text-gray-600 hover:border-gray-300'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Sliders */}
+      <div className="flex flex-col gap-4">
+        <Slider
+          label="Скорость речи"
+          value={voiceSettings.speechRate}
+          min={0.5} max={2.0} step={0.05}
+          onChange={(v) => setVoiceSettings({ speechRate: v })}
+          leftLabel="Медленно" rightLabel="Быстро"
+          format={(v) => `${v.toFixed(2)}×`}
+        />
+        <Slider
+          label="Стабильность"
+          value={voiceSettings.stability}
+          min={0} max={1} step={0.05}
+          onChange={(v) => setVoiceSettings({ stability: v })}
+          leftLabel="Выразительно" rightLabel="Стабильно"
+        />
+        <Slider
+          label="Схожесть с оригиналом"
+          value={voiceSettings.similarityBoost}
+          min={0} max={1} step={0.05}
+          onChange={(v) => setVoiceSettings({ similarityBoost: v })}
+          leftLabel="Свободно" rightLabel="Точно"
+        />
+      </div>
+
+      {/* Extra toggles */}
+      <div className="border border-gray-200 rounded-xl px-4 divide-y divide-gray-100">
+        <Toggle
+          checked={voiceSettings.clarityBoost}
+          onChange={(v) => setVoiceSettings({ clarityBoost: v })}
+          label="Улучшение чёткости"
+          hint="Speaker boost для более чёткого звука"
+        />
+        <Toggle
+          checked={voiceSettings.paragraphPauses}
+          onChange={(v) => setVoiceSettings({ paragraphPauses: v })}
+          label="Паузы между абзацами"
+          hint="Небольшая пауза при смене абзаца"
+        />
+      </div>
+
+      {/* Generate button */}
       <button
         type="button"
         onClick={handleGenerateAudio}
-        disabled={loadingAudio}
+        disabled={loading || uploading || !voiceSettings.voiceId || voicesLoading}
         className="w-full py-3 bg-gray-900 hover:bg-gray-700 disabled:bg-gray-300 text-white font-semibold rounded-xl text-sm transition-colors flex items-center justify-center gap-2"
       >
-        {loadingAudio ? (
+        {loading ? (
           <>
             <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -167,43 +614,79 @@ export default function Step3Voice() {
         )}
       </button>
 
-      {/* Audio player */}
-      {audioUrl && (
-        <div className="bg-gray-50 rounded-xl p-4">
-          <p className="text-sm font-medium text-gray-700 mb-2">Готовое аудио</p>
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <audio controls src={audioUrl} className="w-full" />
+      {/* Upload own audio / skip */}
+      {!loading && (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => audioFileRef.current?.click()}
+            disabled={uploading}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-gray-300 text-gray-600 text-xs font-medium rounded-xl hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            {uploading ? (
+              <>
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                Загрузка...
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                Загрузить .mp3/.wav
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setStep(4)}
+            className="flex items-center gap-1 py-2 px-3 border border-gray-200 text-gray-400 text-xs font-medium rounded-xl hover:bg-gray-50 transition-colors"
+          >
+            Пропустить →
+          </button>
+          <input
+            ref={audioFileRef}
+            type="file"
+            accept="audio/mpeg,audio/wav,audio/mp3,.mp3,.wav"
+            className="hidden"
+            onChange={handleAudioUpload}
+          />
         </div>
       )}
 
-      {/* Subtitles */}
-      {audioUrl && (
-        <div className="border border-dashed border-gray-300 rounded-xl p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-700">Субтитры</p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {subtitleBlocks.length > 0
-                  ? `${subtitleBlocks.length} блоков готово ✓`
-                  : 'Автоматическая транскрибация (−3 кр.)'}
-              </p>
-            </div>
-            {subtitleBlocks.length === 0 && (
-              <button
-                type="button"
-                onClick={handleGenerateSubtitles}
-                disabled={loadingSubs}
-                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium rounded-xl transition-colors disabled:opacity-50"
-              >
-                {loadingSubs ? 'Генерация...' : 'Создать субтитры'}
-              </button>
-            )}
-          </div>
-        </div>
+      {uploadError && (
+        <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2">{uploadError}</p>
       )}
 
       {error && (
         <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3">{error}</p>
+      )}
+
+      {/* Audio result */}
+      {audioUrl && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-gray-700">Готовое аудио</p>
+            <a
+              href={audioUrl}
+              download="audio.mp3"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-red-500 hover:text-red-600 font-medium flex items-center gap-1"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Скачать MP3
+            </a>
+          </div>
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <audio controls src={audioUrl} className="w-full" />
+        </div>
       )}
 
       <div className="flex gap-3">
@@ -220,7 +703,7 @@ export default function Step3Voice() {
           disabled={!audioUrl}
           className="flex-1 py-3 bg-red-500 hover:bg-red-600 disabled:bg-red-200 text-white font-semibold rounded-xl text-sm transition-colors"
         >
-          Далее: Иллюстрации →
+          Далее: Субтитры →
         </button>
       </div>
     </div>
