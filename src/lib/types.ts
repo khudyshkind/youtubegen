@@ -90,6 +90,7 @@ export interface Profile {
   credits: number
   paddle_customer_id: string | null
   paddle_subscription_id: string | null
+  onboarding_completed: boolean
   created_at: string
   updated_at: string
 }

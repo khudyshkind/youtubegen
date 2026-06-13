@@ -15,9 +15,13 @@ create table if not exists public.profiles (
   credits         integer     not null default 5,
   paddle_customer_id      text unique,
   paddle_subscription_id  text unique,
+  onboarding_completed    boolean     not null default false,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
+
+-- Migration: add onboarding_completed to existing databases
+alter table public.profiles add column if not exists onboarding_completed boolean not null default false;
 
 create table if not exists public.projects (
   id              uuid        default uuid_generate_v4() primary key,
