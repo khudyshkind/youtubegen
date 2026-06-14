@@ -63,9 +63,12 @@ function settingsInline() {
 // ── Telegram API helpers ──────────────────────────────────────────────────────
 async function tgApi(method, params) {
   if (!BOT_TOKEN) return null
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 30000)
   try {
     const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
       method: 'POST',
+      signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     })
@@ -73,6 +76,52 @@ async function tgApi(method, params) {
   } catch (err) {
     console.error(`[tg] ${method} error:`, err.message)
     return null
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+// Download image to Buffer so Telegram never has to fetch from fal.media
+async function fetchImageBuffer(url) {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 20000)
+  try {
+    const res = await fetch(url, { signal: ctrl.signal })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return Buffer.from(await res.arrayBuffer())
+  } catch (err) {
+    console.error('[tg] fetchImageBuffer error:', err.message)
+    return null
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+// Send photo via multipart so Telegram doesn't fetch from external CDN
+async function tgSendPhoto(chatId, imageBuffer, caption, extra = {}) {
+  if (!BOT_TOKEN) return null
+  const form = new FormData()
+  form.append('chat_id', String(chatId))
+  form.append('photo', new Blob([imageBuffer], { type: 'image/jpeg' }), 'image.jpg')
+  form.append('caption', caption)
+  form.append('parse_mode', 'Markdown')
+  for (const [k, v] of Object.entries(extra)) {
+    form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v))
+  }
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 30000)
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+      method: 'POST', signal: ctrl.signal, body: form,
+    })
+    const json = await res.json()
+    if (!json.ok) console.error('[tg] sendPhoto failed:', JSON.stringify(json).slice(0, 200))
+    return json
+  } catch (err) {
+    console.error('[tg] sendPhoto error:', err.message)
+    return null
+  } finally {
+    clearTimeout(t)
   }
 }
 
@@ -87,12 +136,13 @@ async function sendTo(chatId, text, extra = {}) {
 
 async function publishToChannel(text, imageUrl = null) {
   if (imageUrl) {
-    return tgApi('sendPhoto', {
-      chat_id: CHANNEL_ID,
-      photo: imageUrl,
-      caption: text,
-      parse_mode: 'Markdown',
-    })
+    console.log('[tg] downloading image buffer...')
+    const buf = await fetchImageBuffer(imageUrl)
+    if (buf) {
+      console.log('[tg] sending photo to channel, size:', buf.length)
+      return tgSendPhoto(CHANNEL_ID, buf, text)
+    }
+    console.warn('[tg] image download failed, sending text only')
   }
   return tgApi('sendMessage', { chat_id: CHANNEL_ID, text, parse_mode: 'Markdown' })
 }
@@ -236,16 +286,19 @@ async function showPreview(chatId, post, imageUrl, topic) {
   const caption = `📝 *Превью поста:*\n\n${post}`
   const markup = previewInline(topic)
   if (imageUrl) {
-    await tgApi('sendPhoto', {
-      chat_id: chatId, photo: imageUrl,
-      caption, parse_mode: 'Markdown', reply_markup: markup,
-    })
-  } else {
-    await tgApi('sendMessage', {
-      chat_id: chatId, text: caption,
-      parse_mode: 'Markdown', reply_markup: markup,
-    })
+    console.log('[tg] downloading image for preview...')
+    const buf = await fetchImageBuffer(imageUrl)
+    if (buf) {
+      console.log('[tg] sending preview photo, size:', buf.length)
+      await tgSendPhoto(chatId, buf, caption, { reply_markup: JSON.stringify(markup) })
+      return
+    }
+    console.warn('[tg] preview image download failed, text only')
   }
+  await tgApi('sendMessage', {
+    chat_id: chatId, text: caption,
+    parse_mode: 'Markdown', reply_markup: markup,
+  })
 }
 
 // Core flow: generate post + image, then auto-publish or preview
