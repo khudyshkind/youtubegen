@@ -26,10 +26,10 @@ interface GoogleVoice {
   isWavenet: boolean
 }
 
-const ENGINES: { id: AudioEngine; medal: string; name: string; quality: string; meta: string }[] = [
-  { id: 'elevenlabs', medal: '🥇', name: 'ElevenLabs',  quality: 'Отличное качество',    meta: '321 голос · 28 языков' },
-  { id: 'openai',     medal: '🥈', name: 'OpenAI TTS',  quality: 'Хорошее качество',     meta: '6 голосов'             },
-  { id: 'google',     medal: '🥉', name: 'Google TTS',  quality: 'Стандартное качество', meta: '100+ голосов'          },
+const ENGINES: { id: AudioEngine; medal: string; name: string; quality: string; meta: string; soon?: boolean }[] = [
+  { id: 'elevenlabs', medal: '🥇', name: 'ElevenLabs',  quality: 'Отличное качество', meta: '321 голос · 28 языков' },
+  { id: 'openai',     medal: '🥈', name: 'OpenAI TTS',  quality: 'Хорошее качество',  meta: '6 голосов'             },
+  { id: 'google',     medal: '🥉', name: 'Google TTS',  quality: 'Скоро',             meta: '100+ голосов', soon: true },
 ]
 
 const OPENAI_VOICES = [
@@ -458,24 +458,33 @@ export default function Step3Voice() {
             <button
               key={eng.id}
               type="button"
-              onClick={() => setEngine(eng.id)}
-              className="flex flex-col gap-1 p-3 rounded-xl text-left transition-all"
-              style={engine === eng.id
+              onClick={() => !eng.soon && setEngine(eng.id)}
+              disabled={!!eng.soon}
+              className="relative flex flex-col gap-1 p-3 rounded-xl text-left transition-all disabled:cursor-not-allowed"
+              style={eng.soon
+                ? { background: 'rgba(255,255,255,0.02)', border: '2px solid rgba(255,255,255,0.05)', opacity: 0.5 }
+                : engine === eng.id
                 ? { background: 'rgba(124,58,237,0.15)', border: '2px solid rgba(124,58,237,0.5)' }
                 : { background: 'rgba(255,255,255,0.03)', border: '2px solid rgba(255,255,255,0.07)' }
               }
             >
+              {eng.soon && (
+                <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 rounded-full font-medium"
+                  style={{ background: 'rgba(255,255,255,0.08)', color: '#64748B' }}>
+                  Скоро
+                </span>
+              )}
               <div className="flex items-center gap-1.5">
                 <span className="text-base">{eng.medal}</span>
-                <span className={`text-xs font-bold ${engine === eng.id ? 'text-violet-300' : 'text-slate-300'}`}>{eng.name}</span>
+                <span className={`text-xs font-bold ${engine === eng.id && !eng.soon ? 'text-violet-300' : 'text-slate-400'}`}>{eng.name}</span>
               </div>
               <p className="text-xs text-slate-500">{eng.quality}</p>
               <p className="text-xs text-slate-600">{eng.meta}</p>
-              <p className={`text-xs font-semibold mt-0.5 ${engine === eng.id ? 'text-violet-400' : 'text-slate-500'}`}>
-                {ratePerK === AUDIO_CREDITS_PER_1000_CHARS[eng.id] && engine === eng.id
-                  ? `${AUDIO_CREDITS_PER_1000_CHARS[eng.id]} кр / 1000 симв`
-                  : `${AUDIO_CREDITS_PER_1000_CHARS[eng.id]} кр / 1000 симв`}
-              </p>
+              {!eng.soon && (
+                <p className={`text-xs font-semibold mt-0.5 ${engine === eng.id ? 'text-violet-400' : 'text-slate-500'}`}>
+                  {AUDIO_CREDITS_PER_1000_CHARS[eng.id]} кр / 1000 симв
+                </p>
+              )}
             </button>
           ))}
         </div>
