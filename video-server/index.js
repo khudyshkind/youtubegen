@@ -28,13 +28,13 @@ const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
 
 // ── Monitor config ────────────────────────────────────────────────────────────
 const RSS_SOURCES = [
-  { url: 'https://vc.ru/rss',                                    name: 'vc.ru' },
-  { url: 'https://habr.com/ru/rss/hubs/ai/articles/',            name: 'Habr AI' },
-  { url: 'https://blog.youtube/rss',                             name: 'YouTube Blog' },
-  { url: 'https://tjournal.ru/rss',                              name: 'TJ' },
-  { url: 'https://www.reddit.com/r/youtubers/.rss',              name: 'r/youtubers' },
-  { url: 'https://www.reddit.com/r/artificial/.rss',             name: 'r/artificial' },
-  { url: 'https://www.reddit.com/r/ChatGPT/.rss',                name: 'r/ChatGPT' },
+  { url: 'https://vc.ru/rss',                                                  name: 'vc.ru',       delayMs: 0 },
+  { url: 'https://habr.com/ru/rss/hubs/machine_learning/articles/',            name: 'Habr ML',     delayMs: 0 },
+  { url: 'https://habr.com/ru/rss/hubs/artificial_intelligence/articles/',     name: 'Habr AI',     delayMs: 0 },
+  { url: 'https://blog.youtube/rss',                                            name: 'YouTube Blog', delayMs: 0 },
+  { url: 'https://www.reddit.com/r/youtubers/.rss',                            name: 'r/youtubers', delayMs: 2000 },
+  { url: 'https://www.reddit.com/r/artificial/.rss',                           name: 'r/artificial', delayMs: 2000 },
+  { url: 'https://www.reddit.com/r/ChatGPT/.rss',                              name: 'r/ChatGPT',   delayMs: 2000 },
 ]
 
 const KEYWORDS = [
@@ -477,6 +477,7 @@ async function runMonitor() {
   const newItems = []
 
   for (const source of RSS_SOURCES) {
+    if (source.delayMs) await new Promise(r => setTimeout(r, source.delayMs))
     const items = await fetchRss(source)
     for (const item of items) {
       if (!item.link || seen.has(item.link)) continue
