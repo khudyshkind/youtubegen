@@ -32,9 +32,9 @@ const RSS_SOURCES = [
   { url: 'https://habr.com/ru/rss/hubs/machine_learning/articles/',            name: 'Habr ML',     delayMs: 0 },
   { url: 'https://habr.com/ru/rss/hubs/artificial_intelligence/articles/',     name: 'Habr AI',     delayMs: 0 },
   { url: 'https://blog.youtube/rss',                                            name: 'YouTube Blog', delayMs: 0 },
-  { url: 'https://www.reddit.com/r/youtubers/.rss',                            name: 'r/youtubers', delayMs: 2000 },
-  { url: 'https://www.reddit.com/r/artificial/.rss',                           name: 'r/artificial', delayMs: 2000 },
-  { url: 'https://www.reddit.com/r/ChatGPT/.rss',                              name: 'r/ChatGPT',   delayMs: 2000 },
+  { url: 'https://old.reddit.com/r/youtubers/.rss',                            name: 'r/youtubers', delayMs: 3000 },
+  { url: 'https://old.reddit.com/r/artificial/.rss',                           name: 'r/artificial', delayMs: 3000 },
+  { url: 'https://old.reddit.com/r/ChatGPT/.rss',                              name: 'r/ChatGPT',   delayMs: 3000 },
 ]
 
 const KEYWORDS = [
@@ -491,8 +491,9 @@ async function runMonitor() {
   saveSeenUrls(seen)
   console.log('[monitor] new relevant items:', newItems.length)
 
-  // Process up to 3 items per run to avoid Claude rate limits
-  for (const item of newItems.slice(0, 3)) {
+  // Shuffle to get variety across sources, process up to 5 per run
+  const shuffled = newItems.sort(() => Math.random() - 0.5)
+  for (const item of shuffled.slice(0, 5)) {
     await processMonitorItem(item)
   }
   console.log('[monitor] scan done')
