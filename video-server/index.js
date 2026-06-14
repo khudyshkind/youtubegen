@@ -6,6 +6,9 @@ const path = require('path')
 const os = require('os')
 const https = require('https')
 const http = require('http')
+const AnthropicPkg = require('@anthropic-ai/sdk')
+const Anthropic = AnthropicPkg.default ?? AnthropicPkg
+const cron = require('node-cron')
 
 const app = express()
 app.use(express.json({ limit: '2mb' }))
@@ -13,6 +16,204 @@ app.use(express.json({ limit: '2mb' }))
 const API_SECRET = process.env.RAILWAY_API_SECRET
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+// ── Telegram bot config ───────────────────────────────────────────────────────
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+const CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID
+const OWNER_ID = String(process.env.TELEGRAM_OWNER_ID || '')
+const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+  ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+  : 'https://ytgen-video-server-production.up.railway.app'
+
+let pendingPost = null // { text } — last preview awaiting /yes or /no
+
+// ── Telegram helpers ──────────────────────────────────────────────────────────
+async function tgApi(method, params) {
+  if (!BOT_TOKEN) return null
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+    return res.json()
+  } catch (err) {
+    console.error(`[tg] ${method} error:`, err.message)
+    return null
+  }
+}
+
+async function sendTo(chatId, text) {
+  return tgApi('sendMessage', { chat_id: chatId, text, parse_mode: 'Markdown' })
+}
+
+async function sendToChannel(text) {
+  return tgApi('sendMessage', { chat_id: CHANNEL_ID, text, parse_mode: 'Markdown' })
+}
+
+// ── Claude post generation ────────────────────────────────────────────────────
+async function generatePost(topic) {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const msg = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1024,
+    messages: [{
+      role: 'user',
+      content:
+        'Ты SMM менеджер YouTube automation сервиса YouTubeGen.\n' +
+        'Напиши engaging пост для Telegram канала на русском языке.\n' +
+        `Тема: ${topic}\n\n` +
+        'Правила:\n' +
+        '- Максимум 500 символов\n' +
+        '- Используй эмодзи\n' +
+        '- Короткие абзацы\n' +
+        '- В конце призыв: попробовать сервис со ссылкой https://youtubegen.vercel.app\n' +
+        '- Стиль: дружелюбный, живой, не рекламный\n' +
+        '- Можно использовать Markdown для форматирования',
+    }],
+  })
+  return msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim()
+}
+
+async function generateIdea() {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const msg = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 200,
+    messages: [{
+      role: 'user',
+      content:
+        'Придумай одну конкретную и интересную тему поста для Telegram канала сервиса YouTubeGen ' +
+        '(SaaS для автоматического создания YouTube видео с AI). ' +
+        'Верни только тему, без пояснений.',
+    }],
+  })
+  return msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim()
+}
+
+// ── Supabase stats ────────────────────────────────────────────────────────────
+async function fetchStats() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null
+  const headers = {
+    'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+    'apikey': SUPABASE_SERVICE_KEY,
+  }
+  const [usersRes, projectsRes, videosRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/profiles?select=count`, { headers }),
+    fetch(`${SUPABASE_URL}/rest/v1/projects?select=count`, { headers }),
+    fetch(`${SUPABASE_URL}/rest/v1/projects?select=count&status=eq.completed`, { headers }),
+  ])
+  const [users, projects, videos] = await Promise.all([
+    usersRes.json(), projectsRes.json(), videosRes.json(),
+  ])
+  return {
+    users: users[0]?.count ?? '?',
+    projects: projects[0]?.count ?? '?',
+    videos: videos[0]?.count ?? '?',
+  }
+}
+
+async function publishStats(toOwner = null) {
+  const stats = await fetchStats()
+  if (!stats) { console.warn('[tg] stats unavailable'); return }
+  const date = new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+  const text =
+    `📊 *Статистика YouTubeGen — ${date}*\n\n` +
+    `👥 Пользователей: *${stats.users}*\n` +
+    `📁 Проектов: *${stats.projects}*\n` +
+    `🎬 Видео готово: *${stats.videos}*\n\n` +
+    `Создай своё видео → https://youtubegen.vercel.app`
+  await sendToChannel(text)
+  if (toOwner) await sendTo(toOwner, '✅ Статистика опубликована в канал')
+}
+
+// ── Webhook handler ───────────────────────────────────────────────────────────
+app.post('/telegram/webhook', async (req, res) => {
+  res.json({ ok: true }) // ack Telegram immediately
+  if (!BOT_TOKEN) return
+
+  const message = req.body?.message
+  if (!message) return
+
+  const userId = String(message.from?.id ?? '')
+  const chatId = message.chat?.id
+  const text = (message.text ?? '').trim()
+
+  if (userId !== OWNER_ID) {
+    await sendTo(chatId, '🚫 Доступ запрещён')
+    return
+  }
+
+  console.log('[tg] cmd from owner:', text.slice(0, 60))
+
+  try {
+    if (text === '/start' || text === '/help') {
+      await sendTo(chatId,
+        '🤖 *YouTubeGen Bot*\n\n' +
+        'Команды:\n' +
+        '`/post [тема]` — сгенерировать и опубликовать\n' +
+        '`/preview [тема]` — посмотреть перед публикацией\n' +
+        '`/yes` — опубликовать последний preview\n' +
+        '`/no` — отклонить последний preview\n' +
+        '`/stats` — статистика в канал\n' +
+        '`/idea` — Claude сам придумает тему'
+      )
+    } else if (text.startsWith('/post ')) {
+      const topic = text.slice(6).trim()
+      if (!topic) { await sendTo(chatId, 'Укажи тему: `/post тема поста`'); return }
+      await sendTo(chatId, '⏳ Генерирую пост...')
+      const post = await generatePost(topic)
+      await sendToChannel(post)
+      await sendTo(chatId, '✅ Опубликовано в канал')
+    } else if (text.startsWith('/preview ')) {
+      const topic = text.slice(9).trim()
+      if (!topic) { await sendTo(chatId, 'Укажи тему: `/preview тема поста`'); return }
+      await sendTo(chatId, '⏳ Генерирую пост...')
+      const post = await generatePost(topic)
+      pendingPost = { text: post }
+      await sendTo(chatId, `📝 *Превью:*\n\n${post}\n\n---\nОтветь /yes чтобы опубликовать или /no чтобы отклонить`)
+    } else if (text === '/yes') {
+      if (!pendingPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
+      await sendToChannel(pendingPost.text)
+      pendingPost = null
+      await sendTo(chatId, '✅ Опубликовано в канал')
+    } else if (text === '/no') {
+      if (!pendingPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
+      pendingPost = null
+      await sendTo(chatId, '❌ Пост отклонён')
+    } else if (text === '/stats') {
+      await sendTo(chatId, '⏳ Получаю статистику...')
+      await publishStats(chatId)
+    } else if (text === '/idea') {
+      await sendTo(chatId, '⏳ Придумываю тему...')
+      const idea = await generateIdea()
+      await sendTo(chatId, `💡 *Идея:* ${idea}\n\nГенерирую пост...`)
+      const post = await generatePost(idea)
+      pendingPost = { text: post }
+      await sendTo(chatId, `📝 *Пост:*\n\n${post}\n\n---\nОтветь /yes чтобы опубликовать или /no чтобы отклонить`)
+    } else {
+      await sendTo(chatId, 'Неизвестная команда. Напиши /help')
+    }
+  } catch (err) {
+    console.error('[tg/webhook] error:', err.message)
+    await sendTo(chatId, `❌ Ошибка: ${err.message.slice(0, 120)}`)
+  }
+})
+
+// ── Weekly stats cron — Monday 10:00 UTC ─────────────────────────────────────
+cron.schedule('0 10 * * 1', async () => {
+  console.log('[cron] weekly stats posting')
+  try { await publishStats() } catch (err) { console.error('[cron]', err.message) }
+}, { timezone: 'UTC' })
+
+// ── Register Telegram webhook at startup ──────────────────────────────────────
+async function registerWebhook() {
+  if (!BOT_TOKEN) { console.warn('[tg] TELEGRAM_BOT_TOKEN not set'); return }
+  const webhookUrl = `${SERVER_URL}/telegram/webhook`
+  const result = await tgApi('setWebhook', { url: webhookUrl, drop_pending_updates: true })
+  if (result?.ok) console.log('[tg] webhook registered:', webhookUrl)
+  else console.warn('[tg] webhook registration failed:', JSON.stringify(result))
+}
 
 function verifySecret(req, res, next) {
   if (!API_SECRET || req.headers['x-api-secret'] !== API_SECRET) {
@@ -349,4 +550,7 @@ app.post('/render', verifySecret, async (req, res) => {
 })
 
 const PORT = parseInt(process.env.PORT || '3001', 10)
-app.listen(PORT, () => console.log(`ytgen-video-server on :${PORT}`))
+app.listen(PORT, () => {
+  console.log(`ytgen-video-server on :${PORT}`)
+  registerWebhook().catch(console.error)
+})
