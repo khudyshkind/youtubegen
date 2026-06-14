@@ -17,7 +17,7 @@ const API_SECRET = process.env.RAILWAY_API_SECRET
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-// ── Telegram bot config ───────────────────────────────────────────────────────
+// ── Telegram config ───────────────────────────────────────────────────────────
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID
 const OWNER_ID = String(process.env.TELEGRAM_OWNER_ID || '')
@@ -25,9 +25,42 @@ const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
   : 'https://ytgen-video-server-production.up.railway.app'
 
-let pendingPost = null // { text } — last preview awaiting /yes or /no
+// In-memory state (resets on restart)
+let pendingPost = null   // { text, imageUrl, topic }
+let awaitingTopic = false // true after user taps "✍️ Написать пост"
+const config = { autoPublish: false }
 
-// ── Telegram helpers ──────────────────────────────────────────────────────────
+// ── Keyboards ─────────────────────────────────────────────────────────────────
+const MAIN_KB = {
+  keyboard: [
+    [{ text: '💡 Идея' }, { text: '📊 Статистика' }],
+    [{ text: '✍️ Написать пост' }, { text: '⚙️ Настройки' }],
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+}
+
+function previewInline(topic) {
+  return {
+    inline_keyboard: [[
+      { text: '✅ Опубликовать',   callback_data: 'publish' },
+      { text: '❌ Отклонить',      callback_data: 'decline' },
+      { text: '🔄 Перегенерировать', callback_data: `regen:${topic.slice(0, 60)}` },
+    ]],
+  }
+}
+
+function settingsInline() {
+  return {
+    inline_keyboard: [
+      [{ text: config.autoPublish ? '🟢 Автопубликация: ВКЛ' : '🔴 Автопубликация: ВЫКЛ', callback_data: 'toggle_auto' }],
+      [{ text: '⏰ Расписание: Пн 10:00 UTC', callback_data: 'noop' }],
+      [{ text: '🌐 Часовой пояс: UTC', callback_data: 'noop' }],
+    ],
+  }
+}
+
+// ── Telegram API helpers ──────────────────────────────────────────────────────
 async function tgApi(method, params) {
   if (!BOT_TOKEN) return null
   try {
@@ -43,18 +76,32 @@ async function tgApi(method, params) {
   }
 }
 
-async function sendTo(chatId, text) {
-  return tgApi('sendMessage', { chat_id: chatId, text, parse_mode: 'Markdown' })
+// Send to owner with main keyboard always attached
+async function sendTo(chatId, text, extra = {}) {
+  return tgApi('sendMessage', {
+    chat_id: chatId, text, parse_mode: 'Markdown',
+    reply_markup: MAIN_KB,
+    ...extra,
+  })
 }
 
-async function sendToChannel(text) {
+async function publishToChannel(text, imageUrl = null) {
+  if (imageUrl) {
+    return tgApi('sendPhoto', {
+      chat_id: CHANNEL_ID,
+      photo: imageUrl,
+      caption: text,
+      parse_mode: 'Markdown',
+    })
+  }
   return tgApi('sendMessage', { chat_id: CHANNEL_ID, text, parse_mode: 'Markdown' })
 }
 
-// ── Claude post generation ────────────────────────────────────────────────────
+// ── Claude helpers ────────────────────────────────────────────────────────────
+function claude() { return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) }
+
 async function generatePost(topic) {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  const msg = await client.messages.create({
+  const msg = await claude().messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 1024,
     messages: [{
@@ -76,8 +123,7 @@ async function generatePost(topic) {
 }
 
 async function generateIdea() {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  const msg = await client.messages.create({
+  const msg = await claude().messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 200,
     messages: [{
@@ -91,26 +137,61 @@ async function generateIdea() {
   return msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim()
 }
 
+async function generateImagePrompt(topic) {
+  const msg = await claude().messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 150,
+    messages: [{
+      role: 'user',
+      content:
+        `Create a concise English image prompt for a social media post about: "${topic}". ` +
+        'Style: modern tech, very dark background (#0A0A0F), glowing violet/purple accents, ' +
+        'futuristic UI elements, YouTube branding hints. Horizontal 16:9. No text in image. ' +
+        'Return only the prompt, max 80 words.',
+    }],
+  })
+  return msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim()
+}
+
+// ── fal.ai image generation ───────────────────────────────────────────────────
+async function generateImage(topic) {
+  const FAL_KEY = process.env.FAL_KEY
+  if (!FAL_KEY) { console.warn('[fal] FAL_KEY not set, skipping image'); return null }
+  try {
+    const prompt = await generateImagePrompt(topic)
+    console.log('[fal] prompt:', prompt.slice(0, 80))
+    const res = await fetch('https://fal.run/fal-ai/flux/schnell', {
+      method: 'POST',
+      headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        image_size: 'landscape_16_9',
+        num_images: 1,
+        num_inference_steps: 4,
+        seed: Math.floor(Math.random() * 999999),
+      }),
+    })
+    const json = await res.json()
+    const url = json.images?.[0]?.url ?? null
+    if (url) console.log('[fal] image generated:', url.slice(0, 60))
+    return url
+  } catch (err) {
+    console.error('[fal] error:', err.message)
+    return null
+  }
+}
+
 // ── Supabase stats ────────────────────────────────────────────────────────────
 async function fetchStats() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null
-  const headers = {
-    'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-    'apikey': SUPABASE_SERVICE_KEY,
-  }
-  const [usersRes, projectsRes, videosRes] = await Promise.all([
+  const headers = { 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`, 'apikey': SUPABASE_SERVICE_KEY }
+  const [uR, pR, vR] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/profiles?select=count`, { headers }),
     fetch(`${SUPABASE_URL}/rest/v1/projects?select=count`, { headers }),
     fetch(`${SUPABASE_URL}/rest/v1/projects?select=count&status=eq.completed`, { headers }),
   ])
-  const [users, projects, videos] = await Promise.all([
-    usersRes.json(), projectsRes.json(), videosRes.json(),
-  ])
-  return {
-    users: users[0]?.count ?? '?',
-    projects: projects[0]?.count ?? '?',
-    videos: videos[0]?.count ?? '?',
-  }
+  const [u, p, v] = await Promise.all([uR.json(), pR.json(), vR.json()])
+  return { users: u[0]?.count ?? '?', projects: p[0]?.count ?? '?', videos: v[0]?.count ?? '?' }
 }
 
 async function publishStats(toOwner = null) {
@@ -123,96 +204,193 @@ async function publishStats(toOwner = null) {
     `📁 Проектов: *${stats.projects}*\n` +
     `🎬 Видео готово: *${stats.videos}*\n\n` +
     `Создай своё видео → https://youtubegen.vercel.app`
-  await sendToChannel(text)
+  await publishToChannel(text)
   if (toOwner) await sendTo(toOwner, '✅ Статистика опубликована в канал')
 }
 
-// ── Webhook handler ───────────────────────────────────────────────────────────
+// ── Core flow: show preview with inline buttons ───────────────────────────────
+async function showPreview(chatId, post, imageUrl, topic) {
+  pendingPost = { text: post, imageUrl, topic }
+  const caption = `📝 *Превью поста:*\n\n${post}`
+  const markup = previewInline(topic)
+  if (imageUrl) {
+    await tgApi('sendPhoto', {
+      chat_id: chatId, photo: imageUrl,
+      caption, parse_mode: 'Markdown', reply_markup: markup,
+    })
+  } else {
+    await tgApi('sendMessage', {
+      chat_id: chatId, text: caption,
+      parse_mode: 'Markdown', reply_markup: markup,
+    })
+  }
+}
+
+// Core flow: generate post + image, then auto-publish or preview
+async function generateAndHandle(chatId, topic, forcePreview = false) {
+  const [post, imageUrl] = await Promise.all([generatePost(topic), generateImage(topic)])
+  if (config.autoPublish && !forcePreview) {
+    await publishToChannel(post, imageUrl)
+    await sendTo(chatId, '✅ Опубликовано в канал (автопубликация)')
+  } else {
+    await showPreview(chatId, post, imageUrl, topic)
+  }
+}
+
+// ── Inline button callback handler ────────────────────────────────────────────
+async function handleCallback(cq) {
+  const chatId = cq.message?.chat?.id
+  const msgId  = cq.message?.message_id
+  const data   = cq.data ?? ''
+  const userId = String(cq.from?.id ?? '')
+
+  await tgApi('answerCallbackQuery', { callback_query_id: cq.id })
+  if (userId !== OWNER_ID) return
+
+  const clearButtons = () =>
+    tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
+
+  if (data === 'publish') {
+    if (!pendingPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
+    await publishToChannel(pendingPost.text, pendingPost.imageUrl)
+    pendingPost = null
+    await clearButtons()
+    await sendTo(chatId, '✅ Опубликовано в канал')
+
+  } else if (data === 'decline') {
+    pendingPost = null
+    await clearButtons()
+    await sendTo(chatId, '❌ Пост отклонён')
+
+  } else if (data.startsWith('regen:')) {
+    const topic = data.slice(6)
+    await clearButtons()
+    await sendTo(chatId, '⏳ Перегенерирую...')
+    await generateAndHandle(chatId, topic, true) // always preview on regen
+
+  } else if (data === 'toggle_auto') {
+    config.autoPublish = !config.autoPublish
+    await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: settingsInline() })
+    const msg = config.autoPublish
+      ? '🟢 Автопубликация *включена* — посты публикуются сразу'
+      : '🔴 Автопубликация *выключена* — посты идут на подтверждение'
+    await sendTo(chatId, msg)
+  }
+  // 'noop' → ignore
+}
+
+// ── Webhook ───────────────────────────────────────────────────────────────────
 app.post('/telegram/webhook', async (req, res) => {
-  res.json({ ok: true }) // ack Telegram immediately
+  res.json({ ok: true })
   if (!BOT_TOKEN) return
+
+  // Inline button press
+  if (req.body?.callback_query) {
+    await handleCallback(req.body.callback_query).catch(console.error)
+    return
+  }
 
   const message = req.body?.message
   if (!message) return
 
   const userId = String(message.from?.id ?? '')
   const chatId = message.chat?.id
-  const text = (message.text ?? '').trim()
+  const text   = (message.text ?? '').trim()
 
   if (userId !== OWNER_ID) {
-    await sendTo(chatId, '🚫 Доступ запрещён')
+    await tgApi('sendMessage', { chat_id: chatId, text: '🚫 Доступ запрещён' })
     return
   }
 
-  console.log('[tg] cmd from owner:', text.slice(0, 60))
+  console.log('[tg] msg:', text.slice(0, 60))
+
+  // Awaiting free-text topic after "✍️ Написать пост"
+  if (awaitingTopic && text && !text.startsWith('/')) {
+    awaitingTopic = false
+    await sendTo(chatId, '⏳ Генерирую пост и изображение...')
+    await generateAndHandle(chatId, text)
+    return
+  }
 
   try {
-    if (text === '/start' || text === '/help') {
-      await sendTo(chatId,
-        '🤖 *YouTubeGen Bot*\n\n' +
-        'Команды:\n' +
-        '`/post [тема]` — сгенерировать и опубликовать\n' +
-        '`/preview [тема]` — посмотреть перед публикацией\n' +
-        '`/yes` — опубликовать последний preview\n' +
-        '`/no` — отклонить последний preview\n' +
-        '`/stats` — статистика в канал\n' +
-        '`/idea` — Claude сам придумает тему'
-      )
-    } else if (text.startsWith('/post ')) {
-      const topic = text.slice(6).trim()
-      if (!topic) { await sendTo(chatId, 'Укажи тему: `/post тема поста`'); return }
-      await sendTo(chatId, '⏳ Генерирую пост...')
-      const post = await generatePost(topic)
-      await sendToChannel(post)
-      await sendTo(chatId, '✅ Опубликовано в канал')
-    } else if (text.startsWith('/preview ')) {
-      const topic = text.slice(9).trim()
-      if (!topic) { await sendTo(chatId, 'Укажи тему: `/preview тема поста`'); return }
-      await sendTo(chatId, '⏳ Генерирую пост...')
-      const post = await generatePost(topic)
-      pendingPost = { text: post }
-      await sendTo(chatId, `📝 *Превью:*\n\n${post}\n\n---\nОтветь /yes чтобы опубликовать или /no чтобы отклонить`)
-    } else if (text === '/yes') {
-      if (!pendingPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
-      await sendToChannel(pendingPost.text)
-      pendingPost = null
-      await sendTo(chatId, '✅ Опубликовано в канал')
-    } else if (text === '/no') {
-      if (!pendingPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
-      pendingPost = null
-      await sendTo(chatId, '❌ Пост отклонён')
-    } else if (text === '/stats') {
-      await sendTo(chatId, '⏳ Получаю статистику...')
-      await publishStats(chatId)
-    } else if (text === '/idea') {
-      await sendTo(chatId, '⏳ Придумываю тему...')
-      const idea = await generateIdea()
-      await sendTo(chatId, `💡 *Идея:* ${idea}\n\nГенерирую пост...`)
-      const post = await generatePost(idea)
-      pendingPost = { text: post }
-      await sendTo(chatId, `📝 *Пост:*\n\n${post}\n\n---\nОтветь /yes чтобы опубликовать или /no чтобы отклонить`)
-    } else {
-      await sendTo(chatId, 'Неизвестная команда. Напиши /help')
+    switch (true) {
+      case (text === '/start' || text === '/help'):
+        await sendTo(chatId,
+          '🤖 *YouTubeGen Bot*\n\n' +
+          'Используй кнопки внизу или команды:\n' +
+          '`/post [тема]` — сгенерировать и опубликовать\n' +
+          '`/preview [тема]` — посмотреть перед публикацией\n' +
+          '`/stats` — статистика в канал\n' +
+          '`/idea` — случайная тема\n' +
+          '`/settings` — настройки'
+        )
+        break
+
+      case (text === '💡 Идея' || text === '/idea'): {
+        await sendTo(chatId, '⏳ Придумываю тему...')
+        const idea = await generateIdea()
+        await sendTo(chatId, `💡 *Тема:* ${idea}\n\n⏳ Генерирую пост и изображение...`)
+        await generateAndHandle(chatId, idea)
+        break
+      }
+
+      case (text === '📊 Статистика' || text === '/stats'):
+        await sendTo(chatId, '⏳ Получаю статистику...')
+        await publishStats(chatId)
+        break
+
+      case (text === '✍️ Написать пост'):
+        awaitingTopic = true
+        await sendTo(chatId, '✏️ Введите тему поста:')
+        break
+
+      case (text === '⚙️ Настройки' || text === '/settings'):
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: '⚙️ *Настройки бота*',
+          parse_mode: 'Markdown',
+          reply_markup: settingsInline(),
+        })
+        break
+
+      case text.startsWith('/post '): {
+        const topic = text.slice(6).trim()
+        if (!topic) { await sendTo(chatId, 'Укажи тему: `/post тема`'); break }
+        await sendTo(chatId, '⏳ Генерирую пост и изображение...')
+        await generateAndHandle(chatId, topic)
+        break
+      }
+
+      case text.startsWith('/preview '): {
+        const topic = text.slice(9).trim()
+        if (!topic) { await sendTo(chatId, 'Укажи тему: `/preview тема`'); break }
+        await sendTo(chatId, '⏳ Генерирую пост и изображение...')
+        await generateAndHandle(chatId, topic, true)
+        break
+      }
+
+      default:
+        if (!awaitingTopic) await sendTo(chatId, 'Используй кнопки внизу или /help')
     }
   } catch (err) {
-    console.error('[tg/webhook] error:', err.message)
+    console.error('[tg/webhook]', err.message)
     await sendTo(chatId, `❌ Ошибка: ${err.message.slice(0, 120)}`)
   }
 })
 
 // ── Weekly stats cron — Monday 10:00 UTC ─────────────────────────────────────
 cron.schedule('0 10 * * 1', async () => {
-  console.log('[cron] weekly stats posting')
+  console.log('[cron] weekly stats')
   try { await publishStats() } catch (err) { console.error('[cron]', err.message) }
 }, { timezone: 'UTC' })
 
-// ── Register Telegram webhook at startup ──────────────────────────────────────
+// ── Register webhook at startup ───────────────────────────────────────────────
 async function registerWebhook() {
   if (!BOT_TOKEN) { console.warn('[tg] TELEGRAM_BOT_TOKEN not set'); return }
-  const webhookUrl = `${SERVER_URL}/telegram/webhook`
-  const result = await tgApi('setWebhook', { url: webhookUrl, drop_pending_updates: true })
-  if (result?.ok) console.log('[tg] webhook registered:', webhookUrl)
-  else console.warn('[tg] webhook registration failed:', JSON.stringify(result))
+  const url = `${SERVER_URL}/telegram/webhook`
+  const r = await tgApi('setWebhook', { url, drop_pending_updates: true })
+  if (r?.ok) console.log('[tg] webhook registered:', url)
+  else console.warn('[tg] webhook failed:', JSON.stringify(r))
 }
 
 function verifySecret(req, res, next) {
