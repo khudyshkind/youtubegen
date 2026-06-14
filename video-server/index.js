@@ -303,12 +303,12 @@ async function showPreview(chatId, post, imageUrl, topic) {
 
 // Core flow: generate post + image, then auto-publish or preview
 async function generateAndHandle(chatId, topic, forcePreview = false) {
-  console.log('[tg] generating post+image for:', topic.slice(0, 40))
-  const [post, imageUrl] = await Promise.all([
-    withTimeout(generatePost(topic), 40000, 'post'),
-    generateImage(topic), // has its own internal timeouts
-  ])
-  console.log('[tg] post ready, imageUrl:', imageUrl ? 'yes' : 'no')
+  console.log('[tg] generateAndHandle start, topic:', topic.slice(0, 40))
+  console.log('[tg] generating post...')
+  const post = await withTimeout(generatePost(topic), 40000, 'post')
+  console.log('[tg] post done, length:', post.length)
+  const imageUrl = null // IMAGE DISABLED — testing text-only flow
+  console.log('[tg] imageUrl:', imageUrl)
   if (config.autoPublish && !forcePreview) {
     await publishToChannel(post, imageUrl)
     await sendTo(chatId, '✅ Опубликовано в канал (автопубликация)')
