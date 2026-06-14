@@ -8,6 +8,28 @@ import { refreshCredits } from '@/lib/refresh-credits'
 type DownloadState = 'idle' | 'loading' | 'done' | 'error'
 type RenderState = 'idle' | 'loading' | 'done' | 'error'
 
+const TRANSITIONS = [
+  { id: 'cut',        icon: '✂️',  label: 'Без перехода' },
+  { id: 'fade',       icon: '🌅',  label: 'Затухание' },
+  { id: 'slideleft',  icon: '⬅️',  label: 'Слайд ←' },
+  { id: 'slideright', icon: '➡️',  label: 'Слайд →' },
+  { id: 'slideup',    icon: '⬆️',  label: 'Слайд ↑' },
+  { id: 'dissolve',   icon: '💧',  label: 'Растворение' },
+  { id: 'circleopen', icon: '⭕',  label: 'Круг' },
+  { id: 'wipeleft',   icon: '🔲',  label: 'Шторка ←' },
+]
+
+const EFFECTS = [
+  { id: 'film_grain', icon: '🎞',  label: 'Зернистость' },
+  { id: 'ken_burns',  icon: '🎬',  label: 'Ken Burns' },
+  { id: 'vignette',   icon: '⚫',  label: 'Виньетка' },
+  { id: 'haze',       icon: '🌫',  label: 'Дымка' },
+  { id: 'grayscale',  icon: '🩶',  label: 'Ч/Б' },
+  { id: 'cinematic',  icon: '🎥',  label: 'Кино' },
+  { id: 'lens_flare', icon: '✨',  label: 'Блик' },
+  { id: 'vhs',        icon: '📼',  label: 'VHS' },
+]
+
 function Toggle({
   checked,
   onChange,
@@ -64,10 +86,17 @@ export default function Step6Video() {
   const [renderState, setRenderState] = useState<RenderState>(videoUrl ? 'done' : 'idle')
   const [renderError, setRenderError] = useState('')
   const [burnIn, setBurnIn] = useState(true)
+  const [transition, setTransition] = useState('cut')
+  const [transitionDuration, setTransitionDuration] = useState(0.5)
+  const [effects, setEffects] = useState<string[]>([])
 
   const hasAudio = !!audioUrl
   const hasImages = sceneImages.length > 0
   const hasSubs = subtitleBlocks.length > 0
+
+  function toggleEffect(id: string) {
+    setEffects((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+  }
 
   function downloadSrt() {
     const content = toSrt(subtitleBlocks)
@@ -137,6 +166,9 @@ export default function Step6Video() {
           images,
           subtitle_blocks: hasSubs ? subtitleBlocks : undefined,
           subtitle_style: hasSubs ? { ...subtitleStyle, burnIn } : undefined,
+          transition,
+          transition_duration: transitionDuration,
+          effects,
         }),
       })
       const json = await res.json()
@@ -150,6 +182,8 @@ export default function Step6Video() {
     }
   }
 
+  const cardStyle = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -160,10 +194,7 @@ export default function Step6Video() {
       </div>
 
       {/* Assets checklist */}
-      <div
-        className="rounded-xl p-4"
-        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}
-      >
+      <div className="rounded-xl p-4" style={cardStyle}>
         <p className="text-sm font-medium text-slate-300 mb-3">Готовые материалы</p>
         <div className="flex flex-col gap-2">
           {assetsSummary.map((asset) => (
@@ -269,10 +300,7 @@ export default function Step6Video() {
           </div>
         </div>
       ) : (
-        <div
-          className="rounded-xl p-4 flex items-start gap-3"
-          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}
-        >
+        <div className="rounded-xl p-4 flex items-start gap-3" style={cardStyle}>
           <span className="text-xl shrink-0">💬</span>
           <div>
             <p className="text-sm font-medium text-slate-300">Субтитры не добавлены</p>
@@ -286,6 +314,90 @@ export default function Step6Video() {
             >
               ← Шаг 4: Субтитры
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Transitions block */}
+      {hasImages && (
+        <div className="rounded-xl p-4" style={cardStyle}>
+          <p className="text-sm font-semibold text-slate-200 mb-3">Переходы между сценами</p>
+          <div
+            className="flex gap-2 overflow-x-auto pb-1"
+            style={{ scrollbarWidth: 'none' }}
+          >
+            {TRANSITIONS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTransition(t.id)}
+                className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl text-xs shrink-0 transition-all"
+                style={transition === t.id
+                  ? { background: 'rgba(124,58,237,0.25)', border: '1px solid rgba(124,58,237,0.5)', color: '#C4B5FD' }
+                  : { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#94A3B8' }
+                }
+              >
+                <span>{t.icon}</span>
+                <span className="whitespace-nowrap">{t.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {transition !== 'cut' && (
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-xs text-slate-500">Скорость:</span>
+              {([0.3, 0.5, 1] as const).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setTransitionDuration(d)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
+                  style={transitionDuration === d
+                    ? { background: 'rgba(124,58,237,0.3)', border: '1px solid rgba(124,58,237,0.5)', color: '#C4B5FD' }
+                    : { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#64748B' }
+                  }
+                >
+                  {d}с
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Effects block */}
+      {hasImages && (
+        <div className="rounded-xl p-4" style={cardStyle}>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-semibold text-slate-200">Эффекты видео</p>
+            {effects.length > 0 && (
+              <span
+                className="text-xs px-2 py-0.5 rounded-full"
+                style={{ color: '#FBD34D', background: 'rgba(251,211,77,0.1)', border: '1px solid rgba(251,211,77,0.2)' }}
+              >
+                Увеличивают время сборки
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {EFFECTS.map((e) => {
+              const active = effects.includes(e.id)
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  onClick={() => toggleEffect(e.id)}
+                  className="flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl text-xs transition-all"
+                  style={active
+                    ? { background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.4)', color: '#C4B5FD' }
+                    : { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#64748B' }
+                  }
+                >
+                  <span className="text-base">{e.icon}</span>
+                  <span className="whitespace-nowrap">{e.label}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
       )}
@@ -320,6 +432,8 @@ export default function Step6Video() {
                 <p className="text-xs text-slate-500 mt-0.5">
                   FFmpeg соберёт видео 1280×720 с озвучкой
                   {hasSubs && burnIn ? ', вшитыми субтитрами' : ''}
+                  {transition !== 'cut' ? `, переход "${TRANSITIONS.find((t) => t.id === transition)?.label}"` : ''}
+                  {effects.length > 0 ? `, ${effects.length} эффект(ов)` : ''}
                   {' '}и готовый файл появится прямо здесь
                 </p>
               </div>

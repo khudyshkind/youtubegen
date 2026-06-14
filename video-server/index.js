@@ -70,28 +70,57 @@ function blocksToSrt(blocks) {
     .join('\n\n')
 }
 
+// FFmpeg -vf filter string for each named effect
+const EFFECT_FILTERS = {
+  film_grain: 'noise=alls=15:allf=t+u',
+  ken_burns: "zoompan=z='min(1.3,1+0.0004*in)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1280x720:fps=25",
+  vignette: 'vignette=PI/4',
+  haze: 'colorbalance=rs=0.05:gs=0.05:bs=0.15',
+  grayscale: 'hue=s=0',
+  cinematic: "curves=r='0/0 1/0.88':b='0/0.05 1/0.95',colorbalance=ss=0.08",
+  lens_flare: "curves=r='0/0.02 0.5/0.55 1/1':g='0/0 0.5/0.5 1/0.97':b='0/0.05 0.5/0.45 1/0.9'",
+  vhs: "noise=alls=20:allf=t,hue=s=0.65,colorbalance=rs=0.08:gs=-0.03:bs=-0.05",
+}
+
+const VF_BASE =
+  'scale=1280:720:force_original_aspect_ratio=decrease,' +
+  'pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1'
+
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
 app.post('/render', verifySecret, async (req, res) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytgen-'))
 
   try {
-    const { audio_url, images, subtitle_blocks, subtitle_style, project_id, image_interval } = req.body
+    const {
+      audio_url,
+      images,
+      subtitle_blocks,
+      subtitle_style,
+      project_id,
+      image_interval,
+      transition = 'cut',
+      transition_duration = 0.5,
+      effects = [],
+    } = req.body
 
     if (!audio_url || !Array.isArray(images) || !images.length || !project_id) {
       return res.status(400).json({ ok: false, error: 'Missing audio_url, images, or project_id' })
     }
 
-    console.log('[render] project:', project_id, '| images:', images.length, '| subtitle_blocks:', subtitle_blocks?.length ?? 0, '| burnIn:', subtitle_style?.burnIn ?? false)
+    console.log('[render] project:', project_id,
+      '| images:', images.length,
+      '| transition:', transition,
+      '| effects:', effects,
+      '| burnIn:', subtitle_style?.burnIn ?? false)
 
-    // Fallback duration per image when timecodes are absent
     const defaultDuration = Math.max(1, Number(image_interval) || 10)
 
     // Download audio
     const audioPath = path.join(tmpDir, 'audio.mp3')
     await downloadFile(audio_url, audioPath)
 
-    // Normalize loudness to -14 LUFS (YouTube standard) — fixes ElevenLabs volume drift on long texts
+    // Normalize loudness to -14 LUFS (YouTube standard)
     const audioNormPath = path.join(tmpDir, 'audio_norm.mp3')
     let finalAudioPath = audioPath
     try {
@@ -107,12 +136,12 @@ app.post('/render', verifySecret, async (req, res) => {
         })
       })
       finalAudioPath = audioNormPath
-      console.log('[audio] loudnorm applied →', audioNormPath)
+      console.log('[audio] loudnorm applied')
     } catch (normErr) {
       console.warn('[audio] loudnorm failed, using original:', normErr.message)
     }
 
-    // Download all scene images in sequence
+    // Download all scene images
     const imagePaths = []
     for (let i = 0; i < images.length; i++) {
       const imgPath = path.join(tmpDir, `img_${String(i).padStart(3, '0')}.jpg`)
@@ -128,7 +157,7 @@ app.post('/render', verifySecret, async (req, res) => {
         '-of', 'csv=p=0',
         finalAudioPath,
       ], (err, stdout) => {
-        if (err) reject(new Error(`ffprobe failed: ${err.message}`))
+        if (err) reject(new Error(`ffprobe: ${err.message}`))
         else resolve(parseFloat(stdout.trim()))
       })
     })
@@ -140,48 +169,119 @@ app.post('/render', verifySecret, async (req, res) => {
         ? Math.max(1, parseSecs(img.timecode_end) - parseSecs(img.timecode_start))
         : defaultDuration
     })
-
-    // Extend last image to cover any remaining audio
     const totalImagesDuration = durations.reduce((a, b) => a + b, 0)
     if (totalImagesDuration < audioDuration) {
       durations[durations.length - 1] += audioDuration - totalImagesDuration
     }
 
-    // Build concat.txt (last path repeated without duration — FFmpeg concat demuxer requirement)
-    const concatLines = []
-    for (let i = 0; i < imagePaths.length; i++) {
-      concatLines.push(`file '${imagePaths[i]}'`)
-      concatLines.push(`duration ${durations[i]}`)
-    }
-    concatLines.push(`file '${imagePaths[imagePaths.length - 1]}'`)
-    const concatPath = path.join(tmpDir, 'concat.txt')
-    fs.writeFileSync(concatPath, concatLines.join('\n'))
-
-    const tempNoSubsPath = path.join(tmpDir, 'temp_no_subs.mp4')
+    const tempBasePath = path.join(tmpDir, 'temp_1.mp4')
+    const tempEffectsPath = path.join(tmpDir, 'temp_2.mp4')
     const outputPath = path.join(tmpDir, 'output.mp4')
 
-    // Pass 1 — assemble video from images + audio, no subtitles
-    const vfBase =
-      'scale=1280:720:force_original_aspect_ratio=decrease,' +
-      'pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1'
+    // ── Pass 1: Assemble images into video ──────────────────────────────────
+    const useXfade = transition && transition !== 'cut' && imagePaths.length > 1
+    const td = Math.max(0.1, Math.min(1.5, Number(transition_duration) || 0.5))
 
-    await new Promise((resolve, reject) => {
-      execFile('ffmpeg', [
-        '-f', 'concat', '-safe', '0', '-i', concatPath,
-        '-i', finalAudioPath,
-        '-vf', vfBase,
+    if (useXfade) {
+      // Each image as a looped video input; extend duration by td so xfade has overlap material
+      const ffArgs = []
+      for (let i = 0; i < imagePaths.length; i++) {
+        ffArgs.push('-loop', '1', '-t', String(durations[i] + td), '-i', imagePaths[i])
+      }
+      ffArgs.push('-i', finalAudioPath)
+      const audioIdx = imagePaths.length
+
+      // Build filter_complex: scale each input, then chain xfade filters
+      const filterParts = []
+      for (let i = 0; i < imagePaths.length; i++) {
+        filterParts.push(`[${i}:v]${VF_BASE}[v${i}]`)
+      }
+
+      // xfade chain: [v0][v1]xfade@offset0 → [x0]; [x0][v2]xfade@offset1 → [x1]; ...
+      let cumOffset = 0
+      let prevLabel = '[v0]'
+      for (let i = 0; i < imagePaths.length - 1; i++) {
+        cumOffset += durations[i]
+        const offset = Math.max(0, cumOffset - (i + 1) * td)
+        const outLabel = i === imagePaths.length - 2 ? '[vout]' : `[x${i}]`
+        filterParts.push(
+          `${prevLabel}[v${i + 1}]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}${outLabel}`
+        )
+        prevLabel = outLabel
+      }
+
+      ffArgs.push(
+        '-filter_complex', filterParts.join(';'),
+        '-map', '[vout]',
+        '-map', `${audioIdx}:a`,
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '128k',
         '-movflags', '+faststart',
         '-t', String(audioDuration),
-        '-y', tempNoSubsPath,
-      ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-        if (err) reject(new Error(`FFmpeg pass 1: ${stderr.slice(-400)}`))
-        else resolve()
-      })
-    })
+        '-y', tempBasePath,
+      )
 
-    // Pass 2 — burn subtitles onto the assembled video (timecodes come from SRT, not image cuts)
+      await new Promise((resolve, reject) => {
+        execFile('ffmpeg', ffArgs, { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
+          if (err) reject(new Error(`FFmpeg xfade (${transition}): ${stderr.slice(-400)}`))
+          else resolve()
+        })
+      })
+      console.log('[ffmpeg] xfade done:', transition, td + 's')
+    } else {
+      // Concat demuxer — simple cut between scenes
+      const concatLines = []
+      for (let i = 0; i < imagePaths.length; i++) {
+        concatLines.push(`file '${imagePaths[i]}'`)
+        concatLines.push(`duration ${durations[i]}`)
+      }
+      concatLines.push(`file '${imagePaths[imagePaths.length - 1]}'`)
+      const concatPath = path.join(tmpDir, 'concat.txt')
+      fs.writeFileSync(concatPath, concatLines.join('\n'))
+
+      await new Promise((resolve, reject) => {
+        execFile('ffmpeg', [
+          '-f', 'concat', '-safe', '0', '-i', concatPath,
+          '-i', finalAudioPath,
+          '-vf', VF_BASE,
+          '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+          '-c:a', 'aac', '-b:a', '128k',
+          '-movflags', '+faststart',
+          '-t', String(audioDuration),
+          '-y', tempBasePath,
+        ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
+          if (err) reject(new Error(`FFmpeg concat: ${stderr.slice(-400)}`))
+          else resolve()
+        })
+      })
+      console.log('[ffmpeg] concat done')
+    }
+
+    // ── Pass 2: Apply visual effects ─────────────────────────────────────────
+    const effectFilters = (Array.isArray(effects) ? effects : [])
+      .map((e) => EFFECT_FILTERS[e])
+      .filter(Boolean)
+
+    let currentPath = tempBasePath
+
+    if (effectFilters.length > 0) {
+      const vfEffects = effectFilters.join(',')
+      await new Promise((resolve, reject) => {
+        execFile('ffmpeg', [
+          '-i', tempBasePath,
+          '-vf', vfEffects,
+          '-c:a', 'copy',
+          '-y', tempEffectsPath,
+        ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
+          if (err) reject(new Error(`FFmpeg effects: ${stderr.slice(-400)}`))
+          else resolve()
+        })
+      })
+      currentPath = tempEffectsPath
+      console.log('[ffmpeg] effects applied:', effects.join(', '))
+    }
+
+    // ── Pass 3: Burn subtitles ────────────────────────────────────────────────
     if (subtitle_blocks?.length && subtitle_style?.burnIn) {
       const srtPath = path.join(tmpDir, 'subs.srt')
       fs.writeFileSync(srtPath, blocksToSrt(subtitle_blocks))
@@ -200,25 +300,25 @@ app.post('/render', verifySecret, async (req, res) => {
       try {
         await new Promise((resolve, reject) => {
           execFile('ffmpeg', [
-            '-i', tempNoSubsPath,
+            '-i', currentPath,
             '-vf', `subtitles='${escaped}':force_style='${forceStyle}'`,
             '-c:a', 'copy',
             '-y', outputPath,
           ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-            if (err) reject(new Error(`FFmpeg pass 2 (subtitles): ${stderr.slice(-400)}`))
+            if (err) reject(new Error(`FFmpeg subtitles: ${stderr.slice(-400)}`))
             else resolve()
           })
         })
-        console.log('[ffmpeg] subtitle pass 2 complete')
+        console.log('[ffmpeg] subtitle burn-in done')
       } catch (subsErr) {
-        console.warn('[ffmpeg] subtitle burn-in failed, using video without subtitles:', subsErr.message)
-        fs.renameSync(tempNoSubsPath, outputPath)
+        console.warn('[ffmpeg] subtitle burn-in failed, skipping subs:', subsErr.message)
+        fs.renameSync(currentPath, outputPath)
       }
     } else {
-      fs.renameSync(tempNoSubsPath, outputPath)
+      fs.renameSync(currentPath, outputPath)
     }
 
-    // Upload MP4 to Supabase Storage via REST API (no SDK, no WebSocket)
+    // Upload MP4 to Supabase Storage via REST API
     const fileBuffer = fs.readFileSync(outputPath)
     const storagePath = `${project_id}/output.mp4`
     const uploadUrl = `${SUPABASE_URL}/storage/v1/object/videos/${storagePath}`

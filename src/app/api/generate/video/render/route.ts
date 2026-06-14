@@ -15,6 +15,9 @@ interface RenderRequest {
   images: Pick<SceneImage, 'url' | 'timecode_start' | 'timecode_end'>[]
   subtitle_blocks?: SubtitleBlock[]
   subtitle_style?: Pick<SubtitleStyle, 'size' | 'color' | 'position' | 'background' | 'burnIn'>
+  transition?: string
+  transition_duration?: number
+  effects?: string[]
 }
 
 export async function POST(request: NextRequest) {
@@ -37,7 +40,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body: RenderRequest = await request.json()
-    const { project_id, audio_url, image_interval, images, subtitle_blocks, subtitle_style } = body
+    const { project_id, audio_url, image_interval, images, subtitle_blocks, subtitle_style,
+            transition, transition_duration, effects } = body
 
     if (!project_id || !audio_url || !images?.length) {
       return NextResponse.json(
@@ -62,6 +66,9 @@ export async function POST(request: NextRequest) {
         subtitle_blocks,
         subtitle_style,
         project_id,
+        transition,
+        transition_duration,
+        effects,
       }),
     })
 
