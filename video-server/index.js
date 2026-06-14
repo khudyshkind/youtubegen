@@ -40,12 +40,12 @@ const MAIN_KB = {
   is_persistent: true,
 }
 
-function previewInline(topic) {
+function previewInline() {
   return {
     inline_keyboard: [[
       { text: '✅ Опубликовать',   callback_data: 'publish' },
       { text: '❌ Отклонить',      callback_data: 'decline' },
-      { text: '🔄 Перегенерировать', callback_data: `regen:${topic.slice(0, 60)}` },
+      { text: '🔄 Перегенерировать', callback_data: 'regen' },
     ]],
   }
 }
@@ -194,10 +194,18 @@ async function generateImagePrompt(topic) {
     messages: [{
       role: 'user',
       content:
-        `Create a concise English image prompt for a social media post about: "${topic}". ` +
-        'Style: modern tech, very dark background (#0A0A0F), glowing violet/purple accents, ' +
-        'futuristic UI elements, YouTube branding hints. Horizontal 16:9. No text in image. ' +
-        'Return only the prompt, max 80 words.',
+        `На основе темы поста создай конкретный английский промт для генерации изображения в стиле YouTube thumbnail.\n\n` +
+        `Тема: ${topic}\n\n` +
+        `Требования к изображению:\n` +
+        `- Конкретные объекты, люди или сцены (не абстракция)\n` +
+        `- Тёмный фон с фиолетовыми/синими акцентами\n` +
+        `- Технологичный современный стиль\n` +
+        `- Если тема про деньги/заработок — показать деньги, графики роста\n` +
+        `- Если тема про видео — камера, экран с видео, YouTube интерфейс\n` +
+        `- Если тема про ИИ — роботы, нейросети, светящиеся схемы\n` +
+        `- Если тема про блогеров — человек за компьютером, микрофон, камера\n` +
+        `- Качество: cinematic, 8k, detailed, professional\n\n` +
+        `Ответь только английским промтом (20-30 слов).`,
     }],
   })
   return msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim()
@@ -284,7 +292,7 @@ async function publishStats(toOwner = null) {
 async function showPreview(chatId, post, imageUrl, topic) {
   pendingPost = { text: post, imageUrl, topic }
   const caption = `📝 *Превью поста:*\n\n${post}`
-  const markup = previewInline(topic)
+  const markup = previewInline()
   if (imageUrl) {
     console.log('[tg] downloading image for preview...')
     const buf = await fetchImageBuffer(imageUrl)
@@ -307,8 +315,12 @@ async function generateAndHandle(chatId, topic, forcePreview = false) {
   console.log('[tg] generating post...')
   const post = await withTimeout(generatePost(topic), 40000, 'post')
   console.log('[tg] post done, length:', post.length)
-  const imageUrl = null // IMAGE DISABLED — testing text-only flow
-  console.log('[tg] imageUrl:', imageUrl)
+  console.log('[tg] generating image...')
+  const imageUrl = await withTimeout(generateImage(topic), 35000, 'image').catch(err => {
+    console.warn('[tg] image generation failed:', err.message)
+    return null
+  })
+  console.log('[tg] imageUrl:', imageUrl ? 'ok' : 'null')
   if (config.autoPublish && !forcePreview) {
     await publishToChannel(post, imageUrl)
     await sendTo(chatId, '✅ Опубликовано в канал (автопубликация)')
@@ -342,8 +354,9 @@ async function handleCallback(cq) {
     await clearButtons()
     await sendTo(chatId, '❌ Пост отклонён')
 
-  } else if (data.startsWith('regen:')) {
-    const topic = data.slice(6)
+  } else if (data === 'regen') {
+    if (!pendingPost) { await sendTo(chatId, 'Нет поста для регенерации'); return }
+    const topic = pendingPost.topic
     await clearButtons()
     await sendTo(chatId, '⏳ Перегенерирую...')
     await generateAndHandle(chatId, topic, true) // always preview on regen
@@ -407,10 +420,22 @@ app.post('/telegram/webhook', async (req, res) => {
         break
 
       case (text === '💡 Идея' || text === '/idea'): {
+        console.log('[idea] step1: sendTo thinking')
         await sendTo(chatId, '⏳ Придумываю тему...')
-        const idea = await generateIdea()
-        await sendTo(chatId, `💡 *Тема:* ${idea}\n\n⏳ Генерирую пост и изображение...`)
+        console.log('[idea] step2: generateIdea')
+        let idea
+        try {
+          idea = await withTimeout(generateIdea(), 30000, 'generateIdea')
+        } catch (e) {
+          console.error('[idea] generateIdea failed:', e.message)
+          await sendTo(chatId, `❌ Ошибка генерации темы: ${e.message}`)
+          break
+        }
+        console.log('[idea] step3: idea =', idea.slice(0, 60))
+        await sendTo(chatId, `💡 *Тема:* ${idea}\n\n⏳ Генерирую пост...`)
+        console.log('[idea] step4: generateAndHandle')
         await generateAndHandle(chatId, idea)
+        console.log('[idea] step5: done')
         break
       }
 
