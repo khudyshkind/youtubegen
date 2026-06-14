@@ -154,26 +154,48 @@ async function generateImagePrompt(topic) {
 }
 
 // ── fal.ai image generation ───────────────────────────────────────────────────
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout:${label}`)), ms)),
+  ])
+}
+
 async function generateImage(topic) {
   const FAL_KEY = process.env.FAL_KEY
   if (!FAL_KEY) { console.warn('[fal] FAL_KEY not set, skipping image'); return null }
   try {
-    const prompt = await generateImagePrompt(topic)
+    console.log('[fal] generating image for:', topic.slice(0, 40))
+    const prompt = await withTimeout(generateImagePrompt(topic), 15000, 'image-prompt')
     console.log('[fal] prompt:', prompt.slice(0, 80))
-    const res = await fetch('https://fal.run/fal-ai/flux/schnell', {
-      method: 'POST',
-      headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt,
-        image_size: 'landscape_16_9',
-        num_images: 1,
-        num_inference_steps: 4,
-        seed: Math.floor(Math.random() * 999999),
-      }),
-    })
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 25000)
+    let res
+    try {
+      res = await fetch('https://fal.run/fal-ai/flux/schnell', {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          image_size: 'landscape_16_9',
+          num_images: 1,
+          num_inference_steps: 4,
+          seed: Math.floor(Math.random() * 999999),
+        }),
+      })
+    } finally {
+      clearTimeout(timer)
+    }
+
+    if (!res.ok) {
+      console.error('[fal] HTTP', res.status, await res.text().catch(() => ''))
+      return null
+    }
     const json = await res.json()
     const url = json.images?.[0]?.url ?? null
-    if (url) console.log('[fal] image generated:', url.slice(0, 60))
+    console.log('[fal] image result:', url ? `ok (${url.slice(0, 50)})` : `failed — ${JSON.stringify(json).slice(0, 120)}`)
     return url
   } catch (err) {
     console.error('[fal] error:', err.message)
@@ -228,7 +250,12 @@ async function showPreview(chatId, post, imageUrl, topic) {
 
 // Core flow: generate post + image, then auto-publish or preview
 async function generateAndHandle(chatId, topic, forcePreview = false) {
-  const [post, imageUrl] = await Promise.all([generatePost(topic), generateImage(topic)])
+  console.log('[tg] generating post+image for:', topic.slice(0, 40))
+  const [post, imageUrl] = await Promise.all([
+    withTimeout(generatePost(topic), 40000, 'post'),
+    generateImage(topic), // has its own internal timeouts
+  ])
+  console.log('[tg] post ready, imageUrl:', imageUrl ? 'yes' : 'no')
   if (config.autoPublish && !forcePreview) {
     await publishToChannel(post, imageUrl)
     await sendTo(chatId, '✅ Опубликовано в канал (автопубликация)')
