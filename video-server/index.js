@@ -9,6 +9,7 @@ const http = require('http')
 const AnthropicPkg = require('@anthropic-ai/sdk')
 const Anthropic = AnthropicPkg.default ?? AnthropicPkg
 const cron = require('node-cron')
+const RssParser = require('rss-parser')
 
 const app = express()
 app.use(express.json({ limit: '2mb' }))
@@ -25,16 +26,39 @@ const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
   : 'https://ytgen-video-server-production.up.railway.app'
 
+// ── Monitor config ────────────────────────────────────────────────────────────
+const RSS_SOURCES = [
+  { url: 'https://vc.ru/rss',                                    name: 'vc.ru' },
+  { url: 'https://habr.com/ru/rss/hubs/ai/articles/',            name: 'Habr AI' },
+  { url: 'https://blog.youtube/rss',                             name: 'YouTube Blog' },
+  { url: 'https://tjournal.ru/rss',                              name: 'TJ' },
+  { url: 'https://www.reddit.com/r/youtubers/.rss',              name: 'r/youtubers' },
+  { url: 'https://www.reddit.com/r/artificial/.rss',             name: 'r/artificial' },
+  { url: 'https://www.reddit.com/r/ChatGPT/.rss',                name: 'r/ChatGPT' },
+]
+
+const KEYWORDS = [
+  'youtube', 'автоматизация', 'нейросеть', 'ии', 'ai',
+  'блогер', 'контент', 'видео', 'монетизация',
+  'искусственный интеллект', 'chatgpt', 'midjourney',
+]
+
+const SEEN_URLS_PATH = path.join(__dirname, 'seen_urls.json')
+
 // In-memory state (resets on restart)
-let pendingPost = null   // { text, imageUrl, topic }
-let awaitingTopic = false // true after user taps "✍️ Написать пост"
-const config = { autoPublish: false }
+let pendingPost = null            // { text, imageUrl, topic }
+let pendingMonitorPost = null     // { post, source, url, score, topic }
+let awaitingTopic = false         // true after "✍️ Написать пост"
+let awaitingEdit  = false         // true after "✏️ Редактировать" on monitor post
+const config        = { autoPublish: false }
+const monitorConfig = { enabled: true }
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
 const MAIN_KB = {
   keyboard: [
-    [{ text: '💡 Идея' }, { text: '📊 Статистика' }],
-    [{ text: '✍️ Написать пост' }, { text: '⚙️ Настройки' }],
+    [{ text: '💡 Идея' },         { text: '📊 Статистика' }],
+    [{ text: '✍️ Написать пост' }, { text: '📡 Мониторинг' }],
+    [{ text: '⚙️ Настройки' }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -54,8 +78,24 @@ function settingsInline() {
   return {
     inline_keyboard: [
       [{ text: config.autoPublish ? '🟢 Автопубликация: ВКЛ' : '🔴 Автопубликация: ВЫКЛ', callback_data: 'toggle_auto' }],
+      [{ text: monitorConfig.enabled ? '🟢 Мониторинг: ВКЛ' : '🔴 Мониторинг: ВЫКЛ', callback_data: 'toggle_monitor' }],
       [{ text: '⏰ Расписание: Пн 10:00 UTC', callback_data: 'noop' }],
       [{ text: '🌐 Часовой пояс: UTC', callback_data: 'noop' }],
+    ],
+  }
+}
+
+function monitorInline() {
+  return {
+    inline_keyboard: [
+      [
+        { text: '✅ Опубликовать',    callback_data: 'mon_pub' },
+        { text: '❌ Пропустить',      callback_data: 'mon_skip' },
+      ],
+      [
+        { text: '✏️ Редактировать',   callback_data: 'mon_edit' },
+        { text: '🔄 Перегенерировать', callback_data: 'mon_regen' },
+      ],
     ],
   }
 }
@@ -288,6 +328,175 @@ async function publishStats(toOwner = null) {
   if (toOwner) await sendTo(toOwner, '✅ Статистика опубликована в канал')
 }
 
+// ── Content monitor ───────────────────────────────────────────────────────────
+function loadSeenUrls() {
+  try { return new Set(JSON.parse(fs.readFileSync(SEEN_URLS_PATH, 'utf8'))) } catch { return new Set() }
+}
+
+function saveSeenUrls(set) {
+  const arr = [...set].slice(-2000)
+  try { fs.writeFileSync(SEEN_URLS_PATH, JSON.stringify(arr)) } catch (e) { console.warn('[monitor] saveSeenUrls:', e.message) }
+}
+
+function hasKeyword(text) {
+  const lower = (text || '').toLowerCase()
+  return KEYWORDS.some(kw => lower.includes(kw))
+}
+
+const rssParser = new RssParser({
+  timeout: 15000,
+  headers: { 'User-Agent': 'YouTubeGen-Bot/1.0' },
+})
+
+async function fetchRss(source) {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 18000)
+  try {
+    const feed = await rssParser.parseURL(source.url)
+    return (feed.items || []).slice(0, 15).map(item => ({
+      title:   item.title || '',
+      snippet: (item.contentSnippet || item.content || '').slice(0, 800),
+      link:    item.link || item.guid || '',
+      sourceName: source.name,
+    }))
+  } catch (err) {
+    console.warn(`[monitor] RSS ${source.name} failed:`, err.message)
+    return []
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+async function evaluateItem(item) {
+  const text = `${item.title}\n${item.snippet}`.slice(0, 1500)
+  try {
+    const msg = await withTimeout(claude().messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 300,
+      messages: [{
+        role: 'user',
+        content:
+          'Оцени эту статью/пост для Telegram канала YouTubeGen (сервис автоматизации YouTube через ИИ).\n\n' +
+          `Заголовок: ${item.title}\nТекст: ${item.snippet}\n\n` +
+          'Ответь строго JSON без markdown:\n' +
+          '{"relevant":true/false,"score":1-10,"reason":"...","summary":"..."}\n\n' +
+          'relevant=true если материал полезен для аудитории YouTube блогеров интересующихся ИИ автоматизацией',
+      }],
+    }), 20000, 'eval')
+    const raw = msg.content.filter(b => b.type === 'text').map(b => b.text).join('').trim()
+    const match = raw.match(/\{[\s\S]*?\}/)
+    return match ? JSON.parse(match[0]) : null
+  } catch (err) {
+    console.warn('[monitor] eval error:', err.message)
+    return null
+  }
+}
+
+async function generateMonitorPost(item) {
+  const msg = await withTimeout(claude().messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 700,
+    messages: [{
+      role: 'user',
+      content:
+        'На основе этой статьи напиши оригинальный пост для Telegram канала YouTubeGen.\n' +
+        'Не копируй текст — перескажи своими словами, добавь свою точку зрения, ' +
+        'упомяни YouTubeGen как инструмент для YouTube авторов. ' +
+        'Стиль: живой, с эмодзи, максимум 500 символов.\n\n' +
+        `Заголовок: ${item.title}\nТекст: ${item.snippet}`,
+    }],
+  }), 40000, 'monitor-post')
+  return msg.content.filter(b => b.type === 'text').map(b => b.text).join('').trim()
+}
+
+async function regenMonitorPost(chatId) {
+  if (!pendingMonitorPost) { await sendTo(chatId, '❌ Нет поста для регенерации'); return }
+  const { topic, source, url, score } = pendingMonitorPost
+  try {
+    await sendTo(chatId, '🔄 Перегенерирую...')
+    const msg = await withTimeout(claude().messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 700,
+      messages: [{
+        role: 'user',
+        content:
+          'Напиши другой вариант поста для Telegram канала YouTubeGen на эту тему. ' +
+          'Стиль: живой, с эмодзи, максимум 500 символов. ' +
+          'Упомяни YouTubeGen как инструмент для YouTube авторов.\n\n' +
+          `Тема: ${topic}`,
+      }],
+    }), 40000, 'monitor-regen')
+    const post = msg.content.filter(b => b.type === 'text').map(b => b.text).join('').trim()
+    pendingMonitorPost.post = post
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: `📰 *Перегенерировано из ${source}:*\n\n${post}\n\n🔗 ${url}\n📊 Оценка: ${score}/10`,
+      parse_mode: 'Markdown',
+      reply_markup: monitorInline(),
+    })
+  } catch (err) {
+    console.error('[monitor] regen failed:', err.message)
+    await sendTo(chatId, `❌ Ошибка регенерации: ${err.message}`)
+  }
+}
+
+async function processMonitorItem(item) {
+  const eval_ = await evaluateItem(item)
+  if (!eval_) return
+  const score = Number(eval_.score) || 0
+  console.log(`[monitor] "${item.title.slice(0, 50)}" score=${score} relevant=${eval_.relevant}`)
+  if (!eval_.relevant || score < 7) return
+
+  let post
+  try {
+    post = await generateMonitorPost(item)
+  } catch (err) {
+    console.error('[monitor] post gen failed:', err.message)
+    return
+  }
+
+  pendingMonitorPost = { post, source: item.sourceName, url: item.link, score, topic: item.title }
+
+  if (OWNER_ID) {
+    await tgApi('sendMessage', {
+      chat_id: OWNER_ID,
+      text:
+        `📰 *Нашёл интересное из ${item.sourceName}:*\n\n${post}\n\n` +
+        `🔗 ${item.link}\n📊 Оценка: ${score}/10`,
+      parse_mode: 'Markdown',
+      reply_markup: monitorInline(),
+    })
+    console.log('[monitor] sent to owner, score:', score)
+  }
+}
+
+async function runMonitor() {
+  if (!monitorConfig.enabled) { console.log('[monitor] disabled, skipping'); return }
+  console.log('[monitor] scanning', RSS_SOURCES.length, 'sources...')
+  const seen = loadSeenUrls()
+  const newItems = []
+
+  for (const source of RSS_SOURCES) {
+    const items = await fetchRss(source)
+    for (const item of items) {
+      if (!item.link || seen.has(item.link)) continue
+      seen.add(item.link)
+      if (hasKeyword(item.title + ' ' + item.snippet)) {
+        newItems.push(item)
+      }
+    }
+  }
+
+  saveSeenUrls(seen)
+  console.log('[monitor] new relevant items:', newItems.length)
+
+  // Process up to 3 items per run to avoid Claude rate limits
+  for (const item of newItems.slice(0, 3)) {
+    await processMonitorItem(item)
+  }
+  console.log('[monitor] scan done')
+}
+
 // ── Core flow: show preview with inline buttons ───────────────────────────────
 async function showPreview(chatId, post, imageUrl, topic) {
   pendingPost = { text: post, imageUrl, topic }
@@ -364,10 +573,47 @@ async function handleCallback(cq) {
   } else if (data === 'toggle_auto') {
     config.autoPublish = !config.autoPublish
     await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: settingsInline() })
-    const msg = config.autoPublish
+    await sendTo(chatId, config.autoPublish
       ? '🟢 Автопубликация *включена* — посты публикуются сразу'
-      : '🔴 Автопубликация *выключена* — посты идут на подтверждение'
-    await sendTo(chatId, msg)
+      : '🔴 Автопубликация *выключена* — посты идут на подтверждение')
+
+  } else if (data === 'toggle_monitor') {
+    monitorConfig.enabled = !monitorConfig.enabled
+    await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: settingsInline() })
+    await sendTo(chatId, monitorConfig.enabled
+      ? '🟢 Мониторинг *включён* — сканирую источники каждые 4 часа'
+      : '🔴 Мониторинг *выключён*')
+
+  } else if (data === 'mon_pub') {
+    if (!pendingMonitorPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
+    await publishToChannel(pendingMonitorPost.post)
+    pendingMonitorPost = null
+    await clearButtons()
+    await sendTo(chatId, '✅ Опубликовано в канал')
+
+  } else if (data === 'mon_skip') {
+    pendingMonitorPost = null
+    await clearButtons()
+    await sendTo(chatId, '⏭ Пропущено')
+
+  } else if (data === 'mon_edit') {
+    if (!pendingMonitorPost) { await sendTo(chatId, 'Нет поста для редактирования'); return }
+    await clearButtons()
+    awaitingEdit = true
+    await sendTo(chatId,
+      `✏️ *Редактирование поста*\n\nОтправь исправленный текст:\n\n${pendingMonitorPost.post}`)
+
+  } else if (data === 'mon_regen') {
+    await clearButtons()
+    await regenMonitorPost(chatId)
+
+  } else if (data === 'mon_scan') {
+    await clearButtons()
+    await sendTo(chatId, '🔍 Запускаю проверку источников...')
+    runMonitor().catch(err => {
+      console.error('[monitor] manual scan error:', err.message)
+      sendTo(chatId, `❌ Ошибка при проверке: ${err.message.slice(0, 100)}`)
+    })
   }
   // 'noop' → ignore
 }
@@ -396,6 +642,26 @@ app.post('/telegram/webhook', async (req, res) => {
   }
 
   console.log('[tg] msg:', text.slice(0, 60))
+
+  // Awaiting edited text from "✏️ Редактировать" on monitor post
+  if (awaitingEdit && text && !text.startsWith('/')) {
+    awaitingEdit = false
+    if (pendingMonitorPost) {
+      pendingMonitorPost.post = text
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: '✅ Текст обновлён. Публикуем?',
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '✅ Опубликовать', callback_data: 'mon_pub' },
+            { text: '❌ Отмена',       callback_data: 'mon_skip' },
+          ]],
+        },
+      })
+    }
+    return
+  }
 
   // Awaiting free-text topic after "✍️ Написать пост"
   if (awaitingTopic && text && !text.startsWith('/')) {
@@ -449,6 +715,29 @@ app.post('/telegram/webhook', async (req, res) => {
         await sendTo(chatId, '✏️ Введите тему поста:')
         break
 
+      case (text === '📡 Мониторинг'): {
+        const status = monitorConfig.enabled ? '🟢 ВКЛ' : '🔴 ВЫКЛ'
+        const nextRun = 'каждые 4 часа'
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text:
+            `📡 *Мониторинг контента*\n\n` +
+            `Статус: ${status}\n` +
+            `Интервал: ${nextRun}\n` +
+            `Источников: ${RSS_SOURCES.length} RSS лент\n` +
+            `Ключевых слов: ${KEYWORDS.length}\n\n` +
+            `Найденные материалы автоматически оцениваются Claude (score ≥ 7) и предлагаются для публикации.`,
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '🔍 Проверить сейчас', callback_data: 'mon_scan' },
+              { text: monitorConfig.enabled ? '🔴 Выключить' : '🟢 Включить', callback_data: 'toggle_monitor' },
+            ]],
+          },
+        })
+        break
+      }
+
       case (text === '⚙️ Настройки' || text === '/settings'):
         await tgApi('sendMessage', {
           chat_id: chatId,
@@ -487,6 +776,12 @@ app.post('/telegram/webhook', async (req, res) => {
 cron.schedule('0 10 * * 1', async () => {
   console.log('[cron] weekly stats')
   try { await publishStats() } catch (err) { console.error('[cron]', err.message) }
+}, { timezone: 'UTC' })
+
+// ── Monitor cron — every 4 hours ─────────────────────────────────────────────
+cron.schedule('0 */4 * * *', async () => {
+  console.log('[cron] monitor scan')
+  try { await runMonitor() } catch (err) { console.error('[cron/monitor]', err.message) }
 }, { timezone: 'UTC' })
 
 // ── Register webhook at startup ───────────────────────────────────────────────
