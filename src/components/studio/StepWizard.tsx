@@ -54,11 +54,13 @@ function StepWizardInner() {
     }
 
     let cancelled = false
+    reset()  // clear stale data from any previously loaded project
     setRestoring(true)
     setRestoreError('')
 
     async function loadProject() {
       try {
+        console.log('[studio] loading project:', projectParam)
         const res = await fetch(`/api/projects/${projectParam}`)
         if (cancelled) return
         const json = await res.json()
@@ -69,6 +71,7 @@ function StepWizardInner() {
         }
 
         const p: Project = json.data.project
+        console.log('[studio] loaded data:', p.topic)
         setProjectId(p.id)
         setScriptParams({ topic: p.topic, duration_minutes: p.duration_minutes })
         if (p.script) setScript(p.script)
