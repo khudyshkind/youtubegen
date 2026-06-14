@@ -54,7 +54,7 @@ let awaitingEdit  = false         // true after "✏️ Редактироват
 let awaitingPlan  = false         // true after plan_add callback
 let awaitingTime  = false         // true after plan_set_time callback
 const config        = { autoPublish: false }
-const monitorConfig = { enabled: true }
+const monitorConfig = { interval: 'daily' } // 'daily' | 'twice' | 'weekly' | 'off'
 const planConfig    = { paused: false, postHour: 12 }
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
@@ -78,13 +78,33 @@ function previewInline() {
   }
 }
 
+const INTERVAL_LABELS = {
+  daily:  '1 раз в день',
+  twice:  '2 раза в день',
+  weekly: '1 раз в неделю',
+  off:    'Выкл',
+}
+
 function settingsInline() {
+  const iLabel = INTERVAL_LABELS[monitorConfig.interval] ?? '1 раз в день'
   return {
     inline_keyboard: [
       [{ text: config.autoPublish ? '🟢 Автопубликация: ВКЛ' : '🔴 Автопубликация: ВЫКЛ', callback_data: 'toggle_auto' }],
-      [{ text: monitorConfig.enabled ? '🟢 Мониторинг: ВКЛ' : '🔴 Мониторинг: ВЫКЛ', callback_data: 'toggle_monitor' }],
+      [{ text: `📡 Мониторинг: ${iLabel}`, callback_data: 'mi_menu' }],
       [{ text: `⏰ Время постинга: ${String(planConfig.postHour).padStart(2, '0')}:00 UTC`, callback_data: 'plan_set_time' }],
       [{ text: '🌐 Часовой пояс: UTC', callback_data: 'noop' }],
+    ],
+  }
+}
+
+function monitorIntervalInline() {
+  const c = (v) => monitorConfig.interval === v ? '✅ ' : ''
+  return {
+    inline_keyboard: [
+      [{ text: `${c('daily')}1 раз в день (09:00 UTC)`,       callback_data: 'mi_daily' }],
+      [{ text: `${c('twice')}2 раза в день (09:00 и 18:00)`,  callback_data: 'mi_twice' }],
+      [{ text: `${c('weekly')}1 раз в неделю (Пн 09:00)`,     callback_data: 'mi_weekly' }],
+      [{ text: `${c('off')}Выкл — только вручную`,            callback_data: 'mi_off' }],
     ],
   }
 }
@@ -490,7 +510,7 @@ async function processMonitorItem(item) {
 }
 
 async function runMonitor() {
-  if (!monitorConfig.enabled) { console.log('[monitor] disabled, skipping'); return }
+  if (monitorConfig.interval === 'off') { console.log('[monitor] disabled, skipping'); return }
   console.log('[monitor] scanning', RSS_SOURCES.length, 'sources...')
   const seen = loadSeenUrls()
   const newItems = []
@@ -508,11 +528,21 @@ async function runMonitor() {
   }
 
   saveSeenUrls(seen)
-  console.log('[monitor] new relevant items:', newItems.length)
 
-  // Shuffle to get variety across sources, process up to 5 per run
-  const shuffled = newItems.sort(() => Math.random() - 0.5)
-  for (const item of shuffled.slice(0, 5)) {
+  // Rank by keyword count (most matches = most relevant), take top 5 only
+  const ranked = newItems
+    .map(item => {
+      const t = (item.title + ' ' + item.snippet).toLowerCase()
+      return { ...item, kwCount: KEYWORDS.filter(kw => t.includes(kw)).length }
+    })
+    .sort((a, b) => b.kwCount - a.kwCount)
+
+  const top = ranked.slice(0, 5)
+  // Claude Haiku eval: ~500 tok each ≈ $0.000040/call; Sonnet post: ~1000 tok ≈ $0.003/call
+  const estCost = (top.length * 0.00004 + top.length * 0.003).toFixed(4)
+  console.log(`[monitor] found ${newItems.length} matches, evaluating top ${top.length}, est. cost ~$${estCost}`)
+
+  for (const item of top) {
     await processMonitorItem(item)
   }
   console.log('[monitor] scan done')
@@ -651,11 +681,25 @@ async function handleCallback(cq) {
       : '🔴 Автопубликация *выключена* — посты идут на подтверждение')
 
   } else if (data === 'toggle_monitor') {
-    monitorConfig.enabled = !monitorConfig.enabled
+    // legacy toggle — flip between daily and off
+    monitorConfig.interval = monitorConfig.interval === 'off' ? 'daily' : 'off'
     await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: settingsInline() })
-    await sendTo(chatId, monitorConfig.enabled
-      ? '🟢 Мониторинг *включён* — сканирую источники каждые 4 часа'
-      : '🔴 Мониторинг *выключён*')
+    await sendTo(chatId, monitorConfig.interval === 'off'
+      ? '🔴 Мониторинг *выключен*'
+      : '🟢 Мониторинг *включён* (1 раз в день)')
+
+  } else if (data === 'mi_menu') {
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: '📡 *Интервал мониторинга*\n\nВыбери как часто бот проверяет источники:',
+      parse_mode: 'Markdown',
+      reply_markup: monitorIntervalInline(),
+    })
+
+  } else if (['mi_daily', 'mi_twice', 'mi_weekly', 'mi_off'].includes(data)) {
+    monitorConfig.interval = data.slice(3) // strip 'mi_'
+    await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: monitorIntervalInline() })
+    await sendTo(chatId, `✅ Интервал мониторинга: *${INTERVAL_LABELS[monitorConfig.interval]}*`)
 
   } else if (data === 'mon_pub') {
     if (!pendingMonitorPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
@@ -868,22 +912,23 @@ app.post('/telegram/webhook', async (req, res) => {
         break
 
       case (text === '📡 Мониторинг'): {
-        const status = monitorConfig.enabled ? '🟢 ВКЛ' : '🔴 ВЫКЛ'
-        const nextRun = 'каждые 4 часа'
+        const iLabel = INTERVAL_LABELS[monitorConfig.interval] ?? 'daily'
+        const status = monitorConfig.interval === 'off' ? '🔴 ВЫКЛ' : '🟢 ВКЛ'
         await tgApi('sendMessage', {
           chat_id: chatId,
           text:
             `📡 *Мониторинг контента*\n\n` +
             `Статус: ${status}\n` +
-            `Интервал: ${nextRun}\n` +
+            `Интервал: *${iLabel}*\n` +
             `Источников: ${RSS_SOURCES.length} RSS лент\n` +
-            `Ключевых слов: ${KEYWORDS.length}\n\n` +
-            `Найденные материалы автоматически оцениваются Claude (score ≥ 7) и предлагаются для публикации.`,
+            `Ключевых слов: ${KEYWORDS.length}\n` +
+            `Оцениваются: топ 5 по релевантности (score ≥ 7)\n\n` +
+            `Материалы предлагаются владельцу на одобрение.`,
           parse_mode: 'Markdown',
           reply_markup: {
             inline_keyboard: [[
               { text: '🔍 Проверить сейчас', callback_data: 'mon_scan' },
-              { text: monitorConfig.enabled ? '🔴 Выключить' : '🟢 Включить', callback_data: 'toggle_monitor' },
+              { text: '⏱ Изменить интервал', callback_data: 'mi_menu' },
             ]],
           },
         })
@@ -942,9 +987,17 @@ cron.schedule('0 10 * * 1', async () => {
   try { await publishStats() } catch (err) { console.error('[cron]', err.message) }
 }, { timezone: 'UTC' })
 
-// ── Monitor cron — every 4 hours ─────────────────────────────────────────────
-cron.schedule('0 */4 * * *', async () => {
-  console.log('[cron] monitor scan')
+// ── Monitor cron — hourly tick, fires based on configured interval ─────────────
+cron.schedule('0 * * * *', async () => {
+  const h = new Date().getUTCHours()
+  const d = new Date().getUTCDay() // 0=Sun, 1=Mon
+  const { interval } = monitorConfig
+  const fire =
+    (interval === 'daily'  && h === 9) ||
+    (interval === 'twice'  && (h === 9 || h === 18)) ||
+    (interval === 'weekly' && d === 1 && h === 9)
+  if (!fire) return
+  console.log(`[cron] monitor scan (${interval})`)
   try { await runMonitor() } catch (err) { console.error('[cron/monitor]', err.message) }
 }, { timezone: 'UTC' })
 
