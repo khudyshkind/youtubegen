@@ -45,9 +45,6 @@ function StepWizardInner() {
   const [restoring, setRestoring] = useState(!!projectParam)
   const [restoreError, setRestoreError] = useState('')
 
-  // Single effect handles both cases: no param → reset; param → load project.
-  // Uses a cancellation flag so navigating A→B cancels the in-flight A request,
-  // and React StrictMode double-invocation doesn't produce duplicate loads.
   useEffect(() => {
     if (!projectParam) {
       reset()
@@ -101,11 +98,11 @@ function StepWizardInner() {
     return (
       <div className="flex items-center justify-center py-24">
         <div className="flex flex-col items-center gap-3">
-          <svg className="w-8 h-8 animate-spin text-red-400" fill="none" viewBox="0 0 24 24">
+          <svg className="w-8 h-8 animate-spin text-violet-500" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
           </svg>
-          <p className="text-sm text-gray-500">Загрузка проекта...</p>
+          <p className="text-sm text-slate-500">Загрузка проекта...</p>
         </div>
       </div>
     )
@@ -114,10 +111,10 @@ function StepWizardInner() {
   if (restoreError) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
-        <p className="text-red-500 font-medium">{restoreError}</p>
+        <p className="text-red-400 font-medium">{restoreError}</p>
         <button
           onClick={reset}
-          className="px-5 py-2.5 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl text-sm transition-colors"
+          className="px-5 py-2.5 btn-gradient text-white font-semibold rounded-xl text-sm"
         >
           Создать новый проект
         </button>
@@ -127,7 +124,7 @@ function StepWizardInner() {
 
   return (
     <div>
-      {/* Progress bar */}
+      {/* Step indicator */}
       <div className="flex items-start mb-8 overflow-x-auto pb-1">
         {STEPS.map((step, idx) => {
           const done = currentStep > step.n
@@ -143,10 +140,10 @@ function StepWizardInner() {
                   title={reachable ? `Перейти к шагу ${step.n}: ${step.label}` : undefined}
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
                     done
-                      ? 'bg-red-500 text-white hover:bg-red-600 cursor-pointer'
+                      ? 'step-done text-white cursor-pointer hover:opacity-90'
                       : active
-                      ? 'bg-red-500 text-white ring-4 ring-red-100 cursor-default'
-                      : 'bg-gray-100 text-gray-400 cursor-default'
+                      ? 'step-active text-white cursor-default'
+                      : 'step-future text-slate-500 cursor-default'
                   }`}
                 >
                   {done ? (
@@ -158,8 +155,8 @@ function StepWizardInner() {
                   )}
                 </button>
                 <span
-                  className={`hidden sm:block text-xs font-medium whitespace-nowrap ${
-                    currentStep >= step.n ? 'text-gray-700' : 'text-gray-400'
+                  className={`hidden sm:block text-xs font-medium whitespace-nowrap transition-colors ${
+                    done ? 'text-green-400' : active ? 'text-violet-400' : 'text-slate-600'
                   }`}
                 >
                   {step.label}
@@ -168,9 +165,12 @@ function StepWizardInner() {
 
               {idx < STEPS.length - 1 && (
                 <div
-                  className={`flex-1 h-0.5 mt-4 mx-1 transition-all min-w-[8px] ${
-                    currentStep > step.n ? 'bg-red-400' : 'bg-gray-200'
-                  }`}
+                  className="flex-1 h-0.5 mt-4 mx-1 transition-all min-w-[8px]"
+                  style={{
+                    background: currentStep > step.n
+                      ? 'linear-gradient(90deg, #10B981, #059669)'
+                      : 'rgba(255,255,255,0.08)',
+                  }}
                 />
               )}
             </React.Fragment>
@@ -179,7 +179,13 @@ function StepWizardInner() {
       </div>
 
       {/* Step content */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-6">
+      <div
+        className="rounded-2xl p-6"
+        style={{
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid rgba(255,255,255,0.08)',
+        }}
+      >
         {currentStep === 1 && <Step1Topic />}
         {currentStep === 2 && <Step2Script />}
         {currentStep === 3 && <Step3Voice />}
@@ -193,7 +199,7 @@ function StepWizardInner() {
         <div className="text-center mt-4">
           <button
             onClick={reset}
-            className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-sm text-slate-600 hover:text-slate-400 transition-colors"
           >
             ↺ Начать заново
           </button>
@@ -207,7 +213,7 @@ export default function StepWizard() {
   return (
     <Suspense fallback={
       <div className="flex items-center justify-center py-24">
-        <svg className="w-8 h-8 animate-spin text-red-400" fill="none" viewBox="0 0 24 24">
+        <svg className="w-8 h-8 animate-spin text-violet-500" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
         </svg>

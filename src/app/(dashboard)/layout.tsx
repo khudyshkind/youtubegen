@@ -37,19 +37,25 @@ const NAV_ITEMS = [
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-1 min-h-0">
+    <div className="flex flex-1 min-h-0 dark-ui">
 
       {/* Sidebar */}
-      <aside className="hidden md:flex flex-col w-60 bg-white border-r border-gray-200 shrink-0">
+      <aside
+        className="hidden md:flex flex-col w-60 shrink-0"
+        style={{
+          background: 'rgba(8,8,14,0.98)',
+          borderRight: '1px solid rgba(255,255,255,0.07)',
+        }}
+      >
         <nav className="flex flex-col gap-1 p-4 flex-1">
           {NAV_ITEMS.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 item.highlight
-                  ? 'bg-red-50 text-red-600 hover:bg-red-100'
-                  : 'text-gray-700 hover:bg-gray-100'
+                  ? 'btn-gradient text-white shadow-lg'
+                  : 'text-slate-400 hover:text-white hover:bg-white/5'
               }`}
             >
               {item.icon}
@@ -59,10 +65,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </nav>
 
         {/* Bottom help link */}
-        <div className="p-4 border-t border-gray-100">
+        <div className="p-4" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
           <a
             href="mailto:support@youtubegen.ru"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-gray-500 hover:bg-gray-100 transition-colors"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -74,13 +80,21 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 flex">
+      <nav
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex"
+        style={{
+          background: 'rgba(8,8,14,0.97)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          borderTop: '1px solid rgba(255,255,255,0.08)',
+        }}
+      >
         {NAV_ITEMS.map((item) => (
           <Link
             key={item.href}
             href={item.href}
             className={`flex flex-col items-center justify-center flex-1 py-3 gap-1 text-xs font-medium transition-colors ${
-              item.highlight ? 'text-red-500' : 'text-gray-600'
+              item.highlight ? 'text-violet-400' : 'text-slate-500 hover:text-slate-300'
             }`}
           >
             {item.icon}

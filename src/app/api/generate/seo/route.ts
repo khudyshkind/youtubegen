@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import type { SeoData, SubtitleBlock } from '@/lib/types'
 
@@ -156,7 +157,7 @@ ${transcriptTimeline ? `ГЛАВЫ ВИДЕО (проанализируй тра
       .slice(0, 5)
       .map((h) => (h.startsWith('#') ? h : `#${h}`))
 
-    await spendCredits(user.id, 5, 'seo', project_id)
+    await spendCredits(user.id, CREDIT_COSTS.seo, 'seo', project_id)
 
     if (project_id) {
       await supabase

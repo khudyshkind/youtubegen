@@ -76,6 +76,16 @@
 
 ---
 
+## Фаза 7 — Рост и монетизация
+
+- [x] ✅ Step6Video.tsx — перенос «Вшить субтитры» из Step4, локальный `burnIn` стейт, SRT скачать
+- [x] ✅ Кредитная система — новые CREDIT_COSTS ключи, PLAN_CREDITS значения, SQL миграция
+- [x] ✅ Реферальная программа — SQL колонки, applyReferral(), /api/referral/apply, ReferralBlock
+- [x] ✅ Админ-панель — 5 страниц + API routes, защита через proxy.ts, analytics_events
+- [x] ✅ Диагностика + Paddle revenue — fetchPaddleRevenue(), UsersTable с subscription полями
+
+---
+
 ## Сводка
 
 | Фаза | Прогресс |
@@ -88,4 +98,5 @@
 | Фаза 6 — Деплой | 4 / 4 |
 | Railway FFmpeg видео-сервер | 4 / 4 |
 | Синхронизация изображений с аудио | 1 / 1 |
-| **Итого** | **47 / 47** ✅ |
+| Фаза 7 — Рост и монетизация | 5 / 5 |
+| **Итого** | **52 / 52** ✅ |

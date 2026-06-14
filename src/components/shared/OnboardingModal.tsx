@@ -20,8 +20,9 @@ const PIPELINE_STEPS = [
 ]
 
 const CREDIT_ROWS = [
-  { label: 'Сценарий (Haiku)', cost: CREDIT_COSTS.script },
-  { label: 'Озвучка', cost: CREDIT_COSTS.voice },
+  { label: 'Сценарий (Sonnet)', cost: CREDIT_COSTS.script_sonnet },
+  { label: 'Сценарий (Opus)', cost: CREDIT_COSTS.script_opus },
+  { label: 'Озвучка', cost: CREDIT_COSTS.audio },
   { label: 'Субтитры', cost: CREDIT_COSTS.subtitles },
   { label: 'Иллюстрация (за шт.)', cost: CREDIT_COSTS.image },
   { label: 'Сборка видео', cost: CREDIT_COSTS.video },
@@ -170,7 +171,7 @@ export default function OnboardingModal({ initialShow }: Props) {
 
               <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-center">
                 <p className="text-sm font-semibold text-amber-800">
-                  🎁 У вас 5 бесплатных кредитов для первого видео
+                  🎁 У вас 20 бесплатных кредитов — хватит на несколько видео
                 </p>
               </div>
 

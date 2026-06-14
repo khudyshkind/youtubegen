@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useStudioStore } from '@/lib/studio-store'
+import { refreshCredits } from '@/lib/refresh-credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SeoData } from '@/lib/types'
 
@@ -19,11 +20,13 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg border transition-all ${
-        copied
-          ? 'border-green-300 bg-green-50 text-green-600'
-          : 'border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700 hover:bg-gray-50'
-      }`}
+      className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg border transition-all"
+      style={copied
+        ? { borderColor: 'rgba(16,185,129,0.4)', background: 'rgba(16,185,129,0.1)', color: '#34D399' }
+        : { borderColor: 'rgba(255,255,255,0.1)', color: '#64748B' }
+      }
+      onMouseEnter={(e) => { if (!copied) { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = '#94A3B8' } }}
+      onMouseLeave={(e) => { if (!copied) { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#64748B' } }}
     >
       {copied ? (
         <>
@@ -59,21 +62,15 @@ function SpinnerIcon({ className }: { className?: string }) {
 // ─── Thumbnail section ─────────────────────────────────────────────────────────
 
 function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string }) {
-  const {
-    projectId,
-    thumbnailUrl, setThumbnailUrl,
-    thumbnailBgUrl, setThumbnailBgUrl,
-  } = useStudioStore()
+  const { projectId, thumbnailUrl, setThumbnailUrl, thumbnailBgUrl, setThumbnailBgUrl } = useStudioStore()
 
   const [customTitle, setCustomTitle] = useState(seoTitle)
   const [editingTitle, setEditingTitle] = useState(false)
   const [loading, setLoading] = useState<'full' | 'text' | null>(null)
   const [error, setError] = useState('')
-  // Keep ref in sync so the download handler always reads the latest URL
   const thumbUrlRef = useRef(thumbnailUrl)
   useEffect(() => { thumbUrlRef.current = thumbnailUrl }, [thumbnailUrl])
 
-  // Sync custom title when SEO title changes (only if user hasn't overridden)
   const [titleEdited, setTitleEdited] = useState(false)
   useEffect(() => {
     if (!titleEdited) setCustomTitle(seoTitle)
@@ -129,20 +126,23 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
   const isLoading = loading !== null
 
   return (
-    <div className="flex flex-col gap-4 border-t border-gray-100 pt-5">
+    <div className="flex flex-col gap-4 pt-5" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold text-gray-700">Превью видео (Thumbnail)</p>
-          <p className="text-xs text-gray-400 mt-0.5">1280×720 · яркое, кликабельное изображение с заголовком</p>
+          <p className="text-sm font-semibold text-slate-200">Превью видео (Thumbnail)</p>
+          <p className="text-xs text-slate-500 mt-0.5">1280×720 · яркое, кликабельное изображение с заголовком</p>
         </div>
-        <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-full">
+        <span
+          className="text-xs px-2 py-1 rounded-full"
+          style={{ background: 'rgba(124,58,237,0.12)', color: '#A78BFA', border: '1px solid rgba(124,58,237,0.2)' }}
+        >
           {CREDIT_COSTS.thumbnail} кр.
         </span>
       </div>
 
       {/* Custom title input */}
       <div>
-        <p className="text-xs font-medium text-gray-600 mb-1.5">Текст на превью</p>
+        <p className="text-xs font-medium text-slate-400 mb-1.5">Текст на превью</p>
         {editingTitle ? (
           <div className="flex gap-2">
             <input
@@ -150,24 +150,28 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               value={customTitle}
               onChange={(e) => { setCustomTitle(e.target.value); setTitleEdited(true) }}
               maxLength={80}
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-400"
+              className="flex-1 px-3 py-2 rounded-xl text-sm"
               autoFocus
             />
             <button
               type="button"
               onClick={() => setEditingTitle(false)}
-              className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl text-sm transition-colors"
+              className="px-3 py-2 text-slate-300 rounded-xl text-sm transition-colors hover:text-white"
+              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
             >
               ОК
             </button>
           </div>
         ) : (
           <div
-            className="flex items-center justify-between px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 transition-colors"
+            className="flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition-all"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
             onClick={() => setEditingTitle(true)}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)')}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)')}
           >
-            <span className="text-sm text-gray-800 truncate flex-1">{customTitle || seoTitle}</span>
-            <svg className="w-4 h-4 text-gray-400 shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <span className="text-sm text-slate-300 truncate flex-1">{customTitle || seoTitle}</span>
+            <svg className="w-4 h-4 text-slate-600 shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
@@ -177,7 +181,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
 
       {/* Preview image */}
       {thumbnailUrl && (
-        <div className="relative rounded-xl overflow-hidden bg-gray-100 aspect-video w-full">
+        <div className="relative rounded-xl overflow-hidden aspect-video w-full" style={{ background: 'rgba(255,255,255,0.04)' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={thumbnailUrl}
@@ -185,18 +189,20 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
             className={`w-full h-full object-cover transition-opacity ${isLoading ? 'opacity-40' : 'opacity-100'}`}
           />
           {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-              <SpinnerIcon className="w-8 h-8 text-white animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+              <SpinnerIcon className="w-8 h-8 text-violet-400 animate-spin" />
             </div>
           )}
-          <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+          <div className="absolute top-2 right-2 text-xs px-2 py-1 rounded" style={{ background: 'rgba(0,0,0,0.7)', color: '#94A3B8' }}>
             1280×720
           </div>
         </div>
       )}
 
       {error && (
-        <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2">{error}</p>
+        <p className="text-xs text-red-400 rounded-xl px-3 py-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.15)' }}>
+          {error}
+        </p>
       )}
 
       {/* Action buttons */}
@@ -206,13 +212,10 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
             type="button"
             onClick={() => generate({ regenBg: true })}
             disabled={isLoading}
-            className="flex-1 py-2.5 bg-gray-900 hover:bg-gray-700 disabled:bg-gray-300 text-white font-semibold rounded-xl text-sm transition-colors flex items-center justify-center gap-2"
+            className="flex-1 py-2.5 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isLoading ? (
-              <>
-                <SpinnerIcon className="w-4 h-4 animate-spin" />
-                Генерация превью...
-              </>
+              <><SpinnerIcon className="w-4 h-4 animate-spin" /> Генерация превью...</>
             ) : (
               `🖼 Сгенерировать превью (−${CREDIT_COSTS.thumbnail} кр.)`
             )}
@@ -223,8 +226,8 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               type="button"
               onClick={() => generate({ regenBg: true })}
               disabled={isLoading}
-              title="Новое фоновое изображение + тот же текст"
-              className="flex-1 py-2 bg-gray-900 hover:bg-gray-700 disabled:bg-gray-300 text-white font-medium rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
+              title="Новое фоновое изображение"
+              className="flex-1 py-2 text-white font-medium rounded-xl text-xs disabled:opacity-50 flex items-center justify-center gap-1.5 btn-gradient"
             >
               {loading === 'full' ? (
                 <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> Генерация фона...</>
@@ -238,7 +241,8 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               onClick={() => generate({ regenBg: false })}
               disabled={isLoading || !thumbnailBgUrl}
               title="Тот же фон с новым текстом"
-              className="flex-1 py-2 border-2 border-gray-200 hover:border-gray-300 bg-white disabled:opacity-40 text-gray-700 font-medium rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 py-2 text-slate-300 font-medium rounded-xl text-xs disabled:opacity-40 flex items-center justify-center gap-1.5 hover:text-white transition-colors"
+              style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)' }}
             >
               {loading === 'text' ? (
                 <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> Обновление текста...</>
@@ -251,7 +255,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               type="button"
               onClick={handleDownload}
               disabled={isLoading}
-              className="px-4 py-2 bg-red-500 hover:bg-red-600 disabled:opacity-40 text-white font-medium rounded-xl text-xs transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 btn-gradient text-white font-medium rounded-xl text-xs disabled:opacity-40 flex items-center gap-1.5"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -266,16 +270,12 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
   )
 }
 
-// ─── Main component ────────────────────────────────────────────────────────────
-
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-// Returns description body with the trailing hashtag line stripped.
 function stripHashtags(desc: string): string {
   const trimmed = desc.trimEnd()
   const lastNl = trimmed.lastIndexOf('\n')
   const lastLine = lastNl >= 0 ? trimmed.slice(lastNl + 1).trim() : trimmed
-  // If the very last line consists only of #-words, remove it
   if (lastLine.length > 0 && lastLine.split(/\s+/).every((w) => w.startsWith('#'))) {
     return trimmed.slice(0, lastNl >= 0 ? lastNl : 0).trimEnd()
   }
@@ -298,7 +298,6 @@ export default function Step7Seo() {
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
 
-  // Hashtags stored separately for the editing block; may be absent in old records
   const hashtags: string[] = localSeo?.hashtags ?? []
 
   async function handleGenerate() {
@@ -319,20 +318,14 @@ export default function Step7Seo() {
       })
       const json = await res.json()
       if (!json.ok) {
-        if (json.code === 'NO_CREDITS') {
-          setError('Недостаточно кредитов для SEO-оптимизации.')
-          return
-        }
+        if (json.code === 'NO_CREDITS') { setError('Недостаточно кредитов для SEO-оптимизации.'); return }
         throw new Error(json.error)
       }
       const raw: SeoData = json.data.seo
-      // Embed hashtags at the end of description so the textarea is "final YouTube text"
-      const merged: SeoData = {
-        ...raw,
-        description: appendHashtags(raw.description, raw.hashtags ?? []),
-      }
+      const merged: SeoData = { ...raw, description: appendHashtags(raw.description, raw.hashtags ?? []) }
       setLocalSeo(merged)
       setSeo(merged)
+      void refreshCredits()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка генерации SEO')
     } finally {
@@ -358,49 +351,44 @@ export default function Step7Seo() {
     const tag = raw.startsWith('#') ? raw : `#${raw}`
     if (hashtags.includes(tag)) return
     const newTags = [...hashtags, tag]
-    setLocalSeo({
-      ...localSeo,
-      hashtags: newTags,
-      description: appendHashtags(stripHashtags(localSeo.description), newTags),
-    })
+    setLocalSeo({ ...localSeo, hashtags: newTags, description: appendHashtags(stripHashtags(localSeo.description), newTags) })
     setNewHashtag('')
   }
 
   function removeHashtag(idx: number) {
     if (!localSeo) return
     const newTags = hashtags.filter((_, i) => i !== idx)
-    setLocalSeo({
-      ...localSeo,
-      hashtags: newTags,
-      description: appendHashtags(stripHashtags(localSeo.description), newTags),
-    })
+    setLocalSeo({ ...localSeo, hashtags: newTags, description: appendHashtags(stripHashtags(localSeo.description), newTags) })
   }
 
   if (done) {
     return (
       <div className="flex flex-col items-center text-center gap-6 py-8">
-        <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center">
-          <svg className="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div
+          className="w-20 h-20 rounded-full flex items-center justify-center"
+          style={{ background: 'rgba(16,185,129,0.12)', border: '2px solid rgba(16,185,129,0.3)', boxShadow: '0 0 30px rgba(16,185,129,0.2)' }}
+        >
+          <svg className="w-10 h-10 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         </div>
         <div>
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Видео готово!</h2>
-          <p className="text-gray-600 text-sm">
+          <h2 className="text-xl font-bold text-slate-100 mb-2">Видео готово!</h2>
+          <p className="text-slate-400 text-sm">
             Все материалы сгенерированы. Перейдите в дашборд чтобы найти свой проект.
           </p>
         </div>
         <div className="flex gap-3 w-full max-w-xs">
           <Link
             href="/dashboard"
-            className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl text-sm text-center transition-colors"
+            className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm text-center"
           >
             Перейти в дашборд
           </Link>
           <button
             type="button"
             onClick={reset}
-            className="flex-1 py-3 border border-gray-300 text-gray-700 font-medium rounded-xl text-sm hover:bg-gray-50 transition-colors"
+            className="flex-1 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
           >
             Новое видео
           </button>
@@ -412,8 +400,8 @@ export default function Step7Seo() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Шаг 7: SEO + Превью</h2>
-        <p className="text-sm text-gray-500">
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">Шаг 7: SEO + Превью</h2>
+        <p className="text-sm text-slate-500">
           Заголовок, описание, теги и превью для максимального охвата
         </p>
       </div>
@@ -423,22 +411,21 @@ export default function Step7Seo() {
         type="button"
         onClick={handleGenerate}
         disabled={loading}
-        className="w-full py-3 bg-gray-900 hover:bg-gray-700 disabled:bg-gray-300 text-white font-semibold rounded-xl text-sm transition-colors flex items-center justify-center gap-2"
+        className="w-full py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-50 flex items-center justify-center gap-2"
       >
         {loading ? (
-          <>
-            <SpinnerIcon className="w-4 h-4 animate-spin" />
-            Генерация SEO...
-          </>
+          <><SpinnerIcon className="w-4 h-4 animate-spin" /> Генерация SEO...</>
         ) : localSeo ? (
-          '↺ Перегенерировать SEO (−5 кр.)'
+          `↺ Перегенерировать SEO (−${CREDIT_COSTS.seo} кр.)`
         ) : (
-          '🔍 Сгенерировать SEO (−5 кр.)'
+          `🔍 Сгенерировать SEO (−${CREDIT_COSTS.seo} кр.)`
         )}
       </button>
 
       {error && (
-        <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3">{error}</p>
+        <p className="text-sm text-red-400 rounded-xl px-4 py-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
+          {error}
+        </p>
       )}
 
       {localSeo && (
@@ -446,11 +433,10 @@ export default function Step7Seo() {
           {/* Title A/B picker */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-gray-700">Заголовок</label>
+              <label className="text-sm font-medium text-slate-300">Заголовок</label>
               <CopyButton text={localSeo.title} />
             </div>
 
-            {/* If we have an alt title — show A/B cards */}
             {localSeo.title_alt ? (
               <div className="flex flex-col gap-2 mb-2">
                 {([localSeo.title, localSeo.title_alt] as [string, string]).map((t, i) => {
@@ -460,25 +446,27 @@ export default function Step7Seo() {
                       key={i}
                       type="button"
                       onClick={() => {
-                        if (i === 1) {
-                          // swap: alt becomes title, title becomes alt
-                          setLocalSeo({ ...localSeo, title: localSeo.title_alt!, title_alt: localSeo.title })
-                        }
+                        if (i === 1) setLocalSeo({ ...localSeo, title: localSeo.title_alt!, title_alt: localSeo.title })
                       }}
-                      className={`flex items-start gap-3 w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${
+                      className="flex items-start gap-3 w-full text-left px-4 py-3 rounded-xl transition-all"
+                      style={
                         isActive
-                          ? 'border-red-400 bg-red-50'
-                          : 'border-gray-200 bg-white hover:border-gray-300'
-                      }`}
+                          ? { border: '2px solid #7C3AED', background: 'rgba(124,58,237,0.1)' }
+                          : { border: '2px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }
+                      }
                     >
-                      <span className={`shrink-0 mt-0.5 text-xs font-bold px-1.5 py-0.5 rounded ${
-                        isActive ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600'
-                      }`}>
+                      <span
+                        className="shrink-0 mt-0.5 text-xs font-bold px-1.5 py-0.5 rounded"
+                        style={isActive
+                          ? { background: '#7C3AED', color: '#fff' }
+                          : { background: 'rgba(255,255,255,0.08)', color: '#64748B' }
+                        }
+                      >
                         {isActive ? 'A ✓' : 'B'}
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-900 leading-snug">{t}</p>
-                        <p className={`text-xs mt-1 ${t.length > 70 ? 'text-red-500' : 'text-gray-400'}`}>
+                        <p className="text-sm text-slate-200 leading-snug">{t}</p>
+                        <p className={`text-xs mt-1 ${t.length > 70 ? 'text-red-400' : 'text-slate-500'}`}>
                           {t.length}/70 {isActive ? '· активный' : '· нажми чтобы выбрать'}
                         </p>
                       </div>
@@ -488,26 +476,24 @@ export default function Step7Seo() {
               </div>
             ) : null}
 
-            {/* Editable input for active title */}
             <input
               type="text"
               value={localSeo.title}
               onChange={(e) => setLocalSeo({ ...localSeo, title: e.target.value })}
-              className={`w-full px-4 py-2.5 border rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-400 ${
-                localSeo.title.length > 70 ? 'border-red-400' : 'border-gray-300'
-              }`}
+              className="w-full px-4 py-2.5 rounded-xl text-sm"
+              style={localSeo.title.length > 70 ? { borderColor: 'rgba(239,68,68,0.5) !important' } : {}}
             />
-            <p className={`text-xs mt-1 text-right ${localSeo.title.length > 70 ? 'text-red-500' : 'text-gray-400'}`}>
+            <p className={`text-xs mt-1 text-right ${localSeo.title.length > 70 ? 'text-red-400' : 'text-slate-500'}`}>
               {localSeo.title.length}/70
             </p>
           </div>
 
-          {/* Description — textarea already contains hashtags at the bottom */}
+          {/* Description */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <div>
-                <label className="text-sm font-medium text-gray-700">Описание</label>
-                <span className="ml-2 text-xs text-gray-400">первые 2 строки видны в поиске без разворачивания</span>
+                <label className="text-sm font-medium text-slate-300">Описание</label>
+                <span className="ml-2 text-xs text-slate-600">первые 2 строки видны в поиске</span>
               </div>
               <CopyButton text={localSeo.description} label="Копировать" />
             </div>
@@ -515,23 +501,26 @@ export default function Step7Seo() {
               rows={12}
               value={localSeo.description}
               onChange={(e) => setLocalSeo({ ...localSeo, description: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm text-gray-900 resize-y focus:outline-none focus:ring-2 focus:ring-red-400 leading-relaxed font-mono"
+              className="w-full px-4 py-3 rounded-xl text-sm resize-y leading-relaxed font-mono"
             />
           </div>
 
-          {/* Hashtags — editing here auto-updates the end of the description textarea */}
+          {/* Hashtags */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-gray-700">Хэштеги</label>
-                <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${
-                  hashtags.length >= 3 && hashtags.length <= 5
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-amber-100 text-amber-700'
-                }`}>
+                <label className="text-sm font-medium text-slate-300">Хэштеги</label>
+                <span
+                  className="text-xs font-medium px-1.5 py-0.5 rounded-full"
+                  style={
+                    hashtags.length >= 3 && hashtags.length <= 5
+                      ? { background: 'rgba(16,185,129,0.12)', color: '#34D399' }
+                      : { background: 'rgba(245,158,11,0.12)', color: '#FBB04D' }
+                  }
+                >
                   {hashtags.length}/5
                 </span>
-                <span className="text-xs text-gray-400">изменения обновляют описание выше</span>
+                <span className="text-xs text-slate-600">изменения обновляют описание</span>
               </div>
               <CopyButton text={hashtags.join(' ')} label="Копировать хэштеги" />
             </div>
@@ -539,20 +528,21 @@ export default function Step7Seo() {
               {hashtags.map((tag, idx) => (
                 <span
                   key={idx}
-                  className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs font-medium px-2.5 py-1 rounded-full border border-blue-200"
+                  className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full"
+                  style={{ background: 'rgba(59,130,246,0.12)', color: '#60A5FA', border: '1px solid rgba(59,130,246,0.2)' }}
                 >
                   {tag}
                   <button
                     type="button"
                     onClick={() => removeHashtag(idx)}
-                    className="text-blue-400 hover:text-red-500 transition-colors"
+                    className="text-blue-400 hover:text-red-400 transition-colors"
                   >
                     ×
                   </button>
                 </span>
               ))}
               {hashtags.length === 0 && (
-                <p className="text-xs text-gray-400">Хэштеги ещё не добавлены</p>
+                <p className="text-xs text-slate-600">Хэштеги ещё не добавлены</p>
               )}
             </div>
             <div className="flex gap-2">
@@ -562,12 +552,13 @@ export default function Step7Seo() {
                 onChange={(e) => setNewHashtag(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addHashtag())}
                 placeholder="#история или история"
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-400"
+                className="flex-1 px-3 py-2 rounded-xl text-sm"
               />
               <button
                 type="button"
                 onClick={addHashtag}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-xl transition-colors"
+                className="px-4 py-2 text-slate-300 text-sm font-medium rounded-xl hover:text-white transition-colors"
+                style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)' }}
               >
                 +
               </button>
@@ -578,12 +569,15 @@ export default function Step7Seo() {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-gray-700">Теги</label>
-                <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${
-                  localSeo.tags.length >= 20 && localSeo.tags.length <= 25
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-amber-100 text-amber-700'
-                }`}>
+                <label className="text-sm font-medium text-slate-300">Теги</label>
+                <span
+                  className="text-xs font-medium px-1.5 py-0.5 rounded-full"
+                  style={
+                    localSeo.tags.length >= 20 && localSeo.tags.length <= 25
+                      ? { background: 'rgba(16,185,129,0.12)', color: '#34D399' }
+                      : { background: 'rgba(245,158,11,0.12)', color: '#FBB04D' }
+                  }
+                >
                   {localSeo.tags.length}/25
                 </span>
               </div>
@@ -593,13 +587,14 @@ export default function Step7Seo() {
               {localSeo.tags.map((tag, idx) => (
                 <span
                   key={idx}
-                  className="inline-flex items-center gap-1 bg-gray-100 text-gray-700 text-xs font-medium px-2.5 py-1 rounded-full"
+                  className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#94A3B8', border: '1px solid rgba(255,255,255,0.08)' }}
                 >
                   {tag}
                   <button
                     type="button"
                     onClick={() => removeTag(idx)}
-                    className="text-gray-400 hover:text-red-500 transition-colors"
+                    className="text-slate-500 hover:text-red-400 transition-colors"
                   >
                     ×
                   </button>
@@ -613,12 +608,13 @@ export default function Step7Seo() {
                 onChange={(e) => setNewTag(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
                 placeholder="Добавить тег..."
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-400"
+                className="flex-1 px-3 py-2 rounded-xl text-sm"
               />
               <button
                 type="button"
                 onClick={addTag}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-xl transition-colors"
+                className="px-4 py-2 text-slate-300 text-sm font-medium rounded-xl hover:text-white transition-colors"
+                style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)' }}
               >
                 +
               </button>
@@ -626,13 +622,14 @@ export default function Step7Seo() {
           </div>
 
           {/* Quick copy actions */}
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Скопировать для YouTube</p>
+          <div
+            className="rounded-xl p-4"
+            style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.15)' }}
+          >
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Скопировать для YouTube</p>
             <div className="flex flex-wrap gap-2">
               <CopyButton text={localSeo.title} label="Заголовок A" />
-              {localSeo.title_alt && (
-                <CopyButton text={localSeo.title_alt} label="Заголовок B" />
-              )}
+              {localSeo.title_alt && <CopyButton text={localSeo.title_alt} label="Заголовок B" />}
               <CopyButton text={localSeo.description} label="Описание" />
               <CopyButton text={localSeo.tags.join(', ')} label="Теги" />
               <CopyButton
@@ -642,11 +639,8 @@ export default function Step7Seo() {
             </div>
           </div>
 
-          {/* Thumbnail section — only shown after SEO is generated */}
-          <ThumbnailSection
-            seoTitle={localSeo.title}
-            topic={scriptParams.topic}
-          />
+          {/* Thumbnail section */}
+          <ThumbnailSection seoTitle={localSeo.title} topic={scriptParams.topic} />
         </div>
       )}
 
@@ -654,7 +648,7 @@ export default function Step7Seo() {
         <button
           type="button"
           onClick={() => setStep(6)}
-          className="px-5 py-3 border border-gray-300 text-gray-700 font-medium rounded-xl text-sm hover:bg-gray-50 transition-colors"
+          className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
           ← Назад
         </button>
@@ -662,7 +656,11 @@ export default function Step7Seo() {
           type="button"
           onClick={() => { setSeo(localSeo!); setDone(true) }}
           disabled={!localSeo}
-          className="flex-1 py-3 bg-green-500 hover:bg-green-600 disabled:bg-green-200 text-white font-semibold rounded-xl text-sm transition-colors"
+          className="flex-1 py-3 font-semibold rounded-xl text-sm disabled:opacity-40 transition-all"
+          style={localSeo
+            ? { background: 'linear-gradient(135deg, #10B981, #059669)', color: '#fff', boxShadow: '0 4px 20px rgba(16,185,129,0.3)' }
+            : { background: 'rgba(255,255,255,0.05)', color: '#475569', border: '1px solid rgba(255,255,255,0.08)' }
+          }
         >
           ✓ Завершить проект
         </button>

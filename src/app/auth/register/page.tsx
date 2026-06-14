@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useMemo, type FormEvent } from 'react'
+import { Suspense, useState, useMemo, type FormEvent } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 
-export default function RegisterPage() {
+function RegisterForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const refCode = searchParams.get('ref') ?? ''
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -16,6 +18,19 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false)
 
   const supabase = useMemo(() => createClient(), [])
+
+  async function applyReferralClient(userId: string) {
+    if (!refCode) return
+    try {
+      await fetch('/api/referral/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referral_code: refCode, new_user_id: userId }),
+      })
+    } catch {
+      // referral is best-effort — don't block registration
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -28,12 +43,17 @@ export default function RegisterPage() {
       return
     }
 
+    // Build the callback URL, carrying ?ref= so the server-side callback can apply it
+    const callbackUrl = refCode
+      ? `${window.location.origin}/auth/callback?ref=${encodeURIComponent(refCode)}`
+      : `${window.location.origin}/auth/callback`
+
     const { data, error: authError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
       options: {
         data: { full_name: name.trim() },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: callbackUrl,
       },
     })
 
@@ -48,25 +68,28 @@ export default function RegisterPage() {
       return
     }
 
-    // If session exists — email confirmation is disabled, redirect immediately
-    if (data.session) {
+    // Email confirmation disabled — session returned immediately
+    if (data.session && data.user) {
+      await applyReferralClient(data.user.id)
       router.push('/dashboard')
       router.refresh()
       return
     }
 
-    // Email confirmation required
+    // Email confirmation required — referral will be applied in callback
     setSuccess(true)
     setLoading(false)
   }
 
   async function handleGoogleRegister() {
     setError('')
+    const callbackUrl = refCode
+      ? `${window.location.origin}/auth/callback?ref=${encodeURIComponent(refCode)}`
+      : `${window.location.origin}/auth/callback`
+
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
+      options: { redirectTo: callbackUrl },
     })
     if (authError) setError('Ошибка регистрации через Google')
   }
@@ -108,6 +131,12 @@ export default function RegisterPage() {
           </Link>
           <p className="mt-2 text-gray-600">Создайте аккаунт бесплатно</p>
         </div>
+
+        {refCode && (
+          <div className="mb-4 bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-sm text-violet-700 text-center">
+            🎁 Вас пригласил друг — после регистрации вы получите <strong>+5 кредитов</strong> бонусом!
+          </div>
+        )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
 
@@ -209,5 +238,13 @@ export default function RegisterPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense>
+      <RegisterForm />
+    </Suspense>
   )
 }

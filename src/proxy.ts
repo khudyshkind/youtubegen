@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 const PROTECTED_PREFIXES = ['/dashboard', '/studio', '/settings', '/billing']
+const ADMIN_EMAILS = ['khudyshkin.d@gmail.com', 'denis-region@mail.ru']
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -32,6 +33,16 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const { pathname } = request.nextUrl
+
+  // Admin route protection — check before general protected check
+  if (pathname.startsWith('/admin')) {
+    const email = user?.email
+    if (!email || !ADMIN_EMAILS.includes(email)) {
+      return NextResponse.redirect(new URL('/dashboard', request.url))
+    }
+    return response
+  }
+
   const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p))
 
   if (isProtected && !user) {

@@ -3,8 +3,7 @@
 import { useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import type { SubtitleBlock, SubtitleFont, SubtitleSize, SubtitlePosition, SubtitleAnimation } from '@/lib/types'
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
+import { refreshCredits } from '@/lib/refresh-credits'
 
 function formatTime(sec: number) {
   const m = Math.floor(sec / 60)
@@ -27,15 +26,14 @@ function Toggle({
   return (
     <div className="flex items-center justify-between py-2.5">
       <div>
-        <p className="text-sm font-medium text-gray-700">{label}</p>
-        {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
+        <p className="text-sm font-medium text-slate-300">{label}</p>
+        {hint && <p className="text-xs text-slate-500 mt-0.5">{hint}</p>}
       </div>
       <button
         type="button"
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${
-          checked ? 'bg-red-500' : 'bg-gray-200'
-        }`}
+        className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0"
+        style={{ background: checked ? '#7C3AED' : 'rgba(255,255,255,0.1)' }}
       >
         <span
           className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
@@ -46,8 +44,6 @@ function Toggle({
     </div>
   )
 }
-
-// ─── Chip selector ─────────────────────────────────────────────────────────────
 
 function ChipSelector<T extends string>({
   label,
@@ -62,18 +58,19 @@ function ChipSelector<T extends string>({
 }) {
   return (
     <div>
-      <p className="text-sm font-medium text-gray-700 mb-2">{label}</p>
+      <p className="text-sm font-medium text-slate-300 mb-2">{label}</p>
       <div className="flex flex-wrap gap-1.5">
         {options.map((o) => (
           <button
             key={o.value}
             type="button"
             onClick={() => onChange(o.value)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg border-2 transition-all ${
+            className="px-3 py-1.5 text-xs font-medium rounded-lg transition-all"
+            style={
               value === o.value
-                ? 'border-red-400 bg-red-50 text-red-600'
-                : 'border-gray-200 text-gray-600 hover:border-gray-300'
-            }`}
+                ? { border: '2px solid #7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA' }
+                : { border: '2px solid rgba(255,255,255,0.08)', color: '#94A3B8' }
+            }
           >
             {o.label}
           </button>
@@ -82,8 +79,6 @@ function ChipSelector<T extends string>({
     </div>
   )
 }
-
-// ─── SRT export ────────────────────────────────────────────────────────────────
 
 function toSrt(blocks: SubtitleBlock[]): string {
   function srtTime(sec: number) {
@@ -95,8 +90,6 @@ function toSrt(blocks: SubtitleBlock[]): string {
   }
   return blocks.map((b, i) => `${i + 1}\n${srtTime(b.start)} --> ${srtTime(b.end)}\n${b.text}`).join('\n\n')
 }
-
-// ─── SRT parser ────────────────────────────────────────────────────────────────
 
 function parseSrt(text: string): SubtitleBlock[] {
   const blocks: SubtitleBlock[] = []
@@ -118,8 +111,6 @@ function parseSrt(text: string): SubtitleBlock[] {
   }
   return blocks
 }
-
-// ─── Main component ────────────────────────────────────────────────────────────
 
 export default function Step4Subtitles() {
   const {
@@ -163,13 +154,11 @@ export default function Step4Subtitles() {
       })
       const json = await res.json()
       if (!json.ok) {
-        if (json.code === 'NO_CREDITS') {
-          setError('Недостаточно кредитов.')
-          return
-        }
+        if (json.code === 'NO_CREDITS') { setError('Недостаточно кредитов.'); return }
         throw new Error(json.error)
       }
       setSubtitleBlocks(json.data.subtitle_blocks)
+      void refreshCredits()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка генерации субтитров')
     } finally {
@@ -205,26 +194,29 @@ export default function Step4Subtitles() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Шаг 4: Субтитры</h2>
-        <p className="text-sm text-gray-500">Автоматическая транскрибация через Whisper</p>
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">Шаг 4: Субтитры</h2>
+        <p className="text-sm text-slate-500">Автоматическое распознавание речи и создание субтитров</p>
       </div>
 
-      {/* Generate */}
       {subtitleBlocks.length === 0 ? (
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-4 py-3">
-            <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div
+            className="flex items-center gap-2 rounded-xl px-4 py-3"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+          >
+            <svg className="w-4 h-4 text-slate-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
             </svg>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-slate-400">
               Распознаёт речь и создаёт блоки субтитров с тайм-кодами
             </p>
           </div>
+
           <button
             type="button"
             onClick={handleGenerate}
             disabled={loading || !audioUrl}
-            className="w-full py-3 bg-gray-900 hover:bg-gray-700 disabled:bg-gray-300 text-white font-semibold rounded-xl text-sm transition-colors flex items-center justify-center gap-2"
+            className="w-full py-3 btn-gradient disabled:opacity-40 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2"
           >
             {loading ? (
               <>
@@ -235,19 +227,20 @@ export default function Step4Subtitles() {
                 Транскрибация... (30–60 сек)
               </>
             ) : (
-              '📝 Создать субтитры (−3 кр.)'
+              '📝 Создать субтитры (−1 кр.)'
             )}
           </button>
+
           {!audioUrl && (
-            <p className="text-xs text-gray-400 text-center">Сначала сгенерируйте аудио на шаге 3</p>
+            <p className="text-xs text-slate-500 text-center">Сначала сгенерируйте аудио на шаге 3</p>
           )}
 
-          {/* Upload SRT */}
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => srtFileRef.current?.click()}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-gray-300 text-gray-600 text-xs font-medium rounded-xl hover:bg-gray-50 transition-colors"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 text-slate-400 text-xs font-medium rounded-xl hover:text-slate-200 transition-colors"
+              style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -264,7 +257,9 @@ export default function Step4Subtitles() {
           </div>
 
           {srtUploadError && (
-            <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2">{srtUploadError}</p>
+            <p className="text-xs text-red-400 rounded-xl px-3 py-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.15)' }}>
+              {srtUploadError}
+            </p>
           )}
         </div>
       ) : (
@@ -272,20 +267,20 @@ export default function Step4Subtitles() {
           {/* Subtitle blocks editor */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium text-gray-700">{subtitleBlocks.length} блоков субтитров</p>
-              <div className="flex gap-2">
+              <p className="text-sm font-medium text-slate-300">{subtitleBlocks.length} блоков субтитров</p>
+              <div className="flex gap-3">
                 <button
                   type="button"
                   onClick={handleGenerate}
                   disabled={loading}
-                  className="text-xs text-gray-500 hover:text-gray-700 font-medium transition-colors"
+                  className="text-xs text-slate-400 hover:text-slate-200 font-medium transition-colors"
                 >
                   ↺ Перегенерировать
                 </button>
                 <button
                   type="button"
                   onClick={downloadSrt}
-                  className="text-xs text-red-500 hover:text-red-600 font-medium transition-colors flex items-center gap-1"
+                  className="text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors flex items-center gap-1"
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -297,29 +292,33 @@ export default function Step4Subtitles() {
 
             <div className="max-h-64 overflow-y-auto flex flex-col gap-2 pr-1">
               {subtitleBlocks.map((block, idx) => (
-                <div key={idx} className="flex gap-2 items-start bg-gray-50 rounded-xl p-3">
-                  <span className="text-xs font-bold text-gray-400 w-5 pt-0.5 shrink-0">{idx + 1}</span>
+                <div
+                  key={idx}
+                  className="flex gap-2 items-start rounded-xl p-3"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+                >
+                  <span className="text-xs font-bold text-slate-600 w-5 pt-0.5 shrink-0">{idx + 1}</span>
                   <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                    <div className="flex gap-2 text-xs text-gray-500 font-mono">
+                    <div className="flex gap-2 text-xs text-slate-400 font-mono">
                       <input
                         type="text"
                         value={formatTime(block.start)}
                         onChange={(e) => updateBlock(idx, 'start', e.target.value)}
-                        className="w-20 bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-red-400"
+                        className="w-20 rounded px-1.5 py-0.5 text-slate-300 focus:outline-none"
                       />
-                      <span className="self-center">→</span>
+                      <span className="self-center text-slate-600">→</span>
                       <input
                         type="text"
                         value={formatTime(block.end)}
                         onChange={(e) => updateBlock(idx, 'end', e.target.value)}
-                        className="w-20 bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-red-400"
+                        className="w-20 rounded px-1.5 py-0.5 text-slate-300 focus:outline-none"
                       />
                     </div>
                     <input
                       type="text"
                       value={block.text}
                       onChange={(e) => updateBlock(idx, 'text', e.target.value)}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-red-400"
+                      className="w-full rounded-lg px-2 py-1.5 text-sm text-slate-200 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -328,8 +327,11 @@ export default function Step4Subtitles() {
           </div>
 
           {/* Style settings */}
-          <div className="border border-gray-200 rounded-xl p-4 flex flex-col gap-4">
-            <p className="text-sm font-semibold text-gray-900">Настройки стиля</p>
+          <div
+            className="rounded-xl p-4 flex flex-col gap-4"
+            style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
+          >
+            <p className="text-sm font-semibold text-slate-200">Настройки стиля</p>
 
             <div className="grid grid-cols-2 gap-4">
               <ChipSelector
@@ -347,15 +349,16 @@ export default function Step4Subtitles() {
             </div>
 
             <div>
-              <p className="text-sm font-medium text-gray-700 mb-2">Цвет текста</p>
+              <p className="text-sm font-medium text-slate-300 mb-2">Цвет текста</p>
               <div className="flex items-center gap-3">
                 <input
                   type="color"
                   value={subtitleStyle.color}
                   onChange={(e) => setSubtitleStyle({ color: e.target.value })}
-                  className="w-10 h-10 rounded-lg border border-gray-300 cursor-pointer"
+                  className="w-10 h-10 rounded-lg cursor-pointer"
+                  style={{ border: '1px solid rgba(255,255,255,0.1)' }}
                 />
-                <span className="text-sm text-gray-600 font-mono">{subtitleStyle.color}</span>
+                <span className="text-sm text-slate-400 font-mono">{subtitleStyle.color}</span>
               </div>
             </div>
 
@@ -373,18 +376,12 @@ export default function Step4Subtitles() {
               onChange={(v) => setSubtitleStyle({ animation: v })}
             />
 
-            <div className="divide-y divide-gray-100">
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
               <Toggle
                 checked={subtitleStyle.background}
                 onChange={(v) => setSubtitleStyle({ background: v })}
                 label="Фон под текстом"
                 hint="Полупрозрачная подложка для лучшей читаемости"
-              />
-              <Toggle
-                checked={subtitleStyle.burnIn}
-                onChange={(v) => setSubtitleStyle({ burnIn: v })}
-                label="Вшить в видео"
-                hint="Иначе субтитры экспортируются отдельным SRT файлом"
               />
             </div>
           </div>
@@ -392,14 +389,16 @@ export default function Step4Subtitles() {
       )}
 
       {error && (
-        <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3">{error}</p>
+        <p className="text-sm text-red-400 rounded-xl px-4 py-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
+          {error}
+        </p>
       )}
 
       <div className="flex gap-3">
         <button
           type="button"
           onClick={() => setStep(3)}
-          className="px-5 py-3 border border-gray-300 text-gray-700 font-medium rounded-xl text-sm hover:bg-gray-50 transition-colors"
+          className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
           ← Назад
         </button>
@@ -407,7 +406,7 @@ export default function Step4Subtitles() {
           type="button"
           onClick={() => setStep(5)}
           disabled={subtitleBlocks.length === 0}
-          className="flex-1 py-3 bg-red-500 hover:bg-red-600 disabled:bg-red-200 text-white font-semibold rounded-xl text-sm transition-colors"
+          className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40"
         >
           Далее: Иллюстрации →
         </button>
@@ -415,7 +414,7 @@ export default function Step4Subtitles() {
           <button
             type="button"
             onClick={() => setStep(5)}
-            className="px-5 py-3 border border-gray-300 text-gray-500 font-medium rounded-xl text-sm hover:bg-gray-50 transition-colors"
+            className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
           >
             Пропустить
           </button>

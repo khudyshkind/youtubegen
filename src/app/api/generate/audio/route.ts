@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { trackEvent } from '@/lib/analytics'
+import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 
 // Allow up to 5 minutes — long scripts can take time to synthesize
@@ -27,10 +29,6 @@ interface AudioRequest {
   clarity_boost?: boolean
 }
 
-function estimateMinutes(text: string): number {
-  const words = text.trim().split(/\s+/).length
-  return Math.ceil(words / 130)
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -61,10 +59,9 @@ export async function POST(request: NextRequest) {
       ? voice_style
       : STYLE_EXAGGERATION[voice_style] ?? 0
 
-    const minutes = estimateMinutes(text)
-    const creditCost = Math.max(5, minutes * 5)
+    const creditCost = CREDIT_COSTS.audio
 
-    const check = await requireCredits(user.id, 'voice', supabase)
+    const check = await requireCredits(user.id, 'audio', supabase)
     if (!check.ok) {
       return NextResponse.json(check, { status: 402 })
     }
@@ -129,7 +126,7 @@ export async function POST(request: NextRequest) {
       .from('audio')
       .getPublicUrl(storagePath)
 
-    await spendCredits(user.id, creditCost, 'voice', project_id)
+    await spendCredits(user.id, creditCost, 'audio', project_id)
 
     if (project_id) {
       await supabase
@@ -139,7 +136,8 @@ export async function POST(request: NextRequest) {
         .eq('user_id', user.id)
     }
 
-    return NextResponse.json({ ok: true, data: { audio_url: publicUrl, minutes } })
+    void trackEvent(user.id, 'step_completed', { step: 'audio', project_id })
+    return NextResponse.json({ ok: true, data: { audio_url: publicUrl } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/audio] unexpected error:', msg)

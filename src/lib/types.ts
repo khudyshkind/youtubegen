@@ -1,21 +1,21 @@
 export type Plan = 'free' | 'starter' | 'pro' | 'agency'
 
 export const CREDIT_COSTS = {
-  script: 10,
-  'script-opus': 20,
-  'script-gpt': 12,
-  voice: 5,
-  subtitles: 3,
-  image: 8,
+  script_sonnet: 1,
+  script_opus: 2,
+  script_gpt: 1,
+  audio: 2,
+  subtitles: 1,
+  image: 1,
   video: 2,
-  seo: 5,
-  thumbnail: 2,
+  seo: 1,
+  thumbnail: 1,
 } as const
 
 export const PLAN_CREDITS: Record<Plan, number> = {
-  free: 5,
-  starter: 50,
-  pro: 200,
+  free: 20,
+  starter: 100,
+  pro: 300,
   agency: 1000,
 }
 
@@ -91,6 +91,11 @@ export interface Profile {
   paddle_customer_id: string | null
   paddle_subscription_id: string | null
   onboarding_completed: boolean
+  is_admin: boolean
+  referral_code: string | null
+  referred_by: string | null
+  referral_count: number
+  referral_credits_earned: number
   created_at: string
   updated_at: string
 }

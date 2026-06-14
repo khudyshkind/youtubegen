@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
 import type { ScriptParams } from '@/lib/types'
 import { CREDIT_COSTS } from '@/lib/types'
@@ -89,15 +90,15 @@ function buildPrompt(p: ScriptParams): string {
 }
 
 function modelOperation(model: string): keyof typeof CREDIT_COSTS {
-  if (model === 'claude-opus') return 'script-opus'
-  if (model === 'gpt-4o') return 'script-gpt'
-  return 'script'
+  if (model === 'claude-opus') return 'script_opus'
+  if (model === 'gpt-4o') return 'script_gpt'
+  return 'script_sonnet'
 }
 
 function modelCost(model: string): number {
-  if (model === 'claude-opus') return 20
-  if (model === 'gpt-4o') return 12
-  return 10
+  if (model === 'claude-opus') return CREDIT_COSTS.script_opus
+  if (model === 'gpt-4o') return CREDIT_COSTS.script_gpt
+  return CREDIT_COSTS.script_sonnet
 }
 
 async function generateWithClaude(prompt: string, opus: boolean): Promise<string> {
@@ -166,6 +167,7 @@ export async function POST(request: NextRequest) {
         .eq('user_id', user.id)
     }
 
+    void trackEvent(user.id, 'step_completed', { step: 'script', model, project_id })
     return NextResponse.json({ ok: true, data: { script } })
   } catch (error) {
     console.error('[generate/script]', error instanceof Error ? error.message : error)

@@ -29,7 +29,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ru" className={`${geist.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-gray-50 text-gray-900">
+      <body className="min-h-screen flex flex-col text-gray-900" style={{ background: '#0A0A0F' }}>
         <Navbar />
         <main className="flex-1">{children}</main>
       </body>

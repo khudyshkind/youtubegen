@@ -1,7 +1,10 @@
 import { createServiceClient } from './supabase-server'
 import { CREDIT_COSTS } from './types'
+import { sendLowCreditsEmail } from './email'
 import type { ApiResponse } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
+
+const LOW_CREDITS_THRESHOLD = 5
 
 export async function hasCredits(
   userId: string,
@@ -35,13 +38,30 @@ export async function spendCredits(
     return { ok: false, remaining: 0 }
   }
 
-  return { ok: true, remaining: (data as { remaining: number }).remaining }
+  const remaining = (data as { remaining: number }).remaining
+
+  // Fire-and-forget low balance alert
+  if (remaining < LOW_CREDITS_THRESHOLD) {
+    void (async () => {
+      try {
+        const svc = createServiceClient()
+        const { data: profile } = await svc.from('profiles').select('email, full_name').eq('id', userId).single()
+        if (profile?.email) {
+          await sendLowCreditsEmail({ email: profile.email, name: profile.full_name }, remaining)
+        }
+      } catch (e) {
+        console.error('[credits] sendLowCreditsEmail error:', e)
+      }
+    })()
+  }
+
+  return { ok: true, remaining }
 }
 
 export async function addCredits(
   userId: string,
   amount: number,
-  operation: 'purchase' | 'signup_bonus',
+  operation: 'purchase' | 'signup_bonus' | 'referral_bonus' | 'referral_reward',
   projectId?: string
 ): Promise<void> {
   const supabase = createServiceClient()

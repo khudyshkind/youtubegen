@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import type { SubtitleBlock } from '@/lib/types'
 
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
       })
     )
 
-    await spendCredits(user.id, 3, 'subtitles', project_id)
+    await spendCredits(user.id, CREDIT_COSTS.subtitles, 'subtitles', project_id)
 
     if (project_id) {
       await supabase

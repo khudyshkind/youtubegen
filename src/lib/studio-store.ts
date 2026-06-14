@@ -36,6 +36,10 @@ interface StudioState {
   thumbnailUrl: string | null
   thumbnailBgUrl: string | null
 
+  // Global credits (synced from /api/profile, updated after each generation)
+  credits: number | null
+  setCredits: (n: number) => void
+
   isGenerating: boolean
   generatingStep: string | null
   error: string | null
@@ -111,6 +115,7 @@ const initialState = {
   seo: null,
   thumbnailUrl: null,
   thumbnailBgUrl: null,
+  credits: null as number | null,
   isGenerating: false,
   generatingStep: null,
   error: null,
@@ -138,6 +143,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setSeo: (seo) => set({ seo }),
   setThumbnailUrl: (url) => set({ thumbnailUrl: url }),
   setThumbnailBgUrl: (url) => set({ thumbnailBgUrl: url }),
+  setCredits: (n) => set({ credits: n }),
   setGenerating: (isGenerating, step) =>
     set({ isGenerating, generatingStep: step ?? null }),
   setError: (error) => set({ error }),

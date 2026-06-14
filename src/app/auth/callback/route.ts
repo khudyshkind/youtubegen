@@ -1,19 +1,16 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
+import { applyReferral } from '@/lib/referral'
+import { sendWelcomeEmail } from '@/lib/email'
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
+  const ref = url.searchParams.get('ref')
   const googleError = url.searchParams.get('error')
   const googleErrorDesc = url.searchParams.get('error_description')
   const redirectTo = url.searchParams.get('redirectTo') ?? '/dashboard'
   const origin = url.origin
-
-  console.log('[callback] full URL:', request.url)
-  console.log('[callback] code:', code ? 'present' : 'MISSING')
-  console.log('[callback] google error param:', googleError ?? 'none')
-  console.log('[callback] google error_description:', googleErrorDesc ?? 'none')
-  console.log('[callback] redirectTo:', redirectTo)
 
   if (googleError) {
     console.error('[callback] Google returned error:', googleError, googleErrorDesc)
@@ -34,7 +31,6 @@ export async function GET(request: NextRequest) {
             return request.cookies.getAll()
           },
           setAll(cookiesToSet) {
-            console.log('[callback] setting cookies:', cookiesToSet.map(c => c.name))
             cookiesToSet.forEach(({ name, value, options }) =>
               response.cookies.set(name, value, options)
             )
@@ -52,11 +48,26 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log('[callback] exchange SUCCESS, user:', data.user?.email, 'session expires:', data.session?.expires_at)
-    console.log('[callback] redirecting to:', redirectTo)
+    // Send welcome email for new users (created within last 30 seconds)
+    if (data.user) {
+      const isNew = new Date(data.user.created_at).getTime() > Date.now() - 30_000
+      if (isNew) {
+        void sendWelcomeEmail({
+          email: data.user.email!,
+          name: data.user.user_metadata?.full_name ?? data.user.user_metadata?.name ?? null,
+        })
+      }
+    }
+
+    // Apply referral if ?ref= was present — best-effort, won't block login on failure
+    if (ref && data.user?.id) {
+      applyReferral(data.user.id, ref).catch((err) =>
+        console.error('[callback] applyReferral error:', err)
+      )
+    }
+
     return response
   }
 
-  console.warn('[callback] no code in URL — redirecting to', redirectTo, '(no session set)')
   return NextResponse.redirect(new URL(redirectTo, origin))
 }

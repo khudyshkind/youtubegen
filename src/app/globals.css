@@ -12,15 +12,170 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ── Credits badge shake on deduct ───────────────────── */
+@keyframes credits-shake {
+  0%   { transform: translateX(0); }
+  20%  { transform: translateX(-4px); }
+  40%  { transform: translateX(4px); }
+  60%  { transform: translateX(-3px); }
+  80%  { transform: translateX(2px); }
+  100% { transform: translateX(0); }
+}
+
+/* ── Blob animation ───────────────────────────────────── */
+@keyframes blob {
+  0%,  100% { transform: translate(0, 0) scale(1); }
+  25%        { transform: translate(30px, -40px) scale(1.08); }
+  50%        { transform: translate(-20px, 20px) scale(0.95); }
+  75%        { transform: translate(15px, 35px) scale(1.05); }
+}
+
+.animate-blob { animation: blob 12s infinite ease-in-out; }
+.animation-delay-2000 { animation-delay: 2000ms; }
+.animation-delay-4000 { animation-delay: 4000ms; }
+
+/* ── Scroll reveal ────────────────────────────────────── */
+.reveal {
+  opacity: 0;
+  transform: translateY(36px);
+  transition: opacity 0.65s ease, transform 0.65s ease;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Dark card (glassmorphism) ────────────────────────── */
+.card-dark {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+.card-dark:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(124, 58, 237, 0.45);
+  box-shadow: 0 0 30px rgba(124, 58, 237, 0.18);
+  transform: translateY(-2px);
+}
+
+/* ── Gradient button ──────────────────────────────────── */
+.btn-gradient {
+  background: linear-gradient(135deg, #7C3AED, #2563EB);
+  transition: box-shadow 0.3s ease, transform 0.3s ease, opacity 0.3s ease;
+}
+.btn-gradient:hover {
+  box-shadow: 0 0 32px rgba(124, 58, 237, 0.5);
+  transform: scale(1.025);
+  opacity: 0.92;
+}
+
+/* ── Gradient text ────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #A78BFA, #60A5FA, #F472B6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Ghost button ─────────────────────────────────────── */
+.btn-ghost-dark {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #CBD5E1;
+  transition: border-color 0.3s ease, color 0.3s ease, background 0.3s ease;
+}
+.btn-ghost-dark:hover {
+  border-color: rgba(124, 58, 237, 0.5);
+  color: #fff;
+  background: rgba(124, 58, 237, 0.08);
+}
+
+/* ── Pro card glow ────────────────────────────────────── */
+.pro-card-glow {
+  border: 1px solid rgba(124, 58, 237, 0.6);
+  box-shadow: 0 0 60px rgba(124, 58, 237, 0.35), 0 0 0 1px rgba(124, 58, 237, 0.2) inset;
+}
+
+/* ── Step connector line ──────────────────────────────── */
+.step-line {
+  background: linear-gradient(to right, #7C3AED, #2563EB);
+  opacity: 0.4;
+}
+
+/* ── Reveal from left ─────────────────────────────────── */
+.reveal-left {
+  opacity: 0;
+  transform: translateX(-36px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.reveal-left.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ── Reveal from right ────────────────────────────────── */
+.reveal-right {
+  opacity: 0;
+  transform: translateX(36px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.reveal-right.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ── Respect prefers-reduced-motion ──────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal-left, .reveal-right,
+  .animate-blob, .btn-gradient, .btn-ghost-dark {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* ── Dark scrollbar ───────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.35); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.6); }
+
+/* ── Dark UI wrapper (dashboard / studio / billing) ───── */
+.dark-ui { background: #0A0A0F; color: #F8FAFC; }
+
+.dark-ui input:not([type='range']):not([type='file']):not([type='checkbox']):not([type='radio']),
+.dark-ui textarea {
+  background: rgba(255,255,255,0.05) !important;
+  border-color: rgba(255,255,255,0.1) !important;
+  color: #F8FAFC !important;
+}
+.dark-ui input::placeholder,
+.dark-ui textarea::placeholder { color: rgba(148,163,184,0.4) !important; }
+.dark-ui input:focus,
+.dark-ui textarea:focus {
+  border-color: #7C3AED !important;
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.15), 0 0 10px rgba(124,58,237,0.08) !important;
+  outline: none !important;
+}
+.dark-ui select {
+  background: rgba(255,255,255,0.05) !important;
+  border-color: rgba(255,255,255,0.1) !important;
+  color: #F8FAFC !important;
+}
+.dark-ui select option { background: #13131A; color: #F8FAFC; }
+.dark-ui input[type='range'] { accent-color: #7C3AED !important; }
+.dark-ui audio { filter: invert(0.85) hue-rotate(180deg); border-radius: 8px; }
+
+/* ── Step indicator states ────────────────────────────── */
+.step-active {
+  background: #7C3AED;
+  box-shadow: 0 0 0 4px rgba(124,58,237,0.25), 0 0 16px rgba(124,58,237,0.5);
+}
+.step-done { background: #10B981; box-shadow: 0 0 0 3px rgba(16,185,129,0.2); }
+.step-future { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); }

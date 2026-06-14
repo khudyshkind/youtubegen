@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabase } from '@/lib/supabase-server'
+import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { trackEvent } from '@/lib/analytics'
+import { sendVideoReadyEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import type { SceneImage, SubtitleBlock, SubtitleStyle } from '@/lib/types'
 
@@ -79,6 +81,25 @@ export async function POST(request: NextRequest) {
       .eq('user_id', user.id)
 
     await spendCredits(user.id, 2, 'video', project_id)
+    void trackEvent(user.id, 'step_completed', { step: 'video', project_id })
+    void trackEvent(user.id, 'video_downloaded', { project_id })
+
+    // Fire-and-forget: send "video ready" email
+    void (async () => {
+      try {
+        const svc = createServiceClient()
+        const { data: profile } = await svc.from('profiles').select('email, full_name').eq('id', user.id).single()
+        const { data: project } = await svc.from('projects').select('title').eq('id', project_id).single()
+        if (profile?.email) {
+          await sendVideoReadyEmail(
+            { email: profile.email, name: profile.full_name },
+            { id: project_id, title: project?.title ?? 'Без названия' },
+          )
+        }
+      } catch (e) {
+        console.error('[render] sendVideoReadyEmail error:', e)
+      }
+    })()
 
     return NextResponse.json({ ok: true, data: { video_url } })
   } catch (error) {

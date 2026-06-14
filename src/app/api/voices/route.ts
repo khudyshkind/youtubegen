@@ -7,6 +7,7 @@ interface ElevenLabel {
   accent?: string
   age?: string
   description?: string
+  language?: string
   'use case'?: string
 }
 
@@ -15,6 +16,7 @@ interface OwnVoice {
   name: string
   preview_url?: string | null
   labels?: ElevenLabel
+  fine_tuning?: { language?: string }
 }
 
 interface SharedVoice {
@@ -41,7 +43,76 @@ interface NormalizedVoice {
   is_own: boolean
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────────
+// ─── Language normalisation ─────────────────────────────────────────────────────
+// ElevenLabs returns wildly inconsistent formats: "ru", "RU", "Russian", "russian",
+// "Русский", "английский", etc. Map every known variant to ISO-639-1 lowercase.
+
+const LANG_MAP: Record<string, string> = {
+  // Russian
+  ru: 'ru', russian: 'ru', русский: 'ru',
+  // English
+  en: 'en', english: 'en', английский: 'en',
+  // German
+  de: 'de', german: 'de', deutsch: 'de', немецкий: 'de',
+  // Spanish
+  es: 'es', spanish: 'es', español: 'es', espanol: 'es', испанский: 'es',
+  // French
+  fr: 'fr', french: 'fr', français: 'fr', francais: 'fr', французский: 'fr',
+  // Italian
+  it: 'it', italian: 'it', italiano: 'it', итальянский: 'it',
+  // Portuguese
+  pt: 'pt', portuguese: 'pt', português: 'pt', portugues: 'pt', португальский: 'pt',
+  // Chinese
+  zh: 'zh', chinese: 'zh', китайский: 'zh',
+  // Japanese
+  ja: 'ja', japanese: 'ja', японский: 'ja',
+  // Korean
+  ko: 'ko', korean: 'ko', корейский: 'ko',
+  // Arabic
+  ar: 'ar', arabic: 'ar', арабский: 'ar',
+  // Hindi
+  hi: 'hi', hindi: 'hi', хинди: 'hi',
+  // Dutch
+  nl: 'nl', dutch: 'nl', нидерландский: 'nl',
+  // Polish
+  pl: 'pl', polish: 'pl', polski: 'pl', польский: 'pl',
+  // Turkish
+  tr: 'tr', turkish: 'tr', türkçe: 'tr', turkce: 'tr', турецкий: 'tr',
+  // Swedish
+  sv: 'sv', swedish: 'sv', svenska: 'sv', шведский: 'sv',
+  // Norwegian
+  no: 'no', norwegian: 'no', norsk: 'no', норвежский: 'no',
+  // Danish
+  da: 'da', danish: 'da', dansk: 'da', датский: 'da',
+  // Finnish
+  fi: 'fi', finnish: 'fi', suomi: 'fi', финский: 'fi',
+  // Ukrainian
+  uk: 'uk', ukrainian: 'uk', українська: 'uk', украинский: 'uk',
+  // Czech
+  cs: 'cs', czech: 'cs', čeština: 'cs', cestina: 'cs', чешский: 'cs',
+  // Romanian
+  ro: 'ro', romanian: 'ro', română: 'ro', romana: 'ro', румынский: 'ro',
+  // Hungarian
+  hu: 'hu', hungarian: 'hu', magyar: 'hu', венгерский: 'hu',
+  // Greek
+  el: 'el', greek: 'el', ελληνικά: 'el', греческий: 'el',
+  // Hebrew
+  he: 'he', hebrew: 'he', עברית: 'he', иврит: 'he',
+  // Thai
+  th: 'th', thai: 'th', тайский: 'th',
+  // Indonesian
+  id: 'id', indonesian: 'id', индонезийский: 'id',
+  // Vietnamese
+  vi: 'vi', vietnamese: 'vi', вьетнамский: 'vi',
+}
+
+function normalizeLang(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const key = raw.toLowerCase().trim()
+  return LANG_MAP[key] ?? null  // unknown format → null (treat as "no language")
+}
+
+// ─── Voice normalisation ────────────────────────────────────────────────────────
 
 function parseGender(raw?: string): 'M' | 'F' | null {
   const g = raw?.toLowerCase()
@@ -52,6 +123,7 @@ function parseGender(raw?: string): 'M' | 'F' | null {
 
 function normalizeOwn(v: OwnVoice): NormalizedVoice {
   const desc = [v.labels?.description, v.labels?.['use case']].filter(Boolean).join(', ')
+  const rawLang = v.labels?.language ?? v.fine_tuning?.language
   return {
     voice_id: v.voice_id,
     name: v.name,
@@ -59,7 +131,7 @@ function normalizeOwn(v: OwnVoice): NormalizedVoice {
     gender: parseGender(v.labels?.gender),
     description: desc || null,
     accent: v.labels?.accent ?? null,
-    language: null,
+    language: normalizeLang(rawLang),
     is_own: true,
   }
 }
@@ -73,14 +145,14 @@ function normalizeShared(v: SharedVoice): NormalizedVoice {
     gender: parseGender(v.gender),
     description: desc || null,
     accent: v.accent ?? null,
-    language: v.language ?? null,
+    language: normalizeLang(v.language),
     is_own: false,
   }
 }
 
 // ─── Fetch helpers ──────────────────────────────────────────────────────────────
 
-async function fetchOwnVoices(apiKey: string): Promise<NormalizedVoice[]> {
+async function fetchOwnVoices(apiKey: string, language: string): Promise<NormalizedVoice[]> {
   try {
     const res = await fetch('https://api.elevenlabs.io/v1/voices', {
       headers: { 'xi-api-key': apiKey },
@@ -88,7 +160,23 @@ async function fetchOwnVoices(apiKey: string): Promise<NormalizedVoice[]> {
     })
     if (!res.ok) return []
     const data = await res.json()
-    return ((data.voices ?? []) as OwnVoice[]).map(normalizeOwn)
+
+    // Diagnostic: show raw labels of first few own voices
+    const raw = (data.voices ?? []) as OwnVoice[]
+    console.log('[voices] own voice sample labels:', raw.slice(0, 3).map((v) => ({
+      name: v.name,
+      labels: v.labels,
+      fine_tuning_lang: v.fine_tuning?.language,
+    })))
+
+    const all = raw.map(normalizeOwn)
+
+    if (!language) return all
+
+    // When a specific language is requested: only show own voices that have a
+    // matching language label. Voices with NO language info are excluded —
+    // otherwise they pollute every language-filtered list.
+    return all.filter((v) => v.language === language)
   } catch {
     return []
   }
@@ -120,19 +208,23 @@ async function fetchSharedPage(
 }
 
 async function fetchSharedVoices(apiKey: string, language: string): Promise<NormalizedVoice[]> {
-  // Always fetch page 1; then if has_more fetch pages 2+3 in parallel (max 300 shared)
-  const page1 = await fetchSharedPage(apiKey, language, 1)
-  const all = [...page1.voices]
+  const page0 = await fetchSharedPage(apiKey, language, 0)
+  const all = [...page0.voices]
 
-  if (page1.has_more) {
-    const [p2, p3] = await Promise.all([
+  if (page0.has_more) {
+    const [p1, p2] = await Promise.all([
+      fetchSharedPage(apiKey, language, 1),
       fetchSharedPage(apiKey, language, 2),
-      fetchSharedPage(apiKey, language, 3),
     ])
-    all.push(...p2.voices)
-    if (p2.has_more) all.push(...p3.voices)
+    all.push(...p1.voices)
+    if (p1.has_more) all.push(...p2.voices)
   }
 
+  // Secondary client-side filter: ElevenLabs server-side filter isn't always strict.
+  // If language was requested, drop any voices whose language tag doesn't match.
+  if (language) {
+    return all.filter((v) => !v.language || v.language === language)
+  }
   return all
 }
 
@@ -143,16 +235,13 @@ export async function GET(request: NextRequest) {
     const apiKey = process.env.ELEVENLABS_API_KEY ?? ''
     const language = request.nextUrl.searchParams.get('language') ?? ''
 
-    // Fetch own voices + shared in parallel
     const [ownVoices, sharedVoices] = await Promise.all([
-      apiKey ? fetchOwnVoices(apiKey) : Promise.resolve([]),
+      apiKey ? fetchOwnVoices(apiKey, language) : Promise.resolve([]),
       apiKey ? fetchSharedVoices(apiKey, language) : Promise.resolve([]),
     ])
 
-    // Own voices first, then deduplicated shared voices
     const ownIds = new Set(ownVoices.map((v) => v.voice_id))
     const shared = sharedVoices.filter((v) => !ownIds.has(v.voice_id))
-
     const voices = [...ownVoices, ...shared]
 
     console.log(`[api/voices] own=${ownVoices.length} shared=${shared.length} total=${voices.length} lang="${language}"`)
@@ -161,7 +250,7 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error('[api/voices]', err instanceof Error ? err.message : err)
     return NextResponse.json(
-      { ok: false, error: 'Ошибка соединения с ElevenLabs' },
+      { ok: false, error: 'Ошибка соединения с голосовым сервисом' },
       { status: 502 }
     )
   }

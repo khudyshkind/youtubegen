@@ -25,13 +25,15 @@ export default function DeleteProjectButton({ projectId }: { projectId: string }
         <button
           onClick={handleDelete}
           disabled={loading}
-          className="px-2 py-1 bg-red-500 hover:bg-red-600 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
+          className="px-2 py-1 text-red-400 text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
+          style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)' }}
         >
           {loading ? '...' : 'Да'}
         </button>
         <button
           onClick={() => setConfirming(false)}
-          className="px-2 py-1 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          className="px-2 py-1 text-slate-400 text-xs font-medium rounded-lg transition-colors hover:text-slate-200"
+          style={{ border: '1px solid rgba(255,255,255,0.1)' }}
         >
           Нет
         </button>
@@ -43,7 +45,10 @@ export default function DeleteProjectButton({ projectId }: { projectId: string }
     <button
       onClick={() => setConfirming(true)}
       title="Удалить проект"
-      className="shrink-0 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+      className="shrink-0 p-1.5 rounded-lg transition-colors text-slate-600 hover:text-red-400"
+      style={{ '--hover-bg': 'rgba(239,68,68,0.08)' } as React.CSSProperties}
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(239,68,68,0.08)')}
+      onMouseLeave={(e) => (e.currentTarget.style.background = '')}
     >
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

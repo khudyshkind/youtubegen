@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SceneImage } from '@/lib/types'
+import { refreshCredits } from '@/lib/refresh-credits'
 
 const INTERVAL_PRESETS = [5, 8, 10, 15, 20] as const
 
@@ -265,6 +266,7 @@ export default function Step5Images() {
         throw new Error(json.error)
       }
       setSceneImages(json.data.scene_images as SceneImage[])
+      void refreshCredits()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка генерации иллюстраций')
     } finally {
@@ -309,6 +311,7 @@ export default function Step5Images() {
       const newImage: SceneImage = { ...raw, url: raw.url ? `${raw.url}?t=${Date.now()}` : raw.url }
       const latest = useStudioStore.getState().sceneImages
       setSceneImages(latest.map((img) => img.scene_index === sceneIndex ? newImage : img))
+      void refreshCredits()
       closeEditor()
     } catch (err) {
       setRegenErrors((prev) => ({ ...prev, [sceneIndex]: err instanceof Error ? err.message : 'Ошибка перегенерации' }))
