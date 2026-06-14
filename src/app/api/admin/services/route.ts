@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase-server'
+import { env } from '@/lib/env'
 
 export const maxDuration = 30
 
@@ -23,10 +24,6 @@ export interface ServiceResult {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
-
-function envVar(name: string): string {
-  return process.env[name] ?? ''
-}
 
 async function safeFetch(url: string, init?: RequestInit, timeoutMs = 7000): Promise<Response> {
   const controller = new AbortController()
@@ -55,7 +52,7 @@ function formatUptime(seconds: number): string {
 
 async function checkAnthropic(): Promise<ServiceResult> {
   const base = { key: 'anthropic', name: 'Anthropic (Claude)', icon: '🤖', link: 'https://console.anthropic.com' }
-  const apiKey = envVar('ANTHROPIC_API_KEY')
+  const apiKey = env('ANTHROPIC_API_KEY')
   if (!apiKey) return unconfigured(base, 'ANTHROPIC_API_KEY')
   try {
     const res = await safeFetch('https://api.anthropic.com/v1/models', {
@@ -81,7 +78,7 @@ async function checkAnthropic(): Promise<ServiceResult> {
 
 async function checkOpenAI(): Promise<ServiceResult> {
   const base = { key: 'openai', name: 'OpenAI (Whisper)', icon: '🎤', link: 'https://platform.openai.com/usage' }
-  const apiKey = envVar('OPENAI_API_KEY')
+  const apiKey = env('OPENAI_API_KEY')
   if (!apiKey) return unconfigured(base, 'OPENAI_API_KEY')
   try {
     const res = await safeFetch('https://api.openai.com/v1/models', {
@@ -104,7 +101,7 @@ async function checkOpenAI(): Promise<ServiceResult> {
 
 async function checkElevenLabs(): Promise<ServiceResult> {
   const base = { key: 'elevenlabs', name: 'ElevenLabs (TTS)', icon: '🔊', link: 'https://elevenlabs.io/app/subscription' }
-  const apiKey = envVar('ELEVENLABS_API_KEY')
+  const apiKey = env('ELEVENLABS_API_KEY')
   if (!apiKey) return unconfigured(base, 'ELEVENLABS_API_KEY')
   try {
     const res = await safeFetch('https://api.elevenlabs.io/v1/user', {
@@ -144,7 +141,7 @@ async function checkElevenLabs(): Promise<ServiceResult> {
 
 async function checkFal(): Promise<ServiceResult> {
   const base = { key: 'fal', name: 'fal.ai (Flux / Изображения)', icon: '🎨', link: 'https://fal.ai/dashboard' }
-  const apiKey = envVar('FAL_KEY')
+  const apiKey = env('FAL_KEY')
   if (!apiKey) return unconfigured(base, 'FAL_KEY')
   // fal.ai doesn't expose a public balance REST endpoint — just confirm key is set
   return {
@@ -158,7 +155,7 @@ async function checkFal(): Promise<ServiceResult> {
 
 async function checkResend(): Promise<ServiceResult> {
   const base = { key: 'resend', name: 'Resend (Email)', icon: '📧', link: 'https://resend.com/overview' }
-  const apiKey = envVar('RESEND_API_KEY')
+  const apiKey = env('RESEND_API_KEY')
   if (!apiKey) return unconfigured(base, 'RESEND_API_KEY')
   try {
     const res = await safeFetch('https://api.resend.com/domains', {
@@ -186,7 +183,7 @@ async function checkResend(): Promise<ServiceResult> {
 
 async function checkRailway(): Promise<ServiceResult> {
   const base = { key: 'railway', name: 'Railway (Video Server)', icon: '🎬', link: 'https://railway.app' }
-  const railwayUrl = envVar('RAILWAY_VIDEO_SERVER_URL')
+  const railwayUrl = env('RAILWAY_VIDEO_SERVER_URL')
   if (!railwayUrl) return unconfigured(base, 'RAILWAY_VIDEO_SERVER_URL')
   const healthUrl = `${railwayUrl.replace(/\/$/, '')}/health`
   try {
@@ -219,14 +216,14 @@ async function checkRailway(): Promise<ServiceResult> {
 }
 
 async function checkSupabase(): Promise<ServiceResult> {
-  const supabaseUrl = envVar('NEXT_PUBLIC_SUPABASE_URL')
+  const supabaseUrl = env('NEXT_PUBLIC_SUPABASE_URL')
   const base = {
     key: 'supabase', name: 'Supabase (БД + Storage)', icon: '🗄️',
     link: supabaseUrl
       ? `https://supabase.com/dashboard/project/${supabaseUrl.split('.')[0].split('//')[1]}`
       : 'https://supabase.com',
   }
-  const serviceKey = envVar('SUPABASE_SERVICE_ROLE_KEY')
+  const serviceKey = env('SUPABASE_SERVICE_ROLE_KEY')
   if (!serviceKey) return unconfigured(base, 'SUPABASE_SERVICE_ROLE_KEY')
   try {
     const supabase = createServiceClient()
@@ -257,7 +254,7 @@ async function checkSupabase(): Promise<ServiceResult> {
 
 async function checkPaddle(): Promise<ServiceResult> {
   const base = { key: 'paddle', name: 'Paddle (Платежи)', icon: '💳', link: 'https://vendors.paddle.com' }
-  const apiKey = envVar('PADDLE_API_KEY')
+  const apiKey = env('PADDLE_API_KEY')
   if (!apiKey) return unconfigured(base, 'PADDLE_API_KEY')
   try {
     const [subsRes, txRes] = await Promise.all([
@@ -335,7 +332,7 @@ async function checkVercel(): Promise<ServiceResult> {
     key: 'vercel', name: 'Vercel (Деплой)', icon: '▲',
     link: 'https://vercel.com/you-tube-gen-s-projects/youtubegen',
   }
-  const token = envVar('VERCEL_TOKEN')
+  const token = env('VERCEL_TOKEN')
   if (!token) return unconfigured(base, 'VERCEL_TOKEN')
   try {
     const res = await safeFetch(
