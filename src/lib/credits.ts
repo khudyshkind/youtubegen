@@ -23,7 +23,7 @@ export async function hasCredits(
 export async function spendCredits(
   userId: string,
   amount: number,
-  operation: keyof typeof CREDIT_COSTS,
+  operation: string,
   projectId?: string
 ): Promise<{ ok: boolean; remaining: number }> {
   const supabase = createServiceClient()
@@ -71,6 +71,30 @@ export async function addCredits(
     p_operation: operation,
     p_project_id: projectId ?? null,
   })
+}
+
+export async function requireCreditsAmount(
+  userId: string,
+  amount: number,
+  supabase?: SupabaseClient
+): Promise<ApiResponse<{ credits: number }>> {
+  const client = supabase ?? createServiceClient()
+  const { data, error } = await client
+    .from('profiles')
+    .select('credits')
+    .eq('id', userId)
+    .single()
+
+  if (error) {
+    console.error('[requireCreditsAmount] DB error:', error.message)
+    return { ok: false, error: 'Ошибка проверки кредитов', code: 'NO_CREDITS' }
+  }
+
+  const credits = data?.credits ?? 0
+  if (credits < amount) {
+    return { ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }
+  }
+  return { ok: true, data: { credits } }
 }
 
 // Pass the user's session supabase client so the JWT satisfies RLS — no service role needed

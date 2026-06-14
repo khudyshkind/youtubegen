@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
-import { requireCredits, spendCredits } from '@/lib/credits'
+import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
-import { CREDIT_COSTS } from '@/lib/types'
+import { audioCost } from '@/lib/types'
+import type { AudioEngine } from '@/lib/types'
 import { env } from '@/lib/env'
 
-// Allow up to 5 minutes — long scripts can take time to synthesize
 export const maxDuration = 300
 
 const ELEVENLABS_BASE = 'https://api.elevenlabs.io'
 
-// Maps UI style labels to ElevenLabs 0–1 style exaggeration
 const STYLE_EXAGGERATION: Record<string, number> = {
   neutral: 0,
   conversational: 0.2,
@@ -19,16 +18,18 @@ const STYLE_EXAGGERATION: Record<string, number> = {
 }
 
 interface AudioRequest {
+  engine?: AudioEngine
   text: string
   voice_id: string
   project_id?: string
+  // ElevenLabs-specific
   stability?: number
   similarity_boost?: number
   speech_rate?: number
   voice_style?: string | number
   clarity_boost?: boolean
+  paragraph_pauses?: boolean
 }
-
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest) {
 
     const body: AudioRequest = await request.json()
     const {
+      engine = 'elevenlabs',
       text,
       voice_id,
       project_id,
@@ -55,55 +57,123 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Текст и голос обязательны' }, { status: 400 })
     }
 
-    const styleExaggeration = typeof voice_style === 'number'
-      ? voice_style
-      : STYLE_EXAGGERATION[voice_style] ?? 0
+    const validEngines: AudioEngine[] = ['elevenlabs', 'openai', 'google']
+    if (!validEngines.includes(engine)) {
+      return NextResponse.json({ ok: false, error: 'Неверный движок TTS' }, { status: 400 })
+    }
 
-    const creditCost = CREDIT_COSTS.audio
+    const chars = text.length
+    const cost = Math.max(1, audioCost(chars, engine))
 
-    const check = await requireCredits(user.id, 'audio', supabase)
+    const check = await requireCreditsAmount(user.id, cost, supabase)
     if (!check.ok) {
       return NextResponse.json(check, { status: 402 })
     }
 
-    // Call ElevenLabs REST API directly — avoids SDK streaming issues in serverless.
-    // mp3_44100_64 is available on all ElevenLabs plans (128kbps requires Creator+).
-    // speed is NOT part of voice_settings in REST API v1 — omitting it prevents 422.
-    const elevenRes = await fetch(
-      `${ELEVENLABS_BASE}/v1/text-to-speech/${voice_id}?output_format=mp3_44100_64`,
-      {
+    let audioBuffer: Buffer
+
+    if (engine === 'openai') {
+      const openaiKey = env('OPENAI_API_KEY')
+      if (!openaiKey) {
+        return NextResponse.json({ ok: false, error: 'OpenAI API key не настроен' }, { status: 503 })
+      }
+
+      const openaiRes = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
         headers: {
-          'xi-api-key': env('ELEVENLABS_API_KEY'),
+          'Authorization': `Bearer ${openaiKey}`,
           'Content-Type': 'application/json',
-          Accept: 'audio/mpeg',
         },
         body: JSON.stringify({
-          text,
-          model_id: 'eleven_multilingual_v2',
-          voice_settings: {
-            stability,
-            similarity_boost,
-            style: styleExaggeration,
-            use_speaker_boost: clarity_boost,
-          },
+          model: 'tts-1',
+          voice: voice_id,
+          input: text,
+          response_format: 'mp3',
         }),
-      }
-    )
+      })
 
-    if (!elevenRes.ok) {
-      const errBody = await elevenRes.text().catch(() => '(no body)')
-      console.error(`[generate/audio] ElevenLabs ${elevenRes.status}:`, errBody)
-      return NextResponse.json(
-        { ok: false, error: 'Ошибка синтеза речи — проверьте настройки голоса' },
-        { status: 502 }
+      if (!openaiRes.ok) {
+        const errBody = await openaiRes.text().catch(() => '')
+        console.error('[generate/audio] OpenAI TTS error:', openaiRes.status, errBody.slice(0, 200))
+        return NextResponse.json({ ok: false, error: 'Ошибка синтеза речи OpenAI' }, { status: 502 })
+      }
+
+      audioBuffer = Buffer.from(await openaiRes.arrayBuffer())
+
+    } else if (engine === 'google') {
+      const googleKey = env('GOOGLE_TTS_API_KEY')
+      if (!googleKey) {
+        return NextResponse.json({ ok: false, error: 'Google TTS API key не настроен' }, { status: 503 })
+      }
+
+      // Extract BCP-47 language code from voice name (e.g. "ru-RU-Standard-A" → "ru-RU")
+      const langCode = voice_id.split('-').slice(0, 2).join('-') || 'ru-RU'
+
+      const googleRes = await fetch(
+        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${googleKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input: { text },
+            voice: { languageCode: langCode, name: voice_id },
+            audioConfig: { audioEncoding: 'MP3' },
+          }),
+        }
       )
+
+      if (!googleRes.ok) {
+        const errBody = await googleRes.text().catch(() => '')
+        console.error('[generate/audio] Google TTS error:', googleRes.status, errBody.slice(0, 200))
+        return NextResponse.json({ ok: false, error: 'Ошибка синтеза речи Google' }, { status: 502 })
+      }
+
+      const googleJson = await googleRes.json() as { audioContent?: string }
+      if (!googleJson.audioContent) {
+        return NextResponse.json({ ok: false, error: 'Google TTS вернул пустой ответ' }, { status: 502 })
+      }
+
+      audioBuffer = Buffer.from(googleJson.audioContent, 'base64')
+
+    } else {
+      // ElevenLabs
+      const styleExaggeration = typeof voice_style === 'number'
+        ? voice_style
+        : STYLE_EXAGGERATION[voice_style] ?? 0
+
+      const elevenRes = await fetch(
+        `${ELEVENLABS_BASE}/v1/text-to-speech/${voice_id}?output_format=mp3_44100_64`,
+        {
+          method: 'POST',
+          headers: {
+            'xi-api-key': env('ELEVENLABS_API_KEY'),
+            'Content-Type': 'application/json',
+            Accept: 'audio/mpeg',
+          },
+          body: JSON.stringify({
+            text,
+            model_id: 'eleven_multilingual_v2',
+            voice_settings: {
+              stability,
+              similarity_boost,
+              style: styleExaggeration,
+              use_speaker_boost: clarity_boost,
+            },
+          }),
+        }
+      )
+
+      if (!elevenRes.ok) {
+        const errBody = await elevenRes.text().catch(() => '')
+        console.error('[generate/audio] ElevenLabs error:', elevenRes.status, errBody.slice(0, 200))
+        return NextResponse.json({ ok: false, error: 'Ошибка синтеза речи — проверьте настройки голоса' }, { status: 502 })
+      }
+
+      audioBuffer = Buffer.from(await elevenRes.arrayBuffer())
     }
 
-    const audioBuffer = Buffer.from(await elevenRes.arrayBuffer())
     if (audioBuffer.byteLength === 0) {
-      console.error('[generate/audio] ElevenLabs returned empty audio buffer')
-      return NextResponse.json({ ok: false, error: 'Ошибка генерации аудио' }, { status: 502 })
+      return NextResponse.json({ ok: false, error: 'Получен пустой аудио буфер' }, { status: 502 })
     }
 
     // Upload to Supabase Storage
@@ -112,21 +182,16 @@ export async function POST(request: NextRequest) {
 
     const { error: uploadError } = await serviceClient.storage
       .from('audio')
-      .upload(storagePath, audioBuffer, {
-        contentType: 'audio/mpeg',
-        upsert: true,
-      })
+      .upload(storagePath, audioBuffer, { contentType: 'audio/mpeg', upsert: true })
 
     if (uploadError) {
       console.error('[generate/audio] Supabase upload error:', uploadError.message)
       return NextResponse.json({ ok: false, error: 'Ошибка загрузки аудио' }, { status: 500 })
     }
 
-    const { data: { publicUrl } } = serviceClient.storage
-      .from('audio')
-      .getPublicUrl(storagePath)
+    const { data: { publicUrl } } = serviceClient.storage.from('audio').getPublicUrl(storagePath)
 
-    await spendCredits(user.id, creditCost, 'audio', project_id)
+    await spendCredits(user.id, cost, `audio_${engine}`, project_id)
 
     if (project_id) {
       await supabase
@@ -136,7 +201,7 @@ export async function POST(request: NextRequest) {
         .eq('user_id', user.id)
     }
 
-    void trackEvent(user.id, 'step_completed', { step: 'audio', project_id })
+    void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id })
     return NextResponse.json({ ok: true, data: { audio_url: publicUrl } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)

@@ -4,13 +4,24 @@ export const CREDIT_COSTS = {
   script_sonnet: 1,
   script_opus: 2,
   script_gpt: 1,
-  audio: 2,
   subtitles: 1,
   image: 1,
   video: 2,
   seo: 1,
   thumbnail: 1,
 } as const
+
+export type AudioEngine = 'elevenlabs' | 'openai' | 'google'
+
+export const AUDIO_CREDITS_PER_1000_CHARS: Record<AudioEngine, number> = {
+  elevenlabs: 3,
+  openai: 1,
+  google: 1,
+}
+
+export function audioCost(chars: number, engine: AudioEngine): number {
+  return Math.ceil(chars / 1000) * AUDIO_CREDITS_PER_1000_CHARS[engine]
+}
 
 export const PLAN_CREDITS: Record<Plan, number> = {
   free: 20,

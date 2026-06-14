@@ -22,7 +22,7 @@ const PIPELINE_STEPS = [
 const CREDIT_ROWS = [
   { label: 'Сценарий (Sonnet)', cost: CREDIT_COSTS.script_sonnet },
   { label: 'Сценарий (Opus)', cost: CREDIT_COSTS.script_opus },
-  { label: 'Озвучка', cost: CREDIT_COSTS.audio },
+  { label: 'Озвучка (за 1000 симв.)', cost: '1–3' },
   { label: 'Субтитры', cost: CREDIT_COSTS.subtitles },
   { label: 'Иллюстрация (за шт.)', cost: CREDIT_COSTS.image },
   { label: 'Сборка видео', cost: CREDIT_COSTS.video },
