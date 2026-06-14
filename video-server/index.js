@@ -44,21 +44,25 @@ const KEYWORDS = [
 ]
 
 const SEEN_URLS_PATH = path.join(__dirname, 'seen_urls.json')
+const QUEUE_PATH     = path.join(__dirname, 'content_queue.json')
 
 // In-memory state (resets on restart)
 let pendingPost = null            // { text, imageUrl, topic }
 let pendingMonitorPost = null     // { post, source, url, score, topic }
 let awaitingTopic = false         // true after "✍️ Написать пост"
 let awaitingEdit  = false         // true after "✏️ Редактировать" on monitor post
+let awaitingPlan  = false         // true after plan_add callback
+let awaitingTime  = false         // true after plan_set_time callback
 const config        = { autoPublish: false }
 const monitorConfig = { enabled: true }
+const planConfig    = { paused: false, postHour: 12 }
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
 const MAIN_KB = {
   keyboard: [
-    [{ text: '💡 Идея' },         { text: '📊 Статистика' }],
-    [{ text: '✍️ Написать пост' }, { text: '📡 Мониторинг' }],
-    [{ text: '⚙️ Настройки' }],
+    [{ text: '💡 Идея' },           { text: '📊 Статистика' }],
+    [{ text: '✍️ Написать пост' },   { text: '📡 Мониторинг' }],
+    [{ text: '📅 Контент-план' },    { text: '⚙️ Настройки' }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -79,8 +83,23 @@ function settingsInline() {
     inline_keyboard: [
       [{ text: config.autoPublish ? '🟢 Автопубликация: ВКЛ' : '🔴 Автопубликация: ВЫКЛ', callback_data: 'toggle_auto' }],
       [{ text: monitorConfig.enabled ? '🟢 Мониторинг: ВКЛ' : '🔴 Мониторинг: ВЫКЛ', callback_data: 'toggle_monitor' }],
-      [{ text: '⏰ Расписание: Пн 10:00 UTC', callback_data: 'noop' }],
+      [{ text: `⏰ Время постинга: ${String(planConfig.postHour).padStart(2, '0')}:00 UTC`, callback_data: 'plan_set_time' }],
       [{ text: '🌐 Часовой пояс: UTC', callback_data: 'noop' }],
+    ],
+  }
+}
+
+function planInline() {
+  return {
+    inline_keyboard: [
+      [
+        { text: '➕ Добавить темы',   callback_data: 'plan_add' },
+        { text: '🗑 Очистить',        callback_data: 'plan_clear' },
+      ],
+      [
+        { text: planConfig.paused ? '▶️ Возобновить' : '⏸ Пауза', callback_data: 'plan_pause' },
+        { text: '▶️ Запустить сейчас', callback_data: 'plan_post_now' },
+      ],
     ],
   }
 }
@@ -499,6 +518,58 @@ async function runMonitor() {
   console.log('[monitor] scan done')
 }
 
+// ── Content plan (queue) ──────────────────────────────────────────────────────
+function loadQueue() {
+  try { return JSON.parse(fs.readFileSync(QUEUE_PATH, 'utf8')) } catch { return [] }
+}
+
+function saveQueue(queue) {
+  try { fs.writeFileSync(QUEUE_PATH, JSON.stringify(queue, null, 2)) } catch (e) { console.warn('[plan] saveQueue:', e.message) }
+}
+
+function queueStats(queue) {
+  return {
+    pending:   queue.filter(i => i.status === 'pending').length,
+    published: queue.filter(i => i.status === 'published').length,
+    declined:  queue.filter(i => i.status === 'declined').length,
+  }
+}
+
+function planStatusText(queue) {
+  const s = queueStats(queue)
+  const next = queue.find(i => i.status === 'pending')
+  const pauseNote = planConfig.paused ? '\n\n⏸ *Автопостинг на паузе*' : ''
+  return (
+    `📋 *Контент-план*\n\n` +
+    `✅ Опубликовано: ${s.published}\n` +
+    `⏳ В очереди: ${s.pending}\n` +
+    `❌ Отклонено: ${s.declined}\n\n` +
+    `⏰ Время постинга: *${String(planConfig.postHour).padStart(2, '0')}:00 UTC*\n` +
+    (next ? `📌 Следующий: *${next.topic.slice(0, 60)}*` : '📭 Очередь пуста') +
+    pauseNote
+  )
+}
+
+async function postFromQueue(chatId = OWNER_ID) {
+  if (planConfig.paused) { console.log('[plan] paused'); return }
+  const queue = loadQueue()
+  const item = queue.find(i => i.status === 'pending')
+  if (!item) {
+    console.log('[plan] queue empty')
+    if (OWNER_ID) await sendTo(OWNER_ID, '📭 Контент-план пуст. Добавь новые темы через 📅 Контент-план')
+    return
+  }
+  console.log('[plan] posting topic:', item.topic.slice(0, 50))
+  try {
+    await generateAndHandle(chatId, item.topic)
+    item.status = 'published'
+    saveQueue(queue)
+  } catch (err) {
+    console.error('[plan] post failed:', err.message)
+    if (OWNER_ID) await sendTo(OWNER_ID, `❌ Ошибка автопостинга: ${err.message.slice(0, 120)}`)
+  }
+}
+
 // ── Core flow: show preview with inline buttons ───────────────────────────────
 async function showPreview(chatId, post, imageUrl, topic) {
   pendingPost = { text: post, imageUrl, topic }
@@ -616,6 +687,55 @@ async function handleCallback(cq) {
       console.error('[monitor] manual scan error:', err.message)
       sendTo(chatId, `❌ Ошибка при проверке: ${err.message.slice(0, 100)}`)
     })
+
+  } else if (data === 'plan_add') {
+    awaitingPlan = true
+    await clearButtons()
+    await sendTo(chatId,
+      '📝 Отправь список тем для постинга, каждая с новой строки:\n\n' +
+      '_Пример:_\nОчеловечивание текста\n321 голос на 28 языках\nИллюстрации с субтитрами')
+
+  } else if (data === 'plan_clear') {
+    const queue = loadQueue()
+    const cleared = queue.filter(i => i.status === 'pending').length
+    queue.forEach(i => { if (i.status === 'pending') i.status = 'declined' })
+    saveQueue(queue)
+    await clearButtons()
+    await sendTo(chatId, `🗑 Очищено тем из очереди: *${cleared}*`)
+
+  } else if (data === 'plan_pause') {
+    planConfig.paused = !planConfig.paused
+    const queue = loadQueue()
+    await tgApi('editMessageText', {
+      chat_id: chatId, message_id: msgId,
+      text: planStatusText(queue),
+      parse_mode: 'Markdown',
+      reply_markup: planInline(),
+    })
+    await sendTo(chatId, planConfig.paused
+      ? '⏸ Автопостинг *приостановлен*'
+      : '▶️ Автопостинг *возобновлён*')
+
+  } else if (data === 'plan_post_now') {
+    await clearButtons()
+    const queue = loadQueue()
+    const next = queue.find(i => i.status === 'pending')
+    if (!next) { await sendTo(chatId, '📭 Очередь пуста'); return }
+    await sendTo(chatId, `⏳ Публикую: *${next.topic.slice(0, 60)}*`)
+    await postFromQueue(chatId)
+
+  } else if (data === 'plan_set_time') {
+    awaitingTime = true
+    await sendTo(chatId,
+      `⏰ Текущее время постинга: *${String(planConfig.postHour).padStart(2, '0')}:00 UTC*\n\n` +
+      'Отправь новое время (час, 0–23):\n_Например: `10` или `18`_')
+
+  } else if (data === 'plan_decline') {
+    const queue = loadQueue()
+    const item = queue.find(i => i.status === 'pending')
+    if (item) { item.status = 'declined'; saveQueue(queue) }
+    await clearButtons()
+    await sendTo(chatId, '❌ Тема из плана отклонена')
   }
   // 'noop' → ignore
 }
@@ -662,6 +782,36 @@ app.post('/telegram/webhook', async (req, res) => {
         },
       })
     }
+    return
+  }
+
+  // Awaiting list of topics for content plan
+  if (awaitingPlan && text && !text.startsWith('/')) {
+    awaitingPlan = false
+    const topics = text.split('\n').map(t => t.trim()).filter(t => t.length > 0)
+    if (!topics.length) { await sendTo(chatId, '❌ Список тем пуст'); return }
+    const queue = loadQueue()
+    for (const topic of topics) {
+      queue.push({ topic, status: 'pending', addedAt: new Date().toISOString() })
+    }
+    saveQueue(queue)
+    const pending = queue.filter(i => i.status === 'pending').length
+    await sendTo(chatId,
+      `✅ Добавлено тем: *${topics.length}*\n` +
+      `📋 Всего в очереди: *${pending}*\n` +
+      `⏰ Следующая публикация: *${String(planConfig.postHour).padStart(2, '0')}:00 UTC*`)
+    return
+  }
+
+  // Awaiting new posting hour
+  if (awaitingTime && text && !text.startsWith('/')) {
+    awaitingTime = false
+    const match = text.match(/\d+/)
+    const hour = match ? Math.min(23, Math.max(0, parseInt(match[0], 10))) : null
+    if (hour === null) { await sendTo(chatId, '❌ Укажи час от 0 до 23'); return }
+    planConfig.postHour = hour
+    await sendTo(chatId,
+      `✅ Время постинга обновлено: *${String(hour).padStart(2, '0')}:00 UTC*`)
     return
   }
 
@@ -740,6 +890,17 @@ app.post('/telegram/webhook', async (req, res) => {
         break
       }
 
+      case (text === '📅 Контент-план' || text === '/plan'): {
+        const queue = loadQueue()
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: planStatusText(queue),
+          parse_mode: 'Markdown',
+          reply_markup: planInline(),
+        })
+        break
+      }
+
       case (text === '⚙️ Настройки' || text === '/settings'):
         await tgApi('sendMessage', {
           chat_id: chatId,
@@ -766,7 +927,8 @@ app.post('/telegram/webhook', async (req, res) => {
       }
 
       default:
-        if (!awaitingTopic) await sendTo(chatId, 'Используй кнопки внизу или /help')
+        if (!awaitingTopic && !awaitingPlan && !awaitingTime && !awaitingEdit)
+          await sendTo(chatId, 'Используй кнопки внизу или /help')
     }
   } catch (err) {
     console.error('[tg/webhook]', err.message)
@@ -784,6 +946,13 @@ cron.schedule('0 10 * * 1', async () => {
 cron.schedule('0 */4 * * *', async () => {
   console.log('[cron] monitor scan')
   try { await runMonitor() } catch (err) { console.error('[cron/monitor]', err.message) }
+}, { timezone: 'UTC' })
+
+// ── Content plan cron — every hour, fires at configured postHour ──────────────
+cron.schedule('0 * * * *', async () => {
+  if (new Date().getUTCHours() !== planConfig.postHour) return
+  console.log('[cron] plan post at', planConfig.postHour + ':00 UTC')
+  try { await postFromQueue() } catch (err) { console.error('[cron/plan]', err.message) }
 }, { timezone: 'UTC' })
 
 // ── Register webhook at startup ───────────────────────────────────────────────
