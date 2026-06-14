@@ -7,6 +7,23 @@ import type { SceneImage } from '@/lib/types'
 
 const INTERVAL_PRESETS = [5, 8, 10, 15, 20] as const
 
+// Parse timecode "M:SS.mm" → seconds. Returns -1 if invalid.
+function parseTimecode(tc: string | undefined): number {
+  if (!tc) return -1
+  const [minPart, secPart] = tc.split(':')
+  const mins = parseInt(minPart || '0', 10)
+  const secs = parseFloat(secPart || '0')
+  if (isNaN(mins) || isNaN(secs)) return -1
+  return mins * 60 + secs
+}
+
+function formatTime(sec: number): string {
+  if (!isFinite(sec) || sec < 0) return '0:00'
+  const m = Math.floor(sec / 60)
+  const s = Math.floor(sec % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
 function SpinnerIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24">
@@ -25,9 +42,135 @@ function RefreshIcon({ className }: { className?: string }) {
   )
 }
 
+function AudioSyncPlayer({
+  audioUrl,
+  images,
+  audioRef,
+  onActiveChange,
+}: {
+  audioUrl: string
+  images: SceneImage[]
+  audioRef: React.RefObject<HTMLAudioElement | null>
+  onActiveChange: (idx: number | null) => void
+}) {
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+
+  function handleTimeUpdate() {
+    const audio = audioRef.current
+    if (!audio) return
+    const t = audio.currentTime
+    setCurrentTime(t)
+
+    let found: number | null = null
+    for (let i = 0; i < images.length; i++) {
+      const start = parseTimecode(images[i].timecode_start)
+      const end = parseTimecode(images[i].timecode_end)
+      if (start >= 0 && end > start && t >= start && t < end) {
+        found = i
+        break
+      }
+    }
+    // Keep last scene active if past its end
+    if (found === null && images.length > 0) {
+      const lastEnd = parseTimecode(images[images.length - 1].timecode_end)
+      if (lastEnd >= 0 && t >= lastEnd) found = images.length - 1
+    }
+    onActiveChange(found)
+  }
+
+  function togglePlay() {
+    const audio = audioRef.current
+    if (!audio) return
+    if (isPlaying) { audio.pause() } else { void audio.play() }
+  }
+
+  function handleSeek(e: React.ChangeEvent<HTMLInputElement>) {
+    const audio = audioRef.current
+    if (!audio) return
+    const t = parseFloat(e.target.value)
+    audio.currentTime = t
+    setCurrentTime(t)
+  }
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0
+
+  return (
+    <div
+      className="rounded-xl p-3 flex flex-col gap-2.5"
+      style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}
+    >
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <audio
+        ref={audioRef}
+        src={audioUrl}
+        onTimeUpdate={handleTimeUpdate}
+        onDurationChange={() => setDuration(audioRef.current?.duration ?? 0)}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => { setIsPlaying(false); onActiveChange(null) }}
+        preload="metadata"
+      />
+
+      <div className="flex items-center gap-3">
+        {/* Play / Pause */}
+        <button
+          type="button"
+          onClick={togglePlay}
+          className="flex items-center justify-center w-8 h-8 rounded-full shrink-0 transition-colors"
+          style={{ background: 'rgba(124,58,237,0.35)', color: '#C4B5FD' }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.55)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.35)')}
+          title={isPlaying ? 'Пауза' : 'Воспроизвести'}
+        >
+          {isPlaying ? (
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          )}
+        </button>
+
+        {/* Seekable progress bar */}
+        <div className="flex-1">
+          <input
+            type="range"
+            min={0}
+            max={duration || 100}
+            step={0.1}
+            value={currentTime}
+            onChange={handleSeek}
+            className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+            style={{
+              background: `linear-gradient(to right, #7C3AED ${progress}%, rgba(255,255,255,0.1) ${progress}%)`,
+              accentColor: '#7C3AED',
+            }}
+          />
+        </div>
+
+        {/* Time counter */}
+        <span className="text-xs text-slate-400 shrink-0 tabular-nums">
+          {formatTime(currentTime)}<span className="text-slate-600 mx-0.5">/</span>{formatTime(duration)}
+        </span>
+      </div>
+
+      <p className="text-xs leading-relaxed" style={{ color: 'rgba(196,181,253,0.7)' }}>
+        Прослушайте озвучку и проверьте соответствие иллюстраций тексту.{' '}
+        <span style={{ color: 'rgba(196,181,253,0.45)' }}>
+          Нажмите на изображение чтобы перейти к этому моменту в аудио.
+        </span>
+      </p>
+    </div>
+  )
+}
+
 export default function Step5Images() {
   const {
-    script, scriptParams, subtitleBlocks, projectId,
+    script, scriptParams, subtitleBlocks, projectId, audioUrl,
     sceneImages, imageInterval,
     setSceneImages, setImageInterval, setStep,
   } = useStudioStore()
@@ -40,16 +183,16 @@ export default function Step5Images() {
   const [uploadError, setUploadError] = useState('')
   const imageFilesRef = useRef<HTMLInputElement>(null)
 
-  // Per-scene regen state
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editingPrompt, setEditingPrompt] = useState('')
-  // Ref mirrors editingPrompt so async handlers always read the latest value,
-  // avoiding stale closure in React 18 Concurrent Mode.
   const editingPromptRef = useRef('')
   const [regenLoading, setRegenLoading] = useState<Set<number>>(new Set())
   const [regenErrors, setRegenErrors] = useState<Record<number, string>>({})
 
-  // Derive audio duration: prefer actual subtitle data over estimated duration
+  // Audio sync
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [activeSceneIdx, setActiveSceneIdx] = useState<number | null>(null)
+
   const audioDurationSec =
     subtitleBlocks.length > 0
       ? Math.ceil(subtitleBlocks[subtitleBlocks.length - 1].end)
@@ -66,9 +209,7 @@ export default function Step5Images() {
   function handleCustomIntervalChange(raw: string) {
     setCustomInterval(raw)
     const n = parseInt(raw, 10)
-    if (!isNaN(n) && n >= 3 && n <= 30) {
-      setImageInterval(n)
-    }
+    if (!isNaN(n) && n >= 3 && n <= 30) setImageInterval(n)
   }
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -78,7 +219,6 @@ export default function Step5Images() {
     setUploadError('')
     setUploading(true)
     setUploadProgress(0)
-
     try {
       const results: SceneImage[] = []
       for (let i = 0; i < files.length; i++) {
@@ -86,24 +226,13 @@ export default function Step5Images() {
         const signRes = await fetch('/api/upload/sign', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'image',
-            project_id: projectId,
-            index: i + 1,
-            content_type: file.type || 'image/jpeg',
-          }),
+          body: JSON.stringify({ type: 'image', project_id: projectId, index: i + 1, content_type: file.type || 'image/jpeg' }),
         })
         const signJson = await signRes.json()
         if (!signJson.ok) throw new Error(signJson.error)
-
         const { signed_url, access_url } = signJson.data
-        const uploadRes = await fetch(signed_url, {
-          method: 'PUT',
-          headers: { 'Content-Type': file.type || 'image/jpeg' },
-          body: file,
-        })
+        const uploadRes = await fetch(signed_url, { method: 'PUT', headers: { 'Content-Type': file.type || 'image/jpeg' }, body: file })
         if (!uploadRes.ok) throw new Error(`Ошибка загрузки файла ${i + 1}`)
-
         results.push({ scene_index: i + 1, url: access_url, prompt: '' })
         setUploadProgress(Math.round(((i + 1) / files.length) * 100))
       }
@@ -125,21 +254,14 @@ export default function Step5Images() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          script,
-          topic: scriptParams.topic,
-          duration_sec: audioDurationSec,
-          image_count: imageCount,
-          project_id: projectId,
-          image_interval: imageInterval,
+          script, topic: scriptParams.topic, duration_sec: audioDurationSec,
+          image_count: imageCount, project_id: projectId, image_interval: imageInterval,
           subtitle_blocks: subtitleBlocks.length > 0 ? subtitleBlocks : undefined,
         }),
       })
       const json = await res.json()
       if (!json.ok) {
-        if (json.code === 'NO_CREDITS') {
-          setError(`Недостаточно кредитов. Нужно ${imageCount * CREDIT_COSTS.image} кр.`)
-          return
-        }
+        if (json.code === 'NO_CREDITS') { setError(`Недостаточно кредитов. Нужно ${imageCount * CREDIT_COSTS.image} кр.`); return }
         throw new Error(json.error)
       }
       setSceneImages(json.data.scene_images as SceneImage[])
@@ -165,16 +287,11 @@ export default function Step5Images() {
   }
 
   async function handleSingleRegen(sceneIndex: number) {
-    if (!projectId) {
-      setRegenErrors((prev) => ({ ...prev, [sceneIndex]: 'Сначала сохраните проект' }))
-      return
-    }
+    if (!projectId) { setRegenErrors((prev) => ({ ...prev, [sceneIndex]: 'Сначала сохраните проект' })); return }
     setRegenLoading((prev) => new Set([...prev, sceneIndex]))
     setRegenErrors((prev) => { const n = { ...prev }; delete n[sceneIndex]; return n })
     try {
       const promptToSend = editingPromptRef.current
-      console.log(`[regen] scene_index=${sceneIndex} prompt sent:`, promptToSend)
-
       const res = await fetch('/api/generate/image-single', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -188,16 +305,8 @@ export default function Step5Images() {
         }
         throw new Error(json.error)
       }
-      console.log(`[regen] scene_index=${sceneIndex} new URL:`, json.data.image?.url)
-
-      // Append cache-buster so the browser fetches the new image even if the
-      // Supabase Storage path (and therefore URL) is identical after upsert.
       const raw: SceneImage = json.data.image
-      const newImage: SceneImage = {
-        ...raw,
-        url: raw.url ? `${raw.url}?t=${Date.now()}` : raw.url,
-      }
-
+      const newImage: SceneImage = { ...raw, url: raw.url ? `${raw.url}?t=${Date.now()}` : raw.url }
       const latest = useStudioStore.getState().sceneImages
       setSceneImages(latest.map((img) => img.scene_index === sceneIndex ? newImage : img))
       closeEditor()
@@ -208,6 +317,14 @@ export default function Step5Images() {
     }
   }
 
+  function seekAndPlay(tc: string | undefined) {
+    const audio = audioRef.current
+    if (!audio || !audioUrl) return
+    const t = parseTimecode(tc)
+    if (t >= 0) audio.currentTime = t
+    void audio.play()
+  }
+
   const durationLabel =
     subtitleBlocks.length > 0
       ? `${Math.floor(audioDurationSec / 60)} мин ${audioDurationSec % 60} сек (из субтитров)`
@@ -216,37 +333,39 @@ export default function Step5Images() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Шаг 5: Иллюстрации</h2>
-        <p className="text-sm text-gray-500">
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">Шаг 5: Иллюстрации</h2>
+        <p className="text-sm text-slate-500">
           Настройте частоту смены иллюстраций и сгенерируйте изображения
         </p>
       </div>
 
       {/* Interval selector */}
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col gap-3">
+      <div
+        className="rounded-xl p-4 flex flex-col gap-3"
+        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+      >
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold text-gray-700">Смена изображения каждые...</p>
-          <span className="text-xs text-gray-400">{durationLabel}</span>
+          <p className="text-sm font-semibold text-slate-300">Смена изображения каждые...</p>
+          <span className="text-xs text-slate-500">{durationLabel}</span>
         </div>
 
-        {/* Preset buttons */}
         <div className="flex gap-2 flex-wrap">
           {INTERVAL_PRESETS.map((sec) => (
             <button
               key={sec}
               type="button"
               onClick={() => handleIntervalPreset(sec)}
-              className={`px-3 py-1.5 rounded-xl text-sm font-medium border-2 transition-all ${
+              className="px-3 py-1.5 rounded-xl text-sm font-medium transition-all"
+              style={
                 imageInterval === sec && !customInterval
-                  ? 'border-red-400 bg-red-50 text-red-600'
-                  : 'border-gray-200 text-gray-600 hover:border-gray-300 bg-white'
-              }`}
+                  ? { border: '2px solid #7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA' }
+                  : { border: '2px solid rgba(255,255,255,0.08)', color: '#94A3B8' }
+              }
             >
               {sec} сек
             </button>
           ))}
 
-          {/* Custom input */}
           <div className="flex items-center gap-1.5">
             <input
               type="number"
@@ -255,40 +374,46 @@ export default function Step5Images() {
               value={customInterval}
               onChange={(e) => handleCustomIntervalChange(e.target.value)}
               placeholder="..."
-              className={`w-16 px-2 py-1.5 border-2 rounded-xl text-sm text-center text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-400 transition-all ${
-                customInterval && !isNaN(parseInt(customInterval, 10))
-                  ? 'border-red-400 bg-red-50'
-                  : 'border-gray-200'
-              }`}
+              className="w-16 px-2 py-1.5 rounded-xl text-sm text-center focus:outline-none"
+              style={customInterval && !isNaN(parseInt(customInterval, 10))
+                ? { border: '2px solid #7C3AED' }
+                : { border: '2px solid rgba(255,255,255,0.08)' }
+              }
             />
-            <span className="text-xs text-gray-400">сек</span>
+            <span className="text-xs text-slate-500">сек</span>
           </div>
         </div>
 
         {/* Calculation preview */}
-        <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-3 py-2.5">
+        <div
+          className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+        >
           <svg className="w-4 h-4 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
-          <p className="text-xs text-gray-700 leading-relaxed">
-            {audioDurationSec} сек ÷ {imageInterval} сек/кадр = {' '}
-            <strong className="text-gray-900">{imageCount} иллюстраций</strong>
-            <span className="mx-1.5 text-gray-400">·</span>
-            Стоимость: <strong className="text-red-600">{creditCost} кредитов</strong>
-            <span className="ml-1 text-gray-400">({CREDIT_COSTS.image} кр./шт.)</span>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            {audioDurationSec} сек ÷ {imageInterval} сек/кадр ={' '}
+            <strong className="text-slate-200">{imageCount} иллюстраций</strong>
+            <span className="mx-1.5 text-slate-600">·</span>
+            Стоимость: <strong className="text-violet-400">{creditCost} кредитов</strong>
+            <span className="ml-1 text-slate-600">({CREDIT_COSTS.image} кр./шт.)</span>
           </p>
         </div>
       </div>
 
       {/* Info about AI scene splitting */}
-      <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
-        <svg className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div
+        className="flex items-start gap-3 rounded-xl px-4 py-3"
+        style={{ background: 'rgba(37,99,235,0.08)', border: '1px solid rgba(37,99,235,0.2)' }}
+      >
+        <svg className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
-        <p className="text-xs text-blue-700 leading-relaxed">
-          Claude проанализирует сценарий целиком и разобьёт его на <strong>{imageCount} сцен</strong> по смыслу.
-          Для каждой сцены будет написан детальный промпт на английском и сгенерирована иллюстрация через Flux.
+        <p className="text-xs text-blue-300 leading-relaxed">
+          Сценарий будет разбит на <strong>{imageCount} сцен</strong> по смыслу.
+          Для каждой сцены автоматически сгенерируется иллюстрация.
         </p>
       </div>
 
@@ -296,12 +421,12 @@ export default function Step5Images() {
         type="button"
         onClick={handleGenerate}
         disabled={loading || !script?.trim()}
-        className="w-full py-3 bg-gray-900 hover:bg-gray-700 disabled:bg-gray-300 text-white font-semibold rounded-xl text-sm transition-colors flex items-center justify-center gap-2"
+        className="w-full py-3 btn-gradient disabled:opacity-40 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2"
       >
         {loading ? (
           <>
             <SpinnerIcon className="w-4 h-4 animate-spin" />
-            Claude анализирует сценарий и генерирует иллюстрации...
+            Анализ сценария и генерация иллюстраций...
           </>
         ) : sceneImages.length > 0 ? (
           `↺ Перегенерировать все (−${imageCount * CREDIT_COSTS.image} кр.)`
@@ -310,14 +435,14 @@ export default function Step5Images() {
         )}
       </button>
 
-      {/* Upload own images / skip */}
       {!loading && (
         <div className="flex gap-2">
           <button
             type="button"
             onClick={() => imageFilesRef.current?.click()}
             disabled={uploading}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-gray-300 text-gray-600 text-xs font-medium rounded-xl hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 text-slate-400 text-xs font-medium rounded-xl hover:text-slate-200 disabled:opacity-50 transition-colors"
+            style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}
           >
             {uploading ? (
               <>
@@ -336,7 +461,8 @@ export default function Step5Images() {
           <button
             type="button"
             onClick={() => setStep(6)}
-            className="flex items-center gap-1 py-2 px-3 border border-gray-200 text-gray-400 text-xs font-medium rounded-xl hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1 py-2 px-3 text-slate-500 text-xs font-medium rounded-xl hover:text-slate-300 transition-colors"
+            style={{ border: '1px solid rgba(255,255,255,0.07)' }}
           >
             Пропустить →
           </button>
@@ -352,130 +478,182 @@ export default function Step5Images() {
       )}
 
       {uploadError && (
-        <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2">{uploadError}</p>
+        <p className="text-xs text-red-400 rounded-xl px-3 py-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.15)' }}>
+          {uploadError}
+        </p>
       )}
 
       {error && (
-        <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3">{error}</p>
+        <p className="text-sm text-red-400 rounded-xl px-4 py-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
+          {error}
+        </p>
       )}
 
-      {/* Generated images grid */}
+      {/* Generated images with audio sync */}
       {sceneImages.length > 0 && (
-        <div>
-          <p className="text-sm font-medium text-gray-700 mb-3">
-            Готовые иллюстрации ({sceneImages.length})
-            <span className="ml-2 text-xs text-gray-400 font-normal">— нажмите ↺ для перегенерации отдельной сцены</span>
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {sceneImages.map((img, arrayIdx) => {
-              const isLoading = regenLoading.has(img.scene_index)
-              const isEditing = editingIdx === img.scene_index
-              const err = regenErrors[img.scene_index]
+        <div className="flex flex-col gap-4">
+          {/* Audio player or hint to go record audio */}
+          {audioUrl ? (
+            <AudioSyncPlayer
+              audioUrl={audioUrl}
+              images={sceneImages}
+              audioRef={audioRef}
+              onActiveChange={setActiveSceneIdx}
+            />
+          ) : (
+            <div
+              className="flex items-center gap-2.5 rounded-xl px-3 py-2.5"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}
+            >
+              <svg className="w-4 h-4 text-slate-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+              </svg>
+              <p className="text-xs text-slate-500">
+                Вернитесь на шаг озвучки чтобы прослушать аудио вместе с иллюстрациями.
+              </p>
+            </div>
+          )}
 
-              return (
-                <div
-                  key={img.scene_index}
-                  className={`flex flex-col gap-2 ${isEditing ? 'col-span-2 sm:col-span-3' : ''}`}
-                >
-                  <div className={`flex gap-3 ${isEditing ? 'items-start' : 'flex-col'}`}>
-                    {/* Image card */}
-                    <div className={`relative rounded-xl overflow-hidden bg-gray-100 shrink-0 ${
-                      isEditing ? 'w-40 sm:w-52 aspect-video' : 'aspect-video w-full'
-                    }`}>
-                      {img.url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={img.url}
-                          alt={`Сцена ${arrayIdx + 1}`}
-                          className={`w-full h-full object-cover transition-opacity ${isLoading ? 'opacity-40' : 'opacity-100'}`}
-                        />
-                      ) : (
-                        <div className="flex items-center justify-center h-full text-gray-400 text-xs">
-                          Ошибка
+          <div>
+            <p className="text-sm font-medium text-slate-300 mb-3">
+              Готовые иллюстрации ({sceneImages.length})
+              <span className="ml-2 text-xs text-slate-500 font-normal">— нажмите ↺ для перегенерации отдельной сцены</span>
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {sceneImages.map((img, arrayIdx) => {
+                const isLoading = regenLoading.has(img.scene_index)
+                const isEditing = editingIdx === img.scene_index
+                const err = regenErrors[img.scene_index]
+                const isActive = !isEditing && activeSceneIdx === arrayIdx
+                const canSeek = !!audioUrl && !!img.timecode_start && !isEditing
+
+                return (
+                  <div
+                    key={img.scene_index}
+                    className={`flex flex-col gap-2 rounded-xl transition-all ${isEditing ? 'col-span-2 sm:col-span-3' : ''} ${canSeek ? 'cursor-pointer' : ''}`}
+                    onClick={canSeek ? () => seekAndPlay(img.timecode_start) : undefined}
+                    style={
+                      isActive
+                        ? { outline: '2px solid rgba(124,58,237,0.7)', boxShadow: '0 0 18px rgba(124,58,237,0.25)' }
+                        : {}
+                    }
+                  >
+                    <div className={`flex gap-3 ${isEditing ? 'items-start' : 'flex-col'}`}>
+                      {/* Image card */}
+                      <div
+                        className={`relative rounded-xl overflow-hidden shrink-0 ${
+                          isEditing ? 'w-40 sm:w-52 aspect-video' : 'aspect-video w-full'
+                        }`}
+                        style={{ background: 'rgba(255,255,255,0.04)' }}
+                      >
+                        {img.url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={img.url}
+                            alt={`Сцена ${arrayIdx + 1}`}
+                            className={`w-full h-full object-cover transition-opacity ${isLoading ? 'opacity-40' : 'opacity-100'}`}
+                          />
+                        ) : (
+                          <div className="flex items-center justify-center h-full text-slate-600 text-xs">
+                            Ошибка
+                          </div>
+                        )}
+
+                        {isLoading && (
+                          <div
+                            className="absolute inset-0 flex flex-col items-center justify-center gap-1"
+                            style={{ background: 'rgba(0,0,0,0.5)' }}
+                          >
+                            <SpinnerIcon className="w-5 h-5 text-violet-400 animate-spin" />
+                            <span className="text-xs text-slate-300 font-medium">Генерация...</span>
+                          </div>
+                        )}
+
+                        <div className="absolute bottom-1 left-1 text-white text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(0,0,0,0.6)' }}>
+                          {img.timecode_start ?? arrayIdx + 1}
                         </div>
-                      )}
 
-                      {isLoading && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
-                          <SpinnerIcon className="w-5 h-5 text-gray-700 animate-spin" />
-                          <span className="text-xs text-gray-700 font-medium">Генерация...</span>
-                        </div>
-                      )}
-
-                      <div className="absolute bottom-1 left-1 bg-black/50 text-white text-xs px-1.5 py-0.5 rounded">
-                        {img.timecode_start ?? arrayIdx + 1}
+                        {!isLoading && !isEditing && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); openEditor(img.scene_index, img.prompt) }}
+                            className="absolute top-1 right-1 p-1.5 rounded-lg transition-colors text-white"
+                            style={{ background: 'rgba(0,0,0,0.5)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.7)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.5)')}
+                            title="Перегенерировать сцену"
+                          >
+                            <RefreshIcon className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
 
-                      {!isLoading && !isEditing && (
-                        <button
-                          type="button"
-                          onClick={() => openEditor(img.scene_index, img.prompt)}
-                          className="absolute top-1 right-1 p-1.5 bg-black/50 hover:bg-black/75 text-white rounded-lg transition-colors"
-                          title="Перегенерировать сцену"
-                        >
-                          <RefreshIcon className="w-3.5 h-3.5" />
-                        </button>
+                      {/* Inline prompt editor */}
+                      {isEditing && (
+                        <div className="flex-1 flex flex-col gap-2 min-w-0">
+                          {img.scene && (
+                            <p
+                              className="text-xs text-slate-400 rounded-lg px-2 py-1.5 leading-snug"
+                              style={{ background: 'rgba(255,255,255,0.05)' }}
+                            >
+                              {img.scene}
+                              {img.timecode_start && (
+                                <span className="ml-2 text-slate-600">{img.timecode_start}–{img.timecode_end}</span>
+                              )}
+                            </p>
+                          )}
+                          <p className="text-xs font-medium text-slate-400">
+                            Промпт для перегенерации сцены {arrayIdx + 1}
+                          </p>
+                          <textarea
+                            rows={3}
+                            value={editingPrompt}
+                            onChange={(e) => { setEditingPrompt(e.target.value); editingPromptRef.current = e.target.value }}
+                            disabled={isLoading}
+                            className="w-full px-3 py-2 rounded-xl text-sm resize-none focus:outline-none disabled:opacity-50"
+                          />
+                          {err && (
+                            <p className="text-xs text-red-400 rounded-lg px-2 py-1" style={{ background: 'rgba(239,68,68,0.1)' }}>
+                              {err}
+                            </p>
+                          )}
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleSingleRegen(img.scene_index)}
+                              disabled={isLoading || !editingPrompt.trim()}
+                              className="flex-1 py-2 btn-gradient disabled:opacity-40 text-white font-medium rounded-xl text-xs flex items-center justify-center gap-1.5"
+                            >
+                              {isLoading ? (
+                                <>
+                                  <SpinnerIcon className="w-3 h-3 animate-spin" />
+                                  Генерация...
+                                </>
+                              ) : (
+                                <>
+                                  <RefreshIcon className="w-3 h-3" />
+                                  Перегенерировать (−{CREDIT_COSTS.image} кр.)
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={closeEditor}
+                              disabled={isLoading}
+                              className="px-4 py-2 text-slate-400 font-medium rounded-xl text-xs hover:text-slate-200 disabled:opacity-40 transition-colors"
+                              style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+                            >
+                              Отмена
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
-
-                    {/* Inline prompt editor */}
-                    {isEditing && (
-                      <div className="flex-1 flex flex-col gap-2 min-w-0">
-                        {img.scene && (
-                          <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-2 py-1.5 leading-snug">
-                            {img.scene}
-                            {img.timecode_start && (
-                              <span className="ml-2 text-gray-400">{img.timecode_start}–{img.timecode_end}</span>
-                            )}
-                          </p>
-                        )}
-                        <p className="text-xs font-medium text-gray-600">
-                          Промпт для перегенерации сцены {arrayIdx + 1}
-                        </p>
-                        <textarea
-                          rows={3}
-                          value={editingPrompt}
-                          onChange={(e) => { setEditingPrompt(e.target.value); editingPromptRef.current = e.target.value }}
-                          disabled={isLoading}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm text-gray-900 resize-none focus:outline-none focus:ring-2 focus:ring-red-400 disabled:bg-gray-50"
-                        />
-                        {err && (
-                          <p className="text-xs text-red-500 bg-red-50 rounded-lg px-2 py-1">{err}</p>
-                        )}
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleSingleRegen(img.scene_index)}
-                            disabled={isLoading || !editingPrompt.trim()}
-                            className="flex-1 py-2 bg-gray-900 hover:bg-gray-700 disabled:bg-gray-300 text-white font-medium rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
-                          >
-                            {isLoading ? (
-                              <>
-                                <SpinnerIcon className="w-3 h-3 animate-spin" />
-                                Генерация...
-                              </>
-                            ) : (
-                              <>
-                                <RefreshIcon className="w-3 h-3" />
-                                Перегенерировать (−{CREDIT_COSTS.image} кр.)
-                              </>
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={closeEditor}
-                            disabled={isLoading}
-                            className="px-4 py-2 border border-gray-300 text-gray-600 font-medium rounded-xl text-xs hover:bg-gray-50 disabled:opacity-40 transition-colors"
-                          >
-                            Отмена
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -484,7 +662,7 @@ export default function Step5Images() {
         <button
           type="button"
           onClick={() => setStep(4)}
-          className="px-5 py-3 border border-gray-300 text-gray-700 font-medium rounded-xl text-sm hover:bg-gray-50 transition-colors"
+          className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
           ← Назад
         </button>
@@ -492,7 +670,7 @@ export default function Step5Images() {
           type="button"
           onClick={() => setStep(6)}
           disabled={sceneImages.length === 0}
-          className="flex-1 py-3 bg-red-500 hover:bg-red-600 disabled:bg-red-200 text-white font-semibold rounded-xl text-sm transition-colors"
+          className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40"
         >
           Далее: Видео →
         </button>
