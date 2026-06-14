@@ -6,6 +6,7 @@ const NAV = [
   { href: '/admin/users',      icon: '👥', label: 'Пользователи' },
   { href: '/admin/referrals',  icon: '🔗', label: 'Рефералы' },
   { href: '/admin/analytics',  icon: '📈', label: 'Аналитика' },
+  { href: '/admin/services',   icon: '🔧', label: 'Сервисы' },
 ]
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
