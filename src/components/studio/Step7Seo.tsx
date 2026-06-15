@@ -6,10 +6,12 @@ import { useStudioStore } from '@/lib/studio-store'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SeoData } from '@/lib/types'
+import { useLang } from '@/hooks/useLang'
 
 // ─── Copy button ───────────────────────────────────────────────────────────────
 
 function CopyButton({ text, label }: { text: string; label?: string }) {
+  const { t } = useLang()
   const [copied, setCopied] = useState(false)
   async function handleCopy() {
     await navigator.clipboard.writeText(text)
@@ -33,7 +35,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
           </svg>
-          Скопировано
+          {t('copy.copied')}
         </>
       ) : (
         <>
@@ -41,7 +43,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
-          {label ?? 'Копировать'}
+          {label ?? t('copy.copy')}
         </>
       )}
     </button>
@@ -62,6 +64,7 @@ function SpinnerIcon({ className }: { className?: string }) {
 // ─── Thumbnail section ─────────────────────────────────────────────────────────
 
 function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string }) {
+  const { t } = useLang()
   const { projectId, thumbnailUrl, setThumbnailUrl, thumbnailBgUrl, setThumbnailBgUrl } = useStudioStore()
 
   const [customTitle, setCustomTitle] = useState(seoTitle)
@@ -77,7 +80,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
   }, [seoTitle, titleEdited])
 
   async function generate(opts: { regenBg: boolean }) {
-    if (!projectId) { setError('Сначала создайте проект'); return }
+    if (!projectId) { setError(t('thumb.err_project')); return }
     setError('')
     setLoading(opts.regenBg ? 'full' : 'text')
     try {
@@ -94,7 +97,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
       const json = await res.json()
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') {
-          setError(`Недостаточно кредитов (нужно ${CREDIT_COSTS.thumbnail} кр.)`)
+          setError(t('step7.err_credits'))
           return
         }
         throw new Error(json.error)
@@ -102,7 +105,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
       setThumbnailUrl(json.data.thumbnail_url)
       setThumbnailBgUrl(json.data.bg_url)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка генерации превью')
+      setError(err instanceof Error ? err.message : t('thumb.err_gen'))
     } finally {
       setLoading(null)
       setEditingTitle(false)
@@ -129,20 +132,20 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
     <div className="flex flex-col gap-4 pt-5" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold text-slate-200">Превью видео (Thumbnail)</p>
-          <p className="text-xs text-slate-500 mt-0.5">1280×720 · яркое, кликабельное изображение с заголовком</p>
+          <p className="text-sm font-semibold text-slate-200">{t('thumb.title')}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('thumb.desc')}</p>
         </div>
         <span
           className="text-xs px-2 py-1 rounded-full"
           style={{ background: 'rgba(124,58,237,0.12)', color: '#A78BFA', border: '1px solid rgba(124,58,237,0.2)' }}
         >
-          {CREDIT_COSTS.thumbnail} кр.
+          {CREDIT_COSTS.thumbnail} {t('nav.credits_suffix')}
         </span>
       </div>
 
       {/* Custom title input */}
       <div>
-        <p className="text-xs font-medium text-slate-400 mb-1.5">Текст на превью</p>
+        <p className="text-xs font-medium text-slate-400 mb-1.5">{t('thumb.text_label')}</p>
         {editingTitle ? (
           <div className="flex gap-2">
             <input
@@ -159,7 +162,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               className="px-3 py-2 text-slate-300 rounded-xl text-sm transition-colors hover:text-white"
               style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
             >
-              ОК
+              {t('thumb.ok')}
             </button>
           </div>
         ) : (
@@ -215,9 +218,9 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
             className="flex-1 py-2.5 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isLoading ? (
-              <><SpinnerIcon className="w-4 h-4 animate-spin" /> Генерация превью...</>
+              <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('thumb.generating')}</>
             ) : (
-              `🖼 Сгенерировать превью (−${CREDIT_COSTS.thumbnail} кр.)`
+              `${t('thumb.gen_btn')} (−${CREDIT_COSTS.thumbnail} ${t('nav.credits_suffix')})`
             )}
           </button>
         ) : (
@@ -226,13 +229,13 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               type="button"
               onClick={() => generate({ regenBg: true })}
               disabled={isLoading}
-              title="Новое фоновое изображение"
+              title={t('thumb.new_bg_title')}
               className="flex-1 py-2 text-white font-medium rounded-xl text-xs disabled:opacity-50 flex items-center justify-center gap-1.5 btn-gradient"
             >
               {loading === 'full' ? (
-                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> Генерация фона...</>
+                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> {t('thumb.gen_bg')}</>
               ) : (
-                <>↺ Новый фон (−{CREDIT_COSTS.thumbnail} кр.)</>
+                <>{t('thumb.gen_bg_btn')} (−{CREDIT_COSTS.thumbnail} {t('nav.credits_suffix')})</>
               )}
             </button>
 
@@ -240,14 +243,14 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               type="button"
               onClick={() => generate({ regenBg: false })}
               disabled={isLoading || !thumbnailBgUrl}
-              title="Тот же фон с новым текстом"
+              title={t('thumb.update_text_title')}
               className="flex-1 py-2 text-slate-300 font-medium rounded-xl text-xs disabled:opacity-40 flex items-center justify-center gap-1.5 hover:text-white transition-colors"
               style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)' }}
             >
               {loading === 'text' ? (
-                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> Обновление текста...</>
+                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> {t('thumb.update_text')}</>
               ) : (
-                <>T Изменить текст (−{CREDIT_COSTS.thumbnail} кр.)</>
+                <>{t('thumb.update_text_btn')} (−{CREDIT_COSTS.thumbnail} {t('nav.credits_suffix')})</>
               )}
             </button>
 
@@ -290,6 +293,7 @@ function appendHashtags(body: string, tags: string[]): string {
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 export default function Step7Seo() {
+  const { t } = useLang()
   const { script, scriptParams, subtitleBlocks, projectId, seo, setSeo, setStep, reset } = useStudioStore()
   const [localSeo, setLocalSeo] = useState<SeoData | null>(seo)
   const [newTag, setNewTag] = useState('')
@@ -318,7 +322,7 @@ export default function Step7Seo() {
       })
       const json = await res.json()
       if (!json.ok) {
-        if (json.code === 'NO_CREDITS') { setError('Недостаточно кредитов для SEO-оптимизации.'); return }
+        if (json.code === 'NO_CREDITS') { setError(t('step7.err_credits')); return }
         throw new Error(json.error)
       }
       const raw: SeoData = json.data.seo
@@ -327,7 +331,7 @@ export default function Step7Seo() {
       setSeo(merged)
       void refreshCredits()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка генерации SEO')
+      setError(err instanceof Error ? err.message : t('step7.err_gen'))
     } finally {
       setLoading(false)
     }
@@ -373,24 +377,22 @@ export default function Step7Seo() {
           </svg>
         </div>
         <div>
-          <h2 className="text-xl font-bold text-slate-100 mb-2">Видео готово!</h2>
-          <p className="text-slate-400 text-sm">
-            Все материалы сгенерированы. Перейдите в дашборд чтобы найти свой проект.
-          </p>
+          <h2 className="text-xl font-bold text-slate-100 mb-2">{t('step7.done_title')}</h2>
+          <p className="text-slate-400 text-sm">{t('step7.done_desc')}</p>
         </div>
         <div className="flex gap-3 w-full max-w-xs">
           <Link
             href="/dashboard"
             className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm text-center"
           >
-            Перейти в дашборд
+            {t('step7.to_dashboard')}
           </Link>
           <button
             type="button"
             onClick={reset}
             className="flex-1 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
           >
-            Новое видео
+            {t('step7.new_video')}
           </button>
         </div>
       </div>
@@ -400,10 +402,8 @@ export default function Step7Seo() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100 mb-1">Шаг 7: SEO + Превью</h2>
-        <p className="text-sm text-slate-500">
-          Заголовок, описание, теги и превью для максимального охвата
-        </p>
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">{t('step7.title')}</h2>
+        <p className="text-sm text-slate-500">{t('step7.subtitle')}</p>
       </div>
 
       {/* SEO generate button */}
@@ -414,11 +414,11 @@ export default function Step7Seo() {
         className="w-full py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-50 flex items-center justify-center gap-2"
       >
         {loading ? (
-          <><SpinnerIcon className="w-4 h-4 animate-spin" /> Генерация SEO...</>
+          <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('step7.generating')}</>
         ) : localSeo ? (
-          `↺ Перегенерировать SEO (−${CREDIT_COSTS.seo} кр.)`
+          `${t('step7.seo_regen')} (−${CREDIT_COSTS.seo} ${t('nav.credits_suffix')})`
         ) : (
-          `🔍 Сгенерировать SEO (−${CREDIT_COSTS.seo} кр.)`
+          `${t('step7.seo_gen')} (−${CREDIT_COSTS.seo} ${t('nav.credits_suffix')})`
         )}
       </button>
 
@@ -433,13 +433,13 @@ export default function Step7Seo() {
           {/* Title A/B picker */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-slate-300">Заголовок</label>
+              <label className="text-sm font-medium text-slate-300">{t('step7.title_label')}</label>
               <CopyButton text={localSeo.title} />
             </div>
 
             {localSeo.title_alt ? (
               <div className="flex flex-col gap-2 mb-2">
-                {([localSeo.title, localSeo.title_alt] as [string, string]).map((t, i) => {
+                {([localSeo.title, localSeo.title_alt] as [string, string]).map((title, i) => {
                   const isActive = i === 0
                   return (
                     <button
@@ -465,9 +465,9 @@ export default function Step7Seo() {
                         {isActive ? 'A ✓' : 'B'}
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-slate-200 leading-snug">{t}</p>
-                        <p className={`text-xs mt-1 ${t.length > 70 ? 'text-red-400' : 'text-slate-500'}`}>
-                          {t.length}/70 {isActive ? '· активный' : '· нажми чтобы выбрать'}
+                        <p className="text-sm text-slate-200 leading-snug">{title}</p>
+                        <p className={`text-xs mt-1 ${title.length > 70 ? 'text-red-400' : 'text-slate-500'}`}>
+                          {title.length}/70 {isActive ? t('step7.active') : t('step7.select_hint')}
                         </p>
                       </div>
                     </button>
@@ -492,10 +492,10 @@ export default function Step7Seo() {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <div>
-                <label className="text-sm font-medium text-slate-300">Описание</label>
-                <span className="ml-2 text-xs text-slate-600">первые 2 строки видны в поиске</span>
+                <label className="text-sm font-medium text-slate-300">{t('step7.description')}</label>
+                <span className="ml-2 text-xs text-slate-600">{t('step7.desc_hint')}</span>
               </div>
-              <CopyButton text={localSeo.description} label="Копировать" />
+              <CopyButton text={localSeo.description} label={t('step7.copy')} />
             </div>
             <textarea
               rows={12}
@@ -509,7 +509,7 @@ export default function Step7Seo() {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-slate-300">Хэштеги</label>
+                <label className="text-sm font-medium text-slate-300">{t('step7.hashtags')}</label>
                 <span
                   className="text-xs font-medium px-1.5 py-0.5 rounded-full"
                   style={
@@ -520,9 +520,9 @@ export default function Step7Seo() {
                 >
                   {hashtags.length}/5
                 </span>
-                <span className="text-xs text-slate-600">изменения обновляют описание</span>
+                <span className="text-xs text-slate-600">{t('step7.hashtags_hint')}</span>
               </div>
-              <CopyButton text={hashtags.join(' ')} label="Копировать хэштеги" />
+              <CopyButton text={hashtags.join(' ')} label={t('step7.copy')} />
             </div>
             <div className="flex flex-wrap gap-2 mb-2">
               {hashtags.map((tag, idx) => (
@@ -542,7 +542,7 @@ export default function Step7Seo() {
                 </span>
               ))}
               {hashtags.length === 0 && (
-                <p className="text-xs text-slate-600">Хэштеги ещё не добавлены</p>
+                <p className="text-xs text-slate-600">{t('step7.no_hashtags')}</p>
               )}
             </div>
             <div className="flex gap-2">
@@ -551,7 +551,7 @@ export default function Step7Seo() {
                 value={newHashtag}
                 onChange={(e) => setNewHashtag(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addHashtag())}
-                placeholder="#история или история"
+                placeholder={t('step7.hashtag_ph')}
                 className="flex-1 px-3 py-2 rounded-xl text-sm"
               />
               <button
@@ -569,7 +569,7 @@ export default function Step7Seo() {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-slate-300">Теги</label>
+                <label className="text-sm font-medium text-slate-300">{t('step7.tags')}</label>
                 <span
                   className="text-xs font-medium px-1.5 py-0.5 rounded-full"
                   style={
@@ -607,7 +607,7 @@ export default function Step7Seo() {
                 value={newTag}
                 onChange={(e) => setNewTag(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
-                placeholder="Добавить тег..."
+                placeholder={t('step7.tag_ph')}
                 className="flex-1 px-3 py-2 rounded-xl text-sm"
               />
               <button
@@ -626,15 +626,15 @@ export default function Step7Seo() {
             className="rounded-xl p-4"
             style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.15)' }}
           >
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Скопировать для YouTube</p>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">{t('step7.copy_label')}</p>
             <div className="flex flex-wrap gap-2">
-              <CopyButton text={localSeo.title} label="Заголовок A" />
-              {localSeo.title_alt && <CopyButton text={localSeo.title_alt} label="Заголовок B" />}
-              <CopyButton text={localSeo.description} label="Описание" />
-              <CopyButton text={localSeo.tags.join(', ')} label="Теги" />
+              <CopyButton text={localSeo.title} label={t('step7.copy_title_a')} />
+              {localSeo.title_alt && <CopyButton text={localSeo.title_alt} label={t('step7.copy_title_b')} />}
+              <CopyButton text={localSeo.description} label={t('step7.copy_desc')} />
+              <CopyButton text={localSeo.tags.join(', ')} label={t('step7.copy_tags')} />
               <CopyButton
-                text={`${localSeo.title}\n\n${localSeo.description}\n\nТеги: ${localSeo.tags.join(', ')}`}
-                label="Всё сразу"
+                text={`${localSeo.title}\n\n${localSeo.description}\n\n${t('step7.tags')}: ${localSeo.tags.join(', ')}`}
+                label={t('step7.copy_all')}
               />
             </div>
           </div>
@@ -650,7 +650,7 @@ export default function Step7Seo() {
           onClick={() => setStep(6)}
           className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
-          ← Назад
+          {t('step7.back')}
         </button>
         <button
           type="button"
@@ -662,7 +662,7 @@ export default function Step7Seo() {
             : { background: 'rgba(255,255,255,0.05)', color: '#475569', border: '1px solid rgba(255,255,255,0.08)' }
           }
         >
-          ✓ Завершить проект
+          {t('step7.finish')}
         </button>
       </div>
     </div>

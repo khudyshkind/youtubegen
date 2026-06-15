@@ -4,12 +4,7 @@ import { useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import { CREDIT_COSTS } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
-
-const MODEL_LABELS: Record<string, string> = {
-  'claude-sonnet': 'Стандартная',
-  'claude-opus': 'Улучшенная',
-  'gpt-4o': 'Альтернативная',
-}
+import { useLang } from '@/hooks/useLang'
 
 const MODEL_COSTS: Record<string, number> = {
   'claude-sonnet': CREDIT_COSTS.script_sonnet,
@@ -32,10 +27,20 @@ function SpinnerIcon({ className }: { className?: string }) {
 
 export default function Step2Script() {
   const { scriptParams, setScriptParams, projectId, script, setScript, setStep } = useStudioStore()
+  const { t } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [uploadError, setUploadError] = useState('')
+  const [processingMode, setProcessingMode] = useState<'unique' | 'human' | 'both' | null>(null)
+  const [originalScript, setOriginalScript] = useState<string | null>(null)
+  const [processSuccess, setProcessSuccess] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const MODEL_LABELS: Record<string, string> = {
+    'claude-sonnet': t('model.standard'),
+    'claude-opus':   t('model.enhanced'),
+    'gpt-4o':        t('model.alternative'),
+  }
 
   const model = scriptParams.model
   const creditCost = MODEL_COSTS[model] ?? 10
@@ -52,7 +57,7 @@ export default function Step2Script() {
       const json = await res.json()
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') {
-          setError('Недостаточно кредитов. Пополните баланс в разделе «Тарифы».')
+          setError(t('step2.err_credits'))
           return
         }
         throw new Error(json.error)
@@ -60,7 +65,7 @@ export default function Step2Script() {
       setScript(json.data.script)
       void refreshCredits()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка генерации сценария')
+      setError(err instanceof Error ? err.message : t('step2.err_gen'))
     } finally {
       setLoading(false)
     }
@@ -72,14 +77,14 @@ export default function Step2Script() {
     setUploadError('')
 
     if (file.size > 5 * 1024 * 1024) {
-      setUploadError('Файл слишком большой (макс. 5 МБ)')
+      setUploadError(t('step2.err_file_big'))
       return
     }
 
     const reader = new FileReader()
     reader.onload = (ev) => {
       const text = ev.target?.result as string
-      if (!text?.trim()) { setUploadError('Файл пустой'); return }
+      if (!text?.trim()) { setUploadError(t('step2.err_file_empty')); return }
       const trimmed = text.trim()
       setScript(trimmed)
       // Auto-fill topic from first 50 chars if topic is missing or placeholder
@@ -89,9 +94,49 @@ export default function Step2Script() {
         setScriptParams({ topic: autoTopic })
       }
     }
-    reader.onerror = () => setUploadError('Не удалось прочитать файл')
+    reader.onerror = () => setUploadError(t('step2.err_file_read'))
     reader.readAsText(file, 'UTF-8')
     e.target.value = ''
+  }
+
+  async function handleProcess(mode: 'unique' | 'human' | 'both') {
+    if (!script?.trim()) return
+    setError('')
+    setProcessingMode(mode)
+    setProcessSuccess(false)
+    try {
+      const res = await fetch('/api/generate/uniqueize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ script, project_id: projectId, mode }),
+      })
+      const json = await res.json()
+      if (!json.ok) {
+        if (json.code === 'NO_CREDITS') {
+          setError(t('step2.err_credits'))
+          return
+        }
+        throw new Error(json.error)
+      }
+      setOriginalScript(script)
+      setScript(json.data.script)
+      setProcessSuccess(true)
+      void refreshCredits()
+      setTimeout(() => setProcessSuccess(false), 3000)
+    } catch (err) {
+      const errKey = mode === 'human' ? 'step2.err_humanize' : 'step2.err_uniqueize'
+      setError(err instanceof Error ? err.message : t(errKey))
+    } finally {
+      setProcessingMode(null)
+    }
+  }
+
+  function handleUndoProcess() {
+    if (originalScript !== null) {
+      setScript(originalScript)
+      setOriginalScript(null)
+      setProcessSuccess(false)
+    }
   }
 
   function handlePasteMode() { setScript('') }
@@ -103,9 +148,9 @@ export default function Step2Script() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100 mb-1">Шаг 2: Сценарий</h2>
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">{t('step2.title')}</h2>
         <p className="text-sm text-slate-500">
-          Тема: <span className="font-medium text-slate-300">«{scriptParams.topic}»</span>
+          {t('step2.topic_prefix')} <span className="font-medium text-slate-300">«{scriptParams.topic}»</span>
         </p>
       </div>
 
@@ -125,14 +170,14 @@ export default function Step2Script() {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-slate-200">{MODEL_LABELS[model]}</p>
-          <p className="text-xs text-slate-500">{scriptParams.duration_minutes} мин · {scriptParams.language.toUpperCase()}</p>
+          <p className="text-xs text-slate-500">{scriptParams.duration_minutes} {t('step2.min_label')} · {scriptParams.language.toUpperCase()}</p>
         </div>
         <button
           type="button"
           onClick={() => setStep(1)}
           className="text-xs text-violet-400 hover:text-violet-300 font-medium shrink-0 transition-colors"
         >
-          Изменить
+          {t('step2.change_model')}
         </button>
       </div>
 
@@ -146,14 +191,74 @@ export default function Step2Script() {
         {loading ? (
           <>
             <SpinnerIcon className="w-4 h-4 animate-spin" />
-            Генерация сценария...
+            {t('step2.generating')}
           </>
         ) : hasScript ? (
-          `↺ Перегенерировать (−${creditCost} кр.)`
+          `↺ ${t('step2.regenerate')} (−${creditCost} ${t('step1.credits_suffix')})`
         ) : (
-          `✨ Сгенерировать сценарий (−${creditCost} кр.)`
+          `${t('step2.generate')} (−${creditCost} ${t('step1.credits_suffix')})`
         )}
       </button>
+
+      {/* Text processing buttons — shown when script exists */}
+      {hasScript && !loading && (
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => handleProcess('unique')}
+              disabled={processingMode !== null}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
+              style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)', color: processingMode === 'unique' ? '#6b7280' : '#60a5fa' }}
+            >
+              {processingMode === 'unique' ? (
+                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.uniqueizing')}</>
+              ) : t('step2.uniqueize')}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleProcess('human')}
+              disabled={processingMode !== null}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
+              style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', color: processingMode === 'human' ? '#6b7280' : '#34d399' }}
+            >
+              {processingMode === 'human' ? (
+                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.humanizing')}</>
+              ) : t('step2.humanize')}
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => handleProcess('both')}
+              disabled={processingMode !== null}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
+              style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)', color: processingMode === 'both' ? '#6b7280' : '#a78bfa' }}
+            >
+              {processingMode === 'both' ? (
+                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.processing')}</>
+              ) : t('step2.both_process')}
+            </button>
+            {originalScript !== null && (
+              <button
+                type="button"
+                onClick={handleUndoProcess}
+                className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium rounded-xl transition-colors"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8' }}
+              >
+                {t('step2.original')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Process success notice */}
+      {processSuccess && (
+        <p className="text-xs font-medium rounded-xl px-3 py-2 text-center" style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', color: '#34d399' }}>
+          {t('step2.done_ok')}
+        </p>
+      )}
 
       {/* Secondary actions */}
       {!loading && (
@@ -168,7 +273,7 @@ export default function Step2Script() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
             </svg>
-            Загрузить .txt
+            {t('step2.upload_txt')}
           </button>
           {script === null && (
             <button
@@ -181,7 +286,7 @@ export default function Step2Script() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
-              Вставить текст
+              {t('step2.paste')}
             </button>
           )}
           <button
@@ -190,7 +295,7 @@ export default function Step2Script() {
             className="flex items-center gap-1 py-2 px-3 text-slate-500 text-xs font-medium rounded-xl hover:text-slate-300 transition-colors"
             style={{ border: '1px solid rgba(255,255,255,0.07)' }}
           >
-            Пропустить →
+            {t('step2.skip')}
           </button>
           <input
             ref={fileInputRef}
@@ -218,21 +323,19 @@ export default function Step2Script() {
       {script !== null && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-medium text-slate-300">Сценарий</p>
+            <p className="text-sm font-medium text-slate-300">{t('step2.script_label')}</p>
             <span className="text-xs text-slate-500">
-              {words} слов · ~{estimatedMin} мин.
+              {words} {t('step2.words')} · ~{estimatedMin} {t('step2.min_label')}
             </span>
           </div>
           <textarea
             rows={16}
             value={script}
             onChange={(e) => setScript(e.target.value)}
-            placeholder="Введите или вставьте ваш сценарий здесь..."
+            placeholder="..."
             className="w-full px-4 py-3 rounded-xl text-sm resize-none leading-relaxed"
           />
-          <p className="text-xs text-slate-600 mt-1">
-            Отредактируйте при необходимости перед озвучкой
-          </p>
+          <p className="text-xs text-slate-600 mt-1">{t('step2.edit_hint')}</p>
         </div>
       )}
 
@@ -242,7 +345,7 @@ export default function Step2Script() {
           onClick={() => setStep(1)}
           className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
-          ← Назад
+          {t('step2.back')}
         </button>
         <button
           type="button"
@@ -250,7 +353,7 @@ export default function Step2Script() {
           disabled={!hasScript}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40"
         >
-          Далее: Озвучка →
+          {t('step2.next')}
         </button>
       </div>
     </div>

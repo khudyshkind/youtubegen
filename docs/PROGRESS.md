@@ -86,6 +86,23 @@
 
 ---
 
+## Фаза 8 — i18n + Уникализация + APIHOST TTS
+
+- [x] ✅ i18n система (src/lib/i18n.ts + useLang hook) — все строки RU/EN, все 7 шагов студии переведены
+- [x] ✅ Step7Seo.tsx — полный перевод через t(), CopyButton и ThumbnailSection sub-компоненты с useLang()
+- [x] ✅ /api/generate/uniqueize/route.ts — эндпоинт уникализации (mode: unique/human/both, 1-2 кр.)
+- [x] ✅ Step2Script.tsx — 3 кнопки (Уникализировать/Очеловечить/Оба), processingMode, handleProcess()
+- [x] ✅ /tools страница — textarea ввода, 3 кнопки обработки, результат, "Использовать в студии"
+- [x] ✅ SidebarNav.tsx — пункт "Инструменты" с puzzle-иконкой
+- [x] ✅ APIHOST_API_KEY — добавлен в Vercel и Railway
+- [x] ✅ .env.example — добавлен APIHOST_API_KEY
+- [x] ✅ types.ts — ApihostVoiceType, APIHOST_CREDITS_PER_1000_CHARS, audioCost() для apihost
+- [x] ✅ /api/voices/apihost/route.ts — 7 серверов параллельно, дедупликация, фильтр по языку
+- [x] ✅ /api/generate/audio/route.ts — APIHOST async TTS (synthesize → poll → download → upload)
+- [x] ✅ Step3Voice.tsx — APIHOST движок с ApihostVoiceDropdown, type badges, динамическая стоимость
+
+---
+
 ## Сводка
 
 | Фаза | Прогресс |
@@ -99,4 +116,5 @@
 | Railway FFmpeg видео-сервер | 4 / 4 |
 | Синхронизация изображений с аудио | 1 / 1 |
 | Фаза 7 — Рост и монетизация | 5 / 5 |
-| **Итого** | **52 / 52** ✅ |
+| Фаза 8 — i18n + Уникализация + APIHOST TTS | 12 / 12 |
+| **Итого** | **64 / 64** ✅ |

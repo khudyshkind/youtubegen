@@ -9,18 +9,32 @@ export const CREDIT_COSTS = {
   video: 2,
   seo: 1,
   thumbnail: 1,
+  humanize: 1,
+  uniqueize: 1,
 } as const
 
-export type AudioEngine = 'elevenlabs' | 'openai' | 'google'
+export type AudioEngine = 'elevenlabs' | 'openai' | 'google' | 'apihost'
+export type ApihostVoiceType = 'basic' | 'standard' | 'pro' | 'studio'
 
-export const AUDIO_CREDITS_PER_1000_CHARS: Record<AudioEngine, number> = {
+export const AUDIO_CREDITS_PER_1000_CHARS: Record<'elevenlabs' | 'openai' | 'google', number> = {
   elevenlabs: 3,
   openai: 1,
   google: 1,
 }
 
-export function audioCost(chars: number, engine: AudioEngine): number {
-  return Math.ceil(chars / 1000) * AUDIO_CREDITS_PER_1000_CHARS[engine]
+export const APIHOST_CREDITS_PER_1000_CHARS: Record<ApihostVoiceType, number> = {
+  basic:    0.1,
+  standard: 0.5,
+  pro:      1,
+  studio:   2,
+}
+
+export function audioCost(chars: number, engine: AudioEngine, apihostVoiceType?: ApihostVoiceType): number {
+  if (engine === 'apihost') {
+    const rate = APIHOST_CREDITS_PER_1000_CHARS[apihostVoiceType ?? 'standard']
+    return Math.max(1, Math.ceil((chars / 1000) * rate))
+  }
+  return Math.ceil(chars / 1000) * AUDIO_CREDITS_PER_1000_CHARS[engine as 'elevenlabs' | 'openai' | 'google']
 }
 
 export const PLAN_CREDITS: Record<Plan, number> = {
@@ -28,6 +42,12 @@ export const PLAN_CREDITS: Record<Plan, number> = {
   starter: 100,
   pro: 300,
   agency: 1000,
+}
+
+export const PLAN_PRICES: Record<Exclude<Plan, 'free'>, number> = {
+  starter: 19,
+  pro: 39,
+  agency: 99,
 }
 
 // ─── Script params ────────────────────────────────────────────────────────────
@@ -102,6 +122,7 @@ export interface Profile {
   paddle_customer_id: string | null
   paddle_subscription_id: string | null
   onboarding_completed: boolean
+  preferred_lang: string | null
   is_admin: boolean
   referral_code: string | null
   referred_by: string | null

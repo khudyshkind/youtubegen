@@ -115,6 +115,22 @@ NEXT_PUBLIC_APP_URL=
 <!-- ### YYYY-MM-DD — Краткое описание -->
 <!-- Что сделано, какие файлы созданы/изменены -->
 
+### 2026-06-15 — Уникализация текста + APIHOST TTS движок
+Добавлена функция уникализации текста и новый TTS движок APIHOST.RU:
+- `src/lib/i18n.ts` — расширена RU/EN i18n: ключи step7.*, thumb.*, tools.*, apihost.*, step2.uniqueize/both_process
+- `src/components/studio/Step7Seo.tsx` — полный перевод через t(), CopyButton/ThumbnailSection с useLang()
+- `src/app/api/generate/uniqueize/route.ts` — новый эндпоинт (mode: unique/human/both, 1-2 кр., Claude API)
+- `src/components/studio/Step2Script.tsx` — 3 кнопки (Уникализировать/Очеловечить/Оба), processingMode state
+- `src/app/(dashboard)/tools/page.tsx` — новая страница инструментов с textarea + кнопками + "Использовать в студии"
+- `src/components/shared/SidebarNav.tsx` — пункт "Инструменты" (nav.tools)
+- `src/lib/types.ts` — AudioEngine+'apihost', ApihostVoiceType, APIHOST_CREDITS_PER_1000_CHARS, audioCost() обновлена
+- `src/app/api/voices/apihost/route.ts` — новый route: 7 серверов параллельно, дедупликация, кэш 1ч
+- `src/app/api/generate/audio/route.ts` — APIHOST async ветка: synthesize → poll (54×5s) → download → upload
+- `src/components/studio/Step3Voice.tsx` — APIHOST движок: ApihostVoiceDropdown, type badges, динамическая стоимость
+- `.env.example` — добавлен APIHOST_API_KEY
+- Vercel + Railway — APIHOST_API_KEY установлен
+Деплой: dpl_9RuoppPV2NYjNTeJSn7h1KPooHya — https://youtubegen.vercel.app
+
 ### 2026-06-12 — Railway FFmpeg видео-сервер (автосборка MP4)
 Добавлена автосборка MP4 через FFmpeg на Railway:
 - `video-server/index.js` — Express сервер POST /render: скачивает аудио+картинки, строит concat.txt, запускает FFmpeg H.264 1280×720, загружает в Supabase `videos` bucket, возвращает public URL

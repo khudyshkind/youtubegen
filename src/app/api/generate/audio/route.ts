@@ -3,7 +3,7 @@ import { createServerSupabase, createServiceClient } from '@/lib/supabase-server
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
 import { audioCost } from '@/lib/types'
-import type { AudioEngine } from '@/lib/types'
+import type { AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { env } from '@/lib/env'
 
 export const maxDuration = 300
@@ -29,6 +29,9 @@ interface AudioRequest {
   voice_style?: string | number
   clarity_boost?: boolean
   paragraph_pauses?: boolean
+  // APIHOST-specific
+  apihost_voice_type?: ApihostVoiceType
+  apihost_lang?: string
 }
 
 export async function POST(request: NextRequest) {
@@ -51,19 +54,21 @@ export async function POST(request: NextRequest) {
       speech_rate = 1.0,
       voice_style = 0,
       clarity_boost = false,
+      apihost_voice_type = 'standard',
+      apihost_lang = 'ru-RU',
     } = body
 
     if (!text || !voice_id) {
       return NextResponse.json({ ok: false, error: 'Текст и голос обязательны' }, { status: 400 })
     }
 
-    const validEngines: AudioEngine[] = ['elevenlabs', 'openai', 'google']
+    const validEngines: AudioEngine[] = ['elevenlabs', 'openai', 'google', 'apihost']
     if (!validEngines.includes(engine)) {
       return NextResponse.json({ ok: false, error: 'Неверный движок TTS' }, { status: 400 })
     }
 
     const chars = text.length
-    const cost = Math.max(1, audioCost(chars, engine))
+    const cost = Math.max(1, audioCost(chars, engine, apihost_voice_type))
 
     const check = await requireCreditsAmount(user.id, cost, supabase)
     if (!check.ok) {
@@ -134,6 +139,70 @@ export async function POST(request: NextRequest) {
       }
 
       audioBuffer = Buffer.from(googleJson.audioContent, 'base64')
+
+    } else if (engine === 'apihost') {
+      const apihostKey = env('APIHOST_API_KEY')
+      const apihostHeaders = {
+        'Authorization': `Bearer ${apihostKey}`,
+        'Content-Type': 'application/json',
+      }
+
+      // Step 1 — submit synthesis job
+      const synthesizeRes = await fetch('https://apihost.ru/api/v1/synthesize', {
+        method: 'POST',
+        headers: apihostHeaders,
+        body: JSON.stringify({
+          data: [{
+            lang: apihost_lang,
+            speaker: Number(voice_id),
+            text,
+            rate: String(speech_rate),
+            pitch: '1.0',
+            type: 'mp3',
+            pause: '0',
+          }],
+        }),
+      })
+
+      if (!synthesizeRes.ok) {
+        const errBody = await synthesizeRes.text().catch(() => '')
+        console.error('[generate/audio] APIHOST synthesize error:', synthesizeRes.status, errBody.slice(0, 200))
+        return NextResponse.json({ ok: false, error: 'Ошибка отправки задачи APIHOST' }, { status: 502 })
+      }
+
+      const synthesizeJson = await synthesizeRes.json() as { process?: string; id?: string }
+      const processId = synthesizeJson.process ?? synthesizeJson.id
+      if (!processId) {
+        return NextResponse.json({ ok: false, error: 'APIHOST не вернул ID задачи' }, { status: 502 })
+      }
+
+      // Step 2 — poll until status 200 (max ~4.5 minutes)
+      let audioFileUrl: string | null = null
+      for (let i = 0; i < 54; i++) {
+        await new Promise((r) => setTimeout(r, 5000))
+        const checkRes = await fetch('https://apihost.ru/api/v1/process', {
+          method: 'POST',
+          headers: apihostHeaders,
+          body: JSON.stringify({ process: processId }),
+        })
+        if (!checkRes.ok) continue
+        const check = await checkRes.json() as { status?: number; message?: string; url?: string }
+        if (check.status === 200) {
+          audioFileUrl = check.message ?? check.url ?? null
+          break
+        }
+      }
+
+      if (!audioFileUrl) {
+        return NextResponse.json({ ok: false, error: 'APIHOST: синтез занял слишком много времени' }, { status: 504 })
+      }
+
+      // Step 3 — download audio
+      const dlRes = await fetch(audioFileUrl)
+      if (!dlRes.ok) {
+        return NextResponse.json({ ok: false, error: 'Ошибка загрузки аудио с APIHOST' }, { status: 502 })
+      }
+      audioBuffer = Buffer.from(await dlRes.arrayBuffer())
 
     } else {
       // ElevenLabs
