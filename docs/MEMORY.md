@@ -115,6 +115,13 @@ NEXT_PUBLIC_APP_URL=
 <!-- ### YYYY-MM-DD — Краткое описание -->
 <!-- Что сделано, какие файлы созданы/изменены -->
 
+### 2026-06-15 — APIHOST: статические превью, кредитное отображение, исправление загрузки голосов
+- `src/app/api/voices/apihost/route.ts` — исправлен парсинг (API возвращает `{speaker:[]}` а не `{data:[]}`), добавлен `preview_url` для статических MP3-семплов
+- `src/components/studio/Step3Voice.tsx` — превью голосов APIHOST через статические URL (`new Audio(url).play()`), скрытие кнопки при 404, перемещение логики в родительский компонент
+- Удалён `/api/voices/apihost/preview/route.ts` (синтез превью через API больше не нужен)
+- Убраны рублёвые цены из карточки APIHOST, добавлены кредитные бейджи и динамический расчёт стоимости
+Деплой: dpl_9E6ycrUeoomUNNZPoXNzZJtXNUs3 — https://youtubegen.vercel.app
+
 ### 2026-06-15 — Уникализация текста + APIHOST TTS движок
 Добавлена функция уникализации текста и новый TTS движок APIHOST.RU:
 - `src/lib/i18n.ts` — расширена RU/EN i18n: ключи step7.*, thumb.*, tools.*, apihost.*, step2.uniqueize/both_process

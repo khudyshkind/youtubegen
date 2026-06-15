@@ -184,11 +184,14 @@ function VoiceDropdown({
 }
 
 function ApihostVoiceDropdown({
-  value, voices, loading, langFilter, typeFilter, onChange,
+  value, voices, loading, langFilter, typeFilter, noPreviewIds, onChange, onPreview, previewingId,
 }: {
   value: string; voices: ApihostVoice[]; loading: boolean
   langFilter: string; typeFilter: ApihostVoiceType | 'all'
+  noPreviewIds: Set<string>
   onChange: (voice: ApihostVoice) => void
+  onPreview: (e: React.MouseEvent, voice: ApihostVoice) => void
+  previewingId: string | null
 }) {
   const { t } = useLang()
   const [open, setOpen] = useState(false)
@@ -272,22 +275,41 @@ function ApihostVoiceDropdown({
               <p className="px-4 py-3 text-sm text-slate-500 text-center">{t('step3.no_voices')}</p>
             ) : filtered.map((voice) => {
               const isSelected = voice.voice_id === value
+              const isPreviewing = previewingId === voice.voice_id
               const c = APIHOST_TYPE_COLORS[voice.voice_type]
               return (
                 <div key={voice.voice_id}
-                  className="flex items-center justify-between px-3 py-2 cursor-pointer transition-colors"
+                  className="flex items-center justify-between px-3 py-2 transition-colors"
                   style={isSelected ? { background: 'rgba(124,58,237,0.12)' } : {}}
                   onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
-                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = '' }}
-                  onClick={() => { onChange(voice); setOpen(false); setSearch('') }}>
-                  <span className="flex items-center gap-2 min-w-0">
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = '' }}>
+                  <button type="button" onClick={() => { onChange(voice); setOpen(false); setSearch('') }}
+                    className="flex items-center gap-2 flex-1 text-left min-w-0">
                     <span className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0" style={{ background: c.bg, color: c.color }}>
                       {APIHOST_TYPE_ICONS[voice.voice_type]}
                     </span>
                     {genderBadge(voice.gender)}
                     <span className={`text-sm font-medium shrink-0 ${isSelected ? 'text-violet-400' : 'text-slate-200'}`}>{voice.name}</span>
                     <span className="text-xs text-slate-600 truncate">{voice.lang}</span>
-                  </span>
+                  </button>
+                  {!noPreviewIds.has(voice.voice_id) && (
+                    <button type="button" onClick={(e) => onPreview(e, voice)}
+                      disabled={isPreviewing}
+                      title={t('apihost.preview_title')}
+                      className="shrink-0 ml-2 p-1.5 rounded-lg transition-colors disabled:opacity-40"
+                      style={{ color: '#475569' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = '#A78BFA'; e.currentTarget.style.background = 'rgba(124,58,237,0.12)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = '#475569'; e.currentTarget.style.background = '' }}>
+                      {isPreviewing ? (
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                      )}
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -406,6 +428,8 @@ export default function Step3Voice() {
   const [apihostVoiceType, setApihostVoiceType] = useState<ApihostVoiceType>('standard')
   const [apihostLang, setApihostLang] = useState('ru-RU')
   const [apihostTypeFilter, setApihostTypeFilter] = useState<ApihostVoiceType | 'all'>('all')
+  const [noPreviewIds, setNoPreviewIds] = useState<Set<string>>(() => new Set())
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
 
   // Generation
   const [loading, setLoading] = useState(false)
@@ -497,6 +521,28 @@ export default function Step3Voice() {
   function handleGoogleLanguageChange(lang: string) {
     setGoogleLanguage(lang)
     loadGoogleVoices(lang)
+  }
+
+  async function handleApihostPreview(e: React.MouseEvent, voice: ApihostVoice) {
+    e.stopPropagation()
+    if (!voice.preview_url) return
+    if (previewAudioRef.current) { previewAudioRef.current.pause(); previewAudioRef.current = null }
+    if (previewingId === voice.voice_id) { setPreviewingId(null); return }
+    setPreviewingId(voice.voice_id)
+    try {
+      const audio = new Audio(voice.preview_url)
+      previewAudioRef.current = audio
+      audio.onended = () => { setPreviewingId(null); previewAudioRef.current = null }
+      audio.onerror = () => {
+        setPreviewingId(null)
+        previewAudioRef.current = null
+        setNoPreviewIds((prev) => new Set(prev).add(voice.voice_id))
+      }
+      await audio.play()
+    } catch (err) {
+      console.warn('[apihost-preview]', err instanceof Error ? err.message : err)
+      setPreviewingId(null)
+    }
   }
 
   async function handlePreview(voiceId: string) {
@@ -667,7 +713,7 @@ export default function Step3Voice() {
       </div>
 
       {/* Dynamic cost display */}
-      {scriptChars > 0 && (
+      {scriptChars > 0 && engine !== 'apihost' && (
         <div className="rounded-xl px-4 py-3 flex items-center justify-between"
           style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
           <div className="flex items-center gap-2 text-sm">
@@ -677,12 +723,6 @@ export default function Step3Voice() {
             </svg>
             <span className="text-slate-400">{t('step3.your_text')}</span>
             <span className="text-slate-200 font-medium">{scriptChars.toLocaleString()} {t('step3.chars')}</span>
-            {engine === 'apihost' && apihostVoiceId && (
-              <span className="text-xs px-1.5 py-0.5 rounded font-medium"
-                style={{ background: APIHOST_TYPE_COLORS[apihostVoiceType].bg, color: APIHOST_TYPE_COLORS[apihostVoiceType].color }}>
-                {APIHOST_TYPE_ICONS[apihostVoiceType]} {t(`apihost.${apihostVoiceType}` as const)}
-              </span>
-            )}
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-slate-500">{t('step3.cost')}</span>
@@ -822,18 +862,19 @@ export default function Step3Voice() {
             style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.2)' }}>
             <p className="text-xs font-semibold text-blue-400">{t('apihost.info_title')}</p>
             <div className="flex flex-col gap-1.5">
-              {(['basic', 'standard', 'pro'] as const).map((vt) => (
+              {(['basic', 'standard', 'pro', 'studio'] as const).map((vt) => (
                 <div key={vt} className="flex items-center gap-2">
-                  <span className="text-sm">{APIHOST_TYPE_ICONS[vt]}</span>
-                  <span className="text-xs font-medium" style={{ color: APIHOST_TYPE_COLORS[vt].color }}>
-                    {t(`apihost.${vt}` as const)}
+                  <span className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0"
+                    style={{ background: APIHOST_TYPE_COLORS[vt].bg, color: APIHOST_TYPE_COLORS[vt].color }}>
+                    {APIHOST_TYPE_ICONS[vt]} {t(`apihost.${vt}` as const)}
                   </span>
                   <span className="text-xs text-slate-500">—</span>
-                  <span className="text-xs text-slate-400">{t(`apihost.${vt}_desc` as const)}</span>
+                  <span className="text-xs text-slate-400">
+                    {APIHOST_CREDITS_PER_1000_CHARS[vt]} {t('step3.cr_per_k')}
+                  </span>
                 </div>
               ))}
             </div>
-            <p className="text-xs text-slate-600 mt-1">{t('apihost.credit_note')}</p>
           </div>
 
           {/* Language filter */}
@@ -901,12 +942,21 @@ export default function Step3Voice() {
               loading={apihostVoicesLoading}
               langFilter={apihostLang}
               typeFilter={apihostTypeFilter}
+              noPreviewIds={noPreviewIds}
               onChange={(v) => {
                 setApihostVoiceId(v.voice_id)
                 setApihostVoiceType(v.voice_type)
                 setApihostLang(v.lang)
               }}
+              onPreview={handleApihostPreview}
+              previewingId={previewingId}
             />
+          </div>
+
+          {/* Voice cost note */}
+          <div className="rounded-xl px-4 py-3 text-xs text-slate-500"
+            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            ℹ️ {t('apihost.voice_cost_note')}
           </div>
         </div>
       )}
@@ -1000,6 +1050,23 @@ export default function Step3Voice() {
           `🎙 ${t('studio.step3')} · −${cost} ${t('nav.credits_suffix')}`
         )}
       </button>
+
+      {/* APIHOST dynamic cost breakdown */}
+      {engine === 'apihost' && scriptChars > 0 && (
+        <p className="text-xs text-slate-500 text-center -mt-2">
+          {(() => {
+            const rate = APIHOST_CREDITS_PER_1000_CHARS[apihostVoiceType]
+            const voiceName = apihostVoiceId
+              ? (apihostVoices.find((v) => v.voice_id === apihostVoiceId)?.name ?? '?')
+              : null
+            return [
+              `${t('step3.your_text')} ${scriptChars.toLocaleString()} ${t('step3.chars')}`,
+              voiceName ? `${t('step3.voice')}: ${voiceName} (${t(`apihost.${apihostVoiceType}` as const)})` : null,
+              `${t('step3.cost')} ${cost} ${t('nav.credits_suffix')} (${rate} ${t('step3.cr_per_k')}, ${t('apihost.min_note')})`,
+            ].filter(Boolean).join(' · ')
+          })()}
+        </p>
+      )}
 
       {/* Upload / skip */}
       {!loading && (

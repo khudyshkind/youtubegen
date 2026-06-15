@@ -27,8 +27,9 @@ const SERVER_PRICES_RUB: Record<ApihostVoiceType, number> = {
 }
 
 interface ApihostSpeakerRaw {
-  id: number
-  name: string
+  id: number | string
+  name?: string
+  speaker?: string   // actual name field returned by API
   lang?: string
   language?: string
   gender?: string
@@ -45,7 +46,7 @@ export interface ApihostVoice {
   credits_per_1000: number
   price_per_1000_rub: number
   price_per_1000_usd: number
-  preview_url: null
+  preview_url: string | null
   server: number
 }
 
@@ -57,9 +58,13 @@ async function fetchServer(key: string, server: number): Promise<ApihostVoice[]>
       headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ server }),
     })
+    const rawText = await res.text()
+    console.log(`[apihost/voices] server=${server} status=${res.status} body=${rawText.slice(0, 300)}`)
     if (!res.ok) return []
-    const data = await res.json() as ApihostSpeakerRaw[] | { data?: ApihostSpeakerRaw[] }
-    const list: ApihostSpeakerRaw[] = Array.isArray(data) ? data : (data.data ?? [])
+    let data: ApihostSpeakerRaw[] | { data?: ApihostSpeakerRaw[]; speaker?: ApihostSpeakerRaw[] }
+    try { data = JSON.parse(rawText) } catch { return [] }
+    // API returns { "speaker": [...] }, fallback for { "data": [...] } or plain array
+    const list: ApihostSpeakerRaw[] = Array.isArray(data) ? data : (data.speaker ?? data.data ?? [])
 
     return list.map((v) => {
       const lang = v.lang ?? v.language ?? 'ru-RU'
@@ -68,9 +73,10 @@ async function fetchServer(key: string, server: number): Promise<ApihostVoice[]>
         genderRaw === 'male' || genderRaw === 'm' ? 'male' :
         genderRaw === 'female' || genderRaw === 'f' ? 'female' : null
       const priceRub = SERVER_PRICES_RUB[voiceType]
+      const voiceId = String(v.id)
       return {
-        voice_id: String(v.id),
-        name: v.name,
+        voice_id: voiceId,
+        name: v.speaker ?? v.name ?? voiceId,
         gender,
         lang,
         engine: 'apihost' as const,
@@ -78,11 +84,12 @@ async function fetchServer(key: string, server: number): Promise<ApihostVoice[]>
         credits_per_1000: APIHOST_CREDITS_PER_1000_CHARS[voiceType],
         price_per_1000_rub: priceRub,
         price_per_1000_usd: Math.round((priceRub / 90) * 1000) / 1000,
-        preview_url: null,
+        preview_url: `https://apihost.ru/samples/examples/other/${lang}_${voiceId}.mp3`,
         server,
       }
     })
-  } catch {
+  } catch (err) {
+    console.log(`[apihost/voices] server=${server} exception:`, err instanceof Error ? err.message : String(err))
     return []
   }
 }
@@ -94,6 +101,7 @@ export async function GET(request: Request) {
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
     const key = env('APIHOST_API_KEY')
+    console.log('[apihost/voices] key present:', !!key?.trim(), 'length:', key?.trim().length ?? 0)
 
     const url = new URL(request.url)
     const langFilter = url.searchParams.get('language') ?? ''
@@ -121,6 +129,8 @@ export async function GET(request: Request) {
 
     // Sort: by language then name
     voices.sort((a, b) => a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name))
+
+    console.log('[apihost/voices] total voices after dedup/filter:', voices.length)
 
     return NextResponse.json(
       { ok: true, data: { voices, total: voices.length } },
