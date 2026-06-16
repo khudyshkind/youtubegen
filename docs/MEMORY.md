@@ -115,6 +115,20 @@ NEXT_PUBLIC_APP_URL=
 <!-- ### YYYY-MM-DD — Краткое описание -->
 <!-- Что сделано, какие файлы созданы/изменены -->
 
+### 2026-06-16 — YouTube Analytics раздел
+Добавлен новый раздел /analytics с тремя вкладками:
+- `src/lib/types.ts` — CREDIT_COSTS: niche_analysis(10), trends(5), channel_analysis(15)
+- `src/lib/i18n.ts` — analytics.* ключи (ru + en)
+- `src/components/shared/SidebarNav.tsx` — пункт "YouTube Analytics" → /analytics
+- `supabase/schema.sql` — таблица analytics_cache (24ч кэш по type+key)
+- `src/app/api/analytics/niche/route.ts` — YouTube API (каналы + видео) + Claude анализ ниши
+- `src/app/api/analytics/trends/route.ts` — YouTube trending + Claude паттерны
+- `src/app/api/analytics/channel/route.ts` — 50 видео канала + Claude рекомендации
+- `src/app/(dashboard)/analytics/page.tsx` — 3 вкладки, прогресс-шаги, результаты с таблицами/карточками
+- `.env.example` — добавлен YOUTUBE_API_KEY
+- Vercel — YOUTUBE_API_KEY установлен
+Деплой: dpl_6gt43bmX7psmrEovUW1s2WRfrXKC — https://youtubegen.vercel.app
+
 ### 2026-06-15 — APIHOST: статические превью, кредитное отображение, исправление загрузки голосов
 - `src/app/api/voices/apihost/route.ts` — исправлен парсинг (API возвращает `{speaker:[]}` а не `{data:[]}`), добавлен `preview_url` для статических MP3-семплов
 - `src/components/studio/Step3Voice.tsx` — превью голосов APIHOST через статические URL (`new Audio(url).play()`), скрытие кнопки при 404, перемещение логики в родительский компонент

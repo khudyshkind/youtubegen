@@ -86,6 +86,20 @@
 
 ---
 
+## Фаза 9 — YouTube Analytics
+
+- [x] ✅ CREDIT_COSTS — niche_analysis(10), trends(5), channel_analysis(15)
+- [x] ✅ i18n — analytics.* ключи ru + en (nav.analytics, 50+ ключей)
+- [x] ✅ SidebarNav.tsx — пункт "YouTube Analytics" → /analytics
+- [x] ✅ supabase/schema.sql — analytics_cache таблица (24ч кэш)
+- [x] ✅ /api/analytics/niche/route.ts — YouTube API + Claude (10 кр.)
+- [x] ✅ /api/analytics/trends/route.ts — Trending + Claude (5 кр.)
+- [x] ✅ /api/analytics/channel/route.ts — Channel 50 видео + Claude (15 кр.)
+- [x] ✅ /dashboard/analytics/page.tsx — 3 вкладки с прогрессом и результатами
+- [x] ✅ .env.example + Vercel — YOUTUBE_API_KEY
+
+---
+
 ## Фаза 8 — i18n + Уникализация + APIHOST TTS
 
 - [x] ✅ i18n система (src/lib/i18n.ts + useLang hook) — все строки RU/EN, все 7 шагов студии переведены

@@ -267,6 +267,27 @@ create policy "analytics_events: own select"
   using (auth.uid() = user_id);
 
 -- ─────────────────────────────────────────
+-- YouTube Analytics cache (24h TTL)
+-- ─────────────────────────────────────────
+
+create table if not exists public.analytics_cache (
+  id          uuid        default uuid_generate_v4() primary key,
+  cache_type  text        not null,
+  cache_key   text        not null,
+  result      jsonb       not null,
+  created_at  timestamptz not null default now()
+);
+
+create unique index if not exists analytics_cache_type_key_idx
+  on public.analytics_cache(cache_type, cache_key);
+
+create index if not exists analytics_cache_created_at_idx
+  on public.analytics_cache(created_at);
+
+-- service role reads/writes cache; no RLS needed (server-side only)
+alter table public.analytics_cache enable row level security;
+
+-- ─────────────────────────────────────────
 -- Storage buckets
 -- ─────────────────────────────────────────
 
