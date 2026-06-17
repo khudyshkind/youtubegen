@@ -76,6 +76,14 @@ async function sbPost(table, body, extra = '') {
   return res.json()
 }
 
+async function sbUpsert(table, body, conflictCol) {
+  const url = `${SUPABASE_URL}/rest/v1/${table}?on_conflict=${conflictCol}`
+  const headers = { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates,return=representation' }
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
+  if (!res.ok) throw new Error(`sbUpsert ${table}: ${res.status} ${await res.text().catch(() => '')}`)
+  return res.json()
+}
+
 async function sbPatch(table, qs, body) {
   const url = `${SUPABASE_URL}/rest/v1/${table}?${qs}`
   const res = await fetch(url, { method: 'PATCH', headers: sbHeaders(), body: JSON.stringify(body) })
@@ -102,9 +110,13 @@ async function getQueueStats() {
 }
 
 async function addToQueue(topics) {
+  console.log('[queue] addToQueue called, topics:', topics)
   try {
-    await sbPost('bot_content_queue', topics.map(topic => ({ topic, status: 'pending' })))
-  } catch (e) { console.error('[queue] addToQueue:', e.message) }
+    const rows = topics.map(topic => ({ topic, status: 'pending' }))
+    console.log('[queue] inserting rows:', JSON.stringify(rows))
+    const result = await sbPost('bot_content_queue', rows)
+    console.log('[queue] insert result:', JSON.stringify(result))
+  } catch (e) { console.error('[queue] addToQueue error:', e.message) }
 }
 
 async function markPublished(id) {
@@ -135,15 +147,25 @@ async function isSeenUrl(url) {
 
 async function markSeenUrl(url) {
   try {
-    await sbPost('bot_seen_urls', { url }, 'on_conflict=url')
+    await sbUpsert('bot_seen_urls', { url }, 'url')
   } catch (e) { console.warn('[seen] markSeenUrl:', e.message) }
 }
 
 // ── Settings operations (bot_settings) ───────────────────────────────────────
+async function getSetting(key) {
+  try {
+    const rows = await sbGet('bot_settings', `key=eq.${encodeURIComponent(key)}&select=value`)
+    return rows?.[0]?.value ?? null
+  } catch (e) {
+    console.warn('[settings] getSetting:', e.message)
+    return null
+  }
+}
+
 async function setSetting(key, value) {
   try {
-    await sbPost('bot_settings', { key, value: String(value), updated_at: new Date().toISOString() }, 'on_conflict=key')
-  } catch (e) { console.warn('[settings] setSetting:', e.message) }
+    await sbUpsert('bot_settings', { key, value: String(value), updated_at: new Date().toISOString() }, 'key')
+  } catch (e) { console.warn('[settings] setSetting error:', key, e.message) }
 }
 
 async function loadSettingsFromDB() {
@@ -1351,9 +1373,15 @@ app.post('/telegram/webhook', async (req, res) => {
 
     // ── Support: waiting for description ────────────────────────────────────
     const sst = supportStates.get(String(chatId))
+    console.log('[support] state lookup for chatId:', chatId, '→', sst ? `step=${sst.step}` : 'no state')
     if (sst?.step === 'waiting_description' && !isCommand && text) {
+      console.log('[support] description received from userId:', userId, 'chatId:', chatId)
+      console.log('[support] category:', sst.category)
+      console.log('[support] sending to owner:', process.env.TELEGRAM_OWNER_ID)
+
       const cat          = SUPPORT_CATEGORIES[sst.category]
       const ticketNumber = await createSupportTicket(chatId, sst.username || message.from?.username, sst.category, text)
+      console.log('[support] ticket saved, ticketNumber:', ticketNumber)
       supportStates.delete(String(chatId))
 
       const ticketLabel = ticketNumber ? `#${ticketNumber}` : '#—'
@@ -1368,25 +1396,28 @@ app.post('/telegram/webhook', async (req, res) => {
         parse_mode: 'Markdown',
       })
 
-      if (OWNER_ID && ticketNumber) {
+      if (OWNER_ID) {
         const userDisplay = sst.username ? `@${sst.username}` : (sst.firstName || String(chatId))
         const now = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-        await tgApi('sendMessage', {
+        const replyButton = ticketNumber
+          ? [{ text: '💬 Ответить пользователю', callback_data: `sup_reply_${chatId}_${ticketNumber}` }]
+          : [{ text: '💬 Ответить пользователю', callback_data: `sup_reply_${chatId}_0` }]
+        const ownerText =
+          `🆘 Новая заявка в поддержку!\n\n` +
+          `Заявка: ${ticketLabel}\n` +
+          `Пользователь: ${userDisplay} (ID: ${chatId})\n` +
+          `Категория: ${cat?.label ?? sst.category}\n` +
+          `Время: ${now} МСК\n\n` +
+          `Описание:\n${text}`
+        console.log('[support] notifying owner NOW, chat_id:', OWNER_ID)
+        const ownerRes = await tgApi('sendMessage', {
           chat_id: OWNER_ID,
-          text:
-            `🆘 *Новая заявка в поддержку!*\n\n` +
-            `📋 Заявка: *${ticketLabel}*\n` +
-            `👤 Пользователь: ${userDisplay} (ID: \`${chatId}\`)\n` +
-            `📧 Категория: ${cat?.label ?? sst.category}\n` +
-            `⏰ Время: ${now} МСК\n\n` +
-            `💬 *Описание:*\n${text}`,
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [[
-              { text: '💬 Ответить пользователю', callback_data: `sup_reply_${chatId}_${ticketNumber}` },
-            ]],
-          },
+          text: ownerText,
+          reply_markup: { inline_keyboard: [replyButton] },
         })
+        console.log('[support] owner response:', JSON.stringify(ownerRes))
+      } else {
+        console.warn('[support] OWNER_ID not set — cannot notify owner')
       }
       return
     }
@@ -1720,9 +1751,17 @@ async function checkVercelDeploy() {
   if (!latest) return
 
   const lastId = await getSetting('last_deployment_id')
-  if (latest.uid === lastId) return  // already processed
+  console.log('[vercel] last known id:', lastId)
+  console.log('[vercel] current id:', latest.uid)
 
+  if (latest.uid === lastId) {
+    console.log('[vercel] same deployment, skipping')
+    return
+  }
+
+  console.log('[vercel] new deployment detected, saving id:', latest.uid)
   await setSetting('last_deployment_id', latest.uid)
+  console.log('[vercel] saved ok')
   console.log('[vercel] new production deploy detected:', latest.uid)
 
   const commit = latest.meta?.githubCommitMessage ?? latest.name ?? ''
@@ -2103,5 +2142,14 @@ app.listen(PORT, async () => {
   console.log(`ytgen-video-server on :${PORT}`)
   await loadSettingsFromDB().catch(err => console.warn('[bot] settings load failed:', err.message))
   console.log('[bot] starting cron jobs...')
+
+  const ownerId = process.env.TELEGRAM_OWNER_ID
+  console.log('[boot] OWNER_ID:', ownerId || '(not set)')
+  if (ownerId) {
+    tgApi('sendMessage', { chat_id: ownerId, text: '🟢 Бот перезапущен' })
+      .then(r => console.log('[boot] owner notified ok, tg response ok:', r?.ok))
+      .catch(e => console.log('[boot] owner notify FAILED:', e.message))
+  }
+
   registerWebhook().catch(console.error)
 })
