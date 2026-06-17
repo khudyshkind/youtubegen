@@ -63,7 +63,7 @@ export function audioCost(chars: number, engine: AudioEngine, apihostVoiceType?:
 }
 
 export const PLAN_CREDITS: Record<Plan, number> = {
-  free:    20,
+  free:    30,
   basic:   800,
   starter: 2000,
   pro:     5000,
@@ -79,7 +79,7 @@ export const PLAN_PRICES: Record<Exclude<Plan, 'free'>, number> = {
 
 // Maximum accumulated balance (2× monthly allocation)
 export const PLAN_MAX_CREDITS: Record<Plan, number> = {
-  free:    20,
+  free:    30,
   basic:   1600,
   starter: 4000,
   pro:     10000,

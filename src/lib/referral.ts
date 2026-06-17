@@ -3,7 +3,7 @@ import { addCredits } from './credits'
 import { sendReferralBonusEmail } from './email'
 
 const REFERRER_BONUS = 20  // credits for the user who shared the link
-const REFEREE_BONUS = 5    // extra credits for the newly registered user
+const REFEREE_BONUS = 10   // extra credits for the newly registered user
 
 export async function applyReferral(
   newUserId: string,

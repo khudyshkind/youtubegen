@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import type { SceneImage } from '@/lib/types'
+import { CREDIT_COSTS } from '@/lib/types'
 
 // Derive scene prompts by splitting script into N chunks
 function extractPrompts(script: string, count: number): string[] {
@@ -57,7 +58,7 @@ export default function Step4Images() {
       const json = await res.json()
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') {
-          setError(`Недостаточно кредитов. Нужно ${nonEmpty.length * 8} кр. (по 8 за изображение).`)
+          setError(`Недостаточно кредитов. Нужно ${nonEmpty.length * CREDIT_COSTS.image} кр. (по ${CREDIT_COSTS.image} за изображение).`)
           return
         }
         throw new Error(json.error)
@@ -70,7 +71,7 @@ export default function Step4Images() {
     }
   }
 
-  const creditCost = prompts.filter((p) => p.trim()).length * 8
+  const creditCost = prompts.filter((p) => p.trim()).length * CREDIT_COSTS.image
 
   return (
     <div className="flex flex-col gap-6">
@@ -128,7 +129,7 @@ export default function Step4Images() {
         </svg>
         <p className="text-xs text-amber-700">
           {prompts.filter((p) => p.trim()).length} иллюстраций · стоимость{' '}
-          <strong>{creditCost} кредитов</strong> (8 кр. за штуку)
+          <strong>{creditCost} кредитов</strong> ({CREDIT_COSTS.image} кр. за штуку)
         </p>
       </div>
 

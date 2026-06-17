@@ -398,10 +398,11 @@ export default function Step5Images() {
               d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
           <p className="text-xs text-slate-400 leading-relaxed">
-            {audioDurationSec} {t('step5.sec')} ÷ {imageInterval} {t('step5.sec')}/frame ={' '}
-            <strong className="text-slate-200">{imageCount}</strong>
+            −{CREDIT_COSTS.image} {t('nav.credits_suffix')}/шт
             <span className="mx-1.5 text-slate-600">·</span>
-            {t('step3.cost')} <strong className="text-violet-400">{creditCost} {t('nav.credits_suffix')}</strong>
+            <strong className="text-slate-200">{imageCount}</strong> илл.
+            <span className="mx-1.5 text-slate-600">·</span>
+            Итого: <strong className="text-violet-400">{creditCost} {t('nav.credits_suffix')}</strong>
           </p>
         </div>
       </div>

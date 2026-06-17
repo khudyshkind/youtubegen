@@ -39,24 +39,62 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
     { icon: '💰', title: t('landing.benefit6_title'), desc: t('landing.benefit6_desc') },
   ]
 
+  const BOT = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME ?? 'youtubegenai_bot'}`
+  const tgPlan = (id: string) => `${BOT}?start=plan_${id}`
+
   const PLANS = [
     {
-      name: 'Starter', price: '19', credits: 2000,
+      name: 'Free',
+      isFree: true,
+      credits: 30,
+      features: [t('billing.f_script'), t('billing.f_voice_openai'), t('billing.f_2_images'), t('billing.f_all_tools')],
+      cta: t('landing.plan_cta_free'),
+      href: '/auth/register',
+      highlight: false,
+    },
+    {
+      name: 'Basic',
+      isFree: false,
+      priceUsd: 9,
+      rub: Math.ceil(9 * usdToRub),
+      credits: 800,
+      features: [t('billing.f_credits_basic'), t('billing.f_videos_3'), t('billing.f_all_tools'), t('billing.f_voices_3')],
+      cta: t('landing.plan_cta_basic'),
+      href: tgPlan('basic'),
+      highlight: false,
+    },
+    {
+      name: 'Starter',
+      isFree: false,
+      priceUsd: 19,
       rub: Math.ceil(19 * usdToRub),
-      features: [t('billing.f_credits_100'), t('billing.f_videos_5_9'), t('billing.f_all_tools'), t('billing.f_email_support')],
-      cta: t('landing.plan_cta_starter'), highlight: false,
+      credits: 2000,
+      features: [t('billing.f_credits_100'), t('billing.f_videos_7'), t('billing.f_all_tools'), t('billing.f_analytics')],
+      cta: t('landing.plan_cta_starter'),
+      href: tgPlan('starter'),
+      highlight: true,
     },
     {
-      name: 'Pro', price: '39', credits: 5000,
+      name: 'Pro',
+      isFree: false,
+      priceUsd: 39,
       rub: Math.ceil(39 * usdToRub),
-      features: [t('billing.f_credits_300'), t('billing.f_videos_15_25'), t('billing.f_all_tools'), t('billing.f_priority_support')],
-      cta: t('landing.plan_cta_pro'), highlight: true,
+      credits: 5000,
+      features: [t('billing.f_credits_300'), t('billing.f_videos_18'), t('billing.f_all_tools'), t('billing.f_priority_support')],
+      cta: t('landing.plan_cta_pro'),
+      href: tgPlan('pro'),
+      highlight: false,
     },
     {
-      name: 'Agency', price: '99', credits: 15000,
+      name: 'Agency',
+      isFree: false,
+      priceUsd: 99,
       rub: Math.ceil(99 * usdToRub),
-      features: [t('billing.f_credits_1000'), t('billing.f_videos_55_90'), t('billing.f_all_tools'), t('billing.f_dedicated_support'), t('billing.f_api_access')],
-      cta: t('landing.plan_cta_agency'), highlight: false,
+      credits: 15000,
+      features: [t('billing.f_credits_1000'), t('billing.f_videos_54'), t('billing.f_all_tools'), t('billing.f_dedicated_support')],
+      cta: t('landing.plan_cta_agency'),
+      href: tgPlan('agency'),
+      highlight: false,
     },
   ]
 
@@ -247,19 +285,19 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
       <section id="pricing" className="py-28 relative" style={{ background: 'linear-gradient(to bottom, #0A0A0F, #0D0B18, #0A0A0F)' }}>
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-px bg-gradient-to-r from-transparent via-violet-500/40 to-transparent" />
 
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16 reveal">
             <p className="text-violet-400 text-sm font-semibold uppercase tracking-widest mb-3">{t('landing.pricing_tag')}</p>
             <h2 className="text-5xl font-extrabold gradient-text mb-4">{t('landing.pricing_h2')}</h2>
             <p className="text-xl text-slate-400">{t('landing.pricing_sub')}</p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 items-start">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-start">
             {PLANS.map((plan, i) => (
               <div
                 key={plan.name}
                 data-tilt
-                className={`relative rounded-2xl p-8 flex flex-col gap-6 reveal ${plan.highlight ? 'pro-card-glow' : 'card-dark'}`}
+                className={`relative rounded-2xl p-6 flex flex-col gap-5 reveal ${plan.highlight ? 'pro-card-glow' : 'card-dark'}`}
                 style={{
                   transitionDelay: `${i * 80}ms`,
                   ...(plan.highlight ? { background: 'rgba(124,58,237,0.08)' } : {}),
@@ -273,18 +311,31 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
                   </div>
                 )}
                 <div>
-                  <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">{plan.name}</p>
-                  <div className="flex items-end gap-1">
-                    <span className="text-5xl font-extrabold text-slate-100">${plan.price}</span>
-                    <span className="text-slate-500 mb-2">{t('landing.period')}</span>
-                  </div>
-                  <p className="text-xs text-slate-600 mt-0.5">~{plan.rub.toLocaleString('ru-RU')} ₽/мес</p>
-                  <p className="text-sm text-violet-400 font-semibold mt-1">{plan.credits} {t('landing.plan_credits_mo')}</p>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{plan.name}</p>
+                  {plan.isFree ? (
+                    <div className="flex items-end gap-1">
+                      <span className="text-3xl font-extrabold text-slate-100">
+                        {t('landing.plan_free_price')}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-end gap-1">
+                      <span className="text-4xl font-extrabold text-slate-100">${plan.priceUsd}</span>
+                      <span className="text-slate-500 mb-1 text-sm">{t('landing.period')}</span>
+                    </div>
+                  )}
+                  {!plan.isFree && (
+                    <p className="text-xs text-slate-600 mt-0.5">~{plan.rub?.toLocaleString('ru-RU')} ₽/мес</p>
+                  )}
+                  <p className="text-xs text-violet-400 font-semibold mt-1">
+                    {plan.credits.toLocaleString('ru-RU')} {t('landing.plan_credits_mo')}
+                    {plan.isFree && ' ·  разово'}
+                  </p>
                 </div>
-                <ul className="flex flex-col gap-2.5">
+                <ul className="flex flex-col gap-2 flex-1">
                   {plan.features.map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-sm text-slate-400">
-                      <svg className="w-4 h-4 text-violet-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <li key={f} className="flex items-start gap-1.5 text-xs text-slate-400">
+                      <svg className="w-3.5 h-3.5 text-violet-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                       </svg>
                       {f}
@@ -292,11 +343,11 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
                   ))}
                 </ul>
                 {plan.highlight ? (
-                  <Link href="/auth/register" className="btn-gradient mt-auto w-full py-3.5 rounded-xl text-sm font-semibold text-center text-white">
+                  <Link href={plan.href} className="btn-gradient mt-auto w-full py-3 rounded-xl text-xs font-semibold text-center text-white">
                     {plan.cta}
                   </Link>
                 ) : (
-                  <Link href="/auth/register" className="btn-ghost-dark mt-auto w-full py-3.5 rounded-xl text-sm font-semibold text-center">
+                  <Link href={plan.href} className="btn-ghost-dark mt-auto w-full py-3 rounded-xl text-xs font-semibold text-center">
                     {plan.cta}
                   </Link>
                 )}

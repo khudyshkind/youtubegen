@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useStudioStore } from '@/lib/studio-store'
 import type { SeoData } from '@/lib/types'
+import { CREDIT_COSTS } from '@/lib/types'
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -133,9 +134,9 @@ export default function Step6Seo() {
             Генерация SEO...
           </>
         ) : localSeo ? (
-          '↺ Перегенерировать SEO (−5 кр.)'
+          `↺ Перегенерировать SEO (−${CREDIT_COSTS.seo} кр.)`
         ) : (
-          '🔍 Сгенерировать SEO (−5 кр.)'
+          `🔍 Сгенерировать SEO (−${CREDIT_COSTS.seo} кр.)`
         )}
       </button>
 

@@ -1053,7 +1053,7 @@ function RevenueTab({
               className="btn-gradient py-3.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50">
               {loading
                 ? <span className="flex items-center justify-center gap-2"><Spinner /> Рассчитываю...</span>
-                : 'Рассчитать доход · −3 кр.'}
+                : 'Рассчитать доход · −2 кр.'}
             </button>
           </form>
         </Card>
@@ -1236,7 +1236,7 @@ function CommentsTab({
               className="btn-gradient py-3.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50">
               {loading
                 ? <span className="flex items-center justify-center gap-2"><Spinner /> Анализирую комментарии...</span>
-                : 'Анализировать · −8 кр.'}
+                : 'Анализировать · −4 кр.'}
             </button>
           </form>
         </Card>
@@ -1476,7 +1476,7 @@ function KeywordsTab({
               className="btn-gradient py-3.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50">
               {loading
                 ? <span className="flex items-center justify-center gap-2"><Spinner /> Ищу ключевые слова...</span>
-                : 'Найти ключевые слова · −5 кр.'}
+                : 'Найти ключевые слова · −3 кр.'}
             </button>
           </form>
         </Card>
@@ -1695,7 +1695,7 @@ function CompareTab({
               className="btn-gradient py-3.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50">
               {loading
                 ? <span className="flex items-center justify-center gap-2"><Spinner /> Сравниваю каналы...</span>
-                : 'Сравнить · −10 кр.'}
+                : 'Сравнить · −6 кр.'}
             </button>
           </form>
         </Card>
