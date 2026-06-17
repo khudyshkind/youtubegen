@@ -6,6 +6,7 @@ const path = require('path')
 const os = require('os')
 const https = require('https')
 const http = require('http')
+const crypto = require('crypto')
 const AnthropicPkg = require('@anthropic-ai/sdk')
 const Anthropic = AnthropicPkg.default ?? AnthropicPkg
 const cron = require('node-cron')
@@ -14,9 +15,10 @@ const RssParser = require('rss-parser')
 const app = express()
 app.use(express.json({ limit: '2mb' }))
 
-const API_SECRET = process.env.RAILWAY_API_SECRET
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const API_SECRET            = process.env.RAILWAY_API_SECRET
+const SUPABASE_URL          = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SUPABASE_SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
+const VERCEL_WEBHOOK_SECRET = process.env.VERCEL_WEBHOOK_SECRET
 
 // ── Russia payment config ─────────────────────────────────────────────────────
 const CARD_NUMBER = process.env.CARD_NUMBER || '0000 0000 0000 0000'
@@ -165,6 +167,7 @@ async function loadSettingsFromDB() {
 // In-memory state (settings synced with DB on startup and every change)
 let pendingPost = null            // { text, imageUrl, topic }
 let pendingMonitorPost = null     // { post, source, url, score, topic }
+let pendingDeployPost = null      // { text, commitMessage, deployUrl }
 let awaitingTopic = false         // true after "✍️ Написать пост"
 let awaitingEdit  = false         // true after "✏️ Редактировать" on monitor post
 let awaitingPlan  = false         // true after plan_add callback
@@ -567,6 +570,36 @@ async function generateImage(topic) {
   }
 }
 
+// ── Deploy post helpers ───────────────────────────────────────────────────────
+function deployInline() {
+  return {
+    inline_keyboard: [[
+      { text: '✅ Опубликовать', callback_data: 'dep_pub' },
+      { text: '❌ Отклонить',   callback_data: 'dep_skip' },
+    ]],
+  }
+}
+
+async function generateDeployPost(commitMessage) {
+  const msg = await withTimeout(claude().messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 300,
+    messages: [{
+      role: 'user',
+      content:
+        'Напиши пост для Telegram канала YouTubeGen об этом обновлении сервиса.\n\n' +
+        `Описание изменений из git коммита: ${commitMessage}\n\n` +
+        'Правила:\n' +
+        '- Объясни обновление простым языком для блогеров\n' +
+        '- Покажи пользу для пользователя\n' +
+        '- Добавь эмодзи и ссылку https://youtubegen.vercel.app\n' +
+        '- Максимум 400 символов\n' +
+        '- Стиль: живой, позитивный',
+    }],
+  }), 20000, 'deploy-post')
+  return msg.content.filter(b => b.type === 'text').map(b => b.text).join('').trim()
+}
+
 // ── Supabase stats ────────────────────────────────────────────────────────────
 async function fetchStats() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null
@@ -944,6 +977,18 @@ async function handleCallback(cq) {
     await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: monitorIntervalInline() })
     await sendTo(chatId, `✅ Интервал мониторинга: *${INTERVAL_LABELS[monitorConfig.interval]}*`)
 
+  } else if (data === 'dep_pub') {
+    if (!pendingDeployPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
+    await publishToChannel(pendingDeployPost.text)
+    pendingDeployPost = null
+    await clearButtons()
+    await sendTo(chatId, '✅ Пост об обновлении опубликован')
+
+  } else if (data === 'dep_skip') {
+    pendingDeployPost = null
+    await clearButtons()
+    await sendTo(chatId, '⏭ Пост об обновлении пропущен')
+
   } else if (data === 'mon_pub') {
     if (!pendingMonitorPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
     await publishToChannel(pendingMonitorPost.post)
@@ -1300,6 +1345,66 @@ cron.schedule('0 * * * *', async () => {
   console.log('[cron] plan post at', planConfig.postHour + ':00 UTC')
   try { await postFromQueue() } catch (err) { console.error('[cron/plan]', err.message) }
 }, { timezone: 'UTC' })
+
+// ── Vercel deployment webhook ─────────────────────────────────────────────────
+app.post('/vercel-webhook', express.raw({ type: '*/*' }), async (req, res) => {
+  // Verify HMAC-SHA1 signature
+  const sig = req.headers['x-vercel-signature'] ?? ''
+  if (VERCEL_WEBHOOK_SECRET) {
+    const expected = crypto
+      .createHmac('sha1', VERCEL_WEBHOOK_SECRET)
+      .update(req.body)
+      .digest('hex')
+    try {
+      if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'))) {
+        return res.status(401).json({ ok: false, error: 'Invalid signature' })
+      }
+    } catch {
+      return res.status(401).json({ ok: false, error: 'Invalid signature' })
+    }
+  }
+
+  let payload
+  try { payload = JSON.parse(req.body.toString()) } catch {
+    return res.status(400).json({ ok: false, error: 'Invalid JSON' })
+  }
+
+  res.json({ ok: true })
+
+  // Only act on production deploys that succeeded
+  const type   = payload.type   ?? payload.payload?.type
+  const target = payload.target ?? payload.payload?.target ?? (payload.meta?.githubOrg ? 'production' : null)
+  const url    = payload.url    ?? payload.payload?.url ?? ''
+  const commit = payload.meta?.githubCommitMessage
+    ?? payload.payload?.meta?.githubCommitMessage
+    ?? ''
+
+  console.log(`[vercel] webhook type=${type} target=${target} url=${url}`)
+
+  if (type !== 'deployment.succeeded' && type !== 'READY') return
+  if (target !== 'production') return
+  if (!commit) { console.log('[vercel] no commit message, skipping'); return }
+
+  try {
+    const text = await generateDeployPost(commit)
+    if (config.autoPublish) {
+      await publishToChannel(text)
+      console.log('[vercel] deploy post auto-published')
+    } else {
+      pendingDeployPost = { text, commitMessage: commit, deployUrl: url }
+      if (OWNER_ID) {
+        await tgApi('sendMessage', {
+          chat_id: OWNER_ID,
+          text: `🚀 *Новый деплой YouTubeGen!*\n\n${text}\n\n_Опубликовать в канал?_`,
+          parse_mode: 'Markdown',
+          reply_markup: deployInline(),
+        })
+      }
+    }
+  } catch (err) {
+    console.error('[vercel] deploy post failed:', err.message)
+  }
+})
 
 // ── Register webhook at startup ───────────────────────────────────────────────
 async function registerWebhook() {
