@@ -4,58 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { PLAN_CREDITS } from '@/lib/types'
+import { useLang } from '@/hooks/useLang'
 import type { Profile, Plan } from '@/lib/types'
-
-const PLANS: Array<{
-  id: Plan
-  name: string
-  price: string
-  period: string
-  highlight: boolean
-  features: string[]
-}> = [
-  {
-    id: 'free',
-    name: 'Free',
-    price: '$0',
-    period: '',
-    highlight: false,
-    features: ['20 кредитов (один раз)', 'Все инструменты генерации'],
-  },
-  {
-    id: 'starter',
-    name: 'Starter',
-    price: '$9',
-    period: '/мес',
-    highlight: false,
-    features: ['100 кредитов в месяц', 'Все инструменты генерации', 'Email-поддержка'],
-  },
-  {
-    id: 'pro',
-    name: 'Pro',
-    price: '$19',
-    period: '/мес',
-    highlight: true,
-    features: ['300 кредитов в месяц', 'Все инструменты генерации', 'Приоритетная поддержка'],
-  },
-  {
-    id: 'agency',
-    name: 'Agency',
-    price: '$49',
-    period: '/мес',
-    highlight: false,
-    features: ['1000 кредитов в месяц', 'Все инструменты генерации', 'Выделенная поддержка', 'API-доступ'],
-  },
-]
-
-const CREDIT_COST_INFO = [
-  { operation: 'Сценарий', credits: 1, icon: '✍️' },
-  { operation: 'Озвучка', credits: 2, icon: '🎙' },
-  { operation: 'Субтитры', credits: 1, icon: '📋' },
-  { operation: 'Иллюстрация', credits: 1, icon: '🎨' },
-  { operation: 'Сборка видео', credits: 2, icon: '🎬' },
-  { operation: 'SEO', credits: 1, icon: '🔍' },
-]
 
 export default function BillingPage() {
   const router = useRouter()
@@ -63,6 +13,51 @@ export default function BillingPage() {
   const [loadingPlan, setLoadingPlan] = useState<Plan | null>(null)
   const [error, setError] = useState('')
   const supabase = createClient()
+  const { t } = useLang()
+
+  const PLANS = [
+    {
+      id: 'free' as Plan,
+      name: 'Free',
+      price: '$0',
+      period: '',
+      highlight: false,
+      features: [t('billing.f_credits_once'), t('billing.f_all_tools')],
+    },
+    {
+      id: 'starter' as Plan,
+      name: 'Starter',
+      price: '$19',
+      period: t('billing.period'),
+      highlight: false,
+      features: [t('billing.f_credits_100'), t('billing.f_videos_5_9'), t('billing.f_all_tools'), t('billing.f_email_support')],
+    },
+    {
+      id: 'pro' as Plan,
+      name: 'Pro',
+      price: '$39',
+      period: t('billing.period'),
+      highlight: true,
+      features: [t('billing.f_credits_300'), t('billing.f_videos_15_25'), t('billing.f_all_tools'), t('billing.f_priority_support')],
+    },
+    {
+      id: 'agency' as Plan,
+      name: 'Agency',
+      price: '$99',
+      period: t('billing.period'),
+      highlight: false,
+      features: [t('billing.f_credits_1000'), t('billing.f_videos_55_90'), t('billing.f_all_tools'), t('billing.f_dedicated_support'), t('billing.f_api_access')],
+    },
+  ]
+
+  const CREDIT_COST_INFO = [
+    { operation: t('billing.op_script'),    credits: 1,     icon: '✍️' },
+    { operation: t('billing.op_voice'),     credits: '1–3', icon: '🎙' },
+    { operation: t('billing.op_subtitles'), credits: 1,     icon: '📋' },
+    { operation: t('billing.op_image'),     credits: 1,     icon: '🎨' },
+    { operation: t('billing.op_video'),     credits: 2,     icon: '🎬' },
+    { operation: t('billing.op_seo'),       credits: 1,     icon: '🔍' },
+  ]
 
   useEffect(() => {
     async function loadProfile() {
@@ -89,13 +84,13 @@ export default function BillingPage() {
       const json = await res.json()
 
       if (!json.ok) {
-        setError(json.error ?? 'Ошибка создания сессии оплаты')
+        setError(json.error ?? t('billing.err_session'))
         return
       }
 
       window.location.href = json.data.url
     } catch {
-      setError('Ошибка соединения с сервером')
+      setError(t('billing.err_conn'))
     } finally {
       setLoadingPlan(null)
     }
@@ -108,8 +103,8 @@ export default function BillingPage() {
 
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-100">Тарифы и кредиты</h1>
-        <p className="text-slate-500 text-sm mt-1">Управляйте подпиской и балансом кредитов</p>
+        <h1 className="text-2xl font-bold text-slate-100">{t('billing.title')}</h1>
+        <p className="text-slate-500 text-sm mt-1">{t('billing.subtitle')}</p>
       </div>
 
       {/* Current balance */}
@@ -122,25 +117,25 @@ export default function BillingPage() {
       >
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-violet-400 mb-1">Текущий баланс</p>
+            <p className="text-sm font-medium text-violet-400 mb-1">{t('billing.balance')}</p>
             <div className="flex items-end gap-2">
               <span className="text-5xl font-extrabold text-slate-100">
                 {profile?.credits ?? '—'}
               </span>
-              <span className="text-lg text-slate-400 mb-1">кредитов</span>
+              <span className="text-lg text-slate-400 mb-1">{t('billing.credits_unit')}</span>
             </div>
             <p className="text-sm text-slate-400 mt-1">
-              Тариф:{' '}
+              {t('billing.plan_label')}{' '}
               <span className="font-semibold capitalize text-violet-300">
-                {currentPlan} · {PLAN_CREDITS[currentPlan]} кредитов/мес
+                {currentPlan} · {PLAN_CREDITS[currentPlan]} {t('billing.credits_unit')}{currentPlan !== 'free' ? t('billing.period') : ''}
               </span>
             </p>
           </div>
           <div className="flex flex-col gap-1 text-sm text-slate-400">
-            <p className="font-medium text-slate-300">Стоимость операций:</p>
+            <p className="font-medium text-slate-300">{t('billing.ops_title')}</p>
             {CREDIT_COST_INFO.map((item) => (
               <p key={item.operation}>
-                {item.icon} {item.operation} — <strong className="text-slate-200">{item.credits} кр.</strong>
+                {item.icon} {item.operation} — <strong className="text-slate-200">{item.credits} {t('nav.credits_suffix')}</strong>
               </p>
             ))}
           </div>
@@ -154,7 +149,7 @@ export default function BillingPage() {
       )}
 
       {/* Plans grid */}
-      <h2 className="text-lg font-semibold text-slate-200 mb-4">Выберите тариф</h2>
+      <h2 className="text-lg font-semibold text-slate-200 mb-4">{t('billing.choose_plan')}</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {PLANS.map((plan) => {
           const isCurrent = plan.id === currentPlan
@@ -172,7 +167,7 @@ export default function BillingPage() {
               {plan.highlight && !isCurrent && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                   <span className="btn-gradient text-white text-xs font-bold px-3 py-1 rounded-full">
-                    Популярный
+                    {t('billing.popular')}
                   </span>
                 </div>
               )}
@@ -182,7 +177,7 @@ export default function BillingPage() {
                     className="text-violet-300 text-xs font-bold px-3 py-1 rounded-full"
                     style={{ background: 'rgba(124,58,237,0.3)', border: '1px solid rgba(124,58,237,0.5)' }}
                   >
-                    Ваш тариф
+                    {t('billing.current_plan')}
                   </span>
                 </div>
               )}
@@ -194,7 +189,7 @@ export default function BillingPage() {
                   <span className="text-slate-500 mb-0.5">{plan.period}</span>
                 </div>
                 <p className="text-sm font-medium text-violet-400 mt-1">
-                  {PLAN_CREDITS[plan.id]} кредитов
+                  {PLAN_CREDITS[plan.id]} {t('billing.credits_unit')}
                 </p>
               </div>
 
@@ -232,14 +227,14 @@ export default function BillingPage() {
                 }
               >
                 {isCurrent
-                  ? 'Текущий тариф'
+                  ? t('billing.current_plan')
                   : isDowngrade
-                  ? 'Понижение'
+                  ? t('billing.downgrade')
                   : plan.id === 'free'
-                  ? 'Бесплатный'
+                  ? t('billing.free_btn')
                   : loadingPlan === plan.id
-                  ? 'Загрузка...'
-                  : 'Перейти'}
+                  ? t('billing.loading')
+                  : t('billing.upgrade')}
               </button>
             </div>
           )
@@ -247,8 +242,51 @@ export default function BillingPage() {
       </div>
 
       <p className="text-sm text-slate-600 mt-6 text-center">
-        Оплата через Paddle · Отменить подписку можно в любое время · Кредиты начисляются сразу после оплаты
+        {t('billing.paddle_note')}
       </p>
+
+      {/* Russia payment block */}
+      <div
+        className="mt-8 rounded-2xl p-6"
+        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        <div className="flex items-center gap-3 mb-3">
+          <span className="text-2xl">🇷🇺</span>
+          <h3 className="text-lg font-semibold text-slate-100">{t('billing.russia_title')}</h3>
+        </div>
+        <p className="text-sm text-slate-400 mb-4">{t('billing.russia_desc')}</p>
+        <div className="flex flex-col sm:flex-row gap-3 mb-5">
+          <div
+            className="flex-1 rounded-xl px-4 py-3 flex items-center gap-3"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <span className="text-xl">💳</span>
+            <div>
+              <p className="text-sm font-medium text-slate-200">{t('billing.russia_mir')}</p>
+              <p className="text-xs text-slate-500">{t('billing.russia_mir_desc')}</p>
+            </div>
+          </div>
+          <div
+            className="flex-1 rounded-xl px-4 py-3 flex items-center gap-3"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <span className="text-xl">₿</span>
+            <div>
+              <p className="text-sm font-medium text-slate-200">{t('billing.russia_crypto')}</p>
+              <p className="text-xs text-slate-500">{t('billing.russia_crypto_desc')}</p>
+            </div>
+          </div>
+        </div>
+        <a
+          href="https://t.me/youtubegenai_bot"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
+          style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.9), rgba(37,99,235,0.9))', border: '1px solid rgba(124,58,237,0.4)' }}
+        >
+          {t('billing.russia_btn')}
+        </a>
+      </div>
     </div>
   )
 }

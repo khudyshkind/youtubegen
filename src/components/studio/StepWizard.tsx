@@ -11,18 +11,11 @@ import Step4Subtitles from './Step4Subtitles'
 import Step5Images from './Step5Images'
 import Step6Video from './Step6Video'
 import Step7Seo from './Step7Seo'
+import { useLang } from '@/hooks/useLang'
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7
 
-const STEPS = [
-  { n: 1 as Step, label: 'Тема' },
-  { n: 2 as Step, label: 'Сценарий' },
-  { n: 3 as Step, label: 'Озвучка' },
-  { n: 4 as Step, label: 'Субтитры' },
-  { n: 5 as Step, label: 'Картинки' },
-  { n: 6 as Step, label: 'Видео' },
-  { n: 7 as Step, label: 'SEO' },
-]
+const STEP_KEYS = ['step1', 'step2', 'step3', 'step4', 'step5', 'step6', 'step7'] as const
 
 function inferStep(p: Project): Step {
   if (p.seo) return 7
@@ -42,6 +35,7 @@ function StepWizardInner() {
     setVoiceId, setAudioUrl, setSubtitleBlocks, setSceneImages, setVideoUrl, setSeo,
     setImageInterval, setThumbnailUrl, setThumbnailBgUrl } = useStudioStore()
 
+  const { t } = useLang()
   const [restoring, setRestoring] = useState(!!projectParam)
   const [restoreError, setRestoreError] = useState('')
 
@@ -105,7 +99,7 @@ function StepWizardInner() {
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
           </svg>
-          <p className="text-sm text-slate-500">Загрузка проекта...</p>
+          <p className="text-sm text-slate-500">{t('studio.loading')}</p>
         </div>
       </div>
     )
@@ -119,7 +113,7 @@ function StepWizardInner() {
           onClick={reset}
           className="px-5 py-2.5 btn-gradient text-white font-semibold rounded-xl text-sm"
         >
-          Создать новый проект
+          {t('studio.new_project')}
         </button>
       </div>
     )
@@ -129,18 +123,19 @@ function StepWizardInner() {
     <div>
       {/* Step indicator */}
       <div className="flex items-start mb-8 overflow-x-auto pb-1">
-        {STEPS.map((step, idx) => {
-          const done = currentStep > step.n
-          const active = currentStep === step.n
-          const reachable = step.n < currentStep
+        {STEP_KEYS.map((key, idx) => {
+          const stepN = (idx + 1) as Step
+          const done = currentStep > stepN
+          const active = currentStep === stepN
+          const reachable = stepN < currentStep
           return (
-            <React.Fragment key={step.n}>
+            <React.Fragment key={stepN}>
               <div className="flex flex-col items-center gap-1.5 shrink-0">
                 <button
                   type="button"
-                  onClick={() => reachable ? setStep(step.n) : undefined}
+                  onClick={() => reachable ? setStep(stepN) : undefined}
                   disabled={!reachable}
-                  title={reachable ? `Перейти к шагу ${step.n}: ${step.label}` : undefined}
+                  title={reachable ? `${t('studio.go_to_step')} ${stepN}: ${t(`studio.${key}`)}` : undefined}
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
                     done
                       ? 'step-done text-white cursor-pointer hover:opacity-90'
@@ -154,7 +149,7 @@ function StepWizardInner() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                     </svg>
                   ) : (
-                    step.n
+                    stepN
                   )}
                 </button>
                 <span
@@ -162,15 +157,15 @@ function StepWizardInner() {
                     done ? 'text-green-400' : active ? 'text-violet-400' : 'text-slate-600'
                   }`}
                 >
-                  {step.label}
+                  {t(`studio.${key}`)}
                 </span>
               </div>
 
-              {idx < STEPS.length - 1 && (
+              {idx < STEP_KEYS.length - 1 && (
                 <div
                   className="flex-1 h-0.5 mt-4 mx-1 transition-all min-w-[8px]"
                   style={{
-                    background: currentStep > step.n
+                    background: currentStep > stepN
                       ? 'linear-gradient(90deg, #10B981, #059669)'
                       : 'rgba(255,255,255,0.08)',
                   }}
@@ -204,7 +199,7 @@ function StepWizardInner() {
             onClick={reset}
             className="text-sm text-slate-600 hover:text-slate-400 transition-colors"
           >
-            ↺ Начать заново
+            {t('studio.restart')}
           </button>
         </div>
       )}

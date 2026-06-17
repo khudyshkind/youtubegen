@@ -115,19 +115,33 @@ NEXT_PUBLIC_APP_URL=
 <!-- ### YYYY-MM-DD — Краткое описание -->
 <!-- Что сделано, какие файлы созданы/изменены -->
 
-### 2026-06-16 — YouTube Analytics раздел
+### 2026-06-16 — История отчётов аналитики (вкладка История)
+Реализовано сохранение и просмотр отчётов аналитики:
+- `supabase/schema.sql` — таблица `analytics_reports` (user_id, type, title, query, result, created_at)
+- `src/app/api/analytics/reports/route.ts` — GET список + DELETE (service client)
+- niche/trends/channel route.ts — сохранение в history при кэш-хите И при свежем анализе
+- `src/app/(dashboard)/analytics/page.tsx` — 4-я вкладка "📋 История", открыть отчёт / удалить / Скачать PDF
+- Фикс: `GRANT ALL ON analytics_reports TO service_role` — без этого service client получал `permission denied` (новые таблицы не наследуют default privileges)
+Деплой: dpl_i4ls647y1 → https://youtubegen.vercel.app
+
+### 2026-06-16 — YouTube Analytics: фикс JSON-парсинга Claude (два Haiku-запроса)
+Все три analytics routes переведены на паттерн двух маленьких запросов к Haiku:
+- `src/app/api/analytics/niche/route.ts` — запрос 1: метрики (flat), запрос 2: рекомендации (flat)
+- `src/app/api/analytics/trends/route.ts` — запрос 1: список трендов, запрос 2: идеи для видео
+- `src/app/api/analytics/channel/route.ts` — запрос 1: обзор+темы, запрос 2: форматы+рекомендации
+- Добавлен `parseClaudeJson<T>()` с balanced-brace extraction во всех трёх routes
+- Добавлено детальное логирование: yt status, videos count, шаги Claude
+Деплой: dpl_M7cZot7gWHtULNKqn1tRhBsQRgw1 — https://youtubegen.vercel.app
+
+### 2026-06-16 — YouTube Analytics раздел (начальная реализация)
 Добавлен новый раздел /analytics с тремя вкладками:
 - `src/lib/types.ts` — CREDIT_COSTS: niche_analysis(10), trends(5), channel_analysis(15)
 - `src/lib/i18n.ts` — analytics.* ключи (ru + en)
 - `src/components/shared/SidebarNav.tsx` — пункт "YouTube Analytics" → /analytics
 - `supabase/schema.sql` — таблица analytics_cache (24ч кэш по type+key)
-- `src/app/api/analytics/niche/route.ts` — YouTube API (каналы + видео) + Claude анализ ниши
-- `src/app/api/analytics/trends/route.ts` — YouTube trending + Claude паттерны
-- `src/app/api/analytics/channel/route.ts` — 50 видео канала + Claude рекомендации
 - `src/app/(dashboard)/analytics/page.tsx` — 3 вкладки, прогресс-шаги, результаты с таблицами/карточками
 - `.env.example` — добавлен YOUTUBE_API_KEY
 - Vercel — YOUTUBE_API_KEY установлен
-Деплой: dpl_6gt43bmX7psmrEovUW1s2WRfrXKC — https://youtubegen.vercel.app
 
 ### 2026-06-15 — APIHOST: статические превью, кредитное отображение, исправление загрузки голосов
 - `src/app/api/voices/apihost/route.ts` — исправлен парсинг (API возвращает `{speaker:[]}` а не `{data:[]}`), добавлен `preview_url` для статических MP3-семплов

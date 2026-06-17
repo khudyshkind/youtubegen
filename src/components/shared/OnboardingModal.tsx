@@ -3,31 +3,12 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useStudioStore } from '@/lib/studio-store'
+import { useLang } from '@/hooks/useLang'
 import { CREDIT_COSTS } from '@/lib/types'
 
 interface Props {
   initialShow: boolean
 }
-
-const PIPELINE_STEPS = [
-  { icon: '📝', label: 'Тема' },
-  { icon: '🤖', label: 'Сценарий' },
-  { icon: '🎙', label: 'Озвучка' },
-  { icon: '📄', label: 'Субтитры' },
-  { icon: '🖼', label: 'Иллюстрации' },
-  { icon: '🎬', label: 'Видео' },
-  { icon: '📊', label: 'SEO' },
-]
-
-const CREDIT_ROWS = [
-  { label: 'Сценарий (Sonnet)', cost: CREDIT_COSTS.script_sonnet },
-  { label: 'Сценарий (Opus)', cost: CREDIT_COSTS.script_opus },
-  { label: 'Озвучка (за 1000 симв.)', cost: '1–3' },
-  { label: 'Субтитры', cost: CREDIT_COSTS.subtitles },
-  { label: 'Иллюстрация (за шт.)', cost: CREDIT_COSTS.image },
-  { label: 'Сборка видео', cost: CREDIT_COSTS.video },
-  { label: 'SEO-описание', cost: CREDIT_COSTS.seo },
-]
 
 async function markOnboardingDone() {
   await fetch('/api/profile', {
@@ -42,8 +23,29 @@ export default function OnboardingModal({ initialShow }: Props) {
   const [step, setStep] = useState(1)
   const router = useRouter()
   const reset = useStudioStore((s) => s.reset)
+  const { t } = useLang()
 
   if (!visible) return null
+
+  const PIPELINE_STEPS = [
+    { icon: '📝', label: t('pipeline.topic') },
+    { icon: '🤖', label: t('pipeline.script') },
+    { icon: '🎙', label: t('pipeline.voice') },
+    { icon: '📄', label: t('pipeline.subtitles') },
+    { icon: '🖼', label: t('pipeline.images') },
+    { icon: '🎬', label: t('pipeline.video') },
+    { icon: '📊', label: t('pipeline.seo') },
+  ]
+
+  const CREDIT_ROWS = [
+    { label: `${t('billing.op_script')} (Sonnet)`, cost: CREDIT_COSTS.script_sonnet },
+    { label: `${t('billing.op_script')} (Opus)`,   cost: CREDIT_COSTS.script_opus },
+    { label: t('billing.op_voice'),                 cost: '1–3' },
+    { label: t('billing.op_subtitles'),             cost: CREDIT_COSTS.subtitles },
+    { label: t('billing.op_image'),                 cost: CREDIT_COSTS.image },
+    { label: t('billing.op_video'),                 cost: CREDIT_COSTS.video },
+    { label: t('billing.op_seo'),                   cost: CREDIT_COSTS.seo },
+  ]
 
   async function handleFinish() {
     await markOnboardingDone()
@@ -75,7 +77,7 @@ export default function OnboardingModal({ initialShow }: Props) {
 
         <div className="p-8">
 
-          {/* ── Шаг 1: Приветствие ── */}
+          {/* Step 1: Welcome */}
           {step === 1 && (
             <div className="flex flex-col items-center text-center gap-5">
               <div className="w-20 h-20 bg-red-50 rounded-2xl flex items-center justify-center text-4xl">
@@ -83,10 +85,10 @@ export default function OnboardingModal({ initialShow }: Props) {
               </div>
               <div>
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                  Добро пожаловать в YouTubeGen!
+                  {t('onboard.welcome')}
                 </h2>
                 <p className="text-gray-500 text-sm leading-relaxed">
-                  Создавайте YouTube видео за 10 минут с помощью ИИ — от темы до готового MP4 с субтитрами и SEO
+                  {t('onboard.welcome_desc')}
                 </p>
               </div>
               <div className="flex flex-col gap-2 w-full pt-2">
@@ -95,26 +97,28 @@ export default function OnboardingModal({ initialShow }: Props) {
                   onClick={() => setStep(2)}
                   className="w-full py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl text-sm transition-colors"
                 >
-                  Начать знакомство →
+                  {t('onboard.start')}
                 </button>
                 <button
                   type="button"
                   onClick={handleSkip}
                   className="w-full py-2 text-gray-400 hover:text-gray-600 text-xs transition-colors"
                 >
-                  Пропустить
+                  {t('onboard.skip')}
                 </button>
               </div>
             </div>
           )}
 
-          {/* ── Шаг 2: Пайплайн ── */}
+          {/* Step 2: How it works */}
           {step === 2 && (
             <div className="flex flex-col gap-5">
               <div className="text-center">
-                <p className="text-xs font-medium text-red-500 uppercase tracking-wide mb-1">Шаг 2 из 4</p>
-                <h2 className="text-xl font-bold text-gray-900 mb-1">Как это работает</h2>
-                <p className="text-sm text-gray-500">Просто опишите тему — ИИ сделает остальное</p>
+                <p className="text-xs font-medium text-red-500 uppercase tracking-wide mb-1">
+                  {t('onboard.step')} 2 {t('onboard.step_of')} 4
+                </p>
+                <h2 className="text-xl font-bold text-gray-900 mb-1">{t('onboard.how_works')}</h2>
+                <p className="text-sm text-gray-500">{t('onboard.how_works_desc')}</p>
               </div>
 
               <div className="flex items-center justify-between gap-1">
@@ -137,7 +141,7 @@ export default function OnboardingModal({ initialShow }: Props) {
 
               <div className="bg-blue-50 rounded-xl px-4 py-3 text-center">
                 <p className="text-sm text-blue-700">
-                  Каждый шаг можно <strong>пропустить</strong> или заменить своими материалами
+                  {t('onboard.each_skippable')} <strong>{t('onboard.skippable_bold')}</strong> {t('onboard.skippable_end')}
                 </p>
               </div>
 
@@ -147,31 +151,33 @@ export default function OnboardingModal({ initialShow }: Props) {
                   onClick={() => setStep(1)}
                   className="flex-1 py-2.5 border border-gray-200 text-gray-600 font-medium rounded-xl text-sm hover:bg-gray-50 transition-colors"
                 >
-                  ← Назад
+                  {t('onboard.back')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setStep(3)}
                   className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl text-sm transition-colors"
                 >
-                  Далее →
+                  {t('onboard.next')}
                 </button>
               </div>
             </div>
           )}
 
-          {/* ── Шаг 3: Кредиты ── */}
+          {/* Step 3: Credits */}
           {step === 3 && (
             <div className="flex flex-col gap-5">
               <div className="text-center">
-                <p className="text-xs font-medium text-red-500 uppercase tracking-wide mb-1">Шаг 3 из 4</p>
-                <h2 className="text-xl font-bold text-gray-900 mb-1">Система кредитов</h2>
-                <p className="text-sm text-gray-500">Каждая операция списывает кредиты</p>
+                <p className="text-xs font-medium text-red-500 uppercase tracking-wide mb-1">
+                  {t('onboard.step')} 3 {t('onboard.step_of')} 4
+                </p>
+                <h2 className="text-xl font-bold text-gray-900 mb-1">{t('onboard.credits_title')}</h2>
+                <p className="text-sm text-gray-500">{t('onboard.credits_desc')}</p>
               </div>
 
               <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-center">
                 <p className="text-sm font-semibold text-amber-800">
-                  🎁 У вас 20 бесплатных кредитов — хватит на несколько видео
+                  {t('onboard.credits_gift')}
                 </p>
               </div>
 
@@ -179,15 +185,15 @@ export default function OnboardingModal({ initialShow }: Props) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Операция</th>
-                      <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Кредиты</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('onboard.op')}</th>
+                      <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('onboard.credits_col')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {CREDIT_ROWS.map((row) => (
                       <tr key={row.label}>
                         <td className="px-4 py-2.5 text-gray-700">{row.label}</td>
-                        <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{row.cost} кр.</td>
+                        <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{row.cost} {t('nav.credits_suffix')}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -200,30 +206,32 @@ export default function OnboardingModal({ initialShow }: Props) {
                   onClick={() => setStep(2)}
                   className="flex-1 py-2.5 border border-gray-200 text-gray-600 font-medium rounded-xl text-sm hover:bg-gray-50 transition-colors"
                 >
-                  ← Назад
+                  {t('onboard.back')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setStep(4)}
                   className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl text-sm transition-colors"
                 >
-                  Далее →
+                  {t('onboard.next')}
                 </button>
               </div>
             </div>
           )}
 
-          {/* ── Шаг 4: Готово ── */}
+          {/* Step 4: Done */}
           {step === 4 && (
             <div className="flex flex-col items-center text-center gap-5">
               <div className="w-20 h-20 bg-green-50 rounded-2xl flex items-center justify-center text-4xl">
                 🚀
               </div>
               <div>
-                <p className="text-xs font-medium text-red-500 uppercase tracking-wide mb-1">Шаг 4 из 4</p>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Всё готово!</h2>
+                <p className="text-xs font-medium text-red-500 uppercase tracking-wide mb-1">
+                  {t('onboard.step')} 4 {t('onboard.step_of')} 4
+                </p>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">{t('onboard.all_ready')}</h2>
                 <p className="text-gray-500 text-sm leading-relaxed">
-                  Создайте своё первое видео прямо сейчас — это займёт около 10 минут
+                  {t('onboard.all_ready_desc')}
                 </p>
               </div>
               <div className="flex flex-col gap-2 w-full pt-2">
@@ -232,14 +240,14 @@ export default function OnboardingModal({ initialShow }: Props) {
                   onClick={handleFinish}
                   className="w-full py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl text-sm transition-colors"
                 >
-                  Создать первое видео →
+                  {t('onboard.create_btn')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setStep(3)}
                   className="w-full py-2 text-gray-400 hover:text-gray-600 text-xs transition-colors"
                 >
-                  ← Назад
+                  {t('onboard.back')}
                 </button>
               </div>
             </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useLang } from '@/hooks/useLang'
 
 interface Props {
   referralCode: string
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function ReferralBlock({ referralCode, referralCount, referralCreditsEarned }: Props) {
+  const { t } = useLang()
   const [copied, setCopied] = useState(false)
   const [referralUrl, setReferralUrl] = useState(
     `https://youtubegen.vercel.app/auth/register?ref=${referralCode}`
@@ -51,11 +53,11 @@ export default function ReferralBlock({ referralCode, referralCount, referralCre
           🎁
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-slate-100 mb-1">Пригласи друга — получи кредиты</h3>
+          <h3 className="font-semibold text-slate-100 mb-1">{t('referral.title')}</h3>
           <p className="text-sm text-slate-400 mb-4">
-            За каждого друга который зарегистрируется по вашей ссылке —{' '}
-            <strong className="text-violet-400">вы получаете 20 кредитов</strong>,{' '}
-            друг получает <strong className="text-violet-400">+5 кредитов</strong> бонусом к стартовым 20.
+            {t('referral.desc_pre')}{' '}
+            <strong className="text-violet-400">{t('referral.desc_you')}</strong>
+            {t('referral.desc_mid')} <strong className="text-violet-400">{t('referral.desc_bonus')}</strong> {t('referral.desc_end')}
           </p>
 
           {/* Referral link block */}
@@ -86,7 +88,7 @@ export default function ReferralBlock({ referralCode, referralCount, referralCre
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                   </svg>
-                  Скопировано!
+                  {t('referral.copied')}
                 </>
               ) : (
                 <>
@@ -94,7 +96,7 @@ export default function ReferralBlock({ referralCode, referralCount, referralCre
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                   </svg>
-                  Скопировать
+                  {t('referral.copy')}
                 </>
               )}
             </button>
@@ -104,16 +106,16 @@ export default function ReferralBlock({ referralCode, referralCount, referralCre
           <div className="flex items-center gap-6">
             <div className="text-center">
               <p className="text-2xl font-extrabold text-violet-400">{referralCount}</p>
-              <p className="text-xs text-slate-500 mt-0.5">приглашено</p>
+              <p className="text-xs text-slate-500 mt-0.5">{t('referral.invited')}</p>
             </div>
             <div className="w-px h-8" style={{ background: 'rgba(124,58,237,0.3)' }} />
             <div className="text-center">
               <p className="text-2xl font-extrabold text-violet-400">{referralCreditsEarned}</p>
-              <p className="text-xs text-slate-500 mt-0.5">кредитов заработано</p>
+              <p className="text-xs text-slate-500 mt-0.5">{t('referral.earned')}</p>
             </div>
             {referralCount === 0 && (
               <p className="text-xs text-slate-600 italic">
-                Поделитесь ссылкой и получайте кредиты за каждого нового пользователя
+                {t('referral.share')}
               </p>
             )}
           </div>

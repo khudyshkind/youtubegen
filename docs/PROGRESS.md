@@ -88,14 +88,16 @@
 
 ## Фаза 9 — YouTube Analytics
 
-- [x] ✅ CREDIT_COSTS — niche_analysis(10), trends(5), channel_analysis(15)
-- [x] ✅ i18n — analytics.* ключи ru + en (nav.analytics, 50+ ключей)
+- [x] ✅ CREDIT_COSTS — niche_analysis(10), trends(5), channel_analysis(15), revenue_calc(3)
+- [x] ✅ i18n — analytics.* ключи ru + en (nav.analytics, 50+ ключей, tab_revenue, tab_history)
 - [x] ✅ SidebarNav.tsx — пункт "YouTube Analytics" → /analytics
-- [x] ✅ supabase/schema.sql — analytics_cache таблица (24ч кэш)
-- [x] ✅ /api/analytics/niche/route.ts — YouTube API + Claude (10 кр.)
-- [x] ✅ /api/analytics/trends/route.ts — Trending + Claude (5 кр.)
-- [x] ✅ /api/analytics/channel/route.ts — Channel 50 видео + Claude (15 кр.)
-- [x] ✅ /dashboard/analytics/page.tsx — 3 вкладки с прогрессом и результатами
+- [x] ✅ supabase/schema.sql — analytics_cache + analytics_reports таблицы (GRANT ALL TO service_role)
+- [x] ✅ /api/analytics/niche/route.ts — YouTube API + два Haiku-запроса (10 кр.) + кэш-хит save
+- [x] ✅ /api/analytics/trends/route.ts — два Haiku-запроса (5 кр.) + кэш-хит save
+- [x] ✅ /api/analytics/channel/route.ts — два Haiku-запроса (15 кр.) + кэш-хит save
+- [x] ✅ /api/analytics/reports/route.ts — GET + DELETE история (20 лимит)
+- [x] ✅ /api/analytics/revenue/route.ts — RPM-калькулятор Haiku (3 кр.) + save
+- [x] ✅ /dashboard/analytics/page.tsx — 5 вкладок: анализ ниши, тренды, канал, калькулятор дохода, история
 - [x] ✅ .env.example + Vercel — YOUTUBE_API_KEY
 
 ---
@@ -131,4 +133,5 @@
 | Синхронизация изображений с аудио | 1 / 1 |
 | Фаза 7 — Рост и монетизация | 5 / 5 |
 | Фаза 8 — i18n + Уникализация + APIHOST TTS | 12 / 12 |
-| **Итого** | **64 / 64** ✅ |
+| Фаза 9 — YouTube Analytics | 11 / 11 |
+| **Итого** | **75 / 75** ✅ |

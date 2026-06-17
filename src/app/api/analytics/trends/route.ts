@@ -8,16 +8,36 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
+function parseClaudeJson<T>(text: string, label: string): T {
+  console.log(`[trends] ${label} raw:`, text.substring(0, 500))
+  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+  const start = cleaned.indexOf('{')
+  if (start === -1) throw new Error(`${label}: no { found`)
+  let depth = 0, inStr = false, esc = false
+  for (let i = start; i < cleaned.length; i++) {
+    const c = cleaned[i]
+    if (esc) { esc = false; continue }
+    if (c === '\\') { esc = true; continue }
+    if (c === '"') { inStr = !inStr; continue }
+    if (inStr) continue
+    if (c === '{') depth++
+    if (c === '}') { depth--; if (depth === 0) return JSON.parse(cleaned.slice(start, i + 1)) as T }
+  }
+  throw new Error(`${label}: unbalanced braces`)
+}
+
 async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
   const key = env('YOUTUBE_API_KEY')
   const qs = new URLSearchParams({ ...params, key }).toString()
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
-  if (!res.ok) throw new Error(`YouTube API error ${res.status}: ${await res.text()}`)
-  return res.json()
+  const text = await res.text()
+  console.log(`[trends] yt ${path} status=${res.status} body=${text.slice(0, 300)}`)
+  if (!res.ok) throw new Error(`YouTube API ${res.status} on ${path}: ${text.slice(0, 200)}`)
+  return JSON.parse(text)
 }
 
 function cacheKey(topic: string, period: string) {
-  const day = new Date().toISOString().slice(0, 10) // invalidates daily
+  const day = new Date().toISOString().slice(0, 10)
   return `${topic.toLowerCase().trim()}|${period}|${day}`
 }
 
@@ -31,22 +51,61 @@ export async function POST(req: NextRequest) {
     const topic = body.topic?.trim() ?? ''
     const period = body.period ?? 'week'
 
+    console.log(`[trends] start topic="${topic}" period=${period}`)
     if (!topic) return NextResponse.json({ ok: false, error: 'Введите тему' }, { status: 400 })
 
     const svc = createServiceClient()
     const key = cacheKey(topic, period)
 
-    // Check cache (24h)
-    const { data: cached } = await svc
-      .from('analytics_cache')
-      .select('result, created_at')
-      .eq('cache_type', 'trends')
-      .eq('cache_key', key)
-      .gt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-      .single()
-
-    if (cached) {
-      return NextResponse.json({ ok: true, data: cached.result, cached: true })
+    // Cache check — non-fatal
+    try {
+      const { data: cached } = await svc
+        .from('analytics_cache')
+        .select('result, created_at')
+        .eq('cache_type', 'trends')
+        .eq('cache_key', key)
+        .gt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .single()
+      if (cached) {
+        console.log('[trends] cache hit, saving report for user:', user.id)
+        try {
+          const { data: existing } = await svc
+            .from('analytics_reports')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('report_type', 'trends')
+            .eq('query', `${topic}|${period}`)
+            .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+            .maybeSingle()
+          if (!existing) {
+            const days = period === 'month' ? 30 : 7
+            const { data: old } = await svc
+              .from('analytics_reports')
+              .select('id')
+              .eq('user_id', user.id)
+              .eq('report_type', 'trends')
+              .order('created_at', { ascending: true })
+            if ((old?.length ?? 0) >= 20) {
+              await svc.from('analytics_reports').delete().eq('id', old![0].id)
+            }
+            const { error: saveErr } = await svc.from('analytics_reports').insert({
+              user_id: user.id,
+              report_type: 'trends',
+              title: `Тренды: ${topic} (${days} дн.)`,
+              query: `${topic}|${period}`,
+              result: cached.result,
+            })
+            console.log('[trends] cache-hit save result:', saveErr?.message ?? 'ok')
+          } else {
+            console.log('[trends] cache-hit: report already saved today, skip')
+          }
+        } catch (saveEx) {
+          console.warn('[trends] cache-hit report save failed:', saveEx instanceof Error ? saveEx.message : String(saveEx))
+        }
+        return NextResponse.json({ ok: true, data: cached.result, cached: true })
+      }
+    } catch (e) {
+      console.warn('[trends] cache check skipped:', e instanceof Error ? e.message : String(e))
     }
 
     const check = await requireCredits(user.id, 'trends', supabase)
@@ -55,7 +114,9 @@ export async function POST(req: NextRequest) {
     const days = period === 'month' ? 30 : 7
     const publishedAfter = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
 
-    // 1. Search trending videos
+    // ── YouTube data ──────────────────────────────────────────────────────────
+
+    console.log('[trends] step 1: search trending videos')
     const videoSearch = await ytFetch('/search', {
       part: 'snippet', type: 'video', q: topic,
       order: 'viewCount', publishedAfter,
@@ -63,10 +124,12 @@ export async function POST(req: NextRequest) {
     }) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; channelTitle: string; publishedAt: string } }> }
 
     const videoItems = videoSearch.items ?? []
+    console.log(`[trends] videos count: ${videoItems.length}`)
     const videoIds = videoItems.map(v => v.id.videoId).filter(Boolean).join(',')
 
     let videosData: Array<{ title: string; views: number; channel: string; url: string; publishedAt: string }> = []
     if (videoIds) {
+      console.log('[trends] step 2: video stats')
       const vStats = await ytFetch('/videos', {
         part: 'statistics,snippet', id: videoIds,
       }) as { items?: Array<{ id: string; snippet: { title: string; channelTitle: string; publishedAt: string }; statistics: { viewCount?: string } }> }
@@ -78,53 +141,126 @@ export async function POST(req: NextRequest) {
         url: `https://youtube.com/watch?v=${v.id}`,
         publishedAt: v.snippet.publishedAt,
       })).sort((a, b) => b.views - a.views)
+      console.log(`[trends] sorted videos: ${videosData.length}`)
     }
 
-    // 2. Claude trend analysis
+    // ── Claude: two small requests ────────────────────────────────────────────
+
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
-    const prompt = `Ты эксперт по YouTube маркетингу. Проанализируй вирусные видео в нише "${topic}" за последние ${days} дней:
 
-${JSON.stringify(videosData.slice(0, 15))}
+    const dataCtx = `Ниша: "${topic}", период: ${days} дней.
+Топ видео: ${JSON.stringify(videosData.slice(0, 12).map(v => ({ title: v.title, views: v.views, publishedAt: v.publishedAt })))}`
 
-Найди паттерны и определи тренды. Ответь только JSON без markdown:
-{
-  "trends": [
-    {
-      "topic": "Конкретная тема которая сейчас вирусится",
-      "reason": "Почему это работает — заголовки, форматы, триггеры",
-      "urgency": "Срочно",
-      "video_ideas": ["Идея 1 для видео", "Идея 2 для видео", "Идея 3 для видео"],
-      "example_videos": [
-        { "title": "...", "views": 1200000, "url": "..." }
-      ]
-    }
-  ]
-}`
+    // Request 1 — flat trend list
+    console.log('[trends] step 3a: claude trend list')
+    const prompt1 = `Ты YouTube аналитик. ${dataCtx}
 
-    const msg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: prompt }],
+Найди 4 ключевых тренда. Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
+{"trends":[{"topic":"Конкретная тема","urgency":"Срочно","reason":"Почему вирусится"},{"topic":"Тема 2","urgency":"Актуально","reason":"Причина"},{"topic":"Тема 3","urgency":"Набирает","reason":"Причина"},{"topic":"Тема 4","urgency":"Стабильно","reason":"Причина"}]}`
+
+    const msg1 = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      messages: [{ role: 'user', content: prompt1 }],
     })
+    const text1 = (msg1.content[0] as { text: string }).text
 
-    const raw = (msg.content[0] as { text: string }).text.trim()
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) throw new Error('Claude вернул невалидный JSON')
-    const analysis = JSON.parse(jsonMatch[0])
+    interface TrendList {
+      trends: Array<{ topic: string; urgency: string; reason: string }>
+    }
+    const trendList = parseClaudeJson<TrendList>(text1, 'claude1')
+
+    // Request 2 — video ideas per trend
+    console.log('[trends] step 3b: claude video ideas')
+    const trendNames = (trendList.trends ?? []).slice(0, 4).map(t => t.topic)
+    const prompt2 = `Ты YouTube аналитик. Ниша: "${topic}". Тренды: ${JSON.stringify(trendNames)}
+
+Для каждого тренда — 3 идеи для видео. Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
+{"video_ideas":[{"trend":"${trendNames[0] ?? 'Тренд 1'}","ideas":["Идея 1","Идея 2","Идея 3"]},{"trend":"${trendNames[1] ?? 'Тренд 2'}","ideas":["Идея 1","Идея 2","Идея 3"]},{"trend":"${trendNames[2] ?? 'Тренд 3'}","ideas":["Идея 1","Идея 2","Идея 3"]},{"trend":"${trendNames[3] ?? 'Тренд 4'}","ideas":["Идея 1","Идея 2","Идея 3"]}]}`
+
+    const msg2 = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 600,
+      messages: [{ role: 'user', content: prompt2 }],
+    })
+    const text2 = (msg2.content[0] as { text: string }).text
+
+    interface VideoIdeas {
+      video_ideas: Array<{ trend: string; ideas: string[] }>
+    }
+    const ideasRes = parseClaudeJson<VideoIdeas>(text2, 'claude2')
+
+    // ── Merge into final shape ────────────────────────────────────────────────
+
+    const ideasMap = new Map<string, string[]>()
+    for (const vi of (ideasRes.video_ideas ?? [])) {
+      ideasMap.set(vi.trend, vi.ideas ?? [])
+    }
+
+    const analysis = {
+      trends: (trendList.trends ?? []).map((t, i) => ({
+        topic: t.topic,
+        urgency: t.urgency,
+        reason: t.reason,
+        video_ideas: ideasMap.get(t.topic) ?? [],
+        example_videos: videosData.slice(i * 3, i * 3 + 3).map(v => ({
+          title: v.title,
+          views: v.views,
+          url: v.url,
+        })),
+      })),
+    }
+
+    console.log('[trends] analysis merged ok, trends count:', analysis.trends.length)
 
     await spendCredits(user.id, 5, 'trends')
 
-    await svc.from('analytics_cache').upsert({
-      cache_type: 'trends',
-      cache_key: key,
-      result: analysis,
-      created_at: new Date().toISOString(),
-    }, { onConflict: 'cache_type,cache_key' })
+    try {
+      await svc.from('analytics_cache').upsert({
+        cache_type: 'trends',
+        cache_key: key,
+        result: analysis,
+        created_at: new Date().toISOString(),
+      }, { onConflict: 'cache_type,cache_key' })
+    } catch (e) {
+      console.warn('[trends] cache write failed:', e instanceof Error ? e.message : String(e))
+    }
+
+    // Save to reports history (non-fatal)
+    try {
+      const { data: old } = await svc
+        .from('analytics_reports')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('report_type', 'trends')
+        .order('created_at', { ascending: true })
+      if ((old?.length ?? 0) >= 20) {
+        await svc.from('analytics_reports').delete().eq('id', old![0].id)
+      }
+      await svc.from('analytics_reports').insert({
+        user_id: user.id,
+        report_type: 'trends',
+        title: `Тренды: ${topic} (${days} дн.)`,
+        query: `${topic}|${period}`,
+        result: analysis,
+      })
+    } catch (e) {
+      console.warn('[trends] report save failed:', e instanceof Error ? e.message : String(e))
+    }
+
+    // Cleanup stale cache (non-fatal)
+    try {
+      await svc.from('analytics_cache')
+        .delete()
+        .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    } catch (e) {
+      console.warn('[trends] cache cleanup failed:', e instanceof Error ? e.message : String(e))
+    }
 
     return NextResponse.json({ ok: true, data: analysis, cached: false })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
-    console.error('[analytics/trends] error:', msg)
-    return NextResponse.json({ ok: false, error: 'Ошибка анализа трендов' }, { status: 500 })
+    console.error('[analytics/trends] fatal error:', msg)
+    return NextResponse.json({ ok: false, error: `Ошибка анализа трендов: ${msg}` }, { status: 500 })
   }
 }

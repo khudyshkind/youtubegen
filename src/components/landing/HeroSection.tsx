@@ -3,16 +3,19 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import AnimatedCounter from './AnimatedCounter'
-
-const PHRASES = [
-  'напишет сценарий за 30 секунд',
-  'озвучит 321 голосом на 28 языках',
-  'добавит субтитры автоматически',
-  'создаст иллюстрации к каждой сцене',
-  'оптимизирует под YouTube',
-]
+import { useLang } from '@/hooks/useLang'
 
 export default function HeroSection() {
+  const { t, lang } = useLang()
+
+  const PHRASES = [
+    t('landing.phrase1'),
+    t('landing.phrase2'),
+    t('landing.phrase3'),
+    t('landing.phrase4'),
+    t('landing.phrase5'),
+  ]
+
   /* ── Typewriter ─────────────────────────────────────── */
   const [text, setText] = useState('')
   const [phraseIdx, setPhraseIdx] = useState(0)
@@ -102,21 +105,21 @@ export default function HeroSection() {
         {/* Badge */}
         <div className="inline-flex items-center gap-2 border border-violet-500/30 bg-violet-500/10 text-violet-300 text-sm font-medium rounded-full px-4 py-1.5 mb-8 backdrop-blur-sm">
           <span className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
-          20 кредитов бесплатно при регистрации
+          {t('landing.hero_badge2')}
         </div>
 
         {/* Heading */}
         <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold leading-tight tracking-tight mb-8">
-          <span className="text-slate-100">От идеи до</span>
+          <span className="text-slate-100">{t('landing.hero_h1_pre')}</span>
           <br />
-          <span className="gradient-text">YouTube-видео</span>
+          <span className="gradient-text">{t('landing.hero_h1_mid')}</span>
           <br />
-          <span className="text-slate-100">за 10 минут</span>
+          <span className="text-slate-100">{t('landing.hero_h1_post')}</span>
         </h1>
 
         {/* Typewriter */}
         <div className="max-w-xl mx-auto mb-12">
-          <p className="text-xl text-slate-400 mb-1">Введи тему — AI</p>
+          <p className="text-xl text-slate-400 mb-1">{t('landing.hero_typewriter_pre')}</p>
           <div className="h-8 flex items-center justify-center">
             <span className="text-xl font-medium text-violet-400">{text}</span>
             <span className="ml-0.5 inline-block w-0.5 h-6 bg-violet-400 animate-pulse" />
@@ -126,20 +129,20 @@ export default function HeroSection() {
         {/* CTA */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20">
           <Link href="/auth/register" className="btn-gradient w-full sm:w-auto px-8 py-4 text-white font-semibold rounded-2xl text-lg">
-            Начать бесплатно →
+            {t('landing.hero_cta')}
           </Link>
           <a href="#how-it-works" className="btn-ghost-dark w-full sm:w-auto px-8 py-4 rounded-2xl text-lg font-semibold backdrop-blur-sm">
-            Смотреть как работает ↓
+            {t('landing.hero_cta_watch')}
           </a>
         </div>
 
         {/* Stats — animated counters */}
         <div className="flex flex-wrap items-stretch justify-center">
           {[
-            { to: 321, suffix: '', label: 'голос на выбор' },
-            { to: 28,  suffix: '', label: 'языков озвучки' },
-            { to: 7,   suffix: '', label: 'шагов пайплайна' },
-            { to: 10,  suffix: ' мин', label: 'среднее время' },
+            { to: 321, suffix: '', label: t('landing.hero_stat1') },
+            { to: 28,  suffix: '', label: t('landing.hero_stat2') },
+            { to: 7,   suffix: '', label: t('landing.hero_stat3') },
+            { to: 10,  suffix: lang === 'en' ? ' min' : ' мин', label: t('landing.hero_stat4') },
           ].map((s, i) => (
             <div key={s.label} className={`px-8 py-2 text-center ${i > 0 ? 'border-l border-white/10' : ''}`}>
               <div className="text-3xl font-extrabold text-slate-100">

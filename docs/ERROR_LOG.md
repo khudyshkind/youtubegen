@@ -20,6 +20,24 @@
 
 ---
 
+### [2026-06-16] История отчётов пустая — permission denied на analytics_reports
+**Симптом:** Вкладка "История" пустая, в логах Vercel: `[reports] fetch error: permission denied for table analytics_reports`
+**Причина:** Новые таблицы, созданные вручную в Supabase SQL Editor, не наследуют default privileges автоматически. `service_role` не получил GRANT на таблицу, хотя service_role должен обходить RLS.
+**Решение:** `GRANT ALL ON public.analytics_reports TO service_role;` в Supabase SQL Editor. Также добавлено в `supabase/schema.sql` перед RLS политиками.
+**Дополнительно:** Сохранение отчёта было только в пути "свежий анализ", но при кэш-хите делался `return` до кода сохранения — добавлено сохранение и в путь кэш-хита.
+**Файлы:** `supabase/schema.sql`, `src/app/api/analytics/reports/route.ts`, niche/trends/channel route.ts
+
+---
+
+### [2026-06-16] "Невалидный JSON от Claude" в analytics routes
+**Симптом:** `/api/analytics/trends` и `/api/analytics/channel` возвращают ошибку "Невалидный JSON от Claude"
+**Причина:** Claude Sonnet при больших промтах с вложенными массивами добавляет вводный текст или markdown-блоки перед JSON. Даже balanced-brace extractor не помогает если модель генерирует невалидный JSON внутри.
+**Решение:** Разбить один большой промт на два маленьких запроса к Haiku (max_tokens: 500-600). Flat JSON без вложенных объектов → модель точно следует формату. Результаты двух запросов мёржатся в итоговую структуру.
+**Файлы:** `src/app/api/analytics/niche/route.ts`, `src/app/api/analytics/trends/route.ts`, `src/app/api/analytics/channel/route.ts`
+**Паттерн:** `parseClaudeJson<T>(text, label)` с balanced-brace извлечением; две отдельных `anthropic.messages.create` с Haiku
+
+---
+
 ### [2026-06-13] Railway не подхватывает изменения из GitHub автоматически
 **Симптом:** Пушишь код в GitHub, Railway не обновляется — работает старый код
 **Причина:** Railway сервис был задеплоен через `railway up` (CLI), а не через GitHub Integration. При CLI-деплое Railway не слушает GitHub webhooks

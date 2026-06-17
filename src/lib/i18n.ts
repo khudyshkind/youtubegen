@@ -698,6 +698,11 @@ export const translations = {
     'analytics.tab_niche':         '🔍 Анализ ниши',
     'analytics.tab_trends':        '🔥 Тренды',
     'analytics.tab_channel':       '📊 Анализ канала',
+    'analytics.tab_revenue':       '💰 Калькулятор',
+    'analytics.tab_comments':      '💬 Комментарии',
+    'analytics.tab_keywords':      '🔎 Ключевые слова',
+    'analytics.tab_compare':       '⚡ Сравнение',
+    'analytics.tab_history':       '📋 История',
 
     // Niche tab
     'analytics.niche_topic_label': 'Тема или ниша',
@@ -1480,6 +1485,11 @@ export const translations = {
     'analytics.tab_niche':         '🔍 Niche Analysis',
     'analytics.tab_trends':        '🔥 Trends',
     'analytics.tab_channel':       '📊 Channel Analysis',
+    'analytics.tab_revenue':       '💰 Calculator',
+    'analytics.tab_comments':      '💬 Comments',
+    'analytics.tab_keywords':      '🔎 Keywords',
+    'analytics.tab_compare':       '⚡ Compare',
+    'analytics.tab_history':       '📋 History',
 
     'analytics.niche_topic_label': 'Topic or niche',
     'analytics.niche_topic_ph':    'e.g., Personal Finance, Cars...',

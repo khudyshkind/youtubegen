@@ -4,6 +4,7 @@ import { type FormEvent, useRef, useState, useEffect } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { ScriptLanguage, ScriptModel, NarrativeStyle, ToneType, AudienceType, HookType } from '@/lib/types'
+import { useLang } from '@/hooks/useLang'
 
 // ─── Data ──────────────────────────────────────────────────────────────────────
 
@@ -38,40 +39,10 @@ const LANGUAGES: { code: ScriptLanguage; name: string; flag: string }[] = [
   { code: 'vi', name: 'Tiếng Việt', flag: '🇻🇳' },
 ]
 
-const MODELS: { value: ScriptModel; label: string; desc: string; credits: number }[] = [
-  { value: 'claude-sonnet', label: 'Стандартная', desc: 'Баланс скорости и качества', credits: CREDIT_COSTS.script_sonnet },
-  { value: 'claude-opus',   label: 'Улучшенная',  desc: 'Максимальное качество',        credits: CREDIT_COSTS.script_opus   },
-  { value: 'gpt-4o',        label: 'Альтернативная', desc: 'Другой стиль изложения',    credits: CREDIT_COSTS.script_gpt    },
-]
-
-const NARRATIVE_STYLES: { value: NarrativeStyle; label: string }[] = [
-  { value: 'storytelling',  label: 'Сторителлинг'   },
-  { value: 'science',       label: 'Научпоп'         },
-  { value: 'documentary',   label: 'Документальный'  },
-  { value: 'conversational',label: 'Разговорный'     },
-  { value: 'children',      label: 'Детский'         },
-]
-
-const TONES: { value: ToneType; label: string }[] = [
-  { value: 'neutral',    label: 'Нейтральный'      },
-  { value: 'emotional',  label: 'Эмоциональный'    },
-  { value: 'humorous',   label: 'С юмором'         },
-  { value: 'dramatic',   label: 'Драматичный'      },
-  { value: 'inspiring',  label: 'Воодушевляющий'   },
-]
-
-const AUDIENCES: { value: AudienceType; label: string }[] = [
-  { value: 'children', label: 'Дети'       },
-  { value: 'teens',    label: 'Подростки'  },
-  { value: 'wide',     label: 'Широкая'    },
-  { value: 'adults',   label: 'Взрослые'   },
-]
-
-const HOOK_TYPES: { value: HookType; label: string }[] = [
-  { value: 'question',    label: 'Вопрос'      },
-  { value: 'statistic',   label: 'Статистика'  },
-  { value: 'story',       label: 'История'     },
-  { value: 'provocation', label: 'Провокация'  },
+const MODELS_BASE: { value: ScriptModel; key: 'standard' | 'enhanced' | 'alternative'; credits: number }[] = [
+  { value: 'claude-sonnet', key: 'standard',    credits: CREDIT_COSTS.script_sonnet },
+  { value: 'claude-opus',   key: 'enhanced',    credits: CREDIT_COSTS.script_opus   },
+  { value: 'gpt-4o',        key: 'alternative', credits: CREDIT_COSTS.script_gpt    },
 ]
 
 const DURATION_OPTIONS = [1, 2, 3, 5, 7, 10, 15, 20]
@@ -126,7 +97,7 @@ function LanguageSelect({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Поиск языка..."
+              placeholder="🔍"
               autoFocus
             />
           </div>
@@ -149,7 +120,7 @@ function LanguageSelect({
               </button>
             ))}
             {filtered.length === 0 && (
-              <p className="px-4 py-3 text-sm text-slate-500 text-center">Не найдено</p>
+              <p className="px-4 py-3 text-sm text-slate-500 text-center">—</p>
             )}
           </div>
         </div>
@@ -252,15 +223,52 @@ function Pill({
 
 export default function Step1Topic() {
   const { scriptParams, setScriptParams, setStep, setProjectId, projectId } = useStudioStore()
+  const { t } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [ownScript, setOwnScript] = useState(false)
+
+  const MODELS = MODELS_BASE.map((m) => ({
+    ...m,
+    label: t(`model.${m.key}` as const),
+    desc: t(`model.${m.key}_desc` as const),
+  }))
+
+  const NARRATIVE_STYLES: { value: NarrativeStyle; label: string }[] = [
+    { value: 'storytelling',  label: t('style.storytelling')   },
+    { value: 'science',       label: t('style.science')        },
+    { value: 'documentary',   label: t('style.documentary')    },
+    { value: 'conversational',label: t('style.conversational') },
+    { value: 'children',      label: t('style.children')       },
+  ]
+
+  const TONES: { value: ToneType; label: string }[] = [
+    { value: 'neutral',   label: t('tone.neutral')   },
+    { value: 'emotional', label: t('tone.emotional') },
+    { value: 'humorous',  label: t('tone.humorous')  },
+    { value: 'dramatic',  label: t('tone.dramatic')  },
+    { value: 'inspiring', label: t('tone.inspiring') },
+  ]
+
+  const AUDIENCES: { value: AudienceType; label: string }[] = [
+    { value: 'children', label: t('audience.children') },
+    { value: 'teens',    label: t('audience.teens')    },
+    { value: 'wide',     label: t('audience.wide')     },
+    { value: 'adults',   label: t('audience.adults')   },
+  ]
+
+  const HOOK_TYPES: { value: HookType; label: string }[] = [
+    { value: 'question',    label: t('hook.question')    },
+    { value: 'statistic',   label: t('hook.statistic')   },
+    { value: 'story',       label: t('hook.story')       },
+    { value: 'provocation', label: t('hook.provocation') },
+  ]
 
   const selectedModel = MODELS.find((m) => m.value === scriptParams.model)!
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!ownScript && !scriptParams.topic.trim()) { setError('Введите тему видео'); return }
+    if (!ownScript && !scriptParams.topic.trim()) { setError(t('step1.err_topic')); return }
 
     if (projectId) { setStep(2); return }
 
@@ -277,12 +285,12 @@ export default function Step1Topic() {
         }),
       })
       const json = await res.json()
-      if (!json.ok) throw new Error(json.error ?? 'Ошибка создания проекта')
+      if (!json.ok) throw new Error(json.error ?? t('step1.err_create'))
       setProjectId(json.data.project.id)
       if (!scriptParams.topic.trim()) setScriptParams({ topic })
       setStep(2)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Произошла ошибка')
+      setError(err instanceof Error ? err.message : t('step1.err_general'))
     } finally {
       setLoading(false)
     }
@@ -293,8 +301,8 @@ export default function Step1Topic() {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-5">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100 mb-1">Шаг 1: Тема и параметры</h2>
-        <p className="text-sm text-slate-500">Настройте видео перед генерацией сценария</p>
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">{t('step1.title')}</h2>
+        <p className="text-sm text-slate-500">{t('step1.subtitle')}</p>
       </div>
 
       {/* Own script toggle */}
@@ -307,11 +315,9 @@ export default function Step1Topic() {
         }
       >
         <div>
-          <p className="text-sm font-medium text-slate-300">Загружу свой текст</p>
+          <p className="text-sm font-medium text-slate-300">{t('step1.own_script')}</p>
           <p className="text-xs text-slate-500 mt-0.5">
-            {ownScript
-              ? 'Тема будет определена автоматически из текста'
-              : 'Пропустить генерацию и загрузить готовый сценарий'}
+            {ownScript ? t('step1.own_script_on') : t('step1.own_script_off')}
           </p>
         </div>
         <button
@@ -331,13 +337,13 @@ export default function Step1Topic() {
       {!ownScript && (
         <div>
           <label className="block text-sm font-medium text-slate-400 mb-1.5">
-            Тема видео <span className="text-violet-400">*</span>
+            {t('step1.topic_label')} <span className="text-violet-400">*</span>
           </label>
           <textarea
             rows={3}
             value={scriptParams.topic}
             onChange={(e) => setScriptParams({ topic: e.target.value })}
-            placeholder="Например: Почему птиц не бьёт током на проводах"
+            placeholder={t('step1.topic_placeholder')}
             className="w-full px-4 py-3 rounded-xl text-sm resize-none"
           />
         </div>
@@ -346,21 +352,21 @@ export default function Step1Topic() {
       {/* Language + Duration */}
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-slate-400 mb-1.5">Язык</label>
+          <label className="block text-sm font-medium text-slate-400 mb-1.5">{t('step1.language')}</label>
           <LanguageSelect
             value={scriptParams.language}
             onChange={(v) => setScriptParams({ language: v })}
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-400 mb-1.5">Длительность</label>
+          <label className="block text-sm font-medium text-slate-400 mb-1.5">{t('step1.duration')}</label>
           <select
             value={scriptParams.duration_minutes}
             onChange={(e) => setScriptParams({ duration_minutes: Number(e.target.value) })}
             className="w-full px-4 py-2.5 rounded-xl text-sm"
           >
             {DURATION_OPTIONS.map((d) => (
-              <option key={d} value={d}>{d} мин</option>
+              <option key={d} value={d}>{d} {t('step1.min')}</option>
             ))}
           </select>
         </div>
@@ -369,7 +375,7 @@ export default function Step1Topic() {
       {/* AI Model — only relevant when generating script */}
       {!ownScript && (
         <div>
-          <label className="block text-sm font-medium text-slate-400 mb-2">Качество сценария</label>
+          <label className="block text-sm font-medium text-slate-400 mb-2">{t('step1.quality')}</label>
           <div className="grid grid-cols-3 gap-2">
             {MODELS.map((m) => (
               <button
@@ -386,7 +392,7 @@ export default function Step1Topic() {
                 <p className="text-xs font-semibold text-slate-200 leading-tight">{m.label}</p>
                 <p className="text-xs text-slate-500 mt-0.5 leading-tight">{m.desc}</p>
                 <p className={`text-xs font-bold mt-1 ${scriptParams.model === m.value ? 'text-violet-400' : 'text-slate-600'}`}>
-                  −{m.credits} кр.
+                  −{m.credits} {t('step1.credits_suffix')}
                 </p>
               </button>
             ))}
@@ -397,13 +403,13 @@ export default function Step1Topic() {
       {/* Narrative style + Tone */}
       <div className="grid grid-cols-2 gap-4">
         <SelectRow
-          label="Стиль повествования"
+          label={t('step1.style')}
           value={scriptParams.narrative_style}
           options={NARRATIVE_STYLES}
           onChange={(v) => setScriptParams({ narrative_style: v })}
         />
         <SelectRow
-          label="Тон"
+          label={t('step1.tone')}
           value={scriptParams.tone}
           options={TONES}
           onChange={(v) => setScriptParams({ tone: v })}
@@ -412,7 +418,7 @@ export default function Step1Topic() {
 
       {/* Target audience */}
       <div>
-        <label className="block text-sm font-medium text-slate-400 mb-2">Целевая аудитория</label>
+        <label className="block text-sm font-medium text-slate-400 mb-2">{t('step1.audience')}</label>
         <div className="grid grid-cols-4 gap-2">
           {AUDIENCES.map((a) => (
             <Pill
@@ -434,12 +440,12 @@ export default function Step1Topic() {
         <Toggle
           checked={scriptParams.hook}
           onChange={(v) => setScriptParams({ hook: v })}
-          label="Крюк в начале"
-          hint="Захватывающее вступление чтобы удержать зрителя"
+          label={t('step1.hook')}
+          hint={t('step1.hook_hint')}
         />
         {scriptParams.hook && (
           <div className="py-2">
-            <p className="text-xs font-medium text-slate-400 mb-1.5">Тип крюка</p>
+            <p className="text-xs font-medium text-slate-400 mb-1.5">{t('step1.hook_type')}</p>
             <div className="grid grid-cols-2 gap-1.5">
               {HOOK_TYPES.map((h) => (
                 <button
@@ -462,20 +468,20 @@ export default function Step1Topic() {
         <Toggle
           checked={scriptParams.cta}
           onChange={(v) => setScriptParams({ cta: v })}
-          label="Призыв к действию"
-          hint="Подписаться, поставить лайк, написать комментарий"
+          label={t('step1.cta')}
+          hint={t('step1.cta_hint')}
         />
         <Toggle
           checked={scriptParams.scene_markers}
           onChange={(v) => setScriptParams({ scene_markers: v })}
-          label="Метки сцен"
-          hint="[СЦЕНА 1], [СЦЕНА 2]... для удобства монтажа"
+          label={t('step1.scene_markers')}
+          hint={t('step1.scene_hint')}
         />
         <Toggle
           checked={scriptParams.pauses}
           onChange={(v) => setScriptParams({ pauses: v })}
-          label="Паузы между абзацами"
-          hint="[ПАУЗА] — ориентир для диктора"
+          label={t('step1.pauses')}
+          hint={t('step1.pauses_hint')}
         />
       </div>
 
@@ -490,7 +496,7 @@ export default function Step1Topic() {
               d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <p className="text-xs text-slate-400">
-            Генерация сценария: <strong className="text-violet-400">{selectedModel.credits} кредит{selectedModel.credits === 1 ? '' : 'а'}</strong>
+            {t('step1.credits_label')} <strong className="text-violet-400">{selectedModel.credits} {t('step1.credits_suffix')}</strong>
             {' '}({selectedModel.label})
           </p>
         </div>
@@ -507,7 +513,7 @@ export default function Step1Topic() {
         disabled={loading || !canSubmit}
         className="w-full py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-50"
       >
-        {loading ? 'Создание...' : ownScript ? 'Далее: Загрузить текст →' : 'Далее: Сценарий →'}
+        {loading ? '...' : t('step1.next')}
       </button>
     </form>
   )

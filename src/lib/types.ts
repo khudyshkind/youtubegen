@@ -14,6 +14,10 @@ export const CREDIT_COSTS = {
   niche_analysis: 10,
   trends: 5,
   channel_analysis: 15,
+  revenue_calc: 3,
+  comments_analysis: 8,
+  keywords_analysis: 5,
+  channels_compare: 10,
 } as const
 
 export type AudioEngine = 'elevenlabs' | 'openai' | 'google' | 'apihost'

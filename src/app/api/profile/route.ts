@@ -9,13 +9,18 @@ export async function GET() {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('credits, plan')
+      .select('credits, plan, preferred_lang')
       .eq('id', user.id)
       .single()
 
     if (!profile) return NextResponse.json({ ok: false }, { status: 404 })
 
-    return NextResponse.json({ ok: true, credits: profile.credits as number, plan: profile.plan as string })
+    return NextResponse.json({
+      ok: true,
+      credits: profile.credits as number,
+      plan: profile.plan as string,
+      preferred_lang: (profile.preferred_lang as string | null) ?? 'ru',
+    })
   } catch (err) {
     console.error('[api/profile GET]', err instanceof Error ? err.message : err)
     return NextResponse.json({ ok: false, error: 'Server error' }, { status: 500 })
@@ -31,15 +36,24 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
 
-    const body: { onboarding_completed?: boolean } = await request.json()
+    const body: { onboarding_completed?: boolean; preferred_lang?: string } = await request.json()
+    const update: Record<string, unknown> = {}
 
-    if (typeof body.onboarding_completed !== 'boolean') {
+    if (typeof body.onboarding_completed === 'boolean') {
+      update.onboarding_completed = body.onboarding_completed
+    }
+
+    if (typeof body.preferred_lang === 'string' && ['ru', 'en'].includes(body.preferred_lang)) {
+      update.preferred_lang = body.preferred_lang
+    }
+
+    if (Object.keys(update).length === 0) {
       return NextResponse.json({ ok: false, error: 'Неверные параметры' }, { status: 400 })
     }
 
     const { error } = await supabase
       .from('profiles')
-      .update({ onboarding_completed: body.onboarding_completed })
+      .update(update)
       .eq('id', user.id)
 
     if (error) throw error

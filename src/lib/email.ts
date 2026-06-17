@@ -154,9 +154,9 @@ export async function sendLowCreditsEmail(
   const name = user.name ?? 'друг'
 
   const plans = [
-    { name: 'Starter', credits: 100, price: '$9' },
-    { name: 'Pro',     credits: 300, price: '$19' },
-    { name: 'Agency',  credits: 1000, price: '$49' },
+    { name: 'Starter', credits: 100, price: '$19' },
+    { name: 'Pro',     credits: 300, price: '$39' },
+    { name: 'Agency',  credits: 1000, price: '$99' },
   ]
 
   const html = layout(`
@@ -169,7 +169,7 @@ export async function sendLowCreditsEmail(
     <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:20px;margin-bottom:28px">
       <p style="margin:0;font-size:14px;color:#92400e;font-weight:600">Стоимость операций:</p>
       <p style="margin:8px 0 0;font-size:13px;color:#78350f;line-height:1.8">
-        Сценарий — 1 кр · Озвучка — 2 кр · Субтитры — 1 кр<br>
+        Сценарий — 1 кр · Озвучка — 1–3 кр/1000 симв · Субтитры — 1 кр<br>
         Иллюстрации — 1 кр · Сборка видео — 2 кр · SEO — 1 кр
       </p>
     </div>

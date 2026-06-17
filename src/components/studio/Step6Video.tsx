@@ -4,31 +4,32 @@ import { useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import type { SubtitleBlock } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
+import { useLang } from '@/hooks/useLang'
 
 type DownloadState = 'idle' | 'loading' | 'done' | 'error'
 type RenderState = 'idle' | 'loading' | 'done' | 'error'
 
-const TRANSITIONS = [
-  { id: 'cut',        icon: '✂️',  label: 'Без перехода' },
-  { id: 'fade',       icon: '🌅',  label: 'Затухание' },
-  { id: 'slideleft',  icon: '⬅️',  label: 'Слайд ←' },
-  { id: 'slideright', icon: '➡️',  label: 'Слайд →' },
-  { id: 'slideup',    icon: '⬆️',  label: 'Слайд ↑' },
-  { id: 'dissolve',   icon: '💧',  label: 'Растворение' },
-  { id: 'circleopen', icon: '⭕',  label: 'Круг' },
-  { id: 'wipeleft',   icon: '🔲',  label: 'Шторка ←' },
-]
+const TRANSITIONS_BASE = [
+  { id: 'cut',        icon: '✂️'  },
+  { id: 'fade',       icon: '🌅'  },
+  { id: 'slideleft',  icon: '⬅️'  },
+  { id: 'slideright', icon: '➡️'  },
+  { id: 'slideup',    icon: '⬆️'  },
+  { id: 'dissolve',   icon: '💧'  },
+  { id: 'circleopen', icon: '⭕'  },
+  { id: 'wipeleft',   icon: '🔲'  },
+] as const
 
-const EFFECTS = [
-  { id: 'film_grain', icon: '🎞',  label: 'Зернистость' },
-  { id: 'ken_burns',  icon: '🎬',  label: 'Ken Burns' },
-  { id: 'vignette',   icon: '⚫',  label: 'Виньетка' },
-  { id: 'haze',       icon: '🌫',  label: 'Дымка' },
-  { id: 'grayscale',  icon: '🩶',  label: 'Ч/Б' },
-  { id: 'cinematic',  icon: '🎥',  label: 'Кино' },
-  { id: 'lens_flare', icon: '✨',  label: 'Блик' },
-  { id: 'vhs',        icon: '📼',  label: 'VHS' },
-]
+const EFFECTS_BASE = [
+  { id: 'film_grain', icon: '🎞'  },
+  { id: 'ken_burns',  icon: '🎬'  },
+  { id: 'vignette',   icon: '⚫'  },
+  { id: 'haze',       icon: '🌫'  },
+  { id: 'grayscale',  icon: '🩶'  },
+  { id: 'cinematic',  icon: '🎥'  },
+  { id: 'lens_flare', icon: '✨'  },
+  { id: 'vhs',        icon: '📼'  },
+] as const
 
 function Toggle({
   checked,
@@ -81,6 +82,11 @@ export default function Step6Video() {
     setVideoUrl, setStep,
   } = useStudioStore()
 
+  const { t } = useLang()
+
+  const TRANSITIONS = TRANSITIONS_BASE.map((tr) => ({ ...tr, label: t(`trans.${tr.id}` as const) }))
+  const EFFECTS = EFFECTS_BASE.map((ef) => ({ ...ef, label: t(`effect.${ef.id}` as const) }))
+
   const [downloadState, setDownloadState] = useState<DownloadState>('idle')
   const [downloadError, setDownloadError] = useState('')
   const [renderState, setRenderState] = useState<RenderState>(videoUrl ? 'done' : 'idle')
@@ -108,9 +114,9 @@ export default function Step6Video() {
   }
 
   const assetsSummary = [
-    { label: 'Аудио MP3', ready: hasAudio, value: hasAudio ? 'готово' : null },
-    { label: 'Иллюстрации', ready: hasImages, value: hasImages ? `${sceneImages.length} сцен` : null },
-    { label: 'Субтитры', ready: hasSubs, value: hasSubs ? `${subtitleBlocks.length} блоков` : null },
+    { label: t('step6.audio_label'),  ready: hasAudio,  value: hasAudio  ? t('step6.ready') : null },
+    { label: t('step6.images_label'), ready: hasImages, value: hasImages ? `${sceneImages.length} ${t('step6.scenes_count')}` : null },
+    { label: t('step6.subs_label'),   ready: hasSubs,   value: hasSubs   ? `${subtitleBlocks.length} ${t('step6.blocks_count')}` : null },
   ]
 
   async function handleDownload() {
@@ -187,15 +193,13 @@ export default function Step6Video() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100 mb-1">Шаг 6: Сборка видео</h2>
-        <p className="text-sm text-slate-500">
-          Соберите готовый MP4 автоматически или скачайте исходники для монтажа вручную
-        </p>
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">{t('step6.title')}</h2>
+        <p className="text-sm text-slate-500">{t('step6.subtitle')}</p>
       </div>
 
       {/* Assets checklist */}
       <div className="rounded-xl p-4" style={cardStyle}>
-        <p className="text-sm font-medium text-slate-300 mb-3">Готовые материалы</p>
+        <p className="text-sm font-medium text-slate-300 mb-3">{t('step6.ready_assets')}</p>
         <div className="flex flex-col gap-2">
           {assetsSummary.map((asset) => (
             <div key={asset.label} className="flex items-center justify-between">
@@ -216,7 +220,7 @@ export default function Step6Video() {
                 <span className="text-sm text-slate-300">{asset.label}</span>
               </div>
               <span className={`text-xs ${asset.ready ? 'text-green-400' : 'text-slate-600'}`}>
-                {asset.ready ? asset.value : 'не готово'}
+                {asset.ready ? asset.value : t('step6.not_ready')}
               </span>
             </div>
           ))}
@@ -230,7 +234,7 @@ export default function Step6Video() {
           style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
         >
           <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-semibold text-slate-200">Озвучка</p>
+            <p className="text-sm font-semibold text-slate-200">{t('step6.voiceover')}</p>
             <a
               href={audioUrl}
               download="audio.mp3"
@@ -238,7 +242,7 @@ export default function Step6Video() {
               rel="noopener noreferrer"
               className="text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors"
             >
-              Скачать MP3 ↓
+              {t('step6.download_mp3')}
             </a>
           </div>
           {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
@@ -253,7 +257,7 @@ export default function Step6Video() {
           style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
         >
           <p className="text-sm font-semibold text-slate-200 mb-3">
-            Иллюстрации ({sceneImages.length})
+            {t('step6.images_label')} ({sceneImages.length})
           </p>
           <div className="grid grid-cols-3 gap-2">
             {sceneImages.map((img) =>
@@ -262,7 +266,7 @@ export default function Step6Video() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={img.url}
-                    alt={`Сцена ${img.scene_index + 1}`}
+                    alt={`${t('studio.step5')} ${img.scene_index + 1}`}
                     className="w-full aspect-video object-cover rounded-lg hover:opacity-80 transition-opacity"
                   />
                 </a>
@@ -278,12 +282,12 @@ export default function Step6Video() {
           className="rounded-xl p-4 flex flex-col gap-1"
           style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
         >
-          <p className="text-sm font-semibold text-slate-200 mb-1">Настройки субтитров</p>
+          <p className="text-sm font-semibold text-slate-200 mb-1">{t('step6.subs_settings')}</p>
           <Toggle
             checked={burnIn}
             onChange={setBurnIn}
-            label="Добавить субтитры в видео"
-            hint="Субтитры будут вшиты прямо в MP4 по тайм-кодам"
+            label={t('step6.burn_subs')}
+            hint={t('step6.burn_hint')}
           />
           <div className="pt-3 mt-1" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
             <button
@@ -295,7 +299,7 @@ export default function Step6Video() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              Скачать SRT файл отдельно
+              {t('step6.download_srt')}
             </button>
           </div>
         </div>
@@ -303,16 +307,16 @@ export default function Step6Video() {
         <div className="rounded-xl p-4 flex items-start gap-3" style={cardStyle}>
           <span className="text-xl shrink-0">💬</span>
           <div>
-            <p className="text-sm font-medium text-slate-300">Субтитры не добавлены</p>
+            <p className="text-sm font-medium text-slate-300">{t('step6.no_subs')}</p>
             <p className="text-xs text-slate-500 mt-0.5 mb-2">
-              Вернитесь на шаг субтитров чтобы добавить их в видео
+              {t('step6.no_subs_desc')}
             </p>
             <button
               type="button"
               onClick={() => setStep(4)}
               className="text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors"
             >
-              ← Шаг 4: Субтитры
+              {t('step6.step4_link')}
             </button>
           </div>
         </div>
@@ -321,7 +325,7 @@ export default function Step6Video() {
       {/* Transitions block */}
       {hasImages && (
         <div className="rounded-xl p-4" style={cardStyle}>
-          <p className="text-sm font-semibold text-slate-200 mb-3">Переходы между сценами</p>
+          <p className="text-sm font-semibold text-slate-200 mb-3">{t('step6.transitions')}</p>
           <div
             className="flex gap-2 overflow-x-auto pb-1"
             style={{ scrollbarWidth: 'none' }}
@@ -345,7 +349,7 @@ export default function Step6Video() {
 
           {transition !== 'cut' && (
             <div className="mt-3 flex items-center gap-2">
-              <span className="text-xs text-slate-500">Скорость:</span>
+              <span className="text-xs text-slate-500">{t('step6.speed')}</span>
               {([0.3, 0.5, 1] as const).map((d) => (
                 <button
                   key={d}
@@ -369,13 +373,13 @@ export default function Step6Video() {
       {hasImages && (
         <div className="rounded-xl p-4" style={cardStyle}>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-slate-200">Эффекты видео</p>
+            <p className="text-sm font-semibold text-slate-200">{t('step6.effects')}</p>
             {effects.length > 0 && (
               <span
                 className="text-xs px-2 py-0.5 rounded-full"
                 style={{ color: '#FBD34D', background: 'rgba(251,211,77,0.1)', border: '1px solid rgba(251,211,77,0.2)' }}
               >
-                Увеличивают время сборки
+                {t('step6.effects_warning')}
               </span>
             )}
           </div>
@@ -428,13 +432,12 @@ export default function Step6Video() {
                 </svg>
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-100">Автосборка MP4</p>
+                <p className="text-sm font-semibold text-slate-100">{t('step6.mp4_title')}</p>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  FFmpeg соберёт видео 1280×720 с озвучкой
-                  {hasSubs && burnIn ? ', вшитыми субтитрами' : ''}
-                  {transition !== 'cut' ? `, переход "${TRANSITIONS.find((t) => t.id === transition)?.label}"` : ''}
-                  {effects.length > 0 ? `, ${effects.length} эффект(ов)` : ''}
-                  {' '}и готовый файл появится прямо здесь
+                  {t('step6.mp4_desc')}
+                  {hasSubs && burnIn ? ` + ${t('step6.subs_label').toLowerCase()}` : ''}
+                  {transition !== 'cut' ? ` + ${TRANSITIONS.find((tr) => tr.id === transition)?.label}` : ''}
+                  {effects.length > 0 ? ` + ${effects.length} ${t('step6.effects').toLowerCase()}` : ''}
                 </p>
               </div>
             </div>
@@ -444,11 +447,11 @@ export default function Step6Video() {
               disabled={!hasAudio || !hasImages}
               className="w-full py-2.5 btn-gradient disabled:opacity-40 text-white font-semibold rounded-xl text-sm"
             >
-              Собрать MP4 — 2 кредита
+              {t('step6.render_btn')}
             </button>
             {(!hasAudio || !hasImages) && (
               <p className="text-xs text-slate-500 mt-2 text-center">
-                {!hasAudio ? 'Сначала сгенерируйте озвучку' : 'Сначала добавьте иллюстрации'}
+                {!hasAudio ? t('step6.no_audio_hint') : t('step6.no_images_hint')}
               </p>
             )}
           </>
@@ -460,14 +463,14 @@ export default function Step6Video() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
             </svg>
-            <p className="text-sm font-semibold text-blue-300">Собираем видео...</p>
-            <p className="text-xs text-blue-400">FFmpeg кодирует H.264 1280×720. Обычно 1–3 минуты.</p>
+            <p className="text-sm font-semibold text-blue-300">{t('step6.rendering')}</p>
+            <p className="text-xs text-blue-400">{t('step6.render_hint')}</p>
           </div>
         )}
 
         {renderState === 'done' && videoUrl && (
           <>
-            <p className="text-sm font-semibold text-green-400 mb-3">Видео готово!</p>
+            <p className="text-sm font-semibold text-green-400 mb-3">{t('step6.video_done')}</p>
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
             <video
               controls
@@ -484,14 +487,14 @@ export default function Step6Video() {
                 className="flex-1 py-2 text-center text-white font-semibold rounded-xl text-sm transition-colors"
                 style={{ background: 'linear-gradient(135deg, #10B981, #059669)', boxShadow: '0 4px 16px rgba(16,185,129,0.3)' }}
               >
-                Скачать MP4 ↓
+                {t('step6.download_mp4')}
               </a>
               <button
                 type="button"
                 onClick={() => setRenderState('idle')}
                 className="px-4 py-2 btn-ghost-dark rounded-xl text-sm"
               >
-                Пересобрать
+                {t('step6.reassemble')}
               </button>
             </div>
           </>
@@ -499,7 +502,7 @@ export default function Step6Video() {
 
         {renderState === 'error' && (
           <>
-            <p className="text-sm font-semibold text-red-400 mb-1">Ошибка сборки</p>
+            <p className="text-sm font-semibold text-red-400 mb-1">{t('step6.render_error')}</p>
             <p className="text-xs text-red-400 mb-3">{renderError}</p>
             <button
               type="button"
@@ -507,7 +510,7 @@ export default function Step6Video() {
               className="px-4 py-2 text-white font-medium rounded-xl text-xs transition-colors"
               style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.3)' }}
             >
-              Попробовать снова
+              {t('step6.try_again')}
             </button>
           </>
         )}
@@ -557,10 +560,9 @@ export default function Step6Video() {
 
         {downloadState === 'idle' && (
           <>
-            <p className="text-sm font-semibold text-slate-200 mb-1">Скачать исходники</p>
+            <p className="text-sm font-semibold text-slate-200 mb-1">{t('step6.zip_title')}</p>
             <p className="text-xs text-slate-500 mb-4">
-              ZIP-архив с аудио, иллюстрациями, субтитрами SRT,<br />
-              тайм-кодами и инструкцией для монтажа
+              {t('step6.mp4_desc')}
             </p>
             <button
               type="button"
@@ -571,38 +573,38 @@ export default function Step6Video() {
               onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.15)')}
               onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.1)')}
             >
-              Скачать ZIP
+              {t('step6.zip_btn')}
             </button>
             {!hasAudio && (
-              <p className="text-xs text-slate-600 mt-2">Сначала сгенерируйте озвучку</p>
+              <p className="text-xs text-slate-600 mt-2">{t('step6.no_audio_hint')}</p>
             )}
           </>
         )}
 
         {downloadState === 'loading' && (
           <>
-            <p className="text-sm font-semibold text-slate-200 mb-1">Подготовка архива...</p>
-            <p className="text-xs text-slate-500">Собираем файлы, это займёт несколько секунд</p>
+            <p className="text-sm font-semibold text-slate-200 mb-1">{t('step6.zip_loading')}</p>
+            <p className="text-xs text-slate-500">{t('msg.loading')}</p>
           </>
         )}
 
         {downloadState === 'done' && (
           <>
-            <p className="text-sm font-semibold text-green-400 mb-1">Архив скачан!</p>
-            <p className="text-xs text-slate-500 mb-3">Откройте ZIP и следуйте инструкции README.txt</p>
+            <p className="text-sm font-semibold text-green-400 mb-1">{t('step6.zip_done')}</p>
+            <p className="text-xs text-slate-500 mb-3">README.txt</p>
             <button
               type="button"
               onClick={() => setDownloadState('idle')}
               className="text-xs text-slate-500 hover:text-slate-300 underline transition-colors"
             >
-              Скачать снова
+              {t('step6.zip_again')}
             </button>
           </>
         )}
 
         {downloadState === 'error' && (
           <>
-            <p className="text-sm font-semibold text-red-400 mb-1">Ошибка загрузки</p>
+            <p className="text-sm font-semibold text-red-400 mb-1">{t('step6.zip_error')}</p>
             <p className="text-xs text-red-400 mb-3">{downloadError}</p>
             <button
               type="button"
@@ -610,7 +612,7 @@ export default function Step6Video() {
               className="px-4 py-2 text-white font-medium rounded-xl text-xs transition-colors"
               style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.3)' }}
             >
-              Попробовать снова
+              {t('step6.try_again')}
             </button>
           </>
         )}
@@ -622,14 +624,14 @@ export default function Step6Video() {
           className="rounded-xl p-4"
           style={{ background: 'rgba(37,99,235,0.07)', border: '1px solid rgba(37,99,235,0.15)' }}
         >
-          <p className="text-xs font-semibold text-blue-300 mb-2">Что входит в архив</p>
+          <p className="text-xs font-semibold text-blue-300 mb-2">{t('step6.zip_contents')}</p>
           <ul className="flex flex-col gap-1">
             {[
-              ['audio.mp3', 'озвучка сценария'],
-              ['scene_01.jpg, scene_02.jpg...', 'пронумерованные иллюстрации'],
-              hasSubs ? ['subtitles.srt', 'субтитры для импорта'] : null,
-              hasImages ? ['timing.txt', 'тайм-коды каждой иллюстрации'] : null,
-              ['README.txt', 'инструкция для CapCut, DaVinci, Premiere'],
+              ['audio.mp3', t('step6.audio_label')],
+              [`scene_01.jpg...`, t('step6.images_label')],
+              hasSubs ? ['subtitles.srt', t('step6.subs_label')] : null,
+              hasImages ? ['timing.txt', 'timecodes'] : null,
+              ['README.txt', 'CapCut, DaVinci, Premiere'],
             ]
               .filter(Boolean)
               .map((item) => (
@@ -648,14 +650,14 @@ export default function Step6Video() {
           onClick={() => setStep(5)}
           className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
-          ← Назад
+          {t('step6.back')}
         </button>
         <button
           type="button"
           onClick={() => setStep(7)}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm"
         >
-          Далее: SEO →
+          {t('step6.next')}
         </button>
       </div>
     </div>

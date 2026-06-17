@@ -5,8 +5,48 @@ import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { useStudioStore } from '@/lib/studio-store'
+import { useLang } from '@/hooks/useLang'
 import type { User } from '@supabase/supabase-js'
 import type { Profile } from '@/lib/types'
+import type { Lang } from '@/lib/i18n'
+
+function LangSwitcher() {
+  const { lang, setLang } = useLang()
+
+  async function switchLang(l: Lang) {
+    setLang(l)
+    try {
+      await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferred_lang: l }),
+      })
+    } catch {}
+  }
+
+  return (
+    <div
+      className="flex items-center rounded-lg overflow-hidden text-xs font-semibold"
+      style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)' }}
+    >
+      {(['ru', 'en'] as Lang[]).map((l) => (
+        <button
+          key={l}
+          type="button"
+          onClick={() => switchLang(l)}
+          className="px-2.5 py-1.5 transition-all uppercase"
+          style={
+            lang === l
+              ? { background: 'rgba(124,58,237,0.6)', color: '#fff' }
+              : { color: '#94a3b8' }
+          }
+        >
+          {l}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export default function Navbar() {
   const router = useRouter()
@@ -19,20 +59,18 @@ export default function Navbar() {
   const storeCredits = useStudioStore((s) => s.credits)
   const setStoreCredits = useStudioStore((s) => s.setCredits)
   const prevCreditsRef = useRef<number | null>(null)
+  const { t, setLang } = useLang()
 
   const supabase = createClient()
-
-  // Displayed credits: store value (updated instantly after generation) or profile fallback
   const displayCredits = storeCredits ?? profile?.credits ?? null
 
-  // Animate badge when credits decrease
   useEffect(() => {
     if (storeCredits === null) return
     if (prevCreditsRef.current !== null && storeCredits < prevCreditsRef.current) {
       setCreditsFlash(true)
-      const t = setTimeout(() => setCreditsFlash(false), 600)
+      const timer = setTimeout(() => setCreditsFlash(false), 600)
       prevCreditsRef.current = storeCredits
-      return () => clearTimeout(t)
+      return () => clearTimeout(timer)
     }
     prevCreditsRef.current = storeCredits
   }, [storeCredits])
@@ -41,9 +79,12 @@ export default function Navbar() {
     try {
       const res = await fetch('/api/profile')
       if (!res.ok) return
-      const json: { ok: boolean; credits?: number } = await res.json()
+      const json: { ok: boolean; credits?: number; preferred_lang?: string } = await res.json()
       if (json.ok && typeof json.credits === 'number') {
         setStoreCredits(json.credits)
+      }
+      if (json.ok && json.preferred_lang && ['ru', 'en'].includes(json.preferred_lang)) {
+        setLang(json.preferred_lang as Lang)
       }
     } catch {}
   }
@@ -65,21 +106,20 @@ export default function Navbar() {
             .select('*')
             .eq('id', currentUser.id)
             .single()
-          setProfile(data as Profile | null)
-          // Seed store credits from profile on first load
-          if (data && typeof (data as Profile).credits === 'number') {
-            setStoreCredits((data as Profile).credits)
+          const p = data as Profile | null
+          setProfile(p)
+          if (p && typeof p.credits === 'number') setStoreCredits(p.credits)
+          if (p?.preferred_lang && ['ru', 'en'].includes(p.preferred_lang)) {
+            setLang(p.preferred_lang as Lang)
           }
         } else {
           setProfile(null)
         }
       }
     )
-
     return () => subscription.unsubscribe()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Poll credits every 10 seconds when logged in
   useEffect(() => {
     if (!user) return
     const interval = setInterval(fetchCredits, 10_000)
@@ -153,9 +193,12 @@ export default function Navbar() {
                     animation: creditsFlash ? 'credits-shake 0.3s ease' : 'none',
                   }}
                 >
-                  {displayCredits !== null ? `${displayCredits} кр.` : '—'}
+                  {displayCredits !== null ? `${displayCredits} ${t('nav.credits_suffix')}` : '—'}
                 </span>
               </div>
+
+              {/* Lang switcher */}
+              <LangSwitcher />
 
               {/* Create video button */}
               <button
@@ -166,7 +209,7 @@ export default function Navbar() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-                Создать видео
+                {t('nav.create_video')}
               </button>
 
               {/* User menu */}
@@ -212,9 +255,9 @@ export default function Navbar() {
                     onMouseLeave={() => setMenuOpen(false)}
                   >
                     <div className="px-4 py-2.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-                      <p className="text-xs text-slate-500">Баланс</p>
+                      <p className="text-xs text-slate-500">{t('nav.balance')}</p>
                       <p className="text-sm font-semibold text-violet-400">
-                        {displayCredits ?? 0} кредитов
+                        {displayCredits ?? 0} {t('billing.credits_unit')}
                       </p>
                     </div>
 
@@ -227,7 +270,7 @@ export default function Navbar() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                           d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                       </svg>
-                      Дашборд
+                      {t('nav.dashboard')}
                     </Link>
 
                     <Link
@@ -239,7 +282,7 @@ export default function Navbar() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                           d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                       </svg>
-                      Тарифы и кредиты
+                      {t('nav.billing')}
                     </Link>
 
                     <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', marginTop: '4px' }}>
@@ -251,7 +294,7 @@ export default function Navbar() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                             d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                         </svg>
-                        Выйти
+                        {t('nav.logout')}
                       </button>
                     </div>
                   </div>
@@ -264,24 +307,25 @@ export default function Navbar() {
               {isLanding && (
                 <nav className="hidden md:flex items-center gap-6 mr-2">
                   <a href="/#how-it-works" className="text-sm text-slate-400 hover:text-white transition-colors">
-                    Как работает
+                    {t('nav.how_it_works')}
                   </a>
                   <a href="/#pricing" className="text-sm text-slate-400 hover:text-white transition-colors">
-                    Тарифы
+                    {t('nav.pricing')}
                   </a>
                   <a href="/#faq" className="text-sm text-slate-400 hover:text-white transition-colors">
-                    FAQ
+                    {t('nav.faq')}
                   </a>
                 </nav>
               )}
+              <LangSwitcher />
               <Link
                 href="/auth/login"
                 className="text-sm font-medium text-slate-400 hover:text-white transition-colors"
               >
-                Войти
+                {t('nav.login')}
               </Link>
               <Link href="/auth/register" className="btn-gradient px-4 py-2 text-white text-sm font-semibold rounded-xl">
-                Регистрация
+                {t('nav.register')}
               </Link>
             </div>
           )}

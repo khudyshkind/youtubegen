@@ -5,6 +5,7 @@ import { useStudioStore } from '@/lib/studio-store'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SceneImage } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
+import { useLang } from '@/hooks/useLang'
 
 const INTERVAL_PRESETS = [5, 8, 10, 15, 20] as const
 
@@ -54,6 +55,7 @@ function AudioSyncPlayer({
   audioRef: React.RefObject<HTMLAudioElement | null>
   onActiveChange: (idx: number | null) => void
 }) {
+  const { t } = useLang()
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -123,7 +125,7 @@ function AudioSyncPlayer({
           style={{ background: 'rgba(124,58,237,0.35)', color: '#C4B5FD' }}
           onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.55)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.35)')}
-          title={isPlaying ? 'Пауза' : 'Воспроизвести'}
+          title={isPlaying ? t('step5.pause') : t('step5.play')}
         >
           {isPlaying ? (
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -160,9 +162,9 @@ function AudioSyncPlayer({
       </div>
 
       <p className="text-xs leading-relaxed" style={{ color: 'rgba(196,181,253,0.7)' }}>
-        Прослушайте озвучку и проверьте соответствие иллюстраций тексту.{' '}
+        {t('step5.listen_hint')}{' '}
         <span style={{ color: 'rgba(196,181,253,0.45)' }}>
-          Нажмите на изображение чтобы перейти к этому моменту в аудио.
+          {t('step5.click_hint')}
         </span>
       </p>
     </div>
@@ -176,6 +178,7 @@ export default function Step5Images() {
     setSceneImages, setImageInterval, setStep,
   } = useStudioStore()
 
+  const { t } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [customInterval, setCustomInterval] = useState('')
@@ -216,7 +219,7 @@ export default function Step5Images() {
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []).slice(0, 20)
     if (files.length === 0) return
-    if (!projectId) { setUploadError('Сначала создайте проект (шаг 1)'); return }
+    if (!projectId) { setUploadError(t('step5.err_no_project')); return }
     setUploadError('')
     setUploading(true)
     setUploadProgress(0)
@@ -233,13 +236,13 @@ export default function Step5Images() {
         if (!signJson.ok) throw new Error(signJson.error)
         const { signed_url, access_url } = signJson.data
         const uploadRes = await fetch(signed_url, { method: 'PUT', headers: { 'Content-Type': file.type || 'image/jpeg' }, body: file })
-        if (!uploadRes.ok) throw new Error(`Ошибка загрузки файла ${i + 1}`)
+        if (!uploadRes.ok) throw new Error(`${t('step5.err_upload')} ${i + 1}`)
         results.push({ scene_index: i + 1, url: access_url, prompt: '' })
         setUploadProgress(Math.round(((i + 1) / files.length) * 100))
       }
       setSceneImages(results)
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Ошибка загрузки изображений')
+      setUploadError(err instanceof Error ? err.message : t('step5.err_upload'))
     } finally {
       setUploading(false)
       e.target.value = ''
@@ -247,7 +250,7 @@ export default function Step5Images() {
   }, [projectId, setSceneImages])
 
   async function handleGenerate() {
-    if (!script?.trim()) { setError('Сначала сгенерируйте сценарий (шаг 2)'); return }
+    if (!script?.trim()) { setError(t('step5.err_no_script')); return }
     setError('')
     setLoading(true)
     try {
@@ -262,13 +265,13 @@ export default function Step5Images() {
       })
       const json = await res.json()
       if (!json.ok) {
-        if (json.code === 'NO_CREDITS') { setError(`Недостаточно кредитов. Нужно ${imageCount * CREDIT_COSTS.image} кр.`); return }
+        if (json.code === 'NO_CREDITS') { setError(`${t('step5.err_gen')} (${imageCount * CREDIT_COSTS.image} ${t('nav.credits_suffix')})`); return }
         throw new Error(json.error)
       }
       setSceneImages(json.data.scene_images as SceneImage[])
       void refreshCredits()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка генерации иллюстраций')
+      setError(err instanceof Error ? err.message : t('step5.err_gen'))
     } finally {
       setLoading(false)
     }
@@ -289,7 +292,7 @@ export default function Step5Images() {
   }
 
   async function handleSingleRegen(sceneIndex: number) {
-    if (!projectId) { setRegenErrors((prev) => ({ ...prev, [sceneIndex]: 'Сначала сохраните проект' })); return }
+    if (!projectId) { setRegenErrors((prev) => ({ ...prev, [sceneIndex]: t('step5.err_no_save') })); return }
     setRegenLoading((prev) => new Set([...prev, sceneIndex]))
     setRegenErrors((prev) => { const n = { ...prev }; delete n[sceneIndex]; return n })
     try {
@@ -302,7 +305,7 @@ export default function Step5Images() {
       const json = await res.json()
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') {
-          setRegenErrors((prev) => ({ ...prev, [sceneIndex]: `Недостаточно кредитов (нужно ${CREDIT_COSTS.image} кр.)` }))
+          setRegenErrors((prev) => ({ ...prev, [sceneIndex]: `${t('msg.no_credits')} (${CREDIT_COSTS.image} ${t('nav.credits_suffix')})` }))
           return
         }
         throw new Error(json.error)
@@ -314,7 +317,7 @@ export default function Step5Images() {
       void refreshCredits()
       closeEditor()
     } catch (err) {
-      setRegenErrors((prev) => ({ ...prev, [sceneIndex]: err instanceof Error ? err.message : 'Ошибка перегенерации' }))
+      setRegenErrors((prev) => ({ ...prev, [sceneIndex]: err instanceof Error ? err.message : t('step5.err_regen') }))
     } finally {
       setRegenLoading((prev) => { const n = new Set(prev); n.delete(sceneIndex); return n })
     }
@@ -330,16 +333,14 @@ export default function Step5Images() {
 
   const durationLabel =
     subtitleBlocks.length > 0
-      ? `${Math.floor(audioDurationSec / 60)} мин ${audioDurationSec % 60} сек (из субтитров)`
-      : `~${scriptParams.duration_minutes} мин (по параметрам)`
+      ? `${Math.floor(audioDurationSec / 60)} ${t('step1.min')} ${audioDurationSec % 60} ${t('step5.sec')}`
+      : `~${scriptParams.duration_minutes} ${t('step1.min')}`
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100 mb-1">Шаг 5: Иллюстрации</h2>
-        <p className="text-sm text-slate-500">
-          Настройте частоту смены иллюстраций и сгенерируйте изображения
-        </p>
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">{t('step5.title')}</h2>
+        <p className="text-sm text-slate-500">{t('step5.subtitle')}</p>
       </div>
 
       {/* Interval selector */}
@@ -348,7 +349,7 @@ export default function Step5Images() {
         style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
       >
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold text-slate-300">Смена изображения каждые...</p>
+          <p className="text-sm font-semibold text-slate-300">{t('step5.interval')}</p>
           <span className="text-xs text-slate-500">{durationLabel}</span>
         </div>
 
@@ -365,7 +366,7 @@ export default function Step5Images() {
                   : { border: '2px solid rgba(255,255,255,0.08)', color: '#94A3B8' }
               }
             >
-              {sec} сек
+              {sec} {t('step5.sec')}
             </button>
           ))}
 
@@ -383,7 +384,7 @@ export default function Step5Images() {
                 : { border: '2px solid rgba(255,255,255,0.08)' }
               }
             />
-            <span className="text-xs text-slate-500">сек</span>
+            <span className="text-xs text-slate-500">{t('step5.sec')}</span>
           </div>
         </div>
 
@@ -397,11 +398,10 @@ export default function Step5Images() {
               d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
           <p className="text-xs text-slate-400 leading-relaxed">
-            {audioDurationSec} сек ÷ {imageInterval} сек/кадр ={' '}
-            <strong className="text-slate-200">{imageCount} иллюстраций</strong>
+            {audioDurationSec} {t('step5.sec')} ÷ {imageInterval} {t('step5.sec')}/frame ={' '}
+            <strong className="text-slate-200">{imageCount}</strong>
             <span className="mx-1.5 text-slate-600">·</span>
-            Стоимость: <strong className="text-violet-400">{creditCost} кредитов</strong>
-            <span className="ml-1 text-slate-600">({CREDIT_COSTS.image} кр./шт.)</span>
+            {t('step3.cost')} <strong className="text-violet-400">{creditCost} {t('nav.credits_suffix')}</strong>
           </p>
         </div>
       </div>
@@ -415,8 +415,7 @@ export default function Step5Images() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <p className="text-xs text-blue-300 leading-relaxed">
-          Сценарий будет разбит на <strong>{imageCount} сцен</strong> по смыслу.
-          Для каждой сцены автоматически сгенерируется иллюстрация.
+          <strong>{imageCount}</strong> {t('studio.step5').toLowerCase()} · {t('step5.generating')}
         </p>
       </div>
 
@@ -429,12 +428,12 @@ export default function Step5Images() {
         {loading ? (
           <>
             <SpinnerIcon className="w-4 h-4 animate-spin" />
-            Анализ сценария и генерация иллюстраций...
+            {t('step5.generating')}
           </>
         ) : sceneImages.length > 0 ? (
-          `↺ Перегенерировать все (−${imageCount * CREDIT_COSTS.image} кр.)`
+          `↺ ${t('step2.regenerate')} (−${imageCount * CREDIT_COSTS.image} ${t('nav.credits_suffix')})`
         ) : (
-          `🎨 Сгенерировать ${imageCount} иллюстраций (−${imageCount * CREDIT_COSTS.image} кр.)`
+          `🎨 ${t('btn.generate')} ${imageCount} (−${imageCount * CREDIT_COSTS.image} ${t('nav.credits_suffix')})`
         )}
       </button>
 
@@ -450,14 +449,14 @@ export default function Step5Images() {
             {uploading ? (
               <>
                 <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
-                Загрузка... {uploadProgress}%
+                {t('msg.loading')} {uploadProgress}%
               </>
             ) : (
               <>
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                 </svg>
-                Загрузить свои фото (до 20)
+                {t('step5.upload')}
               </>
             )}
           </button>
@@ -467,7 +466,7 @@ export default function Step5Images() {
             className="flex items-center gap-1 py-2 px-3 text-slate-500 text-xs font-medium rounded-xl hover:text-slate-300 transition-colors"
             style={{ border: '1px solid rgba(255,255,255,0.07)' }}
           >
-            Пропустить →
+            {t('step5.skip')}
           </button>
           <input
             ref={imageFilesRef}
@@ -513,15 +512,15 @@ export default function Step5Images() {
                   d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
               </svg>
               <p className="text-xs text-slate-500">
-                Вернитесь на шаг озвучки чтобы прослушать аудио вместе с иллюстрациями.
+                {t('step5.audio_hint')}
               </p>
             </div>
           )}
 
           <div>
             <p className="text-sm font-medium text-slate-300 mb-3">
-              Готовые иллюстрации ({sceneImages.length})
-              <span className="ml-2 text-xs text-slate-500 font-normal">— нажмите ↺ для перегенерации отдельной сцены</span>
+              {t('studio.step5')} ({sceneImages.length})
+              <span className="ml-2 text-xs text-slate-500 font-normal">{t('step5.regen_hint')}</span>
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {sceneImages.map((img, arrayIdx) => {
@@ -554,12 +553,12 @@ export default function Step5Images() {
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={img.url}
-                            alt={`Сцена ${arrayIdx + 1}`}
+                            alt={`${t('studio.step5')} ${arrayIdx + 1}`}
                             className={`w-full h-full object-cover transition-opacity ${isLoading ? 'opacity-40' : 'opacity-100'}`}
                           />
                         ) : (
                           <div className="flex items-center justify-center h-full text-slate-600 text-xs">
-                            Ошибка
+                            {t('msg.error')}
                           </div>
                         )}
 
@@ -569,7 +568,7 @@ export default function Step5Images() {
                             style={{ background: 'rgba(0,0,0,0.5)' }}
                           >
                             <SpinnerIcon className="w-5 h-5 text-violet-400 animate-spin" />
-                            <span className="text-xs text-slate-300 font-medium">Генерация...</span>
+                            <span className="text-xs text-slate-300 font-medium">{t('msg.generating')}</span>
                           </div>
                         )}
 
@@ -585,7 +584,7 @@ export default function Step5Images() {
                             style={{ background: 'rgba(0,0,0,0.5)' }}
                             onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.7)')}
                             onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.5)')}
-                            title="Перегенерировать сцену"
+                            title={t('step2.regenerate')}
                           >
                             <RefreshIcon className="w-3.5 h-3.5" />
                           </button>
@@ -607,7 +606,7 @@ export default function Step5Images() {
                             </p>
                           )}
                           <p className="text-xs font-medium text-slate-400">
-                            Промпт для перегенерации сцены {arrayIdx + 1}
+                            {t('step2.regenerate')} — {arrayIdx + 1}
                           </p>
                           <textarea
                             rows={3}
@@ -631,12 +630,12 @@ export default function Step5Images() {
                               {isLoading ? (
                                 <>
                                   <SpinnerIcon className="w-3 h-3 animate-spin" />
-                                  Генерация...
+                                  {t('msg.generating')}
                                 </>
                               ) : (
                                 <>
                                   <RefreshIcon className="w-3 h-3" />
-                                  Перегенерировать (−{CREDIT_COSTS.image} кр.)
+                                  {t('step2.regenerate')} (−{CREDIT_COSTS.image} {t('nav.credits_suffix')})
                                 </>
                               )}
                             </button>
@@ -647,7 +646,7 @@ export default function Step5Images() {
                               className="px-4 py-2 text-slate-400 font-medium rounded-xl text-xs hover:text-slate-200 disabled:opacity-40 transition-colors"
                               style={{ border: '1px solid rgba(255,255,255,0.1)' }}
                             >
-                              Отмена
+                              {t('btn.cancel')}
                             </button>
                           </div>
                         </div>
@@ -667,7 +666,7 @@ export default function Step5Images() {
           onClick={() => setStep(4)}
           className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
-          ← Назад
+          {t('step5.back')}
         </button>
         <button
           type="button"
@@ -675,7 +674,7 @@ export default function Step5Images() {
           disabled={sceneImages.length === 0}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40"
         >
-          Далее: Видео →
+          {t('step5.next')}
         </button>
       </div>
     </div>

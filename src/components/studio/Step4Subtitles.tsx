@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import type { SubtitleBlock, SubtitleFont, SubtitleSize, SubtitlePosition, SubtitleAnimation } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
+import { useLang } from '@/hooks/useLang'
 
 function formatTime(sec: number) {
   const m = Math.floor(sec / 60)
@@ -118,6 +119,7 @@ export default function Step4Subtitles() {
     setSubtitleBlocks, setSubtitleStyle, setStep,
   } = useStudioStore()
 
+  const { t } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [srtUploadError, setSrtUploadError] = useState('')
@@ -132,12 +134,12 @@ export default function Step4Subtitles() {
       const text = ev.target?.result as string
       const blocks = parseSrt(text)
       if (blocks.length === 0) {
-        setSrtUploadError('Не удалось распознать субтитры в файле. Проверьте формат SRT.')
+        setSrtUploadError(t('step4.err_srt'))
         return
       }
       setSubtitleBlocks(blocks)
     }
-    reader.onerror = () => setSrtUploadError('Не удалось прочитать файл')
+    reader.onerror = () => setSrtUploadError(t('step4.err_file'))
     reader.readAsText(file, 'UTF-8')
     e.target.value = ''
   }
@@ -154,13 +156,13 @@ export default function Step4Subtitles() {
       })
       const json = await res.json()
       if (!json.ok) {
-        if (json.code === 'NO_CREDITS') { setError('Недостаточно кредитов.'); return }
+        if (json.code === 'NO_CREDITS') { setError(t('step4.err_credits')); return }
         throw new Error(json.error)
       }
       setSubtitleBlocks(json.data.subtitle_blocks)
       void refreshCredits()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка генерации субтитров')
+      setError(err instanceof Error ? err.message : t('step4.err_gen'))
     } finally {
       setLoading(false)
     }
@@ -186,16 +188,16 @@ export default function Step4Subtitles() {
     URL.revokeObjectURL(url)
   }
 
-  const fontLabels: Record<SubtitleFont, string> = { sans: 'Без засечек', serif: 'С засечками', mono: 'Моноширинный' }
-  const sizeLabels: Record<SubtitleSize, string> = { small: 'Маленький', medium: 'Средний', large: 'Крупный' }
-  const posLabels: Record<SubtitlePosition, string> = { top: 'Вверху', center: 'По центру', bottom: 'Внизу' }
-  const animLabels: Record<SubtitleAnimation, string> = { none: 'Нет', fade: 'Плавно', slide: 'Скольжение' }
+  const fontLabels: Record<SubtitleFont, string> = { sans: t('font.sans'), serif: t('font.serif'), mono: t('font.mono') }
+  const sizeLabels: Record<SubtitleSize, string> = { small: t('size.small'), medium: t('size.medium'), large: t('size.large') }
+  const posLabels: Record<SubtitlePosition, string> = { top: t('pos.top'), center: t('pos.center'), bottom: t('pos.bottom') }
+  const animLabels: Record<SubtitleAnimation, string> = { none: t('anim.none'), fade: t('anim.fade'), slide: t('anim.slide') }
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100 mb-1">Шаг 4: Субтитры</h2>
-        <p className="text-sm text-slate-500">Автоматическое распознавание речи и создание субтитров</p>
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">{t('step4.title')}</h2>
+        <p className="text-sm text-slate-500">{t('step4.subtitle')}</p>
       </div>
 
       {subtitleBlocks.length === 0 ? (
@@ -208,7 +210,7 @@ export default function Step4Subtitles() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
             </svg>
             <p className="text-sm text-slate-400">
-              Распознаёт речь и создаёт блоки субтитров с тайм-кодами
+              {t('step4.desc')}
             </p>
           </div>
 
@@ -224,15 +226,15 @@ export default function Step4Subtitles() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
-                Транскрибация... (30–60 сек)
+                {t('step4.transcribing')}
               </>
             ) : (
-              '📝 Создать субтитры (−1 кр.)'
+              t('step4.generate_btn')
             )}
           </button>
 
           {!audioUrl && (
-            <p className="text-xs text-slate-500 text-center">Сначала сгенерируйте аудио на шаге 3</p>
+            <p className="text-xs text-slate-500 text-center">{t('step4.no_audio')}</p>
           )}
 
           <div className="flex gap-2">
@@ -245,7 +247,7 @@ export default function Step4Subtitles() {
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
-              Загрузить .srt файл
+              {t('step4.upload_srt')}
             </button>
             <input
               ref={srtFileRef}
@@ -267,7 +269,7 @@ export default function Step4Subtitles() {
           {/* Subtitle blocks editor */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium text-slate-300">{subtitleBlocks.length} блоков субтитров</p>
+              <p className="text-sm font-medium text-slate-300">{subtitleBlocks.length} {t('step4.blocks')}</p>
               <div className="flex gap-3">
                 <button
                   type="button"
@@ -275,7 +277,7 @@ export default function Step4Subtitles() {
                   disabled={loading}
                   className="text-xs text-slate-400 hover:text-slate-200 font-medium transition-colors"
                 >
-                  ↺ Перегенерировать
+                  {t('step4.regenerate')}
                 </button>
                 <button
                   type="button"
@@ -331,17 +333,17 @@ export default function Step4Subtitles() {
             className="rounded-xl p-4 flex flex-col gap-4"
             style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
           >
-            <p className="text-sm font-semibold text-slate-200">Настройки стиля</p>
+            <p className="text-sm font-semibold text-slate-200">{t('step4.style_settings')}</p>
 
             <div className="grid grid-cols-2 gap-4">
               <ChipSelector
-                label="Шрифт"
+                label={t('step4.font')}
                 value={subtitleStyle.font}
                 options={(Object.keys(fontLabels) as SubtitleFont[]).map((k) => ({ value: k, label: fontLabels[k] }))}
                 onChange={(v) => setSubtitleStyle({ font: v })}
               />
               <ChipSelector
-                label="Размер"
+                label={t('step4.size')}
                 value={subtitleStyle.size}
                 options={(Object.keys(sizeLabels) as SubtitleSize[]).map((k) => ({ value: k, label: sizeLabels[k] }))}
                 onChange={(v) => setSubtitleStyle({ size: v })}
@@ -349,7 +351,7 @@ export default function Step4Subtitles() {
             </div>
 
             <div>
-              <p className="text-sm font-medium text-slate-300 mb-2">Цвет текста</p>
+              <p className="text-sm font-medium text-slate-300 mb-2">{t('step4.color')}</p>
               <div className="flex items-center gap-3">
                 <input
                   type="color"
@@ -363,14 +365,14 @@ export default function Step4Subtitles() {
             </div>
 
             <ChipSelector
-              label="Позиция"
+              label={t('step4.position')}
               value={subtitleStyle.position}
               options={(Object.keys(posLabels) as SubtitlePosition[]).map((k) => ({ value: k, label: posLabels[k] }))}
               onChange={(v) => setSubtitleStyle({ position: v })}
             />
 
             <ChipSelector
-              label="Анимация"
+              label={t('step4.animation')}
               value={subtitleStyle.animation}
               options={(Object.keys(animLabels) as SubtitleAnimation[]).map((k) => ({ value: k, label: animLabels[k] }))}
               onChange={(v) => setSubtitleStyle({ animation: v })}
@@ -380,8 +382,8 @@ export default function Step4Subtitles() {
               <Toggle
                 checked={subtitleStyle.background}
                 onChange={(v) => setSubtitleStyle({ background: v })}
-                label="Фон под текстом"
-                hint="Полупрозрачная подложка для лучшей читаемости"
+                label={t('step4.bg_label')}
+                hint={t('step4.bg_hint')}
               />
             </div>
           </div>
@@ -400,7 +402,7 @@ export default function Step4Subtitles() {
           onClick={() => setStep(3)}
           className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
-          ← Назад
+          {t('step4.back')}
         </button>
         <button
           type="button"
@@ -408,7 +410,7 @@ export default function Step4Subtitles() {
           disabled={subtitleBlocks.length === 0}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40"
         >
-          Далее: Иллюстрации →
+          {t('step4.next')}
         </button>
         {subtitleBlocks.length === 0 && (
           <button
@@ -416,7 +418,7 @@ export default function Step4Subtitles() {
             onClick={() => setStep(5)}
             className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
           >
-            Пропустить
+            {t('step4.skip')}
           </button>
         )}
       </div>
