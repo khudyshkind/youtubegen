@@ -1,61 +1,98 @@
-export type Plan = 'free' | 'starter' | 'pro' | 'agency'
+export type Plan = 'free' | 'basic' | 'starter' | 'pro' | 'agency'
 
 export const CREDIT_COSTS = {
-  script_sonnet: 1,
-  script_opus: 2,
-  script_gpt: 1,
-  subtitles: 1,
-  image: 1,
-  video: 2,
-  seo: 1,
-  thumbnail: 1,
-  humanize: 1,
-  uniqueize: 1,
-  niche_analysis: 10,
-  trends: 5,
-  channel_analysis: 15,
-  revenue_calc: 3,
-  comments_analysis: 8,
-  keywords_analysis: 5,
-  channels_compare: 10,
+  // Script
+  script_sonnet: 4,
+  script_opus:   7,
+  script_gpt:    6,
+
+  // Audio (per 1 000 chars)
+  audio_openai_per_1000:          4,
+  audio_elevenlabs_per_1000:     79,
+  audio_apihost_basic_per_1000:   2,
+  audio_apihost_standard_per_1000: 5,
+  audio_apihost_pro_per_1000:    10,
+  audio_apihost_studio_per_1000: 18,
+
+  // Subtitles (per minute of audio)
+  subtitles_per_minute: 2,
+
+  // Images
+  image: 7,
+
+  // Video
+  video: 1,
+
+  // SEO / thumbnail
+  seo:       2,
+  thumbnail: 7,
+
+  // Text tools
+  humanize:  3,
+  uniqueize: 3,
+
+  // YouTube analytics
+  niche_analysis:    4,
+  trends:            3,
+  channel_analysis:  6,
+  revenue_calc:      2,
+  comments_analysis: 4,
+  keywords_analysis: 3,
+  channels_compare:  6,
 } as const
 
 export type AudioEngine = 'elevenlabs' | 'openai' | 'google' | 'apihost'
 export type ApihostVoiceType = 'basic' | 'standard' | 'pro' | 'studio'
 
-export const AUDIO_CREDITS_PER_1000_CHARS: Record<'elevenlabs' | 'openai' | 'google', number> = {
-  elevenlabs: 3,
-  openai: 1,
-  google: 1,
-}
-
-export const APIHOST_CREDITS_PER_1000_CHARS: Record<ApihostVoiceType, number> = {
-  basic:    0.1,
-  standard: 0.5,
-  pro:      1,
-  studio:   2,
-}
-
 export function audioCost(chars: number, engine: AudioEngine, apihostVoiceType?: ApihostVoiceType): number {
+  const blocks = Math.ceil(chars / 1000)
   if (engine === 'apihost') {
-    const rate = APIHOST_CREDITS_PER_1000_CHARS[apihostVoiceType ?? 'standard']
-    return Math.max(1, Math.ceil((chars / 1000) * rate))
+    const rates: Record<ApihostVoiceType, number> = {
+      basic:    CREDIT_COSTS.audio_apihost_basic_per_1000,
+      standard: CREDIT_COSTS.audio_apihost_standard_per_1000,
+      pro:      CREDIT_COSTS.audio_apihost_pro_per_1000,
+      studio:   CREDIT_COSTS.audio_apihost_studio_per_1000,
+    }
+    return Math.max(1, blocks * (rates[apihostVoiceType ?? 'standard']))
   }
-  return Math.ceil(chars / 1000) * AUDIO_CREDITS_PER_1000_CHARS[engine as 'elevenlabs' | 'openai' | 'google']
+  const rate =
+    engine === 'elevenlabs' ? CREDIT_COSTS.audio_elevenlabs_per_1000 :
+    engine === 'openai'     ? CREDIT_COSTS.audio_openai_per_1000     :
+    CREDIT_COSTS.audio_openai_per_1000  // google same as openai
+  return Math.max(1, blocks * rate)
 }
 
 export const PLAN_CREDITS: Record<Plan, number> = {
-  free: 20,
-  starter: 100,
-  pro: 300,
-  agency: 1000,
+  free:    20,
+  basic:   800,
+  starter: 2000,
+  pro:     5000,
+  agency:  15000,
 }
 
 export const PLAN_PRICES: Record<Exclude<Plan, 'free'>, number> = {
+  basic:   9,
   starter: 19,
-  pro: 39,
-  agency: 99,
+  pro:     39,
+  agency:  99,
 }
+
+// Maximum accumulated balance (2× monthly allocation)
+export const PLAN_MAX_CREDITS: Record<Plan, number> = {
+  free:    20,
+  basic:   1600,
+  starter: 4000,
+  pro:     10000,
+  agency:  30000,
+}
+
+export const TOPUP_PACKAGES = [
+  { credits: 500,  price: 7,  label: '500 кредитов'  },
+  { credits: 2000, price: 26, label: '2000 кредитов' },
+  { credits: 5000, price: 60, label: '5000 кредитов' },
+] as const
+
+export const PLAN_ORDER: Plan[] = ['free', 'basic', 'starter', 'pro', 'agency']
 
 // ─── Script params ────────────────────────────────────────────────────────────
 
@@ -181,16 +218,16 @@ export interface SceneImage {
   scene_index: number
   prompt: string
   url: string | null
-  scene?: string            // Russian scene description from Claude
+  scene?: string
   timecode_start?: string
   timecode_end?: string
 }
 
 export interface SeoData {
   title: string
-  title_alt?: string     // A/B variant — user picks one
-  description: string    // without hashtags — appended separately on copy
-  hashtags: string[]     // 3-5 items, each starts with #
+  title_alt?: string
+  description: string
+  hashtags: string[]
   tags: string[]
 }
 

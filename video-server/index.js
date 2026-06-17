@@ -200,9 +200,40 @@ const payStates = new Map() // String(chatId) → { step, method, plan, username
 let awaitingActivate = null  // { userChatId, plan, planInfo } — owner activation
 
 const PAY_PLANS = {
-  starter: { name: 'Starter', price: '$19', credits: 100 },
-  pro:     { name: 'Pro',     price: '$39', credits: 300 },
-  agency:  { name: 'Agency',  price: '$99', credits: 1000 },
+  basic:        { name: 'Basic',       price: '$9',  usd: 9,   credits: 800  },
+  starter:      { name: 'Starter',     price: '$19', usd: 19,  credits: 2000 },
+  pro:          { name: 'Pro',         price: '$39', usd: 39,  credits: 5000 },
+  agency:       { name: 'Agency',      price: '$99', usd: 99,  credits: 15000 },
+  topup_500:    { name: '500 кредитов',  price: '$7',  usd: 7,   credits: 500  },
+  topup_2000:   { name: '2000 кредитов', price: '$26', usd: 26,  credits: 2000 },
+  topup_5000:   { name: '5000 кредитов', price: '$60', usd: 60,  credits: 5000 },
+}
+
+// ── USD → RUB rate (cached 1 hour in bot_settings) ───────────────────────────
+async function getUsdToRub() {
+  try {
+    const rows = await sbGet('bot_settings', 'key=in.(usd_rub_rate,usd_rub_rate_updated)&select=key,value')
+    const rateRow    = rows.find(r => r.key === 'usd_rub_rate')
+    const updatedRow = rows.find(r => r.key === 'usd_rub_rate_updated')
+    const updatedAt  = updatedRow ? Number(updatedRow.value) : 0
+    const ONE_HOUR   = 3600 * 1000
+    if (rateRow && (Date.now() - updatedAt) < ONE_HOUR) {
+      return Number(rateRow.value)
+    }
+  } catch (e) { /* cache miss — fetch fresh */ }
+
+  try {
+    const res  = await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', { signal: AbortSignal.timeout(5000) })
+    const data = await res.json()
+    const rate = data.usd?.rub
+    if (!rate) throw new Error('no rub field')
+    await sbPost('bot_settings', { key: 'usd_rub_rate',         value: String(rate)      }, 'on_conflict=key')
+    await sbPost('bot_settings', { key: 'usd_rub_rate_updated', value: String(Date.now()) }, 'on_conflict=key')
+    return rate
+  } catch (e) {
+    console.error('[rate] getUsdToRub error:', e.message)
+    return 90 // fallback
+  }
 }
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
@@ -311,11 +342,21 @@ function payMethodInline() {
 
 function payPlanInline() {
   return {
-    inline_keyboard: [[
-      { text: 'Starter $19', callback_data: 'pay_plan_starter' },
-      { text: 'Pro $39',     callback_data: 'pay_plan_pro' },
-      { text: 'Agency $99',  callback_data: 'pay_plan_agency' },
-    ]],
+    inline_keyboard: [
+      [
+        { text: 'Basic $9',    callback_data: 'pay_plan_basic' },
+        { text: 'Starter $19', callback_data: 'pay_plan_starter' },
+      ],
+      [
+        { text: 'Pro $39',     callback_data: 'pay_plan_pro' },
+        { text: 'Agency $99',  callback_data: 'pay_plan_agency' },
+      ],
+      [
+        { text: 'Топап 500 кр $7',   callback_data: 'pay_plan_topup_500' },
+        { text: 'Топап 2000 кр $26', callback_data: 'pay_plan_topup_2000' },
+        { text: 'Топап 5000 кр $60', callback_data: 'pay_plan_topup_5000' },
+      ],
+    ],
   }
 }
 
@@ -407,47 +448,48 @@ async function publishToChannel(text, imageUrl = null) {
 }
 
 // ── Russia payment helpers ────────────────────────────────────────────────────
-function cardPaymentText(planInfo) {
+function cardPaymentText(planInfo, rubAmount) {
+  const rubLine = rubAmount ? `Переведи: *${rubAmount} ₽*\n` : `Переведи сумму на карту:\n`
   return (
     `💳 *Оплата картой МИР*\n\n` +
-    `Тариф: *${planInfo.name}* — ${planInfo.price}\n` +
-    `Переведи сумму на карту:\n` +
+    `Тариф: *${planInfo.name}* — ${planInfo.price}${rubAmount ? ` (~${rubAmount} ₽)` : ''}\n` +
+    rubLine +
     `🏦 Номер карты: \`${CARD_NUMBER}\`\n` +
-    `Получатель: ${CARD_HOLDER}\n\n` +
+    `👤 Получатель: ${CARD_HOLDER}\n\n` +
     `После оплаты отправь сюда:\n` +
     `1. Скриншот перевода\n` +
     `2. Свой email в YouTubeGen\n\n` +
-    `Мы активируем тариф в течение 1 часа ✅`
+    `Активируем в течение 1 часа ✅`
   )
 }
 
 function cryptoPaymentText(planInfo) {
   return (
-    `₿ *Оплата криптовалютой USDT*\n\n` +
-    `Тариф: *${planInfo.name}* — ${planInfo.price}\n\n` +
-    `Переведи USDT на адрес:\n` +
+    `₿ *Оплата USDT*\n\n` +
+    `Тариф: *${planInfo.name}* — ${planInfo.price} USDT\n\n` +
     `🔹 TRC20: \`${USDT_TRC20}\`\n` +
     `🔹 ERC20: \`${USDT_ERC20}\`\n\n` +
     `После оплаты отправь сюда:\n` +
     `1. Hash транзакции\n` +
     `2. Свой email в YouTubeGen\n\n` +
-    `Мы активируем тариф в течение 1 часа ✅`
+    `Активируем в течение 1 часа ✅`
   )
 }
 
-async function notifyOwnerNewPayment(userChatId, username, firstName, method, planInfo) {
+async function notifyOwnerNewPayment(userChatId, username, firstName, method, planInfo, rubAmount) {
   if (!OWNER_ID) return
   const userDisplay = username ? `@${username}` : (firstName || String(userChatId))
   const methodLabel = method === 'card' ? 'Карта МИР 💳' : 'Криптовалюта USDT ₿'
+  const rubNote = rubAmount ? ` (~${rubAmount} ₽)` : ''
   await tgApi('sendMessage', {
     chat_id: OWNER_ID,
     text:
       `💰 *Новая заявка на оплату!*\n\n` +
-      `👤 Пользователь: ${userDisplay} (ID: ${userChatId})\n` +
-      `📦 Тариф: ${planInfo.name} ${planInfo.price}\n` +
+      `👤 ${userDisplay} (ID: \`${userChatId}\`)\n` +
+      `📦 Тариф: *${planInfo.name}* ${planInfo.price}${rubNote}\n` +
       `💳 Способ: ${methodLabel}\n\n` +
       `Ожидай скриншот/hash от пользователя.\n` +
-      `Для активации тарифа: ${APP_URL}/admin/users`,
+      `Активация: ${APP_URL}/admin/users`,
     parse_mode: 'Markdown',
   })
 }
@@ -956,6 +998,24 @@ async function handlePublicCallback(cq) {
 
   if (data === 'pay_card' || data === 'pay_crypto') {
     const method = data === 'pay_card' ? 'card' : 'crypto'
+    const pst    = payStates.get(String(chatId)) || {}
+
+    // Deep-link flow: plan already known — show details immediately
+    if (pst.step === 'method_for_plan' && pst.plan) {
+      const planInfo = PAY_PLANS[pst.plan]
+      if (planInfo) {
+        payStates.set(String(chatId), { ...pst, step: 'awaiting_proof', method })
+        await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
+        const rate      = await getUsdToRub()
+        const rubAmount = planInfo.usd ? Math.ceil(planInfo.usd * rate) : null
+        const detailsText = method === 'card' ? cardPaymentText(planInfo, rubAmount) : cryptoPaymentText(planInfo)
+        await tgApi('sendMessage', { chat_id: chatId, text: detailsText, parse_mode: 'Markdown' })
+        await notifyOwnerNewPayment(chatId, username || pst.username, firstName || pst.firstName, method, planInfo, rubAmount)
+        return
+      }
+    }
+
+    // Regular flow: ask for plan
     payStates.set(String(chatId), { step: 'plan', method, username, firstName })
     await tgApi('editMessageText', {
       chat_id: chatId, message_id: msgId,
@@ -977,10 +1037,12 @@ async function handlePublicCallback(cq) {
 
     await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
 
-    const detailsText = method === 'card' ? cardPaymentText(planInfo) : cryptoPaymentText(planInfo)
+    const rate      = await getUsdToRub()
+    const rubAmount = planInfo.usd ? Math.ceil(planInfo.usd * rate) : null
+    const detailsText = method === 'card' ? cardPaymentText(planInfo, rubAmount) : cryptoPaymentText(planInfo)
     await tgApi('sendMessage', { chat_id: chatId, text: detailsText, parse_mode: 'Markdown' })
 
-    await notifyOwnerNewPayment(chatId, username || pst.username, firstName || pst.firstName, method, planInfo)
+    await notifyOwnerNewPayment(chatId, username || pst.username, firstName || pst.firstName, method, planInfo, rubAmount)
   }
 }
 
@@ -1201,8 +1263,36 @@ app.post('/telegram/webhook', async (req, res) => {
       })
       return
     }
-    if (text === '/start' || text === '/pay') {
-      payStates.set(String(chatId), { step: 'method', username: message.from?.username, firstName: message.from?.first_name })
+    if (text === '/start' || text.startsWith('/start ') || text === '/pay') {
+      const startArg = text.startsWith('/start ') ? text.slice(7).trim() : ''
+      const username  = message.from?.username
+      const firstName = message.from?.first_name
+
+      // Deep link: /start pay_<plan> or /start pay_topup_<size>
+      if (startArg.startsWith('pay_') && startArg !== 'pay') {
+        const planKey  = startArg.slice(4) // strip 'pay_'
+        const planInfo = PAY_PLANS[planKey]
+        if (planInfo) {
+          payStates.set(String(chatId), { step: 'method_for_plan', plan: planKey, username, firstName })
+          const rate      = await getUsdToRub()
+          const rubAmount = planInfo.usd ? Math.ceil(planInfo.usd * rate) : null
+          const rubNote   = rubAmount ? ` (~${rubAmount} ₽)` : ''
+          await tgApi('sendMessage', {
+            chat_id: chatId,
+            text:
+              `💳 *Оплата тарифа ${planInfo.name}*\n\n` +
+              `📦 Тариф: *${planInfo.name}* — ${planInfo.credits} кредитов\n` +
+              `💰 Стоимость: *${planInfo.price}*${rubNote}\n\n` +
+              `Выбери способ оплаты:`,
+            parse_mode: 'Markdown',
+            reply_markup: payMethodInline(),
+          })
+          return
+        }
+      }
+
+      // Regular /start or /pay — choose method first
+      payStates.set(String(chatId), { step: 'method', username, firstName })
       await tgApi('sendMessage', {
         chat_id: chatId,
         text: '👋 Привет! Для оплаты YouTubeGen из России\nвыбери удобный способ:',

@@ -8,11 +8,9 @@ import { PLAN_CREDITS } from '@/lib/types'
 import type { Plan } from '@/lib/types'
 
 function getPaddle() {
+  const useSandbox = process.env.PADDLE_SANDBOX === 'true'
   return new Paddle(env('PADDLE_API_KEY'), {
-    environment:
-      process.env.NODE_ENV === 'production'
-        ? Environment.production
-        : Environment.sandbox,
+    environment: useSandbox ? Environment.sandbox : Environment.production,
   })
 }
 
@@ -90,9 +88,19 @@ export async function POST(request: NextRequest) {
 
       case 'transaction.completed': {
         const tx = event.data as Transaction
-        // Only handle renewals (transactions tied to a subscription)
-        if (!tx.subscriptionId) break
+        const customData = tx.customData as { userId?: string; type?: string; credits?: number; plan?: Plan } | null
 
+        if (!tx.subscriptionId) {
+          // One-time topup purchase
+          const userId = customData?.userId
+          const credits = customData?.credits
+          if (userId && credits && credits > 0) {
+            await addCredits(userId, credits, 'topup')
+          }
+          break
+        }
+
+        // Subscription renewal — top up based on current plan
         const { data: profile } = await supabase
           .from('profiles')
           .select('id, plan')

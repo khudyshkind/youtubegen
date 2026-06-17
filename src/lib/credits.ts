@@ -1,7 +1,7 @@
 import { createServiceClient } from './supabase-server'
-import { CREDIT_COSTS } from './types'
+import { CREDIT_COSTS, PLAN_MAX_CREDITS } from './types'
 import { sendLowCreditsEmail } from './email'
-import type { ApiResponse } from './types'
+import type { ApiResponse, Plan } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 const LOW_CREDITS_THRESHOLD = 5
@@ -61,13 +61,30 @@ export async function spendCredits(
 export async function addCredits(
   userId: string,
   amount: number,
-  operation: 'purchase' | 'signup_bonus' | 'referral_bonus' | 'referral_reward',
+  operation: 'purchase' | 'signup_bonus' | 'referral_bonus' | 'referral_reward' | 'topup',
   projectId?: string
 ): Promise<void> {
   const supabase = createServiceClient()
+
+  // Enforce per-plan maximum balance
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('credits, plan')
+    .eq('id', userId)
+    .single()
+
+  let creditsToAdd = amount
+  if (profile) {
+    const maxCredits = PLAN_MAX_CREDITS[profile.plan as Plan] ?? amount
+    const current = profile.credits ?? 0
+    creditsToAdd = Math.max(0, Math.min(amount, maxCredits - current))
+  }
+
+  if (creditsToAdd <= 0) return
+
   await supabase.rpc('add_credits', {
     p_user_id: userId,
-    p_amount: amount,
+    p_amount: creditsToAdd,
     p_operation: operation,
     p_project_id: projectId ?? null,
   })

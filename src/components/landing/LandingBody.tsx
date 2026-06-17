@@ -13,7 +13,11 @@ import { useLang } from '@/hooks/useLang'
 const BG = '#0A0A0F'
 const DIV_LINE = '1px solid rgba(255,255,255,0.05)'
 
-export default function LandingBody() {
+interface Props {
+  usdToRub?: number
+}
+
+export default function LandingBody({ usdToRub = 90 }: Props) {
   const { t } = useLang()
 
   const STEPS = [
@@ -37,17 +41,20 @@ export default function LandingBody() {
 
   const PLANS = [
     {
-      name: 'Starter', price: '19', credits: 100,
+      name: 'Starter', price: '19', credits: 2000,
+      rub: Math.ceil(19 * usdToRub),
       features: [t('billing.f_credits_100'), t('billing.f_videos_5_9'), t('billing.f_all_tools'), t('billing.f_email_support')],
       cta: t('landing.plan_cta_starter'), highlight: false,
     },
     {
-      name: 'Pro', price: '39', credits: 300,
+      name: 'Pro', price: '39', credits: 5000,
+      rub: Math.ceil(39 * usdToRub),
       features: [t('billing.f_credits_300'), t('billing.f_videos_15_25'), t('billing.f_all_tools'), t('billing.f_priority_support')],
       cta: t('landing.plan_cta_pro'), highlight: true,
     },
     {
-      name: 'Agency', price: '99', credits: 1000,
+      name: 'Agency', price: '99', credits: 15000,
+      rub: Math.ceil(99 * usdToRub),
       features: [t('billing.f_credits_1000'), t('billing.f_videos_55_90'), t('billing.f_all_tools'), t('billing.f_dedicated_support'), t('billing.f_api_access')],
       cta: t('landing.plan_cta_agency'), highlight: false,
     },
@@ -271,6 +278,7 @@ export default function LandingBody() {
                     <span className="text-5xl font-extrabold text-slate-100">${plan.price}</span>
                     <span className="text-slate-500 mb-2">{t('landing.period')}</span>
                   </div>
+                  <p className="text-xs text-slate-600 mt-0.5">~{plan.rub.toLocaleString('ru-RU')} ₽/мес</p>
                   <p className="text-sm text-violet-400 font-semibold mt-1">{plan.credits} {t('landing.plan_credits_mo')}</p>
                 </div>
                 <ul className="flex flex-col gap-2.5">

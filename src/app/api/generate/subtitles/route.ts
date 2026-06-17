@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
-import { requireCredits, spendCredits } from '@/lib/credits'
+import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import type { SubtitleBlock } from '@/lib/types'
@@ -61,7 +61,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const check = await requireCredits(user.id, 'subtitles', supabase)
+    // Require at least 1 minute worth of credits before transcription
+    const minCost = CREDIT_COSTS.subtitles_per_minute
+    const check = await requireCreditsAmount(user.id, minCost, supabase)
     if (!check.ok) {
       return NextResponse.json(check, { status: 402 })
     }
@@ -117,7 +119,11 @@ export async function POST(request: NextRequest) {
       })
     )
 
-    await spendCredits(user.id, CREDIT_COSTS.subtitles, 'subtitles', project_id)
+    // Charge based on actual audio duration from Whisper segments
+    const lastSegEnd = transcription.segments?.at(-1)?.end ?? 0
+    const durationMinutes = lastSegEnd > 0 ? lastSegEnd / 60 : 1
+    const cost = Math.max(minCost, Math.ceil(durationMinutes) * CREDIT_COSTS.subtitles_per_minute)
+    await spendCredits(user.id, cost, 'subtitles', project_id)
 
     if (project_id) {
       await supabase

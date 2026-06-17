@@ -114,6 +114,7 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
 
   const planColors: Record<Plan, string> = {
     free: 'bg-gray-100 text-gray-600',
+    basic: 'bg-green-100 text-green-700',
     starter: 'bg-blue-100 text-blue-700',
     pro: 'bg-purple-100 text-purple-700',
     agency: 'bg-amber-100 text-amber-700',

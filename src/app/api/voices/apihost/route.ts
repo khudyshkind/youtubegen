@@ -2,7 +2,14 @@ import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { env } from '@/lib/env'
 import type { ApihostVoiceType } from '@/lib/types'
-import { APIHOST_CREDITS_PER_1000_CHARS } from '@/lib/types'
+import { CREDIT_COSTS } from '@/lib/types'
+
+const APIHOST_RATE: Record<ApihostVoiceType, number> = {
+  basic:    CREDIT_COSTS.audio_apihost_basic_per_1000,
+  standard: CREDIT_COSTS.audio_apihost_standard_per_1000,
+  pro:      CREDIT_COSTS.audio_apihost_pro_per_1000,
+  studio:   CREDIT_COSTS.audio_apihost_studio_per_1000,
+}
 
 export const maxDuration = 30
 
@@ -81,7 +88,7 @@ async function fetchServer(key: string, server: number): Promise<ApihostVoice[]>
         lang,
         engine: 'apihost' as const,
         voice_type: voiceType,
-        credits_per_1000: APIHOST_CREDITS_PER_1000_CHARS[voiceType],
+        credits_per_1000: APIHOST_RATE[voiceType],
         price_per_1000_rub: priceRub,
         price_per_1000_usd: Math.round((priceRub / 90) * 1000) / 1000,
         preview_url: `https://apihost.ru/samples/examples/other/${lang}_${voiceId}.mp3`,

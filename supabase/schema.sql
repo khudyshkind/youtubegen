@@ -11,7 +11,7 @@ create table if not exists public.profiles (
   full_name       text,
   avatar_url      text,
   plan            text        not null default 'free'
-                    check (plan in ('free', 'starter', 'pro', 'agency')),
+                    check (plan in ('free', 'basic', 'starter', 'pro', 'agency')),
   credits         integer     not null default 20,
   paddle_customer_id      text unique,
   paddle_subscription_id  text unique,
@@ -25,6 +25,10 @@ alter table public.profiles add column if not exists onboarding_completed boolea
 
 -- Migration: admin flag
 alter table public.profiles add column if not exists is_admin boolean not null default false;
+
+-- Migration: add 'basic' plan to constraint (run once on existing databases)
+alter table public.profiles drop constraint if exists profiles_plan_check;
+alter table public.profiles add constraint profiles_plan_check check (plan in ('free', 'basic', 'starter', 'pro', 'agency'));
 
 -- Migration: Paddle billing (add if missing — safe to run multiple times)
 alter table public.profiles add column if not exists paddle_customer_id text unique;

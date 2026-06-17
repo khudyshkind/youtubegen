@@ -3,14 +3,19 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { PLAN_CREDITS } from '@/lib/types'
+import { PLAN_CREDITS, PLAN_ORDER, TOPUP_PACKAGES } from '@/lib/types'
 import { useLang } from '@/hooks/useLang'
 import type { Profile, Plan } from '@/lib/types'
+
+const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME ?? 'youtubegenai_bot'
+
+function tgPayUrl(startParam: string) {
+  return `https://t.me/${BOT_USERNAME}?start=${startParam}`
+}
 
 export default function BillingPage() {
   const router = useRouter()
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [loadingPlan, setLoadingPlan] = useState<Plan | null>(null)
   const [error, setError] = useState('')
   const supabase = createClient()
   const { t } = useLang()
@@ -23,6 +28,14 @@ export default function BillingPage() {
       period: '',
       highlight: false,
       features: [t('billing.f_credits_once'), t('billing.f_all_tools')],
+    },
+    {
+      id: 'basic' as Plan,
+      name: 'Basic',
+      price: '$9',
+      period: t('billing.period'),
+      highlight: false,
+      features: [t('billing.f_credits_basic'), t('billing.f_all_tools'), t('billing.f_email_support')],
     },
     {
       id: 'starter' as Plan,
@@ -51,50 +64,23 @@ export default function BillingPage() {
   ]
 
   const CREDIT_COST_INFO = [
-    { operation: t('billing.op_script'),    credits: 1,     icon: '✍️' },
-    { operation: t('billing.op_voice'),     credits: '1–3', icon: '🎙' },
-    { operation: t('billing.op_subtitles'), credits: 1,     icon: '📋' },
-    { operation: t('billing.op_image'),     credits: 1,     icon: '🎨' },
-    { operation: t('billing.op_video'),     credits: 2,     icon: '🎬' },
-    { operation: t('billing.op_seo'),       credits: 1,     icon: '🔍' },
+    { operation: t('billing.op_script'),    credits: '4–7',     icon: '✍️' },
+    { operation: t('billing.op_voice'),     credits: '1–18/1к', icon: '🎙' },
+    { operation: t('billing.op_subtitles'), credits: '2/мин',   icon: '📋' },
+    { operation: t('billing.op_image'),     credits: 7,         icon: '🎨' },
+    { operation: t('billing.op_video'),     credits: 1,         icon: '🎬' },
+    { operation: t('billing.op_seo'),       credits: 2,         icon: '🔍' },
   ]
 
   useEffect(() => {
     async function loadProfile() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/auth/login'); return }
-
       const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single()
       setProfile(data as Profile | null)
     }
     loadProfile()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function handleUpgrade(planId: Plan) {
-    if (planId === 'free') return
-    setError('')
-    setLoadingPlan(planId)
-
-    try {
-      const res = await fetch('/api/paddle/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: planId }),
-      })
-      const json = await res.json()
-
-      if (!json.ok) {
-        setError(json.error ?? t('billing.err_session'))
-        return
-      }
-
-      window.location.href = json.data.url
-    } catch {
-      setError(t('billing.err_conn'))
-    } finally {
-      setLoadingPlan(null)
-    }
-  }
 
   const currentPlan = profile?.plan ?? 'free'
 
@@ -150,12 +136,10 @@ export default function BillingPage() {
 
       {/* Plans grid */}
       <h2 className="text-lg font-semibold text-slate-200 mb-4">{t('billing.choose_plan')}</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
         {PLANS.map((plan) => {
           const isCurrent = plan.id === currentPlan
-          const isDowngrade =
-            ['free', 'starter', 'pro', 'agency'].indexOf(plan.id) <
-            ['free', 'starter', 'pro', 'agency'].indexOf(currentPlan)
+          const isDowngrade = PLAN_ORDER.indexOf(plan.id) < PLAN_ORDER.indexOf(currentPlan)
 
           return (
             <div
@@ -165,16 +149,16 @@ export default function BillingPage() {
               } ${isCurrent ? 'border-violet-500/60' : ''}`}
             >
               {plan.highlight && !isCurrent && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="btn-gradient text-white text-xs font-bold px-3 py-1 rounded-full">
+                <div className="absolute -top-3 left-0 right-0 flex justify-center">
+                  <span className="btn-gradient text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
                     {t('billing.popular')}
                   </span>
                 </div>
               )}
               {isCurrent && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                <div className="absolute -top-3 left-0 right-0 flex justify-center">
                   <span
-                    className="text-violet-300 text-xs font-bold px-3 py-1 rounded-full"
+                    className="text-violet-300 text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap"
                     style={{ background: 'rgba(124,58,237,0.3)', border: '1px solid rgba(124,58,237,0.5)' }}
                   >
                     {t('billing.current_plan')}
@@ -204,46 +188,76 @@ export default function BillingPage() {
                 ))}
               </ul>
 
-              <button
-                onClick={() => handleUpgrade(plan.id)}
-                disabled={isCurrent || plan.id === 'free' || isDowngrade || loadingPlan !== null}
-                className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                  isCurrent
-                    ? 'text-violet-300 cursor-default'
-                    : plan.id === 'free' || isDowngrade
-                    ? 'text-slate-600 cursor-not-allowed'
-                    : plan.highlight
-                    ? 'btn-gradient text-white disabled:opacity-50'
-                    : 'text-slate-200 disabled:opacity-50'
-                }`}
-                style={
-                  isCurrent
-                    ? { background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }
-                    : plan.id === 'free' || isDowngrade
-                    ? { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }
-                    : plan.highlight
-                    ? {}
-                    : { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }
-                }
-              >
-                {isCurrent
-                  ? t('billing.current_plan')
-                  : isDowngrade
-                  ? t('billing.downgrade')
-                  : plan.id === 'free'
-                  ? t('billing.free_btn')
-                  : loadingPlan === plan.id
-                  ? t('billing.loading')
-                  : t('billing.upgrade')}
-              </button>
+              {plan.id === 'free' || isCurrent ? (
+                <div
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-center"
+                  style={
+                    isCurrent
+                      ? { background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)', color: 'rgba(167,139,250,1)' }
+                      : { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(100,116,139,1)' }
+                  }
+                >
+                  {isCurrent ? t('billing.current_plan') : t('billing.free_btn')}
+                </div>
+              ) : isDowngrade ? (
+                <div
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-center text-slate-600 cursor-not-allowed"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+                >
+                  {t('billing.downgrade')}
+                </div>
+              ) : (
+                <a
+                  href={tgPayUrl(`pay_${plan.id}`)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`w-full py-2.5 rounded-xl text-sm font-semibold text-center transition-all block ${
+                    plan.highlight ? 'btn-gradient text-white' : 'text-slate-200 hover:opacity-80'
+                  }`}
+                  style={plan.highlight ? {} : { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
+                >
+                  💬 {t('billing.tg_pay_btn')}
+                </a>
+              )}
             </div>
           )
         })}
       </div>
 
-      <p className="text-sm text-slate-600 mt-6 text-center">
-        {t('billing.paddle_note')}
-      </p>
+      <p className="text-xs text-slate-600 mt-3 text-center">{t('billing.tg_pay_note')}</p>
+
+      {/* Topup section */}
+      <div className="mt-10">
+        <h2 className="text-lg font-semibold text-slate-200 mb-1">{t('billing.topup_title')}</h2>
+        <p className="text-sm text-slate-500 mb-4">{t('billing.topup_desc')}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {TOPUP_PACKAGES.map((pkg, i) => {
+            const topupKeys = ['pay_topup_500', 'pay_topup_2000', 'pay_topup_5000'] as const
+            return (
+              <div
+                key={pkg.credits}
+                className="card-dark rounded-2xl p-5 flex flex-col gap-3"
+              >
+                <div>
+                  <p className="text-2xl font-extrabold text-slate-100">{pkg.credits}</p>
+                  <p className="text-sm text-slate-400">{t('billing.credits_unit')}</p>
+                </div>
+                <p className="text-xl font-bold text-violet-300">${pkg.price}</p>
+                <a
+                  href={tgPayUrl(topupKeys[i])}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-slate-200 text-center transition-all hover:opacity-80 block"
+                  style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
+                >
+                  💬 {t('billing.topup_btn')}
+                </a>
+                <p className="text-xs text-slate-600 text-center">{t('billing.tg_pay_note')}</p>
+              </div>
+            )
+          })}
+        </div>
+      </div>
 
       {/* Russia payment block */}
       <div
@@ -278,7 +292,7 @@ export default function BillingPage() {
           </div>
         </div>
         <a
-          href="https://t.me/youtubegenai_bot"
+          href={tgPayUrl('pay')}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"

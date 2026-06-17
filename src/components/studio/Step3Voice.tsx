@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import type { VoiceStyleType, AudioEngine, ApihostVoiceType } from '@/lib/types'
-import { AUDIO_CREDITS_PER_1000_CHARS, APIHOST_CREDITS_PER_1000_CHARS, audioCost } from '@/lib/types'
+import { CREDIT_COSTS, audioCost } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { useLang } from '@/hooks/useLang'
 import type { ApihostVoice } from '@/app/api/voices/apihost/route'
@@ -46,6 +46,13 @@ const APIHOST_LANG_OPTIONS = [
   { value: 'it-IT', label: '🇮🇹 Italiano' },
   { value: 'uk-UA', label: '🇺🇦 Українська' },
 ]
+
+const APIHOST_RATE: Record<ApihostVoiceType, number> = {
+  basic:    CREDIT_COSTS.audio_apihost_basic_per_1000,
+  standard: CREDIT_COSTS.audio_apihost_standard_per_1000,
+  pro:      CREDIT_COSTS.audio_apihost_pro_per_1000,
+  studio:   CREDIT_COSTS.audio_apihost_studio_per_1000,
+}
 
 const APIHOST_TYPE_COLORS: Record<ApihostVoiceType, { color: string; bg: string; border: string }> = {
   basic:    { color: '#34D399', bg: 'rgba(16,185,129,0.12)',  border: 'rgba(16,185,129,0.3)'  },
@@ -372,10 +379,10 @@ export default function Step3Voice() {
   const { t } = useLang()
 
   const ENGINES: { id: AudioEngine; medal: string; name: string; quality: string; meta: string; costLabel: string; soon?: boolean }[] = [
-    { id: 'elevenlabs', medal: '🥇', name: 'ElevenLabs', quality: t('voice.el_quality'),     meta: t('voice.el_meta'),     costLabel: `${AUDIO_CREDITS_PER_1000_CHARS.elevenlabs} ${t('step3.cr_per_k')}` },
-    { id: 'openai',     medal: '🥈', name: 'OpenAI TTS', quality: t('voice.openai_quality'), meta: t('voice.openai_meta'), costLabel: `${AUDIO_CREDITS_PER_1000_CHARS.openai} ${t('step3.cr_per_k')}` },
+    { id: 'elevenlabs', medal: '🥇', name: 'ElevenLabs', quality: t('voice.el_quality'),     meta: t('voice.el_meta'),     costLabel: `${CREDIT_COSTS.audio_elevenlabs_per_1000} ${t('step3.cr_per_k')}` },
+    { id: 'openai',     medal: '🥈', name: 'OpenAI TTS', quality: t('voice.openai_quality'), meta: t('voice.openai_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}` },
     { id: 'apihost',    medal: '🏠', name: 'APIHOST RU', quality: t('voice.apihost_quality'),meta: t('voice.apihost_meta'),costLabel: t('voice.apihost_cost') },
-    { id: 'google',     medal: '🥉', name: 'Google TTS', quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${AUDIO_CREDITS_PER_1000_CHARS.google} ${t('step3.cr_per_k')}`, soon: true },
+    { id: 'google',     medal: '🥉', name: 'Google TTS', quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}`, soon: true },
   ]
 
   const OPENAI_VOICES = [
@@ -870,7 +877,7 @@ export default function Step3Voice() {
                   </span>
                   <span className="text-xs text-slate-500">—</span>
                   <span className="text-xs text-slate-400">
-                    {APIHOST_CREDITS_PER_1000_CHARS[vt]} {t('step3.cr_per_k')}
+                    {APIHOST_RATE[vt]} {t('step3.cr_per_k')}
                   </span>
                 </div>
               ))}
@@ -1023,7 +1030,7 @@ export default function Step3Voice() {
 
           <div className="rounded-xl px-4 py-3" style={cardStyle}>
             <p className="text-xs text-slate-500">
-              Google WaveNet — {t('voice.google_quality')}. Standard — base voices. {AUDIO_CREDITS_PER_1000_CHARS.google} {t('step3.cr_per_k')}.
+              Google WaveNet — {t('voice.google_quality')}. Standard — base voices. {CREDIT_COSTS.audio_openai_per_1000} {t('step3.cr_per_k')}.
             </p>
           </div>
         </div>
@@ -1055,7 +1062,7 @@ export default function Step3Voice() {
       {engine === 'apihost' && scriptChars > 0 && (
         <p className="text-xs text-slate-500 text-center -mt-2">
           {(() => {
-            const rate = APIHOST_CREDITS_PER_1000_CHARS[apihostVoiceType]
+            const rate = APIHOST_RATE[apihostVoiceType]
             const voiceName = apihostVoiceId
               ? (apihostVoices.find((v) => v.voice_id === apihostVoiceId)?.name ?? '?')
               : null
