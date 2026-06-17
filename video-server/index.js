@@ -18,6 +18,13 @@ const API_SECRET = process.env.RAILWAY_API_SECRET
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
+// ── Russia payment config ─────────────────────────────────────────────────────
+const CARD_NUMBER = process.env.CARD_NUMBER || '0000 0000 0000 0000'
+const CARD_HOLDER = process.env.CARD_HOLDER || 'IVAN IVANOV'
+const USDT_TRC20  = process.env.USDT_TRC20  || 'TW6Z6iZECebHe764YCKAsv5MfVFG6G947L'
+const USDT_ERC20  = process.env.USDT_ERC20  || '0x0f8d57d74367c4379b809399b1205f587f46104a'
+const APP_URL     = process.env.APP_URL     || 'https://youtubegen.vercel.app'
+
 // ── Telegram config ───────────────────────────────────────────────────────────
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID
@@ -43,10 +50,119 @@ const KEYWORDS = [
   'искусственный интеллект', 'chatgpt', 'midjourney',
 ]
 
-const SEEN_URLS_PATH = path.join(__dirname, 'seen_urls.json')
-const QUEUE_PATH     = path.join(__dirname, 'content_queue.json')
+// ── Supabase REST helpers (bot tables) ───────────────────────────────────────
+function sbHeaders() {
+  return {
+    'apikey': SUPABASE_SERVICE_KEY,
+    'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation',
+  }
+}
 
-// In-memory state (resets on restart)
+async function sbGet(table, qs = '') {
+  const url = `${SUPABASE_URL}/rest/v1/${table}${qs ? `?${qs}` : ''}`
+  const res = await fetch(url, { headers: sbHeaders() })
+  if (!res.ok) throw new Error(`sbGet ${table}: ${res.status} ${await res.text().catch(() => '')}`)
+  return res.json()
+}
+
+async function sbPost(table, body, extra = '') {
+  const url = `${SUPABASE_URL}/rest/v1/${table}${extra ? `?${extra}` : ''}`
+  const res = await fetch(url, { method: 'POST', headers: sbHeaders(), body: JSON.stringify(body) })
+  if (!res.ok) throw new Error(`sbPost ${table}: ${res.status} ${await res.text().catch(() => '')}`)
+  return res.json()
+}
+
+async function sbPatch(table, qs, body) {
+  const url = `${SUPABASE_URL}/rest/v1/${table}?${qs}`
+  const res = await fetch(url, { method: 'PATCH', headers: sbHeaders(), body: JSON.stringify(body) })
+  if (!res.ok) throw new Error(`sbPatch ${table}: ${res.status} ${await res.text().catch(() => '')}`)
+  return res.status === 204 ? [] : res.json()
+}
+
+// ── Queue operations (bot_content_queue) ─────────────────────────────────────
+async function getQueue() {
+  try {
+    return await sbGet('bot_content_queue', 'status=eq.pending&order=created_at')
+  } catch (e) { console.error('[queue] getQueue:', e.message); return [] }
+}
+
+async function getQueueStats() {
+  try {
+    const rows = await sbGet('bot_content_queue', 'select=status')
+    return {
+      pending:   rows.filter(r => r.status === 'pending').length,
+      published: rows.filter(r => r.status === 'published').length,
+      declined:  rows.filter(r => r.status === 'declined').length,
+    }
+  } catch (e) { console.error('[queue] getQueueStats:', e.message); return { pending: 0, published: 0, declined: 0 } }
+}
+
+async function addToQueue(topics) {
+  try {
+    await sbPost('bot_content_queue', topics.map(topic => ({ topic, status: 'pending' })))
+  } catch (e) { console.error('[queue] addToQueue:', e.message) }
+}
+
+async function markPublished(id) {
+  try {
+    await sbPatch('bot_content_queue', `id=eq.${id}`, { status: 'published', published_at: new Date().toISOString() })
+  } catch (e) { console.error('[queue] markPublished:', e.message) }
+}
+
+async function markDeclined(id) {
+  try {
+    await sbPatch('bot_content_queue', `id=eq.${id}`, { status: 'declined' })
+  } catch (e) { console.error('[queue] markDeclined:', e.message) }
+}
+
+async function clearPendingQueue() {
+  try {
+    await sbPatch('bot_content_queue', 'status=eq.pending', { status: 'declined' })
+  } catch (e) { console.error('[queue] clearPendingQueue:', e.message) }
+}
+
+// ── Seen URLs operations (bot_seen_urls) ─────────────────────────────────────
+async function isSeenUrl(url) {
+  try {
+    const rows = await sbGet('bot_seen_urls', `url=eq.${encodeURIComponent(url)}&select=url`)
+    return rows.length > 0
+  } catch (e) { console.warn('[seen] isSeenUrl:', e.message); return false }
+}
+
+async function markSeenUrl(url) {
+  try {
+    await sbPost('bot_seen_urls', { url }, 'on_conflict=url')
+  } catch (e) { console.warn('[seen] markSeenUrl:', e.message) }
+}
+
+// ── Settings operations (bot_settings) ───────────────────────────────────────
+async function setSetting(key, value) {
+  try {
+    await sbPost('bot_settings', { key, value: String(value), updated_at: new Date().toISOString() }, 'on_conflict=key')
+  } catch (e) { console.warn('[settings] setSetting:', e.message) }
+}
+
+async function loadSettingsFromDB() {
+  try {
+    const rows = await sbGet('bot_settings', 'select=key,value')
+    for (const { key, value } of rows) {
+      if (key === 'auto_publish')     config.autoPublish     = value === 'true'
+      if (key === 'monitor_interval') monitorConfig.interval = value
+      if (key === 'plan_paused')      planConfig.paused      = value === 'true'
+      if (key === 'post_time') {
+        const hour = parseInt(value.split(':')[0], 10)
+        if (!isNaN(hour)) planConfig.postHour = hour
+      }
+    }
+    console.log('[bot] settings loaded:', { autoPublish: config.autoPublish, interval: monitorConfig.interval, postHour: planConfig.postHour, paused: planConfig.paused })
+  } catch (e) {
+    console.warn('[bot] loadSettingsFromDB failed:', e.message, '— using defaults')
+  }
+}
+
+// In-memory state (settings synced with DB on startup and every change)
 let pendingPost = null            // { text, imageUrl, topic }
 let pendingMonitorPost = null     // { post, source, url, score, topic }
 let awaitingTopic = false         // true after "✍️ Написать пост"
@@ -56,6 +172,16 @@ let awaitingTime  = false         // true after plan_set_time callback
 const config        = { autoPublish: false }
 const monitorConfig = { interval: 'daily' } // 'daily' | 'twice' | 'weekly' | 'off'
 const planConfig    = { paused: false, postHour: 12 }
+
+// Payment flow: public users (resets on restart)
+const payStates = new Map() // String(chatId) → { step, method, plan, username, firstName }
+let awaitingActivate = null  // { userChatId, plan, planInfo } — owner activation
+
+const PAY_PLANS = {
+  starter: { name: 'Starter', price: '$19', credits: 100 },
+  pro:     { name: 'Pro',     price: '$39', credits: 300 },
+  agency:  { name: 'Agency',  price: '$99', credits: 1000 },
+}
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
 const MAIN_KB = {
@@ -136,6 +262,25 @@ function monitorInline() {
         { text: '🔄 Перегенерировать', callback_data: 'mon_regen' },
       ],
     ],
+  }
+}
+
+function payMethodInline() {
+  return {
+    inline_keyboard: [[
+      { text: '💳 Карта МИР',        callback_data: 'pay_card' },
+      { text: '₿ Криптовалюта USDT', callback_data: 'pay_crypto' },
+    ]],
+  }
+}
+
+function payPlanInline() {
+  return {
+    inline_keyboard: [[
+      { text: 'Starter $19', callback_data: 'pay_plan_starter' },
+      { text: 'Pro $39',     callback_data: 'pay_plan_pro' },
+      { text: 'Agency $99',  callback_data: 'pay_plan_agency' },
+    ]],
   }
 }
 
@@ -224,6 +369,88 @@ async function publishToChannel(text, imageUrl = null) {
     console.warn('[tg] image download failed, sending text only')
   }
   return tgApi('sendMessage', { chat_id: CHANNEL_ID, text, parse_mode: 'Markdown' })
+}
+
+// ── Russia payment helpers ────────────────────────────────────────────────────
+function cardPaymentText(planInfo) {
+  return (
+    `💳 *Оплата картой МИР*\n\n` +
+    `Тариф: *${planInfo.name}* — ${planInfo.price}\n` +
+    `Переведи сумму на карту:\n` +
+    `🏦 Номер карты: \`${CARD_NUMBER}\`\n` +
+    `Получатель: ${CARD_HOLDER}\n\n` +
+    `После оплаты отправь сюда:\n` +
+    `1. Скриншот перевода\n` +
+    `2. Свой email в YouTubeGen\n\n` +
+    `Мы активируем тариф в течение 1 часа ✅`
+  )
+}
+
+function cryptoPaymentText(planInfo) {
+  return (
+    `₿ *Оплата криптовалютой USDT*\n\n` +
+    `Тариф: *${planInfo.name}* — ${planInfo.price}\n\n` +
+    `Переведи USDT на адрес:\n` +
+    `🔹 TRC20: \`${USDT_TRC20}\`\n` +
+    `🔹 ERC20: \`${USDT_ERC20}\`\n\n` +
+    `После оплаты отправь сюда:\n` +
+    `1. Hash транзакции\n` +
+    `2. Свой email в YouTubeGen\n\n` +
+    `Мы активируем тариф в течение 1 часа ✅`
+  )
+}
+
+async function notifyOwnerNewPayment(userChatId, username, firstName, method, planInfo) {
+  if (!OWNER_ID) return
+  const userDisplay = username ? `@${username}` : (firstName || String(userChatId))
+  const methodLabel = method === 'card' ? 'Карта МИР 💳' : 'Криптовалюта USDT ₿'
+  await tgApi('sendMessage', {
+    chat_id: OWNER_ID,
+    text:
+      `💰 *Новая заявка на оплату!*\n\n` +
+      `👤 Пользователь: ${userDisplay} (ID: ${userChatId})\n` +
+      `📦 Тариф: ${planInfo.name} ${planInfo.price}\n` +
+      `💳 Способ: ${methodLabel}\n\n` +
+      `Ожидай скриншот/hash от пользователя.\n` +
+      `Для активации тарифа: ${APP_URL}/admin/users`,
+    parse_mode: 'Markdown',
+  })
+}
+
+async function forwardProofToOwner(userChatId, message, pst) {
+  const planInfo    = PAY_PLANS[pst.plan] || { name: pst.plan, price: '' }
+  const userDisplay = pst.username ? `@${pst.username}` : (pst.firstName || String(userChatId))
+  const methodLabel = pst.method === 'card' ? 'Карта МИР 💳' : 'Криптовалюта USDT ₿'
+
+  if (OWNER_ID) {
+    await tgApi('forwardMessage', { chat_id: OWNER_ID, from_chat_id: userChatId, message_id: message.message_id })
+    await tgApi('sendMessage', {
+      chat_id: OWNER_ID,
+      text:
+        `⬆️ *Подтверждение оплаты от ${userDisplay}*\n\n` +
+        `👤 ID: \`${userChatId}\`\n` +
+        `📦 ${planInfo.name} ${planInfo.price}\n` +
+        `💳 ${methodLabel}`,
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '✅ Активировать тариф', callback_data: `activate_${pst.plan}_${userChatId}` },
+        ]],
+      },
+    })
+  }
+  await tgApi('sendMessage', { chat_id: userChatId, text: '✅ Получено! Мы активируем тариф в течение 1 часа.' })
+}
+
+async function activateUserPlan(email, plan) {
+  const res = await fetch(`${APP_URL}/api/admin/users/activate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-secret': process.env.RAILWAY_API_SECRET || '' },
+    body: JSON.stringify({ email: email.trim().toLowerCase(), plan }),
+  })
+  const json = await res.json()
+  if (!json.ok) throw new Error(json.error || 'Ошибка активации')
+  return json
 }
 
 // ── Claude helpers ────────────────────────────────────────────────────────────
@@ -368,15 +595,6 @@ async function publishStats(toOwner = null) {
 }
 
 // ── Content monitor ───────────────────────────────────────────────────────────
-function loadSeenUrls() {
-  try { return new Set(JSON.parse(fs.readFileSync(SEEN_URLS_PATH, 'utf8'))) } catch { return new Set() }
-}
-
-function saveSeenUrls(set) {
-  const arr = [...set].slice(-2000)
-  try { fs.writeFileSync(SEEN_URLS_PATH, JSON.stringify(arr)) } catch (e) { console.warn('[monitor] saveSeenUrls:', e.message) }
-}
-
 function hasKeyword(text) {
   const lower = (text || '').toLowerCase()
   return KEYWORDS.some(kw => lower.includes(kw))
@@ -512,22 +730,20 @@ async function processMonitorItem(item) {
 async function runMonitor() {
   if (monitorConfig.interval === 'off') { console.log('[monitor] disabled, skipping'); return }
   console.log('[monitor] scanning', RSS_SOURCES.length, 'sources...')
-  const seen = loadSeenUrls()
   const newItems = []
 
   for (const source of RSS_SOURCES) {
     if (source.delayMs) await new Promise(r => setTimeout(r, source.delayMs))
     const items = await fetchRss(source)
     for (const item of items) {
-      if (!item.link || seen.has(item.link)) continue
-      seen.add(item.link)
+      if (!item.link) continue
+      if (await isSeenUrl(item.link)) continue
+      await markSeenUrl(item.link)
       if (hasKeyword(item.title + ' ' + item.snippet)) {
         newItems.push(item)
       }
     }
   }
-
-  saveSeenUrls(seen)
 
   // Rank by keyword count (most matches = most relevant), take top 5 only
   const ranked = newItems
@@ -549,31 +765,18 @@ async function runMonitor() {
 }
 
 // ── Content plan (queue) ──────────────────────────────────────────────────────
-function loadQueue() {
-  try { return JSON.parse(fs.readFileSync(QUEUE_PATH, 'utf8')) } catch { return [] }
-}
-
-function saveQueue(queue) {
-  try { fs.writeFileSync(QUEUE_PATH, JSON.stringify(queue, null, 2)) } catch (e) { console.warn('[plan] saveQueue:', e.message) }
-}
-
-function queueStats(queue) {
-  return {
-    pending:   queue.filter(i => i.status === 'pending').length,
-    published: queue.filter(i => i.status === 'published').length,
-    declined:  queue.filter(i => i.status === 'declined').length,
-  }
-}
-
-function planStatusText(queue) {
-  const s = queueStats(queue)
-  const next = queue.find(i => i.status === 'pending')
+async function planStatusText() {
+  const [stats, pending] = await Promise.all([
+    getQueueStats(),
+    getQueue(),
+  ])
+  const next = pending[0] ?? null
   const pauseNote = planConfig.paused ? '\n\n⏸ *Автопостинг на паузе*' : ''
   return (
     `📋 *Контент-план*\n\n` +
-    `✅ Опубликовано: ${s.published}\n` +
-    `⏳ В очереди: ${s.pending}\n` +
-    `❌ Отклонено: ${s.declined}\n\n` +
+    `✅ Опубликовано: ${stats.published}\n` +
+    `⏳ В очереди: ${stats.pending}\n` +
+    `❌ Отклонено: ${stats.declined}\n\n` +
     `⏰ Время постинга: *${String(planConfig.postHour).padStart(2, '0')}:00 UTC*\n` +
     (next ? `📌 Следующий: *${next.topic.slice(0, 60)}*` : '📭 Очередь пуста') +
     pauseNote
@@ -582,8 +785,8 @@ function planStatusText(queue) {
 
 async function postFromQueue(chatId = OWNER_ID) {
   if (planConfig.paused) { console.log('[plan] paused'); return }
-  const queue = loadQueue()
-  const item = queue.find(i => i.status === 'pending')
+  const queue = await getQueue()
+  const item = queue[0] ?? null
   if (!item) {
     console.log('[plan] queue empty')
     if (OWNER_ID) await sendTo(OWNER_ID, '📭 Контент-план пуст. Добавь новые темы через 📅 Контент-план')
@@ -592,8 +795,7 @@ async function postFromQueue(chatId = OWNER_ID) {
   console.log('[plan] posting topic:', item.topic.slice(0, 50))
   try {
     await generateAndHandle(chatId, item.topic)
-    item.status = 'published'
-    saveQueue(queue)
+    await markPublished(item.id)
   } catch (err) {
     console.error('[plan] post failed:', err.message)
     if (OWNER_ID) await sendTo(OWNER_ID, `❌ Ошибка автопостинга: ${err.message.slice(0, 120)}`)
@@ -641,6 +843,44 @@ async function generateAndHandle(chatId, topic, forcePreview = false) {
   }
 }
 
+// ── Public inline callback handler (non-owner users) ─────────────────────────
+async function handlePublicCallback(cq) {
+  const chatId    = cq.message?.chat?.id
+  const msgId     = cq.message?.message_id
+  const data      = cq.data ?? ''
+  const username  = cq.from?.username
+  const firstName = cq.from?.first_name
+
+  if (data === 'pay_card' || data === 'pay_crypto') {
+    const method = data === 'pay_card' ? 'card' : 'crypto'
+    payStates.set(String(chatId), { step: 'plan', method, username, firstName })
+    await tgApi('editMessageText', {
+      chat_id: chatId, message_id: msgId,
+      text: '📦 *Укажи какой тариф хочешь оплатить:*',
+      parse_mode: 'Markdown',
+      reply_markup: payPlanInline(),
+    })
+    return
+  }
+
+  if (data.startsWith('pay_plan_')) {
+    const plan     = data.slice(9) // strip 'pay_plan_'
+    const planInfo = PAY_PLANS[plan]
+    if (!planInfo) return
+
+    const pst    = payStates.get(String(chatId)) || {}
+    const method = pst.method || 'card'
+    payStates.set(String(chatId), { ...pst, step: 'awaiting_proof', plan, method })
+
+    await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
+
+    const detailsText = method === 'card' ? cardPaymentText(planInfo) : cryptoPaymentText(planInfo)
+    await tgApi('sendMessage', { chat_id: chatId, text: detailsText, parse_mode: 'Markdown' })
+
+    await notifyOwnerNewPayment(chatId, username || pst.username, firstName || pst.firstName, method, planInfo)
+  }
+}
+
 // ── Inline button callback handler ────────────────────────────────────────────
 async function handleCallback(cq) {
   const chatId = cq.message?.chat?.id
@@ -649,7 +889,7 @@ async function handleCallback(cq) {
   const userId = String(cq.from?.id ?? '')
 
   await tgApi('answerCallbackQuery', { callback_query_id: cq.id })
-  if (userId !== OWNER_ID) return
+  if (userId !== OWNER_ID) { await handlePublicCallback(cq).catch(console.error); return }
 
   const clearButtons = () =>
     tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
@@ -675,6 +915,7 @@ async function handleCallback(cq) {
 
   } else if (data === 'toggle_auto') {
     config.autoPublish = !config.autoPublish
+    await setSetting('auto_publish', config.autoPublish)
     await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: settingsInline() })
     await sendTo(chatId, config.autoPublish
       ? '🟢 Автопубликация *включена* — посты публикуются сразу'
@@ -683,6 +924,7 @@ async function handleCallback(cq) {
   } else if (data === 'toggle_monitor') {
     // legacy toggle — flip between daily and off
     monitorConfig.interval = monitorConfig.interval === 'off' ? 'daily' : 'off'
+    await setSetting('monitor_interval', monitorConfig.interval)
     await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: settingsInline() })
     await sendTo(chatId, monitorConfig.interval === 'off'
       ? '🔴 Мониторинг *выключен*'
@@ -698,6 +940,7 @@ async function handleCallback(cq) {
 
   } else if (['mi_daily', 'mi_twice', 'mi_weekly', 'mi_off'].includes(data)) {
     monitorConfig.interval = data.slice(3) // strip 'mi_'
+    await setSetting('monitor_interval', monitorConfig.interval)
     await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: monitorIntervalInline() })
     await sendTo(chatId, `✅ Интервал мониторинга: *${INTERVAL_LABELS[monitorConfig.interval]}*`)
 
@@ -740,19 +983,18 @@ async function handleCallback(cq) {
       '_Пример:_\nОчеловечивание текста\n321 голос на 28 языках\nИллюстрации с субтитрами')
 
   } else if (data === 'plan_clear') {
-    const queue = loadQueue()
-    const cleared = queue.filter(i => i.status === 'pending').length
-    queue.forEach(i => { if (i.status === 'pending') i.status = 'declined' })
-    saveQueue(queue)
+    const stats = await getQueueStats()
+    const cleared = stats.pending
+    await clearPendingQueue()
     await clearButtons()
     await sendTo(chatId, `🗑 Очищено тем из очереди: *${cleared}*`)
 
   } else if (data === 'plan_pause') {
     planConfig.paused = !planConfig.paused
-    const queue = loadQueue()
+    await setSetting('plan_paused', planConfig.paused)
     await tgApi('editMessageText', {
       chat_id: chatId, message_id: msgId,
-      text: planStatusText(queue),
+      text: await planStatusText(),
       parse_mode: 'Markdown',
       reply_markup: planInline(),
     })
@@ -762,8 +1004,8 @@ async function handleCallback(cq) {
 
   } else if (data === 'plan_post_now') {
     await clearButtons()
-    const queue = loadQueue()
-    const next = queue.find(i => i.status === 'pending')
+    const queue = await getQueue()
+    const next = queue[0] ?? null
     if (!next) { await sendTo(chatId, '📭 Очередь пуста'); return }
     await sendTo(chatId, `⏳ Публикую: *${next.topic.slice(0, 60)}*`)
     await postFromQueue(chatId)
@@ -775,11 +1017,24 @@ async function handleCallback(cq) {
       'Отправь новое время (час, 0–23):\n_Например: `10` или `18`_')
 
   } else if (data === 'plan_decline') {
-    const queue = loadQueue()
-    const item = queue.find(i => i.status === 'pending')
-    if (item) { item.status = 'declined'; saveQueue(queue) }
+    const queue = await getQueue()
+    const item = queue[0] ?? null
+    if (item) await markDeclined(item.id)
     await clearButtons()
     await sendTo(chatId, '❌ Тема из плана отклонена')
+
+  } else if (data.startsWith('activate_')) {
+    const parts      = data.split('_')
+    const plan       = parts[1]
+    const userChatId = parts[2]
+    const planInfo   = PAY_PLANS[plan]
+    if (!planInfo) return
+    awaitingActivate = { userChatId, plan, planInfo }
+    await clearButtons()
+    await sendTo(chatId,
+      `✅ *Активация тарифа ${planInfo.name}*\n\n` +
+      `Пользователь: \`${userChatId}\`\n\n` +
+      `Введи email пользователя в YouTubeGen:`)
   }
   // 'noop' → ignore
 }
@@ -802,12 +1057,54 @@ app.post('/telegram/webhook', async (req, res) => {
   const chatId = message.chat?.id
   const text   = (message.text ?? '').trim()
 
+  // ── Public users (payment flow) ───────────────────────────────────────────
   if (userId !== OWNER_ID) {
-    await tgApi('sendMessage', { chat_id: chatId, text: '🚫 Доступ запрещён' })
+    const pst = payStates.get(String(chatId))
+    if (pst?.step === 'awaiting_proof' && (message.photo || message.document || message.text)) {
+      await forwardProofToOwner(chatId, message, pst).catch(err => {
+        console.error('[pay] forwardProof error:', err.message)
+        tgApi('sendMessage', { chat_id: chatId, text: '✅ Получено! Ожидай активации в течение 1 часа.' })
+      })
+      return
+    }
+    if (text === '/start' || text === '/pay') {
+      payStates.set(String(chatId), { step: 'method', username: message.from?.username, firstName: message.from?.first_name })
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: '👋 Привет! Для оплаты YouTubeGen из России\nвыбери удобный способ:',
+        parse_mode: 'Markdown',
+        reply_markup: payMethodInline(),
+      })
+      return
+    }
+    await tgApi('sendMessage', { chat_id: chatId, text: 'Используй /start для оплаты тарифа.' })
     return
   }
 
   console.log('[tg] msg:', text.slice(0, 60))
+
+  // Owner: awaiting email for Russia payment activation
+  if (awaitingActivate && text && !text.startsWith('/')) {
+    const { userChatId, plan, planInfo } = awaitingActivate
+    awaitingActivate = null
+    const email = text.trim()
+    await sendTo(chatId, `⏳ Активирую тариф *${planInfo.name}* для \`${email}\`...`)
+    try {
+      await activateUserPlan(email, plan)
+      await sendTo(chatId, `✅ Тариф *${planInfo.name}* активирован для *${email}*`)
+      await tgApi('sendMessage', {
+        chat_id: userChatId,
+        text:
+          `🎉 *Тариф активирован!*\n\n` +
+          `Тариф *${planInfo.name}* успешно активирован на вашем аккаунте.\n\n` +
+          `Войдите в YouTubeGen: ${APP_URL}`,
+        parse_mode: 'Markdown',
+      })
+    } catch (err) {
+      await sendTo(chatId, `❌ Ошибка активации: ${err.message}`)
+    }
+    return
+  }
 
   // Awaiting edited text from "✏️ Редактировать" on monitor post
   if (awaitingEdit && text && !text.startsWith('/')) {
@@ -834,15 +1131,11 @@ app.post('/telegram/webhook', async (req, res) => {
     awaitingPlan = false
     const topics = text.split('\n').map(t => t.trim()).filter(t => t.length > 0)
     if (!topics.length) { await sendTo(chatId, '❌ Список тем пуст'); return }
-    const queue = loadQueue()
-    for (const topic of topics) {
-      queue.push({ topic, status: 'pending', addedAt: new Date().toISOString() })
-    }
-    saveQueue(queue)
-    const pending = queue.filter(i => i.status === 'pending').length
+    await addToQueue(topics)
+    const stats = await getQueueStats()
     await sendTo(chatId,
       `✅ Добавлено тем: *${topics.length}*\n` +
-      `📋 Всего в очереди: *${pending}*\n` +
+      `📋 Всего в очереди: *${stats.pending}*\n` +
       `⏰ Следующая публикация: *${String(planConfig.postHour).padStart(2, '0')}:00 UTC*`)
     return
   }
@@ -854,6 +1147,7 @@ app.post('/telegram/webhook', async (req, res) => {
     const hour = match ? Math.min(23, Math.max(0, parseInt(match[0], 10))) : null
     if (hour === null) { await sendTo(chatId, '❌ Укажи час от 0 до 23'); return }
     planConfig.postHour = hour
+    await setSetting('post_time', `${String(hour).padStart(2, '0')}:00`)
     await sendTo(chatId,
       `✅ Время постинга обновлено: *${String(hour).padStart(2, '0')}:00 UTC*`)
     return
@@ -936,10 +1230,9 @@ app.post('/telegram/webhook', async (req, res) => {
       }
 
       case (text === '📅 Контент-план' || text === '/plan'): {
-        const queue = loadQueue()
         await tgApi('sendMessage', {
           chat_id: chatId,
-          text: planStatusText(queue),
+          text: await planStatusText(),
           parse_mode: 'Markdown',
           reply_markup: planInline(),
         })
@@ -1352,7 +1645,9 @@ app.post('/render', verifySecret, async (req, res) => {
 })
 
 const PORT = parseInt(process.env.PORT || '3001', 10)
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`ytgen-video-server on :${PORT}`)
+  await loadSettingsFromDB().catch(err => console.warn('[bot] settings load failed:', err.message))
+  console.log('[bot] starting cron jobs...')
   registerWebhook().catch(console.error)
 })

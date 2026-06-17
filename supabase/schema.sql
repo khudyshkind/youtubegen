@@ -288,6 +288,39 @@ create index if not exists analytics_cache_created_at_idx
 alter table public.analytics_cache enable row level security;
 
 -- ─────────────────────────────────────────
+-- Analytics reports history (per-user, max 20)
+-- ─────────────────────────────────────────
+
+create table if not exists public.analytics_reports (
+  id          uuid        default gen_random_uuid() primary key,
+  user_id     uuid        references public.profiles(id) on delete cascade not null,
+  report_type text        not null,
+  title       text        not null,
+  query       text        not null,
+  result      jsonb       not null,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists analytics_reports_user_id_idx
+  on public.analytics_reports(user_id, created_at desc);
+
+alter table public.analytics_reports enable row level security;
+
+-- Users can read/delete their own reports (via authenticated client)
+create policy "analytics_reports: own select"
+  on public.analytics_reports for select
+  using (auth.uid() = user_id);
+
+create policy "analytics_reports: own delete"
+  on public.analytics_reports for delete
+  using (auth.uid() = user_id);
+
+-- service_role needs explicit grant (new tables don't inherit default privs automatically)
+grant all on public.analytics_reports to service_role;
+-- authenticated users can read/delete their own reports (RLS enforces user_id filter)
+grant select, delete on public.analytics_reports to authenticated;
+
+-- ─────────────────────────────────────────
 -- Storage buckets
 -- ─────────────────────────────────────────
 
@@ -323,3 +356,42 @@ create policy "videos: public read"
 create policy "videos: service write"
   on storage.objects for insert
   with check (bucket_id = 'videos');
+
+-- ─────────────────────────────────────────
+-- Telegram bot persistence tables
+-- (accessed only via service_role from video-server)
+-- ─────────────────────────────────────────
+
+create table if not exists public.bot_content_queue (
+  id           uuid        default gen_random_uuid() primary key,
+  topic        text        not null,
+  status       text        not null default 'pending'
+                 check (status in ('pending', 'published', 'declined')),
+  created_at   timestamptz not null default now(),
+  published_at timestamptz
+);
+
+create index if not exists bot_content_queue_status_idx
+  on public.bot_content_queue(status, created_at);
+
+create table if not exists public.bot_seen_urls (
+  url        text        primary key,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.bot_settings (
+  key        text        primary key,
+  value      text        not null,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.bot_settings (key, value) values
+  ('auto_publish',     'false'),
+  ('monitor_interval', 'daily'),
+  ('post_time',        '12:00'),
+  ('plan_paused',      'false')
+on conflict (key) do nothing;
+
+grant all on public.bot_content_queue to service_role;
+grant all on public.bot_seen_urls     to service_role;
+grant all on public.bot_settings      to service_role;
