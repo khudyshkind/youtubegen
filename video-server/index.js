@@ -18,7 +18,7 @@ app.use(express.json({ limit: '2mb' }))
 const API_SECRET            = process.env.RAILWAY_API_SECRET
 const SUPABASE_URL          = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
-const VERCEL_WEBHOOK_SECRET = process.env.VERCEL_WEBHOOK_SECRET
+const VERCEL_TOKEN = process.env.VERCEL_TOKEN
 
 // ── Russia payment config ─────────────────────────────────────────────────────
 const CARD_NUMBER = process.env.CARD_NUMBER || '0000 0000 0000 0000'
@@ -1346,44 +1346,34 @@ cron.schedule('0 * * * *', async () => {
   try { await postFromQueue() } catch (err) { console.error('[cron/plan]', err.message) }
 }, { timezone: 'UTC' })
 
-// ── Vercel deployment webhook ─────────────────────────────────────────────────
-app.post('/vercel-webhook', express.raw({ type: '*/*' }), async (req, res) => {
-  // Verify HMAC-SHA1 signature
-  const sig = req.headers['x-vercel-signature'] ?? ''
-  if (VERCEL_WEBHOOK_SECRET) {
-    const expected = crypto
-      .createHmac('sha1', VERCEL_WEBHOOK_SECRET)
-      .update(req.body)
-      .digest('hex')
-    try {
-      if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'))) {
-        return res.status(401).json({ ok: false, error: 'Invalid signature' })
-      }
-    } catch {
-      return res.status(401).json({ ok: false, error: 'Invalid signature' })
-    }
+// ── Vercel deployment polling ─────────────────────────────────────────────────
+async function checkVercelDeploy() {
+  if (!VERCEL_TOKEN) { console.log('[vercel] VERCEL_TOKEN not set, skipping'); return }
+
+  let latest
+  try {
+    const res = await fetch(
+      'https://api.vercel.com/v6/deployments?projectId=youtubegen&limit=1&target=production&state=READY',
+      { headers: { Authorization: `Bearer ${VERCEL_TOKEN}` } }
+    )
+    if (!res.ok) { console.warn('[vercel] API error:', res.status); return }
+    const data = await res.json()
+    latest = data.deployments?.[0]
+  } catch (err) {
+    console.warn('[vercel] fetch failed:', err.message)
+    return
   }
 
-  let payload
-  try { payload = JSON.parse(req.body.toString()) } catch {
-    return res.status(400).json({ ok: false, error: 'Invalid JSON' })
-  }
+  if (!latest) return
 
-  res.json({ ok: true })
+  const lastId = await getSetting('last_deployment_id')
+  if (latest.uid === lastId) return  // already processed
 
-  // Only act on production deploys that succeeded
-  const type   = payload.type   ?? payload.payload?.type
-  const target = payload.target ?? payload.payload?.target ?? (payload.meta?.githubOrg ? 'production' : null)
-  const url    = payload.url    ?? payload.payload?.url ?? ''
-  const commit = payload.meta?.githubCommitMessage
-    ?? payload.payload?.meta?.githubCommitMessage
-    ?? ''
+  await setSetting('last_deployment_id', latest.uid)
+  console.log('[vercel] new production deploy detected:', latest.uid)
 
-  console.log(`[vercel] webhook type=${type} target=${target} url=${url}`)
-
-  if (type !== 'deployment.succeeded' && type !== 'READY') return
-  if (target !== 'production') return
-  if (!commit) { console.log('[vercel] no commit message, skipping'); return }
+  const commit = latest.meta?.githubCommitMessage ?? latest.name ?? ''
+  if (!commit) { console.log('[vercel] no commit message, skipping post'); return }
 
   try {
     const text = await generateDeployPost(commit)
@@ -1391,7 +1381,7 @@ app.post('/vercel-webhook', express.raw({ type: '*/*' }), async (req, res) => {
       await publishToChannel(text)
       console.log('[vercel] deploy post auto-published')
     } else {
-      pendingDeployPost = { text, commitMessage: commit, deployUrl: url }
+      pendingDeployPost = { text, commitMessage: commit, deployUrl: latest.url }
       if (OWNER_ID) {
         await tgApi('sendMessage', {
           chat_id: OWNER_ID,
@@ -1404,7 +1394,13 @@ app.post('/vercel-webhook', express.raw({ type: '*/*' }), async (req, res) => {
   } catch (err) {
     console.error('[vercel] deploy post failed:', err.message)
   }
-})
+}
+
+// ── Vercel deploy polling cron — every 30 minutes ────────────────────────────
+cron.schedule('*/30 * * * *', async () => {
+  console.log('[cron] vercel deploy check')
+  try { await checkVercelDeploy() } catch (err) { console.error('[cron/vercel]', err.message) }
+}, { timezone: 'UTC' })
 
 // ── Register webhook at startup ───────────────────────────────────────────────
 async function registerWebhook() {
