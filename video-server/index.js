@@ -333,9 +333,19 @@ function monitorInline() {
 
 function payMethodInline() {
   return {
+    inline_keyboard: [
+      [
+        { text: '💳 Карта МИР',        callback_data: 'pay_card' },
+        { text: '₿ Криптовалюта USDT', callback_data: 'pay_crypto' },
+      ],
+    ],
+  }
+}
+
+function payBackInline() {
+  return {
     inline_keyboard: [[
-      { text: '💳 Карта МИР',        callback_data: 'pay_card' },
-      { text: '₿ Криптовалюта USDT', callback_data: 'pay_crypto' },
+      { text: '← Выбрать другой способ', callback_data: 'pay_back' },
     ]],
   }
 }
@@ -1009,7 +1019,7 @@ async function handlePublicCallback(cq) {
         const rate      = await getUsdToRub()
         const rubAmount = planInfo.usd ? Math.ceil(planInfo.usd * rate) : null
         const detailsText = method === 'card' ? cardPaymentText(planInfo, rubAmount) : cryptoPaymentText(planInfo)
-        await tgApi('sendMessage', { chat_id: chatId, text: detailsText, parse_mode: 'Markdown' })
+        await tgApi('sendMessage', { chat_id: chatId, text: detailsText, parse_mode: 'Markdown', reply_markup: payBackInline() })
         await notifyOwnerNewPayment(chatId, username || pst.username, firstName || pst.firstName, method, planInfo, rubAmount)
         return
       }
@@ -1040,9 +1050,25 @@ async function handlePublicCallback(cq) {
     const rate      = await getUsdToRub()
     const rubAmount = planInfo.usd ? Math.ceil(planInfo.usd * rate) : null
     const detailsText = method === 'card' ? cardPaymentText(planInfo, rubAmount) : cryptoPaymentText(planInfo)
-    await tgApi('sendMessage', { chat_id: chatId, text: detailsText, parse_mode: 'Markdown' })
+    await tgApi('sendMessage', { chat_id: chatId, text: detailsText, parse_mode: 'Markdown', reply_markup: payBackInline() })
 
     await notifyOwnerNewPayment(chatId, username || pst.username, firstName || pst.firstName, method, planInfo, rubAmount)
+    return
+  }
+
+  if (data === 'pay_back') {
+    // Restore method selection, keep plan context if it was a deep-link flow
+    const pst = payStates.get(String(chatId)) || {}
+    const prevStep = pst.plan ? 'method_for_plan' : 'method'
+    payStates.set(String(chatId), { ...pst, step: prevStep, method: undefined })
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: pst.plan
+        ? `📦 Тариф: *${PAY_PLANS[pst.plan]?.name ?? pst.plan}*\n\nВыбери способ оплаты:`
+        : '👋 Выбери удобный способ оплаты:',
+      parse_mode: 'Markdown',
+      reply_markup: payMethodInline(),
+    })
   }
 }
 
@@ -1256,7 +1282,9 @@ app.post('/telegram/webhook', async (req, res) => {
   // ── Public users (payment flow) ───────────────────────────────────────────
   if (userId !== OWNER_ID) {
     const pst = payStates.get(String(chatId))
-    if (pst?.step === 'awaiting_proof' && (message.photo || message.document || message.text)) {
+    // Accept proof ONLY for non-command messages (photo, document, or plain text without /)
+    const isCommand = text.startsWith('/')
+    if (pst?.step === 'awaiting_proof' && !isCommand && (message.photo || message.document || message.text)) {
       await forwardProofToOwner(chatId, message, pst).catch(err => {
         console.error('[pay] forwardProof error:', err.message)
         tgApi('sendMessage', { chat_id: chatId, text: '✅ Получено! Ожидай активации в течение 1 часа.' })
@@ -1264,6 +1292,8 @@ app.post('/telegram/webhook', async (req, res) => {
       return
     }
     if (text === '/start' || text.startsWith('/start ') || text === '/pay') {
+      // /start always resets payment state so user can restart cleanly
+      payStates.delete(String(chatId))
       const startArg = text.startsWith('/start ') ? text.slice(7).trim() : ''
       const username  = message.from?.username
       const firstName = message.from?.first_name
