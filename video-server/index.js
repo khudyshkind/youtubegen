@@ -199,6 +199,42 @@ const POST_SCHEDULES = {
 const payStates = new Map() // String(chatId) → { step, method, plan, username, firstName }
 let awaitingActivate = null  // { userChatId, plan, planInfo } — owner activation
 
+// Support flow
+const supportStates = new Map() // String(chatId) → { step, category, username, firstName }
+let awaitingSupportReply = null  // { userChatId, ticketNumber } — owner typing reply
+
+const SUPPORT_CATEGORIES = {
+  bug:        { label: '🐛 Нашёл баг',              emoji: '🐛' },
+  payment:    { label: '💳 Вопрос по оплате',        emoji: '💳' },
+  generation: { label: '🎬 Проблема с генерацией',   emoji: '🎬' },
+  idea:       { label: '💡 Предложение',             emoji: '💡' },
+  other:      { label: '❓ Другой вопрос',           emoji: '❓' },
+}
+
+function supportCategoryInline() {
+  return {
+    inline_keyboard: Object.entries(SUPPORT_CATEGORIES).map(([key, cat]) => ([
+      { text: cat.label, callback_data: `sup_cat_${key}` },
+    ])),
+  }
+}
+
+async function createSupportTicket(userTelegramId, username, category, description) {
+  try {
+    const rows = await sbPost('support_tickets', {
+      user_telegram_id: String(userTelegramId),
+      username: username || null,
+      category,
+      description,
+      status: 'open',
+    }, 'select=ticket_number')
+    return rows?.[0]?.ticket_number ?? null
+  } catch (e) {
+    console.error('[support] createSupportTicket:', e.message)
+    return null
+  }
+}
+
 const PAY_PLANS = {
   basic:        { name: 'Basic',       price: '$9',  usd: 9,   credits: 800  },
   starter:      { name: 'Starter',     price: '$19', usd: 19,  credits: 2000 },
@@ -1069,6 +1105,24 @@ async function handlePublicCallback(cq) {
       parse_mode: 'Markdown',
       reply_markup: payMethodInline(),
     })
+    return
+  }
+
+  if (data.startsWith('sup_cat_')) {
+    const catKey = data.slice(8) // strip 'sup_cat_'
+    const cat    = SUPPORT_CATEGORIES[catKey]
+    if (!cat) return
+    const sst = supportStates.get(String(chatId)) || {}
+    supportStates.set(String(chatId), { ...sst, step: 'waiting_description', category: catKey })
+    await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text:
+        `${cat.emoji} *${cat.label}*\n\n` +
+        `Опиши проблему подробнее.\n` +
+        `Напиши всё что случилось — мы постараемся помочь как можно быстрее 🙏`,
+      parse_mode: 'Markdown',
+    })
   }
 }
 
@@ -1257,6 +1311,18 @@ async function handleCallback(cq) {
       `✅ *Активация тарифа ${planInfo.name}*\n\n` +
       `Пользователь: \`${userChatId}\`\n\n` +
       `Введи email пользователя в YouTubeGen:`)
+
+  } else if (data.startsWith('sup_reply_')) {
+    // sup_reply_{userChatId}_{ticketNumber}
+    const parts        = data.split('_')
+    const userChatId   = parts[2]
+    const ticketNumber = parts[3]
+    awaitingSupportReply = { userChatId, ticketNumber }
+    await clearButtons()
+    await sendTo(chatId,
+      `💬 *Ответ на заявку #${ticketNumber}*\n\n` +
+      `Напиши ответ пользователю (ID: \`${userChatId}\`):\n` +
+      `_Следующее сообщение будет отправлено пользователю_`)
   }
   // 'noop' → ignore
 }
@@ -1279,11 +1345,54 @@ app.post('/telegram/webhook', async (req, res) => {
   const chatId = message.chat?.id
   const text   = (message.text ?? '').trim()
 
-  // ── Public users (payment flow) ───────────────────────────────────────────
+  // ── Public users ──────────────────────────────────────────────────────────
   if (userId !== OWNER_ID) {
-    const pst = payStates.get(String(chatId))
-    // Accept proof ONLY for non-command messages (photo, document, or plain text without /)
     const isCommand = text.startsWith('/')
+
+    // ── Support: waiting for description ────────────────────────────────────
+    const sst = supportStates.get(String(chatId))
+    if (sst?.step === 'waiting_description' && !isCommand && text) {
+      const cat          = SUPPORT_CATEGORIES[sst.category]
+      const ticketNumber = await createSupportTicket(chatId, sst.username || message.from?.username, sst.category, text)
+      supportStates.delete(String(chatId))
+
+      const ticketLabel = ticketNumber ? `#${ticketNumber}` : '#—'
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text:
+          `✅ *Заявка принята!*\n\n` +
+          `Категория: ${cat?.label ?? sst.category}\n` +
+          `Номер заявки: *${ticketLabel}*\n\n` +
+          `Мы свяжемся с тобой в течение 24 часов.\n` +
+          `Спасибо за обращение!`,
+        parse_mode: 'Markdown',
+      })
+
+      if (OWNER_ID && ticketNumber) {
+        const userDisplay = sst.username ? `@${sst.username}` : (sst.firstName || String(chatId))
+        const now = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        await tgApi('sendMessage', {
+          chat_id: OWNER_ID,
+          text:
+            `🆘 *Новая заявка в поддержку!*\n\n` +
+            `📋 Заявка: *${ticketLabel}*\n` +
+            `👤 Пользователь: ${userDisplay} (ID: \`${chatId}\`)\n` +
+            `📧 Категория: ${cat?.label ?? sst.category}\n` +
+            `⏰ Время: ${now} МСК\n\n` +
+            `💬 *Описание:*\n${text}`,
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '💬 Ответить пользователю', callback_data: `sup_reply_${chatId}_${ticketNumber}` },
+            ]],
+          },
+        })
+      }
+      return
+    }
+
+    // ── Payment: waiting for proof ──────────────────────────────────────────
+    const pst = payStates.get(String(chatId))
     if (pst?.step === 'awaiting_proof' && !isCommand && (message.photo || message.document || message.text)) {
       await forwardProofToOwner(chatId, message, pst).catch(err => {
         console.error('[pay] forwardProof error:', err.message)
@@ -1291,16 +1400,32 @@ app.post('/telegram/webhook', async (req, res) => {
       })
       return
     }
+
+    // ── /start router ───────────────────────────────────────────────────────
     if (text === '/start' || text.startsWith('/start ') || text === '/pay') {
-      // /start always resets payment state so user can restart cleanly
       payStates.delete(String(chatId))
-      const startArg = text.startsWith('/start ') ? text.slice(7).trim() : ''
+      supportStates.delete(String(chatId))
+      const startArg  = text.startsWith('/start ') ? text.slice(7).trim() : ''
       const username  = message.from?.username
       const firstName = message.from?.first_name
 
-      // Deep link: /start pay_<plan> or /start pay_topup_<size>
+      // Deep link: support
+      if (startArg === 'support') {
+        supportStates.set(String(chatId), { step: 'waiting_category', username, firstName })
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text:
+            `👋 Привет! Я помогу решить твой вопрос.\n\n` +
+            `Выбери тему обращения:`,
+          parse_mode: 'Markdown',
+          reply_markup: supportCategoryInline(),
+        })
+        return
+      }
+
+      // Deep link: pay_<plan>
       if (startArg.startsWith('pay_') && startArg !== 'pay') {
-        const planKey  = startArg.slice(4) // strip 'pay_'
+        const planKey  = startArg.slice(4)
         const planInfo = PAY_PLANS[planKey]
         if (planInfo) {
           payStates.set(String(chatId), { step: 'method_for_plan', plan: planKey, username, firstName })
@@ -1321,7 +1446,7 @@ app.post('/telegram/webhook', async (req, res) => {
         }
       }
 
-      // Regular /start or /pay — choose method first
+      // Default /start — payment menu
       payStates.set(String(chatId), { step: 'method', username, firstName })
       await tgApi('sendMessage', {
         chat_id: chatId,
@@ -1331,11 +1456,28 @@ app.post('/telegram/webhook', async (req, res) => {
       })
       return
     }
-    await tgApi('sendMessage', { chat_id: chatId, text: 'Используй /start для оплаты тарифа.' })
+
+    await tgApi('sendMessage', { chat_id: chatId, text: 'Используй /start для оплаты или обращения в поддержку.' })
     return
   }
 
   console.log('[tg] msg:', text.slice(0, 60))
+
+  // Owner: awaiting support reply text
+  if (awaitingSupportReply && text && !text.startsWith('/')) {
+    const { userChatId, ticketNumber } = awaitingSupportReply
+    awaitingSupportReply = null
+    await tgApi('sendMessage', {
+      chat_id: userChatId,
+      text:
+        `📩 *Ответ от поддержки YouTubeGen:*\n\n` +
+        `${text}\n\n` +
+        `_Если вопрос не решён — просто напиши нам снова._`,
+      parse_mode: 'Markdown',
+    })
+    await sendTo(chatId, `✅ Ответ на заявку *#${ticketNumber}* отправлен пользователю`)
+    return
+  }
 
   // Owner: awaiting email for Russia payment activation
   if (awaitingActivate && text && !text.startsWith('/')) {

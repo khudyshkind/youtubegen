@@ -399,3 +399,18 @@ on conflict (key) do nothing;
 grant all on public.bot_content_queue to service_role;
 grant all on public.bot_seen_urls     to service_role;
 grant all on public.bot_settings      to service_role;
+
+create table if not exists public.support_tickets (
+  id                uuid        default gen_random_uuid() primary key,
+  ticket_number     serial,
+  user_telegram_id  text        not null,
+  username          text,
+  category          text        not null,
+  description       text        not null,
+  status            text        not null default 'open'
+                      check (status in ('open', 'answered', 'closed')),
+  created_at        timestamptz not null default now()
+);
+
+grant all on public.support_tickets to service_role;
+grant usage, select on sequence public.support_tickets_ticket_number_seq to service_role;

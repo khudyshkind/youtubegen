@@ -89,7 +89,9 @@ export default function SidebarNav() {
 
         <div className="p-4" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
           <a
-            href="mailto:support@youtubegen.ru"
+            href="https://t.me/youtubegenai_bot?start=support"
+            target="_blank"
+            rel="noopener noreferrer"
             className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
