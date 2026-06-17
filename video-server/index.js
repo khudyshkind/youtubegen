@@ -149,6 +149,7 @@ async function setSetting(key, value) {
 async function loadSettingsFromDB() {
   try {
     const rows = await sbGet('bot_settings', 'select=key,value')
+    let ppText = '', ppImageUrl = '', ppTopic = ''
     for (const { key, value } of rows) {
       if (key === 'auto_publish')     config.autoPublish     = value === 'true'
       if (key === 'monitor_interval') monitorConfig.interval = value
@@ -157,8 +158,19 @@ async function loadSettingsFromDB() {
         const hour = parseInt(value.split(':')[0], 10)
         if (!isNaN(hour)) planConfig.postHour = hour
       }
+      if (key === 'posts_per_day') {
+        const n = parseInt(value, 10)
+        if ([1, 2, 3, 5].includes(n)) planConfig.postsPerDay = n
+      }
+      if (key === 'pending_post_text')      ppText     = value
+      if (key === 'pending_post_image_url') ppImageUrl = value
+      if (key === 'pending_post_topic')     ppTopic    = value
     }
-    console.log('[bot] settings loaded:', { autoPublish: config.autoPublish, interval: monitorConfig.interval, postHour: planConfig.postHour, paused: planConfig.paused })
+    if (ppText) {
+      pendingPost = { text: ppText, imageUrl: ppImageUrl || null, topic: ppTopic }
+      console.log('[bot] restored pendingPost from DB, topic:', ppTopic.slice(0, 40))
+    }
+    console.log('[bot] settings loaded:', { autoPublish: config.autoPublish, interval: monitorConfig.interval, postHour: planConfig.postHour, paused: planConfig.paused, postsPerDay: planConfig.postsPerDay })
   } catch (e) {
     console.warn('[bot] loadSettingsFromDB failed:', e.message, '— using defaults')
   }
@@ -174,7 +186,14 @@ let awaitingPlan  = false         // true after plan_add callback
 let awaitingTime  = false         // true after plan_set_time callback
 const config        = { autoPublish: false }
 const monitorConfig = { interval: 'daily' } // 'daily' | 'twice' | 'weekly' | 'off'
-const planConfig    = { paused: false, postHour: 12 }
+const planConfig    = { paused: false, postHour: 12, postsPerDay: 1 }
+
+const POST_SCHEDULES = {
+  1: [12],
+  2: [10, 18],
+  3: [9, 14, 19],
+  5: [8, 11, 14, 17, 20],
+}
 
 // Payment flow: public users (resets on restart)
 const payStates = new Map() // String(chatId) → { step, method, plan, username, firstName }
@@ -221,8 +240,21 @@ function settingsInline() {
       [{ text: config.autoPublish ? '🟢 Автопубликация: ВКЛ' : '🔴 Автопубликация: ВЫКЛ', callback_data: 'toggle_auto' }],
       [{ text: `📡 Мониторинг: ${iLabel}`, callback_data: 'mi_menu' }],
       [{ text: `⏰ Время постинга: ${String(planConfig.postHour).padStart(2, '0')}:00 UTC`, callback_data: 'plan_set_time' }],
+      [{ text: `📝 Постов в день: ${planConfig.postsPerDay}`, callback_data: 'ppd_menu' }],
       [{ text: '🌐 Часовой пояс: UTC', callback_data: 'noop' }],
     ],
+  }
+}
+
+function postsPerDayInline() {
+  const c = (v) => planConfig.postsPerDay === v ? '✅ ' : ''
+  return {
+    inline_keyboard: [[
+      { text: `${c(1)}1 пост`,   callback_data: 'ppd_1' },
+      { text: `${c(2)}2 поста`,  callback_data: 'ppd_2' },
+      { text: `${c(3)}3 поста`,  callback_data: 'ppd_3' },
+      { text: `${c(5)}5 постов`, callback_data: 'ppd_5' },
+    ]],
   }
 }
 
@@ -531,43 +563,78 @@ function withTimeout(promise, ms, label) {
 async function generateImage(topic) {
   const FAL_KEY = process.env.FAL_KEY
   if (!FAL_KEY) { console.warn('[fal] FAL_KEY not set, skipping image'); return null }
-  try {
-    console.log('[fal] generating image for:', topic.slice(0, 40))
-    const prompt = await withTimeout(generateImagePrompt(topic), 15000, 'image-prompt')
-    console.log('[fal] prompt:', prompt.slice(0, 80))
 
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 25000)
-    let res
+  const prompt = await withTimeout(generateImagePrompt(topic), 15000, 'image-prompt')
+    .catch(err => { console.warn('[fal] prompt gen failed:', err.message); return topic })
+  console.log('[fal] prompt:', prompt.slice(0, 80))
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      res = await fetch('https://fal.run/fal-ai/flux/schnell', {
-        method: 'POST',
-        signal: controller.signal,
-        headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          image_size: 'landscape_16_9',
-          num_images: 1,
-          num_inference_steps: 4,
-          seed: Math.floor(Math.random() * 999999),
-        }),
-      })
-    } finally {
-      clearTimeout(timer)
+      console.log(`[fal] generating image attempt ${attempt} for:`, topic.slice(0, 40))
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 25000)
+      let res
+      try {
+        res = await fetch('https://fal.run/fal-ai/flux/schnell', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            image_size: 'landscape_16_9',
+            num_images: 1,
+            num_inference_steps: 4,
+            seed: Math.floor(Math.random() * 999999),
+          }),
+        })
+      } finally {
+        clearTimeout(timer)
+      }
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '')
+        console.error(`[fal] attempt ${attempt} HTTP ${res.status}:`, errText.slice(0, 120))
+        continue
+      }
+      const json = await res.json()
+      const url = json.images?.[0]?.url ?? null
+      if (url) { console.log('[fal] image ok:', url.slice(0, 50)); return url }
+      console.warn(`[fal] attempt ${attempt} no url:`, JSON.stringify(json).slice(0, 120))
+    } catch (err) {
+      console.error(`[fal] attempt ${attempt} error:`, err.message)
     }
-
-    if (!res.ok) {
-      console.error('[fal] HTTP', res.status, await res.text().catch(() => ''))
-      return null
-    }
-    const json = await res.json()
-    const url = json.images?.[0]?.url ?? null
-    console.log('[fal] image result:', url ? `ok (${url.slice(0, 50)})` : `failed — ${JSON.stringify(json).slice(0, 120)}`)
-    return url
-  } catch (err) {
-    console.error('[fal] error:', err.message)
-    return null
   }
+  return null
+}
+
+// ── Pending post DB persistence ───────────────────────────────────────────────
+async function savePendingPost({ text, imageUrl, topic }) {
+  pendingPost = { text, imageUrl: imageUrl ?? null, topic }
+  await Promise.all([
+    setSetting('pending_post_text',      text),
+    setSetting('pending_post_image_url', imageUrl ?? ''),
+    setSetting('pending_post_topic',     topic),
+  ])
+}
+
+async function clearPendingPost() {
+  pendingPost = null
+  await Promise.all([
+    setSetting('pending_post_text',      ''),
+    setSetting('pending_post_image_url', ''),
+    setSetting('pending_post_topic',     ''),
+  ])
+}
+
+async function ensurePendingPost() {
+  if (pendingPost?.text) return pendingPost
+  const [text, imageUrl, topic] = await Promise.all([
+    getSetting('pending_post_text'),
+    getSetting('pending_post_image_url'),
+    getSetting('pending_post_topic'),
+  ])
+  if (!text) return null
+  pendingPost = { text, imageUrl: imageUrl || null, topic: topic || '' }
+  return pendingPost
 }
 
 // ── Deploy post helpers ───────────────────────────────────────────────────────
@@ -837,7 +904,7 @@ async function postFromQueue(chatId = OWNER_ID) {
 
 // ── Core flow: show preview with inline buttons ───────────────────────────────
 async function showPreview(chatId, post, imageUrl, topic) {
-  pendingPost = { text: post, imageUrl, topic }
+  await savePendingPost({ text: post, imageUrl, topic })
   const caption = `📝 *Превью поста:*\n\n${post}`
   const markup = previewInline()
   if (imageUrl) {
@@ -863,11 +930,14 @@ async function generateAndHandle(chatId, topic, forcePreview = false) {
   const post = await withTimeout(generatePost(topic), 40000, 'post')
   console.log('[tg] post done, length:', post.length)
   console.log('[tg] generating image...')
-  const imageUrl = await withTimeout(generateImage(topic), 35000, 'image').catch(err => {
-    console.warn('[tg] image generation failed:', err.message)
+  const imageUrl = await generateImage(topic).catch(err => {
+    console.warn('[tg] image generation threw:', err.message)
     return null
   })
   console.log('[tg] imageUrl:', imageUrl ? 'ok' : 'null')
+  if (!imageUrl && OWNER_ID) {
+    await sendTo(OWNER_ID, '⚠️ Изображение не сгенерировалось (Flux), публикую без него').catch(() => {})
+  }
   if (config.autoPublish && !forcePreview) {
     await publishToChannel(post, imageUrl)
     await sendTo(chatId, '✅ Опубликовано в канал (автопубликация)')
@@ -928,20 +998,23 @@ async function handleCallback(cq) {
     tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
 
   if (data === 'publish') {
-    if (!pendingPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
-    await publishToChannel(pendingPost.text, pendingPost.imageUrl)
-    pendingPost = null
+    const post = await ensurePendingPost()
+    if (!post) { await sendTo(chatId, 'Нет поста на одобрении'); return }
+    await publishToChannel(post.text, post.imageUrl)
+    await clearPendingPost()
     await clearButtons()
     await sendTo(chatId, '✅ Опубликовано в канал')
 
   } else if (data === 'decline') {
-    pendingPost = null
+    await clearPendingPost()
     await clearButtons()
     await sendTo(chatId, '❌ Пост отклонён')
 
   } else if (data === 'regen') {
-    if (!pendingPost) { await sendTo(chatId, 'Нет поста для регенерации'); return }
-    const topic = pendingPost.topic
+    const post = await ensurePendingPost()
+    if (!post) { await sendTo(chatId, 'Нет поста для регенерации'); return }
+    const topic = post.topic
+    await clearPendingPost()
     await clearButtons()
     await sendTo(chatId, '⏳ Перегенерирую...')
     await generateAndHandle(chatId, topic, true) // always preview on regen
@@ -976,6 +1049,22 @@ async function handleCallback(cq) {
     await setSetting('monitor_interval', monitorConfig.interval)
     await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: monitorIntervalInline() })
     await sendTo(chatId, `✅ Интервал мониторинга: *${INTERVAL_LABELS[monitorConfig.interval]}*`)
+
+  } else if (data === 'ppd_menu') {
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text: '📝 *Постов в день из контент-плана*\n\nВыбери сколько постов публиковать:',
+      parse_mode: 'Markdown',
+      reply_markup: postsPerDayInline(),
+    })
+
+  } else if (['ppd_1', 'ppd_2', 'ppd_3', 'ppd_5'].includes(data)) {
+    planConfig.postsPerDay = parseInt(data.slice(4), 10)
+    await setSetting('posts_per_day', planConfig.postsPerDay)
+    const schedule = POST_SCHEDULES[planConfig.postsPerDay]
+    const times = schedule.map(h => `${String(h).padStart(2, '0')}:00`).join(', ')
+    await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: postsPerDayInline() })
+    await sendTo(chatId, `✅ Постов в день: *${planConfig.postsPerDay}*\n⏰ Публикации в: *${times} UTC*`)
 
   } else if (data === 'dep_pub') {
     if (!pendingDeployPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
@@ -1339,10 +1428,12 @@ cron.schedule('0 * * * *', async () => {
   try { await runMonitor() } catch (err) { console.error('[cron/monitor]', err.message) }
 }, { timezone: 'UTC' })
 
-// ── Content plan cron — every hour, fires at configured postHour ──────────────
+// ── Content plan cron — every hour, fires at hours from POST_SCHEDULES ────────
 cron.schedule('0 * * * *', async () => {
-  if (new Date().getUTCHours() !== planConfig.postHour) return
-  console.log('[cron] plan post at', planConfig.postHour + ':00 UTC')
+  const h = new Date().getUTCHours()
+  const schedule = POST_SCHEDULES[planConfig.postsPerDay] ?? [planConfig.postHour]
+  if (!schedule.includes(h)) return
+  console.log(`[cron] plan post at ${h}:00 UTC (postsPerDay=${planConfig.postsPerDay})`)
   try { await postFromQueue() } catch (err) { console.error('[cron/plan]', err.message) }
 }, { timezone: 'UTC' })
 
