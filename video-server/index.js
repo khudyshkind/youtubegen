@@ -1750,19 +1750,22 @@ async function checkVercelDeploy() {
 
   if (!latest) return
 
+  const deployId = latest.uid ?? latest.id  // uid in v6, id in newer API versions
+  console.log('[vercel] api fields: uid=', latest.uid, 'id=', latest.id, '→ using:', deployId)
+
   const lastId = await getSetting('last_deployment_id')
   console.log('[vercel] last known id:', lastId)
-  console.log('[vercel] current id:', latest.uid)
+  console.log('[vercel] current id:', deployId)
 
-  if (latest.uid === lastId) {
+  if (deployId === lastId) {
     console.log('[vercel] same deployment, skipping')
     return
   }
 
-  console.log('[vercel] new deployment detected, saving id:', latest.uid)
-  await setSetting('last_deployment_id', latest.uid)
-  console.log('[vercel] saved ok')
-  console.log('[vercel] new production deploy detected:', latest.uid)
+  console.log('[vercel] new deployment detected, saving id:', deployId)
+  await setSetting('last_deployment_id', deployId)
+  const verifyId = await getSetting('last_deployment_id')
+  console.log('[vercel] verify save: expected=', deployId, 'got=', verifyId, 'ok=', verifyId === deployId)
 
   const commit = latest.meta?.githubCommitMessage ?? latest.name ?? ''
   if (!commit) { console.log('[vercel] no commit message, skipping post'); return }
