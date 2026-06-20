@@ -1976,44 +1976,53 @@ app.post('/render', verifySecret, async (req, res) => {
     const td = Math.max(0.1, Math.min(1.5, Number(transition_duration) || 0.5))
 
     if (useXfade) {
-      // Each image as a looped video input; extend duration by td so xfade has overlap material.
-      // -pix_fmt yuv420p BEFORE -i forces the JPEG decoder to output yuv420p instead of the
-      // deprecated yuvj420p (JPEG full-range) — the swscaler inside the scale filter cannot
-      // handle yuvj420p and crashes with "Failed to configure output pad" despite format= in
-      // the filter graph, because format negotiation for looped image inputs happens too late.
+      // JPEG decoder always outputs yuvj420p regardless of -pix_fmt or format= filters.
+      // xfade creates ~2 internal swscale instances per transition; those get yuvj420p and crash.
+      // Solution: pre-encode each image to a yuv420p H264 clip BEFORE xfade.
+      // H264 always decodes as yuv420p — xfade never sees yuvj420p.
+      console.log(`[ffmpeg] pre-converting ${imagePaths.length} images to yuv420p clips (parallel)…`)
+      const clipPaths = await Promise.all(imagePaths.map((imgPath, i) => {
+        const clipPath = path.join(tmpDir, `clip_${i}.mp4`)
+        return new Promise((resolve, reject) => {
+          execFile('ffmpeg', [
+            '-loop', '1', '-t', String(durations[i] + td),
+            '-i', imgPath,
+            '-vf', VF_BASE,
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'stillimage', '-crf', '28',
+            '-pix_fmt', 'yuv420p', '-an', '-y', clipPath,
+          ], { maxBuffer: 5 * 1024 * 1024 }, (err) => {
+            if (err) reject(new Error(`clip_${i}: ${err.message.slice(0, 120)}`))
+            else resolve(clipPath)
+          })
+        })
+      }))
+      console.log(`[ffmpeg] pre-conversion done, ${clipPaths.length} clips ready`)
+
+      // xfade between the pre-converted yuv420p clips — no scaling or format conversion needed
       const ffArgs = []
-      for (let i = 0; i < imagePaths.length; i++) {
-        ffArgs.push('-loop', '1', '-t', String(durations[i] + td), '-pix_fmt', 'yuv420p', '-i', imagePaths[i])
+      for (const clipPath of clipPaths) {
+        ffArgs.push('-i', clipPath)
       }
       ffArgs.push('-i', finalAudioPath)
-      const audioIdx = imagePaths.length
+      const audioIdx = clipPaths.length
 
-      // Build filter_complex: scale each input, then chain xfade filters.
-      // No format= needed here — decoder already outputs yuv420p via the input -pix_fmt flag.
       const filterComplex = []
-      for (let i = 0; i < imagePaths.length; i++) {
-        filterComplex.push(`[${i}:v]${VF_BASE}[v${i}]`)
-      }
-
-      // xfade chain: [v0][v1]xfade@offset0 → [x0]; [x0][v2]xfade@offset1 → [x1]; ...
       let cumOffset = 0
-      let prevLabel = '[v0]'
-      for (let i = 0; i < imagePaths.length - 1; i++) {
+      let prevLabel = '[0:v]'
+      for (let i = 0; i < clipPaths.length - 1; i++) {
         cumOffset += durations[i]
         const offset = Math.max(0, cumOffset - (i + 1) * td)
-        const outLabel = i === imagePaths.length - 2 ? '[vout]' : `[x${i}]`
+        const outLabel = i === clipPaths.length - 2 ? '[vout]' : `[x${i}]`
         filterComplex.push(
-          `${prevLabel}[v${i + 1}]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}${outLabel}`
+          `${prevLabel}[${i + 1}:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}${outLabel}`
         )
         prevLabel = outLabel
       }
 
-      const filterComplexStr = filterComplex.join(';')
-      console.log(`[ffmpeg] xfade scenes=${imagePaths.length} transition=${transition} td=${td}`)
-      console.log('[ffmpeg] filter_complex FULL:\n' + filterComplexStr)
-
-      ffArgs.push(
-        '-filter_complex', filterComplexStr,
+      console.log(`[ffmpeg] xfade: ${clipPaths.length} clips, transition=${transition}, ${filterComplex.length} ops`)
+      const ffFinalArgs = [
+        ...ffArgs,
+        '-filter_complex', filterComplex.join(';'),
         '-map', '[vout]',
         '-map', `${audioIdx}:a`,
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
@@ -2021,16 +2030,12 @@ app.post('/render', verifySecret, async (req, res) => {
         '-movflags', '+faststart',
         '-t', String(audioDuration),
         '-y', tempBasePath,
-      )
-
-      console.log('=== FULL FFMPEG ARGS ===')
-      console.log(JSON.stringify(ffArgs, null, 2))
-      console.log('=== END FFMPEG ARGS ===')
+      ]
 
       await new Promise((resolve, reject) => {
-        execFile('ffmpeg', ffArgs, { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
+        execFile('ffmpeg', ffFinalArgs, { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
           if (err) {
-            console.error('[ffmpeg] FULL STDERR:\n' + stderr)
+            console.error('[ffmpeg] xfade STDERR:\n' + stderr.slice(-800))
             reject(new Error(`FFmpeg xfade (${transition}): ${stderr.slice(-600)}`))
           } else resolve()
         })
