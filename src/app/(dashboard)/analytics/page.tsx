@@ -2075,7 +2075,7 @@ function RisingStarsTab({
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs text-slate-400">
-                  Видео опубликованы за последние:{' '}
+                  Канал создан не позднее:{' '}
                   <span className="text-violet-300 font-semibold">
                     {anyAge ? 'любой период' : `${monthsMax} мес.`}
                   </span>

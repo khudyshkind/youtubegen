@@ -160,12 +160,22 @@ export async function POST(req: NextRequest) {
     })
     console.log(`[rising] after video count filter (>5): ${afterVideoFilter.length}`)
 
-    // Note: age filter is handled by publishedAfter in the video search above.
-    // channelItems already represent channels with recent activity in the niche.
-    console.log(`[rising] final filtered: ${afterVideoFilter.length}`)
+    // Age filter: check channel.snippet.publishedAt (channel creation date)
+    const afterAgeFilter = afterVideoFilter.filter(ch => {
+      const publishedAt = ch.snippet.publishedAt
+      const monthsOld = (now - new Date(publishedAt).getTime()) / (1000 * 60 * 60 * 24 * 30.44)
+      console.log(`[rising] ch="${ch.snippet.title}" created=${publishedAt} months_old=${monthsOld.toFixed(1)} limit=${monthsMax}`)
+      if (monthsMax > 0 && monthsOld > monthsMax) {
+        console.log(`[rising] REJECTED - too old (${monthsOld.toFixed(1)} > ${monthsMax})`)
+        return false
+      }
+      return true
+    })
+    console.log(`[rising] after age filter (channel created within ${monthsMax === 0 ? 'any' : monthsMax} months): ${afterAgeFilter.length}`)
+    console.log(`[rising] final filtered: ${afterAgeFilter.length}`)
 
     // ── Step 6: Compute metrics ───────────────────────────────────────────────
-    const enriched = afterVideoFilter.slice(0, 10).map(ch => {
+    const enriched = afterAgeFilter.slice(0, 10).map(ch => {
       const subs = parseInt(ch.statistics.subscriberCount ?? '0')
       const totalViews = parseInt(ch.statistics.viewCount ?? '0')
       const videos = parseInt(ch.statistics.videoCount ?? '0')
