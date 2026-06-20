@@ -179,6 +179,7 @@ export default function Step5Images() {
   } = useStudioStore()
 
   const { t } = useLang()
+  const [imageEngine, setImageEngine] = useState<'flux' | 'gpt_mini'>('flux')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [customInterval, setCustomInterval] = useState('')
@@ -203,7 +204,8 @@ export default function Step5Images() {
       : scriptParams.duration_minutes * 60
 
   const imageCount = Math.max(1, Math.ceil(audioDurationSec / imageInterval))
-  const creditCost = imageCount * CREDIT_COSTS.image
+  const costPerImage = imageEngine === 'gpt_mini' ? CREDIT_COSTS.image_gpt_mini : CREDIT_COSTS.image_flux
+  const creditCost = imageCount * costPerImage
 
   function handleIntervalPreset(sec: number) {
     setImageInterval(sec)
@@ -261,11 +263,12 @@ export default function Step5Images() {
           script, topic: scriptParams.topic, duration_sec: audioDurationSec,
           image_count: imageCount, project_id: projectId, image_interval: imageInterval,
           subtitle_blocks: subtitleBlocks.length > 0 ? subtitleBlocks : undefined,
+          engine: imageEngine,
         }),
       })
       const json = await res.json()
       if (!json.ok) {
-        if (json.code === 'NO_CREDITS') { setError(`${t('step5.err_gen')} (${imageCount * CREDIT_COSTS.image} ${t('nav.credits_suffix')})`); return }
+        if (json.code === 'NO_CREDITS') { setError(`${t('step5.err_gen')} (${creditCost} ${t('nav.credits_suffix')})`); return }
         throw new Error(json.error)
       }
       setSceneImages(json.data.scene_images as SceneImage[])
@@ -300,12 +303,12 @@ export default function Step5Images() {
       const res = await fetch('/api/generate/image-single', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, scene_index: sceneIndex, prompt: promptToSend }),
+        body: JSON.stringify({ project_id: projectId, scene_index: sceneIndex, prompt: promptToSend, engine: imageEngine }),
       })
       const json = await res.json()
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') {
-          setRegenErrors((prev) => ({ ...prev, [sceneIndex]: `${t('msg.no_credits')} (${CREDIT_COSTS.image} ${t('nav.credits_suffix')})` }))
+          setRegenErrors((prev) => ({ ...prev, [sceneIndex]: `${t('msg.no_credits')} (${costPerImage} ${t('nav.credits_suffix')})` }))
           return
         }
         throw new Error(json.error)
@@ -404,6 +407,36 @@ export default function Step5Images() {
             <span className="mx-1.5 text-slate-600">·</span>
             Итого: <strong className="text-violet-400">{creditCost} {t('nav.credits_suffix')}</strong>
           </p>
+        </div>
+      </div>
+
+      {/* Engine selector */}
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-semibold text-slate-300">{t('step5.engine_label')}</p>
+        <div className="grid grid-cols-2 gap-3">
+          {([
+            { id: 'flux',     name: t('step5.engine_flux_name'), desc: t('step5.engine_flux_desc') },
+            { id: 'gpt_mini', name: t('step5.engine_gpt_name'),  desc: t('step5.engine_gpt_desc')  },
+          ] as const).map((eng) => {
+            const active = imageEngine === eng.id
+            return (
+              <button
+                key={eng.id}
+                type="button"
+                onClick={() => setImageEngine(eng.id)}
+                className="text-left rounded-xl p-3 transition-all"
+                style={active
+                  ? { border: '2px solid #7C3AED', background: 'rgba(124,58,237,0.12)' }
+                  : { border: '2px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }
+                }
+              >
+                <p className={`text-sm font-semibold mb-0.5 ${active ? 'text-violet-300' : 'text-slate-300'}`}>
+                  {eng.name}
+                </p>
+                <p className="text-xs text-slate-500 leading-relaxed">{eng.desc}</p>
+              </button>
+            )
+          })}
         </div>
       </div>
 

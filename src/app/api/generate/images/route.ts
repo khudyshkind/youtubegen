@@ -7,6 +7,8 @@ import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SceneImage, SubtitleBlock } from '@/lib/types'
 
+type ImageEngine = 'flux' | 'gpt_mini'
+
 interface ImagesRequest {
   script: string
   topic: string
@@ -15,6 +17,7 @@ interface ImagesRequest {
   project_id?: string
   image_interval?: number
   subtitle_blocks?: SubtitleBlock[]
+  engine?: ImageEngine
 }
 
 interface FalImageResult {
@@ -47,8 +50,6 @@ function splitSubtitlesIntoGroups(blocks: SubtitleBlock[], n: number): SubtitleB
   return groups
 }
 
-// When subtitles are available: split them into N groups by time, ask Claude for visual prompts only.
-// Timecodes come directly from Whisper — 100% accurate to the actual audio.
 async function generateScenesFromSubtitles(
   topic: string,
   imageCount: number,
@@ -75,7 +76,7 @@ async function generateScenesFromSubtitles(
 Ниже — ${imageCount} сцен видео с текстом из реального аудио (расшифровка Whisper).
 Для каждой сцены напиши:
 1. scene — краткое русское описание того что происходит
-2. prompt — конкретный английский промпт для генерации иллюстрации через Flux AI
+2. prompt — конкретный английский промпт для генерации иллюстрации через AI
 
 ТРЕБОВАНИЯ К ПРОМПТАМ:
 - Только конкретные визуальные образы: предметы, люди, места, действия
@@ -87,7 +88,7 @@ async function generateScenesFromSubtitles(
 ${scenesWithText.map((s, i) => `Сцена ${i + 1} [${fmtSec(s.start)}–${fmtSec(s.end)}]: "${s.text}"`).join('\n')}
 
 Ответь ТОЛЬКО валидным JSON массивом (ровно ${imageCount} элементов) без markdown-обёрток:
-[{"scene": "Русское описание", "prompt": "English Flux prompt"}]`,
+[{"scene": "Русское описание", "prompt": "English prompt"}]`,
     }],
   })
 
@@ -110,7 +111,6 @@ ${scenesWithText.map((s, i) => `Сцена ${i + 1} [${fmtSec(s.start)}–${fmtS
   }))
 }
 
-// Fallback when no subtitles: Claude analyzes script and guesses scene splits.
 async function generateScenesFromScript(
   script: string,
   topic: string,
@@ -127,7 +127,7 @@ async function generateScenesFromScript(
       content: `Ты режиссёр-постановщик YouTube видео на тему "${topic}". Видео длится ${durationSec} секунд.
 
 Раздели сценарий ниже ровно на ${imageCount} визуальных сцен по СМЫСЛУ (не механически, не по символам).
-Для каждой сцены напиши конкретный английский промпт для генерации иллюстрации через Flux AI.
+Для каждой сцены напиши конкретный английский промпт для генерации иллюстрации через AI.
 
 ТРЕБОВАНИЯ К ПРОМПТАМ:
 - Только конкретные визуальные образы: предметы, люди, места, действия
@@ -145,7 +145,7 @@ ${script.slice(0, 6000)}
     "scene": "Краткое описание по-русски что происходит в этой части",
     "timecode_start": "00:00",
     "timecode_end": "00:30",
-    "prompt": "Precise English visual prompt for Flux image generation"
+    "prompt": "Precise English visual prompt for image generation"
   }
 ]`,
     }],
@@ -169,6 +169,82 @@ ${script.slice(0, 6000)}
   return scenes
 }
 
+async function generateImageFlux(
+  prompt: string,
+  userId: string,
+  projectId: string | undefined,
+  sceneIndex: number,
+  serviceClient: ReturnType<typeof createServiceClient>,
+): Promise<string | null> {
+  fal.config({ credentials: env('FAL_KEY') })
+  const result = await fal.subscribe('fal-ai/flux/dev', {
+    input: {
+      prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
+      image_size: { width: 1280, height: 720 },
+      num_images: 1,
+      num_inference_steps: 35,
+    },
+  }) as { data: FalImageResult }
+
+  const imageUrl = result.data?.images?.[0]?.url ?? null
+  if (!imageUrl) return null
+
+  if (!projectId) return imageUrl
+
+  const imgRes = await fetch(imageUrl)
+  if (!imgRes.ok) return imageUrl
+
+  const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.jpg`
+  const { error: uploadError } = await serviceClient.storage
+    .from('images')
+    .upload(storagePath, await imgRes.arrayBuffer(), { contentType: 'image/jpeg', upsert: true })
+
+  if (uploadError) return imageUrl
+  const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
+  return publicUrl
+}
+
+async function generateImageGptMini(
+  prompt: string,
+  userId: string,
+  projectId: string | undefined,
+  sceneIndex: number,
+  serviceClient: ReturnType<typeof createServiceClient>,
+): Promise<string | null> {
+  const res = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env('OPENAI_API_KEY')}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-image-1-mini',
+      prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
+      size: '1024x1024',
+      quality: 'medium',
+      n: 1,
+    }),
+  })
+
+  const data = await res.json()
+  if (!res.ok) throw new Error(`GPT Image: ${data.error?.message ?? res.status}`)
+  const base64 = data.data?.[0]?.b64_json
+  if (!base64) throw new Error('GPT Image: no image data')
+
+  const buffer = Buffer.from(base64, 'base64')
+
+  if (!projectId) return null
+
+  const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.jpg`
+  const { error: uploadError } = await serviceClient.storage
+    .from('images')
+    .upload(storagePath, buffer, { contentType: 'image/png', upsert: true })
+
+  if (uploadError) throw new Error(`Storage upload error: ${uploadError.message}`)
+  const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
+  return publicUrl
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabase()
@@ -178,30 +254,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
 
-    const { script, topic, duration_sec, image_count, project_id, image_interval, subtitle_blocks }: ImagesRequest =
+    const { script, topic, duration_sec, image_count, project_id, image_interval, subtitle_blocks, engine = 'flux' }: ImagesRequest =
       await request.json()
 
     if (!script?.trim() || !topic?.trim()) {
-      return NextResponse.json(
-        { ok: false, error: 'script и topic обязательны' },
-        { status: 400 },
-      )
+      return NextResponse.json({ ok: false, error: 'script и topic обязательны' }, { status: 400 })
     }
 
     const count = Math.max(1, Math.min(20, image_count ?? 1))
     const interval = Math.max(3, Math.min(30, image_interval ?? 10))
+    const costPerImage = engine === 'gpt_mini' ? CREDIT_COSTS.image_gpt_mini : CREDIT_COSTS.image_flux
+    const totalCost = costPerImage * count
 
-    const totalCost = CREDIT_COSTS.image * count
     const enough = await hasCredits(user.id, totalCost, supabase)
     if (!enough) {
-      return NextResponse.json(
-        { ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' },
-        { status: 402 },
-      )
+      return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
     }
 
     const hasSubtitles = Array.isArray(subtitle_blocks) && subtitle_blocks.length > 0
-    console.log(`[generate/images] mode=${hasSubtitles ? 'whisper-timecodes' : 'script-fallback'} count=${count}`)
+    console.log(`[generate/images] engine=${engine} mode=${hasSubtitles ? 'whisper-timecodes' : 'script-fallback'} count=${count}`)
 
     const scenes = hasSubtitles
       ? await generateScenesFromSubtitles(topic, count, duration_sec, subtitle_blocks!)
@@ -209,47 +280,18 @@ export async function POST(request: NextRequest) {
 
     console.log('[generate/images] timecodes:', scenes.map((s) => `${s.timecode_start}–${s.timecode_end}`))
 
-    // Generate each image with Flux
-    fal.config({ credentials: env('FAL_KEY') })
     const serviceClient = createServiceClient()
     const sceneImages: SceneImage[] = []
 
     for (let i = 0; i < scenes.length; i++) {
       const { scene, timecode_start, timecode_end, prompt } = scenes[i]
 
-      const result = await fal.subscribe('fal-ai/flux/dev', {
-        input: {
-          prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
-          image_size: { width: 1280, height: 720 },
-          num_images: 1,
-          num_inference_steps: 35,
-        },
-      }) as { data: FalImageResult }
+      const url = engine === 'gpt_mini'
+        ? await generateImageGptMini(prompt, user.id, project_id, i, serviceClient)
+        : await generateImageFlux(prompt, user.id, project_id, i, serviceClient)
 
-      const imageUrl = result.data?.images?.[0]?.url ?? null
-
-      let storedUrl = imageUrl
-      if (imageUrl && project_id) {
-        const imgRes = await fetch(imageUrl)
-        if (imgRes.ok) {
-          const storagePath = `${user.id}/${project_id}/scene_${i}.jpg`
-          const { error: uploadError } = await serviceClient.storage
-            .from('images')
-            .upload(storagePath, await imgRes.arrayBuffer(), {
-              contentType: 'image/jpeg',
-              upsert: true,
-            })
-          if (!uploadError) {
-            const { data: { publicUrl } } = serviceClient.storage
-              .from('images')
-              .getPublicUrl(storagePath)
-            storedUrl = publicUrl
-          }
-        }
-      }
-
-      sceneImages.push({ scene_index: i, prompt, url: storedUrl, scene, timecode_start, timecode_end })
-      await spendCredits(user.id, CREDIT_COSTS.image, 'image', project_id)
+      sceneImages.push({ scene_index: i, prompt, url, scene, timecode_start, timecode_end })
+      await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
     }
 
     if (project_id) {

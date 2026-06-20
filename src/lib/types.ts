@@ -18,7 +18,9 @@ export const CREDIT_COSTS = {
   subtitles_per_minute: 2,
 
   // Images
-  image: 7,
+  image: 7,           // legacy alias → Flux
+  image_flux: 7,
+  image_gpt_mini: 2,
 
   // Video
   video: 1,

@@ -572,6 +572,11 @@ export const translations = {
     'step5.pause':       'Пауза',
     'step5.back':        '← Назад',
     'step5.next':        'Далее: Видео →',
+    'step5.engine_label':    'Движок генерации',
+    'step5.engine_flux_name':'🎨 Качество (Flux)',
+    'step5.engine_flux_desc':'Детальные художественные иллюстрации · −7 кр/шт',
+    'step5.engine_gpt_name': '💰 Эконом (GPT Image)',
+    'step5.engine_gpt_desc': 'Простые иллюстрации, быстрее и дешевле · −2 кр/шт',
 
     // ── Step 6 ────────────────────────────────────────────────────────────────────
     'step6.title':          'Шаг 6: Сборка видео',
@@ -1377,6 +1382,11 @@ export const translations = {
     'step5.pause':       'Pause',
     'step5.back':        '← Back',
     'step5.next':        'Next: Video →',
+    'step5.engine_label':    'Generation engine',
+    'step5.engine_flux_name':'🎨 Quality (Flux)',
+    'step5.engine_flux_desc':'Detailed artistic illustrations · −7 cr/ea',
+    'step5.engine_gpt_name': '💰 Economy (GPT Image)',
+    'step5.engine_gpt_desc': 'Simple illustrations, faster and cheaper · −2 cr/ea',
 
     // ── Step 6 ────────────────────────────────────────────────────────────────────
     'step6.title':          'Step 6: Video assembly',
