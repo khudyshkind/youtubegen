@@ -1980,67 +1980,93 @@ app.post('/render', verifySecret, async (req, res) => {
       // xfade creates ~2 internal swscale instances per transition; those get yuvj420p and crash.
       // Solution: pre-encode each image to a yuv420p H264 clip BEFORE xfade.
       // H264 always decodes as yuv420p — xfade never sees yuvj420p.
-      console.log(`[ffmpeg] pre-converting ${imagePaths.length} images to yuv420p clips (parallel)…`)
-      const clipPaths = await Promise.all(imagePaths.map((imgPath, i) => {
-        const clipPath = path.join(tmpDir, `clip_${i}.mp4`)
-        return new Promise((resolve, reject) => {
-          execFile('ffmpeg', [
-            '-loop', '1', '-t', String(durations[i] + td),
-            '-i', imgPath,
-            '-vf', VF_BASE,
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'stillimage', '-crf', '28',
-            '-pix_fmt', 'yuv420p', '-an', '-y', clipPath,
-          ], { maxBuffer: 5 * 1024 * 1024 }, (err) => {
-            if (err) reject(new Error(`clip_${i}: ${err.message.slice(0, 120)}`))
-            else resolve(clipPath)
+      // Process clips in batches of 4 to avoid exhausting Railway container resources.
+      // Running all 20 in parallel causes EAGAIN / "Resource temporarily unavailable" errors.
+      console.log(`[ffmpeg] pre-converting ${imagePaths.length} images to yuv420p clips (batch=4)…`)
+      const CLIP_BATCH = 4
+      const clipPaths = []
+      for (let b = 0; b < imagePaths.length; b += CLIP_BATCH) {
+        const slice = imagePaths.slice(b, b + CLIP_BATCH)
+        const batchResults = await Promise.all(slice.map((imgPath, j) => {
+          const i = b + j
+          const clipPath = path.join(tmpDir, `clip_${i}.mp4`)
+          return new Promise((resolve, reject) => {
+            execFile('ffmpeg', [
+              '-loop', '1', '-t', String(durations[i] + td),
+              '-i', imgPath,
+              '-vf', VF_BASE,
+              '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'stillimage', '-crf', '28',
+              '-pix_fmt', 'yuv420p', '-an', '-y', clipPath,
+            ], { maxBuffer: 5 * 1024 * 1024 }, (err, _stdout, stderr) => {
+              if (err) {
+                const detail = stderr ? stderr.slice(-600) : err.message
+                console.error(`[ffmpeg] clip_${i} STDERR:\n${detail}`)
+                reject(new Error(`clip_${i}: ${detail.slice(-300)}`))
+              } else resolve(clipPath)
+            })
           })
-        })
-      }))
+        }))
+        clipPaths.push(...batchResults)
+      }
       console.log(`[ffmpeg] pre-conversion done, ${clipPaths.length} clips ready`)
 
-      // xfade between the pre-converted yuv420p clips — no scaling or format conversion needed
-      const ffArgs = []
-      for (const clipPath of clipPaths) {
-        ffArgs.push('-i', clipPath)
+      // Sequential xfade: process 2 clips at a time to avoid OOM (SIGKILL) on Railway.
+      // Running all N clips simultaneously in one xfade command opens N H264 decoders at once
+      // which exhausts container memory for N>10. Sequential ensures max 2 inputs per command.
+      console.log(`[ffmpeg] xfade sequential: ${clipPaths.length} clips, transition=${transition}`)
+
+      let accPath = clipPaths[0]   // accumulator starts as first clip (has d0+td tail)
+      let accDuration = durations[0]  // content duration of accumulator (not file duration)
+
+      for (let i = 1; i < clipPaths.length; i++) {
+        const nextAccPath = path.join(tmpDir, `acc_${i}.mp4`)
+        const offset = Math.max(0, accDuration - td)
+
+        await new Promise((resolve, reject) => {
+          execFile('ffmpeg', [
+            '-i', accPath,
+            '-i', clipPaths[i],
+            '-filter_complex', `[0:v][1:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}[vout]`,
+            '-map', '[vout]',
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
+            '-pix_fmt', 'yuv420p', '-an', '-y', nextAccPath,
+          ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
+            if (err) {
+              console.error(`[ffmpeg] xfade step ${i} STDERR:\n${stderr.slice(-400)}`)
+              reject(new Error(`xfade step ${i}: ${stderr.slice(-300)}`))
+            } else resolve()
+          })
+        })
+
+        // Delete previous accumulator (not the original clips) to free disk space
+        if (i > 1) {
+          try { fs.unlinkSync(accPath) } catch (_) {}
+        }
+
+        accDuration += durations[i]
+        accPath = nextAccPath
       }
-      ffArgs.push('-i', finalAudioPath)
-      const audioIdx = clipPaths.length
 
-      const filterComplex = []
-      let cumOffset = 0
-      let prevLabel = '[0:v]'
-      for (let i = 0; i < clipPaths.length - 1; i++) {
-        cumOffset += durations[i]
-        const offset = Math.max(0, cumOffset - (i + 1) * td)
-        const outLabel = i === clipPaths.length - 2 ? '[vout]' : `[x${i}]`
-        filterComplex.push(
-          `${prevLabel}[${i + 1}:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}${outLabel}`
-        )
-        prevLabel = outLabel
-      }
-
-      console.log(`[ffmpeg] xfade: ${clipPaths.length} clips, transition=${transition}, ${filterComplex.length} ops`)
-      const ffFinalArgs = [
-        ...ffArgs,
-        '-filter_complex', filterComplex.join(';'),
-        '-map', '[vout]',
-        '-map', `${audioIdx}:a`,
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-b:a', '128k',
-        '-movflags', '+faststart',
-        '-t', String(audioDuration),
-        '-y', tempBasePath,
-      ]
-
+      console.log(`[ffmpeg] xfade done, muxing audio`)
+      // Mux the accumulated video with audio into tempBasePath
       await new Promise((resolve, reject) => {
-        execFile('ffmpeg', ffFinalArgs, { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-          if (err) {
-            console.error('[ffmpeg] xfade STDERR:\n' + stderr.slice(-800))
-            reject(new Error(`FFmpeg xfade (${transition}): ${stderr.slice(-600)}`))
-          } else resolve()
+        execFile('ffmpeg', [
+          '-i', accPath,
+          '-i', finalAudioPath,
+          '-map', '0:v', '-map', '1:a',
+          '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
+          '-maxrate', '4M', '-bufsize', '8M',
+          '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac', '-b:a', '128k',
+          '-movflags', '+faststart',
+          '-t', String(audioDuration),
+          '-y', tempBasePath,
+        ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
+          if (err) reject(new Error(`FFmpeg mux: ${stderr.slice(-400)}`))
+          else resolve()
         })
       })
-      console.log('[ffmpeg] xfade done:', transition, td + 's')
+      console.log('[ffmpeg] xfade+mux done:', transition, td + 's')
     } else {
       // Concat demuxer — simple cut between scenes
       const concatLines = []
@@ -2057,7 +2083,9 @@ app.post('/render', verifySecret, async (req, res) => {
           '-f', 'concat', '-safe', '0', '-i', concatPath,
           '-i', finalAudioPath,
           '-vf', VF_BASE,
-          '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+          '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
+          '-maxrate', '4M', '-bufsize', '8M',
+          '-pix_fmt', 'yuv420p',
           '-c:a', 'aac', '-b:a', '128k',
           '-movflags', '+faststart',
           '-t', String(audioDuration),
@@ -2085,7 +2113,9 @@ app.post('/render', verifySecret, async (req, res) => {
         execFile('ffmpeg', [
           '-i', tempBasePath,
           '-vf', vfEffects,
-          '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
+          '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
+          '-maxrate', '4M', '-bufsize', '8M',
+          '-pix_fmt', 'yuv420p',
           '-c:a', 'copy',
           '-y', tempEffectsPath,
         ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
@@ -2160,7 +2190,11 @@ app.post('/render', verifySecret, async (req, res) => {
     console.error('[/render]', err)
     return res.status(500).json({ ok: false, error: err.message })
   } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true })
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    } catch (e) {
+      console.warn('[cleanup] rmSync failed:', e.message)
+    }
   }
 })
 
