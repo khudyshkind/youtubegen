@@ -21,6 +21,7 @@ export const CREDIT_COSTS = {
   image: 7,           // legacy alias → Flux
   image_flux: 7,
   image_gpt_mini: 2,
+  style_analysis: 2,
 
   // Video
   video: 1,
@@ -202,6 +203,7 @@ export interface Project {
   subtitle_blocks: SubtitleBlock[] | null
   scene_images: SceneImage[] | null
   image_interval: number
+  image_style: string | null
   thumbnail_url: string | null
   video_url: string | null
   seo: SeoData | null
@@ -248,6 +250,17 @@ export interface VoiceParams {
   stability?: number
   similarity_boost?: number
 }
+
+export const IMAGE_STYLES = {
+  realistic:   'photorealistic, professional photography, detailed, shot on camera',
+  cartoon:     'cartoon style, vibrant colors, animated illustration, bold lines',
+  sketch:      'hand-drawn illustration, pencil sketch style, artistic line art',
+  watercolor:  'watercolor painting style, soft colors, textured paper, artistic',
+  cinematic:   'cinematic photography, dramatic lighting, movie still, wide-angle',
+  cyberpunk:   'neon cyberpunk style, vibrant neon colors, futuristic dystopia',
+} as const
+
+export type ImageStyleKey = keyof typeof IMAGE_STYLES
 
 export interface ApiError {
   ok: false

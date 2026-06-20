@@ -2,8 +2,8 @@
 
 import { useCallback, useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
-import { CREDIT_COSTS } from '@/lib/types'
-import type { SceneImage } from '@/lib/types'
+import { CREDIT_COSTS, IMAGE_STYLES } from '@/lib/types'
+import type { SceneImage, ImageStyleKey } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { useLang } from '@/hooks/useLang'
 
@@ -174,8 +174,8 @@ function AudioSyncPlayer({
 export default function Step5Images() {
   const {
     script, scriptParams, subtitleBlocks, projectId, audioUrl,
-    sceneImages, imageInterval,
-    setSceneImages, setImageInterval, setStep,
+    sceneImages, imageInterval, imageStyle,
+    setSceneImages, setImageInterval, setStep, setImageStyle,
   } = useStudioStore()
 
   const { t } = useLang()
@@ -193,6 +193,21 @@ export default function Step5Images() {
   const editingPromptRef = useRef('')
   const [regenLoading, setRegenLoading] = useState<Set<number>>(new Set())
   const [regenErrors, setRegenErrors] = useState<Record<number, string>>({})
+
+  // Style selector
+  const [selectedStyleKey, setSelectedStyleKey] = useState<ImageStyleKey | 'none'>(() => {
+    if (!imageStyle) return 'none'
+    const match = (Object.entries(IMAGE_STYLES) as [ImageStyleKey, string][]).find(([, v]) => v === imageStyle)
+    return match ? match[0] : 'none'
+  })
+  const [refStyle, setRefStyle] = useState<string | null>(() => {
+    if (!imageStyle) return null
+    const isPreset = (Object.values(IMAGE_STYLES) as string[]).includes(imageStyle)
+    return isPreset ? null : imageStyle
+  })
+  const [refPreviewUrl, setRefPreviewUrl] = useState<string | null>(null)
+  const [refAnalyzing, setRefAnalyzing] = useState(false)
+  const styleRefInputRef = useRef<HTMLInputElement>(null)
 
   // Audio sync
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -251,6 +266,36 @@ export default function Step5Images() {
     }
   }, [projectId, setSceneImages])
 
+  async function handleRefUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setRefPreviewUrl(URL.createObjectURL(file))
+    setRefAnalyzing(true)
+    try {
+      const fd = new FormData()
+      fd.append('image', file)
+      if (projectId) fd.append('project_id', projectId)
+      const res = await fetch('/api/generate/analyze-style', { method: 'POST', body: fd })
+      const json = await res.json()
+      if (!json.ok) {
+        setError(json.code === 'NO_CREDITS' ? `${t('msg.no_credits')} (2 ${t('nav.credits_suffix')})` : json.error)
+        setRefPreviewUrl(null)
+        return
+      }
+      const desc: string = json.data.style_description
+      setRefStyle(desc)
+      setImageStyle(desc)
+      setSelectedStyleKey('none')
+      void refreshCredits()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка анализа стиля')
+      setRefPreviewUrl(null)
+    } finally {
+      setRefAnalyzing(false)
+      e.target.value = ''
+    }
+  }
+
   async function handleGenerate() {
     if (!script?.trim()) { setError(t('step5.err_no_script')); return }
     setError('')
@@ -264,6 +309,7 @@ export default function Step5Images() {
           image_count: imageCount, project_id: projectId, image_interval: imageInterval,
           subtitle_blocks: subtitleBlocks.length > 0 ? subtitleBlocks : undefined,
           engine: imageEngine,
+          image_style: imageStyle ?? undefined,
         }),
       })
       const json = await res.json()
@@ -303,7 +349,7 @@ export default function Step5Images() {
       const res = await fetch('/api/generate/image-single', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, scene_index: sceneIndex, prompt: promptToSend, engine: imageEngine }),
+        body: JSON.stringify({ project_id: projectId, scene_index: sceneIndex, prompt: promptToSend, engine: imageEngine, image_style: imageStyle ?? undefined }),
       })
       const json = await res.json()
       if (!json.ok) {
@@ -401,7 +447,7 @@ export default function Step5Images() {
               d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
           <p className="text-xs text-slate-400 leading-relaxed">
-            −{CREDIT_COSTS.image} {t('nav.credits_suffix')}/шт
+            −{costPerImage} {t('nav.credits_suffix')}/шт
             <span className="mx-1.5 text-slate-600">·</span>
             <strong className="text-slate-200">{imageCount}</strong> илл.
             <span className="mx-1.5 text-slate-600">·</span>
@@ -440,6 +486,85 @@ export default function Step5Images() {
         </div>
       </div>
 
+      {/* Style selector */}
+      <div
+        className="rounded-xl p-4 flex flex-col gap-3"
+        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        <p className="text-sm font-semibold text-slate-300">{t('step5.style_label')}</p>
+        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+          <button
+            type="button"
+            onClick={() => { setSelectedStyleKey('none'); setRefStyle(null); setRefPreviewUrl(null); setImageStyle(null) }}
+            className="rounded-xl px-2 py-2 transition-all text-xs font-medium text-center"
+            style={selectedStyleKey === 'none' && !refStyle
+              ? { border: '2px solid #7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA' }
+              : { border: '2px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)', color: '#94A3B8' }
+            }
+          >
+            {t('step5.style_none')}
+          </button>
+          {(Object.keys(IMAGE_STYLES) as ImageStyleKey[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => { setSelectedStyleKey(key); setRefStyle(null); setRefPreviewUrl(null); setImageStyle(IMAGE_STYLES[key]) }}
+              className="rounded-xl px-2 py-2 transition-all text-xs font-medium text-center"
+              style={selectedStyleKey === key
+                ? { border: '2px solid #7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA' }
+                : { border: '2px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)', color: '#94A3B8' }
+              }
+            >
+              {t(`step5.style_${key}`)}
+            </button>
+          ))}
+        </div>
+
+        {/* Reference image upload */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {refPreviewUrl && (
+            <div className="relative shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={refPreviewUrl} alt="ref" className="w-10 h-10 object-cover rounded-lg" />
+              <button
+                type="button"
+                onClick={() => { setRefPreviewUrl(null); setRefStyle(null); setImageStyle(selectedStyleKey !== 'none' ? IMAGE_STYLES[selectedStyleKey] : null) }}
+                className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-white flex items-center justify-center"
+                style={{ background: '#EF4444', fontSize: 10, lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => styleRefInputRef.current?.click()}
+            disabled={refAnalyzing}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-xl hover:text-slate-200 disabled:opacity-50 transition-colors"
+            style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)', color: '#94A3B8' }}
+          >
+            {refAnalyzing ? (
+              <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step5.ref_analyzing')}</>
+            ) : (
+              t('step5.ref_btn')
+            )}
+          </button>
+          {refStyle && (
+            <p className="text-xs flex-1 min-w-0" style={{ color: '#A78BFA' }}>
+              <span className="text-slate-500">{t('step5.ref_detected')} </span>
+              {refStyle.length > 60 ? `${refStyle.slice(0, 60)}…` : refStyle}
+            </p>
+          )}
+          <input
+            ref={styleRefInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/jpg,image/webp"
+            className="hidden"
+            onChange={handleRefUpload}
+          />
+        </div>
+      </div>
+
       {/* Info about AI scene splitting */}
       <div
         className="flex items-start gap-3 rounded-xl px-4 py-3"
@@ -465,9 +590,9 @@ export default function Step5Images() {
             {t('step5.generating')}
           </>
         ) : sceneImages.length > 0 ? (
-          `↺ ${t('step2.regenerate')} (−${imageCount * CREDIT_COSTS.image} ${t('nav.credits_suffix')})`
+          `↺ ${t('step2.regenerate')} (−${creditCost} ${t('nav.credits_suffix')})`
         ) : (
-          `🎨 ${t('btn.generate')} ${imageCount} (−${imageCount * CREDIT_COSTS.image} ${t('nav.credits_suffix')})`
+          `🎨 ${t('btn.generate')} ${imageCount} (−${creditCost} ${t('nav.credits_suffix')})`
         )}
       </button>
 
@@ -669,7 +794,7 @@ export default function Step5Images() {
                               ) : (
                                 <>
                                   <RefreshIcon className="w-3 h-3" />
-                                  {t('step2.regenerate')} (−{CREDIT_COSTS.image} {t('nav.credits_suffix')})
+                                  {t('step2.regenerate')} (−{costPerImage} {t('nav.credits_suffix')})
                                 </>
                               )}
                             </button>

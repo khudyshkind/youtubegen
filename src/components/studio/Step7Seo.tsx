@@ -79,7 +79,73 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
     if (!titleEdited) setCustomTitle(seoTitle)
   }, [seoTitle, titleEdited])
 
-  async function generate(opts: { regenBg: boolean }) {
+  // Reference style
+  const [refStyle, setRefStyle] = useState<string | null>(null)
+  const [refPreview, setRefPreview] = useState<string | null>(null)
+  const [refAnalyzing, setRefAnalyzing] = useState(false)
+  const refInputRef = useRef<HTMLInputElement>(null)
+
+  // Prompt editor
+  const [promptText, setPromptText] = useState('')
+  const [promptLoading, setPromptLoading] = useState(false)
+  const [showPromptEditor, setShowPromptEditor] = useState(false)
+
+  async function loadPrompt(refStyleOverride?: string) {
+    if (!projectId) return
+    setPromptLoading(true)
+    try {
+      const res = await fetch('/api/generate/thumbnail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          title: customTitle.trim() || seoTitle,
+          topic,
+          dry_run: true,
+          ref_style: refStyleOverride ?? refStyle ?? undefined,
+        }),
+      })
+      const json = await res.json()
+      if (json.ok) {
+        setPromptText(json.data.prompt)
+        setShowPromptEditor(true)
+      }
+    } catch {
+      // ignore prompt load errors silently
+    } finally {
+      setPromptLoading(false)
+    }
+  }
+
+  async function handleRefUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setRefPreview(URL.createObjectURL(file))
+    setRefAnalyzing(true)
+    try {
+      const fd = new FormData()
+      fd.append('image', file)
+      if (projectId) fd.append('project_id', projectId)
+      const res = await fetch('/api/generate/analyze-style', { method: 'POST', body: fd })
+      const json = await res.json()
+      if (!json.ok) {
+        setError(json.code === 'NO_CREDITS' ? t('step7.err_credits') : json.error)
+        setRefPreview(null)
+        return
+      }
+      const desc: string = json.data.style_description
+      setRefStyle(desc)
+      await loadPrompt(desc)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('thumb.err_gen'))
+      setRefPreview(null)
+    } finally {
+      setRefAnalyzing(false)
+      e.target.value = ''
+    }
+  }
+
+  async function generate(opts: { regenBg: boolean; useCustomPrompt?: boolean }) {
     if (!projectId) { setError(t('thumb.err_project')); return }
     setError('')
     setLoading(opts.regenBg ? 'full' : 'text')
@@ -92,6 +158,8 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
           title: customTitle.trim() || seoTitle,
           topic,
           bg_url: opts.regenBg ? undefined : (thumbnailBgUrl ?? undefined),
+          custom_prompt: opts.useCustomPrompt && promptText.trim() ? promptText.trim() : undefined,
+          ref_style: refStyle ?? undefined,
         }),
       })
       const json = await res.json()
@@ -104,6 +172,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
       }
       setThumbnailUrl(json.data.thumbnail_url)
       setThumbnailBgUrl(json.data.bg_url)
+      void refreshCredits()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('thumb.err_gen'))
     } finally {
@@ -178,6 +247,95 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
+          </div>
+        )}
+      </div>
+
+      {/* Reference + prompt editor */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {refPreview && (
+            <div className="relative shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={refPreview} alt="ref" className="w-10 h-10 object-cover rounded-lg" />
+              <button
+                type="button"
+                onClick={() => { setRefPreview(null); setRefStyle(null) }}
+                className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-white flex items-center justify-center"
+                style={{ background: '#EF4444', fontSize: 10, lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => refInputRef.current?.click()}
+            disabled={refAnalyzing || isLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-xl hover:text-slate-200 disabled:opacity-50 transition-colors"
+            style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)', color: '#94A3B8' }}
+          >
+            {refAnalyzing ? (
+              <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('thumb.ref_analyzing')}</>
+            ) : (
+              t('thumb.ref_btn')
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => loadPrompt()}
+            disabled={promptLoading || isLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-xl hover:text-slate-200 disabled:opacity-50 transition-colors"
+            style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)', color: '#94A3B8' }}
+          >
+            {promptLoading ? (
+              <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" /></>
+            ) : (
+              <>✏️ {t('thumb.prompt_btn')}</>
+            )}
+          </button>
+          <input ref={refInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleRefUpload} />
+        </div>
+
+        {refStyle && (
+          <p className="text-xs" style={{ color: '#A78BFA' }}>
+            <span className="text-slate-500">{t('thumb.ref_detected')} </span>
+            {refStyle.length > 90 ? `${refStyle.slice(0, 90)}…` : refStyle}
+          </p>
+        )}
+
+        {showPromptEditor && (
+          <div className="flex flex-col gap-2 mt-1">
+            <p className="text-xs font-medium text-slate-400">{t('thumb.prompt_label')}</p>
+            <textarea
+              rows={3}
+              value={promptText}
+              onChange={(e) => setPromptText(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl text-xs resize-y font-mono"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#cbd5e1' }}
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => generate({ regenBg: true, useCustomPrompt: true })}
+                disabled={isLoading || !promptText.trim()}
+                className="flex-1 py-2 btn-gradient disabled:opacity-40 text-white font-medium rounded-xl text-xs flex items-center justify-center"
+              >
+                {isLoading ? (
+                  <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  `${t('thumb.gen_custom')} (−${CREDIT_COSTS.thumbnail} ${t('nav.credits_suffix')})`
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPromptEditor(false)}
+                className="px-3 py-2 text-slate-400 text-xs rounded-xl hover:text-slate-200 transition-colors"
+                style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                ×
+              </button>
+            </div>
           </div>
         )}
       </div>

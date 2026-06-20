@@ -16,6 +16,7 @@ interface SingleImageRequest {
   scene_index: number
   prompt: string
   engine?: ImageEngine
+  image_style?: string
 }
 
 interface FalImageResult {
@@ -124,7 +125,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: SingleImageRequest = await request.json()
-    const { project_id, scene_index, prompt, engine = 'flux' } = body
+    const { project_id, scene_index, prompt, engine = 'flux', image_style } = body
 
     if (!project_id || scene_index === undefined || !prompt?.trim()) {
       return NextResponse.json(
@@ -139,7 +140,8 @@ export async function POST(request: NextRequest) {
     const check = await requireCredits(user.id, engine === 'gpt_mini' ? 'image_gpt_mini' : 'image', supabase)
     if (!check.ok) return NextResponse.json(check, { status: 402 })
 
-    const enhancedPrompt = await enhancePrompt(prompt)
+    const enhancedBase = await enhancePrompt(prompt)
+    const enhancedPrompt = image_style ? `${enhancedBase}, ${image_style}` : enhancedBase
     console.log(`[image-single] engine=${engine} scene_index=${scene_index} prompt:`, enhancedPrompt)
 
     const { data: projectRow } = await supabase

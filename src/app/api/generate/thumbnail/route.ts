@@ -22,6 +22,9 @@ interface ThumbnailRequest {
   title: string
   topic: string
   bg_url?: string
+  dry_run?: boolean
+  custom_prompt?: string
+  ref_style?: string
 }
 
 interface FalImageResult {
@@ -30,7 +33,7 @@ interface FalImageResult {
 
 // ─── Flux prompt ───────────────────────────────────────────────────────────────
 
-async function generateFluxPrompt(title: string, topic: string): Promise<string> {
+async function generateFluxPrompt(title: string, topic: string, refStyle?: string): Promise<string> {
   try {
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const msg = await anthropic.messages.create({
@@ -44,7 +47,7 @@ Rules:
 - 25–35 words. English only. Return only the prompt text.`,
       messages: [{
         role: 'user',
-        content: `Video title: "${title}"\nTopic: "${topic}"\nWrite a dramatic thumbnail background image prompt.`,
+        content: `Video title: "${title}"\nTopic: "${topic}"${refStyle ? `\nVisual style reference: ${refStyle}` : ''}\nWrite a dramatic thumbnail background image prompt.`,
       }],
     })
     const block = msg.content[0]
@@ -207,13 +210,19 @@ export async function POST(request: NextRequest) {
     }
 
     const body: ThumbnailRequest = await request.json()
-    const { project_id, title, topic, bg_url } = body
+    const { project_id, title, topic, bg_url, dry_run, custom_prompt, ref_style } = body
 
     if (!project_id || !title?.trim() || !topic?.trim()) {
       return NextResponse.json(
         { ok: false, error: 'project_id, title и topic обязательны' },
         { status: 400 },
       )
+    }
+
+    // dry_run: just return the generated prompt, no credits, no Flux call
+    if (dry_run) {
+      const dryPrompt = custom_prompt?.trim() || await generateFluxPrompt(title, topic, ref_style)
+      return NextResponse.json({ ok: true, data: { prompt: dryPrompt } })
     }
 
     const check = await requireCredits(user.id, 'thumbnail', supabase)
@@ -231,7 +240,7 @@ export async function POST(request: NextRequest) {
         .getPublicUrl(`${user.id}/${project_id}/thumbnail_bg.jpg`)
       storedBgUrl = publicUrl
     } else {
-      const prompt = await generateFluxPrompt(title, topic)
+      const prompt = custom_prompt?.trim() || await generateFluxPrompt(title, topic, ref_style)
       console.log('[thumbnail] Flux prompt:', prompt)
 
       fal.config({ credentials: env('FAL_KEY') })

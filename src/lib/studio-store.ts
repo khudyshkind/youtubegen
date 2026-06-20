@@ -27,6 +27,7 @@ interface StudioState {
   // Step 5: Illustrations
   sceneImages: SceneImage[]
   imageInterval: number  // seconds per scene (3–30)
+  imageStyle: string | null
 
   // Step 6: Video
   videoUrl: string | null
@@ -56,6 +57,7 @@ interface StudioState {
   setSubtitleStyle: (style: Partial<SubtitleStyle>) => void
   setSceneImages: (images: SceneImage[]) => void
   setImageInterval: (interval: number) => void
+  setImageStyle: (style: string | null) => void
   setVideoUrl: (url: string) => void
   setSeo: (seo: SeoData) => void
   setThumbnailUrl: (url: string | null) => void
@@ -111,6 +113,7 @@ const initialState = {
   subtitleStyle: defaultSubtitleStyle,
   sceneImages: [],
   imageInterval: 10,
+  imageStyle: null,
   videoUrl: null,
   seo: null,
   thumbnailUrl: null,
@@ -139,6 +142,7 @@ export const useStudioStore = create<StudioState>((set) => ({
     set((s) => ({ subtitleStyle: { ...s.subtitleStyle, ...style } })),
   setSceneImages: (images) => set({ sceneImages: images }),
   setImageInterval: (interval) => set({ imageInterval: Math.max(3, Math.min(30, interval)) }),
+  setImageStyle: (style) => set({ imageStyle: style }),
   setVideoUrl: (url) => set({ videoUrl: url }),
   setSeo: (seo) => set({ seo }),
   setThumbnailUrl: (url) => set({ thumbnailUrl: url }),

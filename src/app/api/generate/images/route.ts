@@ -18,6 +18,7 @@ interface ImagesRequest {
   image_interval?: number
   subtitle_blocks?: SubtitleBlock[]
   engine?: ImageEngine
+  image_style?: string
 }
 
 interface FalImageResult {
@@ -300,7 +301,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
 
-    const { script, topic, duration_sec, image_count, project_id, image_interval, subtitle_blocks, engine = 'flux' }: ImagesRequest =
+    const { script, topic, duration_sec, image_count, project_id, image_interval, subtitle_blocks, engine = 'flux', image_style }: ImagesRequest =
       await request.json()
 
     if (!script?.trim() || !topic?.trim()) {
@@ -331,12 +332,13 @@ export async function POST(request: NextRequest) {
 
     for (let i = 0; i < scenes.length; i++) {
       const { scene, timecode_start, timecode_end, prompt } = scenes[i]
+      const styledPrompt = image_style ? `${prompt}, ${image_style}` : prompt
 
       const url = engine === 'gpt_mini'
-        ? await generateImageGptMini(prompt, user.id, project_id, i, serviceClient)
-        : await generateImageFlux(prompt, user.id, project_id, i, serviceClient)
+        ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
+        : await generateImageFlux(styledPrompt, user.id, project_id, i, serviceClient)
 
-      sceneImages.push({ scene_index: i, prompt, url, scene, timecode_start, timecode_end })
+      sceneImages.push({ scene_index: i, prompt: styledPrompt, url, scene, timecode_start, timecode_end })
       await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
     }
 
