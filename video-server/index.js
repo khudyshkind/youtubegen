@@ -2007,7 +2007,8 @@ app.post('/render', verifySecret, async (req, res) => {
       }
 
       const filterComplexStr = filterComplex.join(';')
-      console.log(`[ffmpeg] xfade filter_complex (${imagePaths.length} scenes): ${filterComplexStr.slice(0, 300)}...`)
+      console.log(`[ffmpeg] xfade scenes=${imagePaths.length} transition=${transition} td=${td}`)
+      console.log('[ffmpeg] filter_complex FULL:\n' + filterComplexStr)
 
       ffArgs.push(
         '-filter_complex', filterComplexStr,
@@ -2020,10 +2021,16 @@ app.post('/render', verifySecret, async (req, res) => {
         '-y', tempBasePath,
       )
 
+      console.log('=== FULL FFMPEG ARGS ===')
+      console.log(JSON.stringify(ffArgs, null, 2))
+      console.log('=== END FFMPEG ARGS ===')
+
       await new Promise((resolve, reject) => {
         execFile('ffmpeg', ffArgs, { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-          if (err) reject(new Error(`FFmpeg xfade (${transition}): ${stderr.slice(-400)}`))
-          else resolve()
+          if (err) {
+            console.error('[ffmpeg] FULL STDERR:\n' + stderr)
+            reject(new Error(`FFmpeg xfade (${transition}): ${stderr.slice(-600)}`))
+          } else resolve()
         })
       })
       console.log('[ffmpeg] xfade done:', transition, td + 's')
