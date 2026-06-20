@@ -718,11 +718,22 @@ function TrendsTab({ externalResult, onClearExternal }: {
                   <div className="mb-4">
                     <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2">{t('analytics.example_videos')}</p>
                     {trend.example_videos.map((v, j) => (
-                      <a key={j} href={v.url} target="_blank" rel="noreferrer"
-                        className="flex justify-between items-center py-1.5 hover:text-violet-300 transition-colors">
-                        <span className="text-sm text-slate-300 line-clamp-1 flex-1">{v.title}</span>
-                        <span className="text-xs text-slate-400 ml-3 shrink-0">{fmtNum(v.views)} просм.</span>
-                      </a>
+                      v.url
+                        ? (
+                          <a key={j} href={v.url} target="_blank" rel="noopener noreferrer"
+                            className="flex justify-between items-center gap-2 py-1.5 group transition-colors">
+                            <span className="text-sm text-slate-300 group-hover:text-violet-300 group-hover:underline line-clamp-1 flex-1 transition-colors">
+                              {v.title}
+                            </span>
+                            <span className="text-xs text-slate-500 shrink-0">{fmtNum(v.views)} просм. ↗</span>
+                          </a>
+                        )
+                        : (
+                          <div key={j} className="flex justify-between items-center gap-2 py-1.5">
+                            <span className="text-sm text-slate-300 line-clamp-1 flex-1">{v.title}</span>
+                            <span className="text-xs text-slate-500 shrink-0">{fmtNum(v.views)} просм.</span>
+                          </div>
+                        )
                     ))}
                   </div>
                 )}

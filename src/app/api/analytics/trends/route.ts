@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
         title: v.snippet.title,
         views: parseInt(v.statistics.viewCount ?? '0'),
         channel: v.snippet.channelTitle,
-        url: `https://youtube.com/watch?v=${v.id}`,
+        url: `https://www.youtube.com/watch?v=${v.id}`,
         publishedAt: v.snippet.publishedAt,
       })).sort((a, b) => b.views - a.views)
       console.log(`[trends] sorted videos: ${videosData.length}`)
