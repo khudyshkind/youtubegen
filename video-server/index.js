@@ -1985,9 +1985,11 @@ app.post('/render', verifySecret, async (req, res) => {
       const audioIdx = imagePaths.length
 
       // Build filter_complex: scale each input, then chain xfade filters
+      // format=yuv420p is required: JPEGs decode to yuvj420p (full-range) which xfade
+      // cannot handle — it tries to reinitialize and crashes with "deprecated pixel format".
       const filterParts = []
       for (let i = 0; i < imagePaths.length; i++) {
-        filterParts.push(`[${i}:v]${VF_BASE}[v${i}]`)
+        filterParts.push(`[${i}:v]${VF_BASE},format=yuv420p[v${i}]`)
       }
 
       // xfade chain: [v0][v1]xfade@offset0 → [x0]; [x0][v2]xfade@offset1 → [x1]; ...
@@ -2007,7 +2009,7 @@ app.post('/render', verifySecret, async (req, res) => {
         '-filter_complex', filterParts.join(';'),
         '-map', '[vout]',
         '-map', `${audioIdx}:a`,
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
         '-c:a', 'aac', '-b:a', '128k',
         '-movflags', '+faststart',
         '-t', String(audioDuration),
@@ -2063,6 +2065,7 @@ app.post('/render', verifySecret, async (req, res) => {
         execFile('ffmpeg', [
           '-i', tempBasePath,
           '-vf', vfEffects,
+          '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
           '-c:a', 'copy',
           '-y', tempEffectsPath,
         ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
