@@ -191,10 +191,11 @@ function VoiceDropdown({
 }
 
 function ApihostVoiceDropdown({
-  value, voices, loading, langFilter, typeFilter, noPreviewIds, onChange, onPreview, previewingId,
+  value, voices, loading, langFilter, typeFilter, genderFilter, noPreviewIds, onChange, onPreview, previewingId,
 }: {
   value: string; voices: ApihostVoice[]; loading: boolean
   langFilter: string; typeFilter: ApihostVoiceType | 'all'
+  genderFilter: 'all' | 'male' | 'female'
   noPreviewIds: Set<string>
   onChange: (voice: ApihostVoice) => void
   onPreview: (e: React.MouseEvent, voice: ApihostVoice) => void
@@ -209,9 +210,10 @@ function ApihostVoiceDropdown({
   const filtered = voices.filter((v) => {
     const matchLang = !langFilter || v.lang.toLowerCase().startsWith(langFilter.toLowerCase())
     const matchType = typeFilter === 'all' || v.voice_type === typeFilter
+    const matchGender = genderFilter === 'all' || v.gender === genderFilter || v.gender === null
     const q = search.toLowerCase()
     const matchSearch = !q || v.name.toLowerCase().includes(q)
-    return matchLang && matchType && matchSearch
+    return matchLang && matchType && matchGender && matchSearch
   })
 
   useEffect(() => {
@@ -435,6 +437,9 @@ export default function Step3Voice() {
   const [apihostVoiceType, setApihostVoiceType] = useState<ApihostVoiceType>('standard')
   const [apihostLang, setApihostLang] = useState('ru-RU')
   const [apihostTypeFilter, setApihostTypeFilter] = useState<ApihostVoiceType | 'all'>('all')
+  const [apihostGenderFilter, setApihostGenderFilter] = useState<'all' | 'male' | 'female'>('all')
+  const [apihostSpeechRate, setApihostSpeechRate] = useState(1.0)
+  const [apihostPitch, setApihostPitch] = useState(1.0)
   const [noPreviewIds, setNoPreviewIds] = useState<Set<string>>(() => new Set())
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -646,6 +651,8 @@ export default function Step3Voice() {
           ...(engine === 'apihost' ? {
             apihost_voice_type: apihostVoiceType,
             apihost_lang: apihostLang,
+            speech_rate: apihostSpeechRate,
+            apihost_pitch: apihostPitch,
           } : {}),
         }),
       })
@@ -925,6 +932,20 @@ export default function Step3Voice() {
             </div>
           </div>
 
+          {/* Gender filter */}
+          <div>
+            <p className="text-sm font-medium text-slate-300 mb-2">{t('step3.gender')}</p>
+            <div className="inline-flex rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+              {(['all', 'female', 'male'] as const).map((g) => (
+                <button key={g} type="button" onClick={() => setApihostGenderFilter(g)}
+                  className="px-4 py-2 text-sm font-medium transition-colors"
+                  style={apihostGenderFilter === g ? { background: '#7C3AED', color: '#fff' } : { color: '#64748B' }}>
+                  {g === 'all' ? t('step3.gender_all') : g === 'female' ? t('step3.gender_f') : t('step3.gender_m')}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Voices error */}
           {apihostVoicesError && !apihostVoicesLoading && (
             <div className="flex items-center justify-between rounded-xl px-4 py-3"
@@ -949,6 +970,7 @@ export default function Step3Voice() {
               loading={apihostVoicesLoading}
               langFilter={apihostLang}
               typeFilter={apihostTypeFilter}
+              genderFilter={apihostGenderFilter}
               noPreviewIds={noPreviewIds}
               onChange={(v) => {
                 setApihostVoiceId(v.voice_id)
@@ -958,6 +980,16 @@ export default function Step3Voice() {
               onPreview={handleApihostPreview}
               previewingId={previewingId}
             />
+          </div>
+
+          {/* Speed & pitch sliders */}
+          <div className="flex flex-col gap-4">
+            <Slider label={t('step3.speed')} value={apihostSpeechRate} min={0.5} max={2.0} step={0.05}
+              onChange={(v) => setApihostSpeechRate(v)} leftLabel={t('step3.slow')} rightLabel={t('step3.fast')}
+              format={(v) => `${v.toFixed(2)}×`} />
+            <Slider label={t('apihost.pitch')} value={apihostPitch} min={0.5} max={2.0} step={0.05}
+              onChange={(v) => setApihostPitch(v)} leftLabel={t('apihost.pitch_low')} rightLabel={t('apihost.pitch_high')}
+              format={(v) => `${v.toFixed(2)}×`} />
           </div>
 
           {/* Voice cost note */}

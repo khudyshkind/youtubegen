@@ -32,6 +32,7 @@ interface AudioRequest {
   // APIHOST-specific
   apihost_voice_type?: ApihostVoiceType
   apihost_lang?: string
+  apihost_pitch?: number
 }
 
 export async function POST(request: NextRequest) {
@@ -56,6 +57,7 @@ export async function POST(request: NextRequest) {
       clarity_boost = false,
       apihost_voice_type = 'standard',
       apihost_lang = 'ru-RU',
+      apihost_pitch = 1.0,
     } = body
 
     if (!text || !voice_id) {
@@ -157,7 +159,7 @@ export async function POST(request: NextRequest) {
             speaker: Number(voice_id),
             text,
             rate: String(speech_rate),
-            pitch: '1.0',
+            pitch: String(apihost_pitch),
             type: 'mp3',
             pause: '0',
           }],
