@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
       videosData = (vStats.items ?? []).map(v => ({
         title: v.snippet.title,
         views: parseInt(v.statistics.viewCount ?? '0'),
-        url: `https://youtube.com/watch?v=${v.id}`,
+        url: `https://www.youtube.com/watch?v=${v.id}`,
         publishedAt: v.snippet.publishedAt,
       })).sort((a, b) => b.views - a.views)
       console.log(`[channel] video stats count: ${videosData.length}`)
@@ -179,15 +179,17 @@ export async function POST(req: NextRequest) {
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
 
+    // Limit to 5 videos to keep prompt compact and avoid Claude quoting titles in JSON
     const dataCtx = `Канал: "${channelData.name}", ${channelData.subscribers} подписчиков, ${channelData.total_videos} видео, ср. просмотры: ${avgViews}.
-Топ видео: ${JSON.stringify(videosData.slice(0, 10).map(v => ({ title: v.title, views: v.views })))}`
+Топ видео: ${JSON.stringify(videosData.slice(0, 5).map(v => ({ title: v.title, views: v.views })))}`
 
     // Request 1 — overview + topics
     console.log('[channel] step 5a: claude overview')
     const prompt1 = `Ты YouTube аналитик. ${dataCtx}
 
 Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
-{"upload_frequency":"X видео в неделю","growth_trend":"Растёт","best_topics":["Тема 1","Тема 2","Тема 3"],"worst_topics":["Слабая тема 1","Слабая тема 2"],"strengths":["Сила 1","Сила 2","Сила 3"],"weaknesses":["Слабость 1","Слабость 2"]}`
+{"upload_frequency":"X видео в неделю","growth_trend":"Растёт","best_topics":["Тема 1","Тема 2","Тема 3"],"worst_topics":["Слабая тема 1","Слабая тема 2"],"strengths":["Сила 1","Сила 2","Сила 3"],"weaknesses":["Слабость 1","Слабость 2"]}
+ВАЖНО: Верни ТОЛЬКО валидный JSON без markdown разметки, без \`\`\`json блоков, без пояснений. Начни ответ сразу с { и закончи }.`
 
     const msg1 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -206,20 +208,22 @@ export async function POST(req: NextRequest) {
     }
     const overview = parseClaudeJson<Overview>(text1, 'claude1')
 
-    // Request 2 — formats with real avg_views + recommendations
+    // Request 2 — formats + recommendations (no "example" field — video titles break JSON escaping)
     console.log('[channel] step 5b: claude formats')
     const prompt2 = `Ты YouTube аналитик. ${dataCtx}
 
-Определи форматы на основе РЕАЛЬНЫХ видео выше. Для каждого формата укажи среднее количество просмотров из предоставленных данных и приведи пример реального названия видео.
+Определи форматы видео (тест-драйвы, обзоры, сравнения и т.д.) и дай рекомендации.
 Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
-{"best_formats":[{"name":"Тест-драйвы","avg_views":450000,"example":"Реальное название видео"},{"name":"Обзоры","avg_views":280000,"example":"Реальное название"}],"worst_formats":[{"name":"Слабый формат","avg_views":5000}],"recommendations":["Конкретная рекомендация 1","Рекомендация 2","Рекомендация 3"]}`
+{"best_formats":[{"name":"Тест-драйвы","avg_views":450000},{"name":"Обзоры","avg_views":280000}],"worst_formats":[{"name":"Слабый формат","avg_views":5000}],"recommendations":["Конкретная рекомендация 1","Рекомендация 2","Рекомендация 3"]}
+ВАЖНО: Верни ТОЛЬКО валидный JSON без markdown разметки, без \`\`\`json блоков, без пояснений. Начни ответ сразу с { и закончи }.`
 
     const msg2 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 600,
+      max_tokens: 800,
       messages: [{ role: 'user', content: prompt2 }],
     })
     const text2 = (msg2.content[0] as { text: string }).text
+    console.log('[channel] claude2 raw:', text2.substring(0, 500))
 
     interface Formats {
       best_formats: Array<{ name: string; avg_views: number; example?: string } | string>
