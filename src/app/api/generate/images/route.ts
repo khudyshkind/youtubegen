@@ -7,6 +7,8 @@ import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SceneImage, SubtitleBlock } from '@/lib/types'
 
+export const maxDuration = 300
+
 type ImageEngine = 'flux' | 'gpt_mini'
 
 interface ImagesRequest {
@@ -58,6 +60,8 @@ async function generateScenesFromSubtitles(
   subtitleBlocks: SubtitleBlock[],
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+  // 77 scenes × ~70 tokens/scene = ~5400 tokens; cap at Haiku max 8192
+  const maxTokens = Math.min(8192, Math.max(2500, imageCount * 80))
 
   const groups = splitSubtitlesIntoGroups(subtitleBlocks, imageCount)
 
@@ -70,7 +74,7 @@ async function generateScenesFromSubtitles(
 
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 2500,
+    max_tokens: maxTokens,
     messages: [{
       role: 'user',
       content: `Ты режиссёр-постановщик YouTube видео на тему "${topic}".
@@ -166,13 +170,14 @@ async function generateScenesFromScript(
   imageCount: number,
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+  const maxTokens = Math.min(8192, Math.max(2500, imageCount * 80))
 
   const blocks = splitScriptByWords(script, imageCount)
   const blocksWithTimecodes = calculateTimecodes(blocks, durationSec)
 
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 2500,
+    max_tokens: maxTokens,
     messages: [{
       role: 'user',
       content: `Ты режиссёр-постановщик YouTube видео на тему "${topic}".
@@ -308,7 +313,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'script и topic обязательны' }, { status: 400 })
     }
 
-    const count = Math.max(1, Math.min(20, image_count ?? 1))
+    // Raised from 20 → 200; client sends the actual count, server no longer hard-caps
+    const count = Math.max(1, Math.min(200, image_count ?? 1))
     const interval = Math.max(3, Math.min(30, image_interval ?? 10))
     const costPerImage = engine === 'gpt_mini' ? CREDIT_COSTS.image_gpt_mini : CREDIT_COSTS.image_flux
     const totalCost = costPerImage * count
@@ -319,38 +325,62 @@ export async function POST(request: NextRequest) {
     }
 
     const hasSubtitles = Array.isArray(subtitle_blocks) && subtitle_blocks.length > 0
-    console.log(`[generate/images] engine=${engine} mode=${hasSubtitles ? 'whisper-timecodes' : 'script-fallback'} count=${count}`)
+    console.log(`[images] engine=${engine} mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
 
     const scenes = hasSubtitles
       ? await generateScenesFromSubtitles(topic, count, duration_sec, subtitle_blocks!)
       : await generateScenesFromScript(script, topic, duration_sec, count)
 
-    console.log('[generate/images] timecodes:', scenes.map((s) => `${s.timecode_start}–${s.timecode_end}`))
+    console.log(`[images] scenes generated: ${scenes.length}`)
 
     const serviceClient = createServiceClient()
-    const sceneImages: SceneImage[] = []
+    const sceneImages: SceneImage[] = new Array(scenes.length)
+    let successCount = 0
+    let failCount = 0
 
-    for (let i = 0; i < scenes.length; i++) {
-      const { scene, timecode_start, timecode_end, prompt } = scenes[i]
-      const styledPrompt = image_style ? `${prompt}, ${image_style}` : prompt
+    // Generate in parallel batches of 5 to stay within rate limits and timeouts.
+    // Sequential (1 at a time) × 77 images × ~7s = ~540s >> 300s Vercel limit.
+    // Parallel 5 at a time × 16 rounds × ~7s = ~110s — safely within limit.
+    const CONCURRENCY = 5
+    for (let batchStart = 0; batchStart < scenes.length; batchStart += CONCURRENCY) {
+      const batchEnd = Math.min(batchStart + CONCURRENCY, scenes.length)
+      console.log(`[images] batch ${Math.floor(batchStart / CONCURRENCY) + 1}: scenes ${batchStart + 1}–${batchEnd} (success=${successCount} failed=${failCount})`)
 
-      const url = engine === 'gpt_mini'
-        ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
-        : await generateImageFlux(styledPrompt, user.id, project_id, i, serviceClient)
-
-      sceneImages.push({ scene_index: i, prompt: styledPrompt, url, scene, timecode_start, timecode_end })
-      await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
+      await Promise.all(
+        scenes.slice(batchStart, batchEnd).map(async (scn, batchIdx) => {
+          const i = batchStart + batchIdx
+          const styledPrompt = image_style ? `${scn.prompt}, ${image_style}` : scn.prompt
+          console.log(`[images] generating ${i + 1}/${scenes.length}`)
+          try {
+            const url = engine === 'gpt_mini'
+              ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
+              : await generateImageFlux(styledPrompt, user.id, project_id, i, serviceClient)
+            sceneImages[i] = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end }
+            successCount++
+            await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
+            console.log(`[images] OK ${i + 1}/${scenes.length} url=${url?.slice(0, 60)}`)
+          } catch (err) {
+            failCount++
+            const msg = err instanceof Error ? err.message : String(err)
+            console.error(`[images] FAILED scene ${i + 1}:`, msg)
+            sceneImages[i] = { scene_index: i, prompt: styledPrompt, url: null, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end }
+          }
+        })
+      )
     }
 
+    console.log(`[images] done: success=${successCount} failed=${failCount} total=${scenes.length}`)
+
+    const validImages = sceneImages.filter(Boolean)
     if (project_id) {
       await supabase
         .from('projects')
-        .update({ scene_images: sceneImages, image_interval: interval, status: 'generating_video' })
+        .update({ scene_images: validImages, image_interval: interval, status: 'generating_video' })
         .eq('id', project_id)
         .eq('user_id', user.id)
     }
 
-    return NextResponse.json({ ok: true, data: { scene_images: sceneImages } })
+    return NextResponse.json({ ok: true, data: { scene_images: validImages, success_count: successCount, fail_count: failCount } })
   } catch (error) {
     console.error('[generate/images]', error)
     return NextResponse.json({ ok: false, error: 'Ошибка генерации иллюстраций' }, { status: 500 })
