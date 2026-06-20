@@ -111,6 +111,53 @@ ${scenesWithText.map((s, i) => `Сцена ${i + 1} [${fmtSec(s.start)}–${fmtS
   }))
 }
 
+function splitScriptByWords(script: string, n: number): string[] {
+  const sentences = script.split(/(?<=[.!?…])\s+/).filter((s) => s.trim())
+  if (sentences.length === 0) return [script]
+
+  const totalWords = script.split(/\s+/).filter(Boolean).length
+  const wordsPerBlock = totalWords / n
+
+  const blocks: string[] = []
+  let currentBlock: string[] = []
+  let currentWordCount = 0
+
+  for (const sentence of sentences) {
+    currentBlock.push(sentence)
+    currentWordCount += sentence.split(/\s+/).filter(Boolean).length
+
+    if (currentWordCount >= wordsPerBlock && blocks.length < n - 1) {
+      blocks.push(currentBlock.join(' '))
+      currentBlock = []
+      currentWordCount = 0
+    }
+  }
+  if (currentBlock.length > 0) blocks.push(currentBlock.join(' '))
+
+  // Pad if too few blocks (e.g. very short script with few sentences)
+  while (blocks.length < n) blocks.push(blocks[blocks.length - 1] ?? script)
+
+  return blocks.slice(0, n)
+}
+
+interface BlockWithTimecode {
+  start: number
+  end: number
+  text: string
+}
+
+function calculateTimecodes(blocks: string[], totalDurationSec: number): BlockWithTimecode[] {
+  const counts = blocks.map((b) => b.split(/\s+/).filter(Boolean).length)
+  const total = counts.reduce((a, b) => a + b, 0) || 1
+  let currentTime = 0
+  return blocks.map((text, i) => {
+    const duration = (counts[i] / total) * totalDurationSec
+    const start = currentTime
+    currentTime += duration
+    return { start, end: currentTime, text }
+  })
+}
+
 async function generateScenesFromScript(
   script: string,
   topic: string,
@@ -119,54 +166,53 @@ async function generateScenesFromScript(
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
 
+  const blocks = splitScriptByWords(script, imageCount)
+  const blocksWithTimecodes = calculateTimecodes(blocks, durationSec)
+
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 2500,
     messages: [{
       role: 'user',
-      content: `Ты режиссёр-постановщик YouTube видео на тему "${topic}". Видео длится ${durationSec} секунд.
-
-Раздели сценарий ниже ровно на ${imageCount} визуальных сцен по СМЫСЛУ (не механически, не по символам).
-Для каждой сцены напиши конкретный английский промпт для генерации иллюстрации через AI.
+      content: `Ты режиссёр-постановщик YouTube видео на тему "${topic}".
+Ниже — ${imageCount} отрывков сценария с уже вычисленными тайм-кодами.
+Для каждого отрывка напиши:
+1. scene — краткое русское описание того что происходит
+2. prompt — конкретный английский промпт для генерации иллюстрации через AI
 
 ТРЕБОВАНИЯ К ПРОМПТАМ:
 - Только конкретные визуальные образы: предметы, люди, места, действия
 - Никаких абстракций («концепция», «идея», «символ»)
 - Cinematic lighting, photorealistic, 25–35 слов
-- Без текста, надписей, логотипов на картинке
-- Описывай что ИМЕННО изображено, как будто объясняешь художнику
+- Без текста, надписей, логотипов
 
-СЦЕНАРИЙ:
-${script.slice(0, 6000)}
+ОТРЫВКИ:
+${blocksWithTimecodes.map((b, i) => `Сцена ${i + 1} [${fmtSec(b.start)}–${fmtSec(b.end)}]:\n"${b.text.slice(0, 400)}"`).join('\n\n')}
 
-Ответь ТОЛЬКО валидным JSON массивом без markdown-обёрток:
-[
-  {
-    "scene": "Краткое описание по-русски что происходит в этой части",
-    "timecode_start": "00:00",
-    "timecode_end": "00:30",
-    "prompt": "Precise English visual prompt for image generation"
-  }
-]`,
+Ответь ТОЛЬКО валидным JSON массивом (ровно ${imageCount} элементов) без markdown-обёрток:
+[{"scene": "Русское описание", "prompt": "English prompt"}]`,
     }],
   })
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
   const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
 
-  let scenes: SceneInfo[] = JSON.parse(cleaned)
+  let promptResults: Array<{ scene: string; prompt: string }> = JSON.parse(cleaned)
+  if (promptResults.length > imageCount) promptResults = promptResults.slice(0, imageCount)
 
-  if (scenes.length > imageCount) scenes = scenes.slice(0, imageCount)
-  while (scenes.length < imageCount) {
-    scenes.push({
-      scene: `Сцена ${scenes.length + 1}`,
-      timecode_start: '00:00',
-      timecode_end: '00:00',
+  while (promptResults.length < imageCount) {
+    const i = promptResults.length
+    promptResults.push({
+      scene: blocksWithTimecodes[i]?.text.slice(0, 80).trim() ?? `Сцена ${i + 1}`,
       prompt: `Cinematic scene related to ${topic}, dramatic lighting, photorealistic, wide shot`,
     })
   }
 
-  return scenes
+  return promptResults.map((p, i) => ({
+    ...p,
+    timecode_start: fmtSec(blocksWithTimecodes[i].start),
+    timecode_end: fmtSec(blocksWithTimecodes[i].end),
+  }))
 }
 
 async function generateImageFlux(

@@ -1954,12 +1954,13 @@ app.post('/render', verifySecret, async (req, res) => {
       })
     })
 
-    // Compute per-image durations
+    // Compute per-image durations from timecodes when available and meaningful
     const durations = images.map((img) => {
-      const hasTc = img.timecode_start && img.timecode_end
-      return hasTc
-        ? Math.max(1, parseSecs(img.timecode_end) - parseSecs(img.timecode_start))
-        : defaultDuration
+      if (img.timecode_start && img.timecode_end) {
+        const tc = parseSecs(img.timecode_end) - parseSecs(img.timecode_start)
+        if (tc > 0.5) return tc  // valid proportional timecode
+      }
+      return defaultDuration  // fallback: old projects or no timecodes
     })
     const totalImagesDuration = durations.reduce((a, b) => a + b, 0)
     if (totalImagesDuration < audioDuration) {
