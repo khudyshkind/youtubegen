@@ -81,20 +81,23 @@ export async function POST(req: NextRequest) {
     const videoSearch = await ytFetch('/search', videoSearchParams) as {
       items?: Array<{
         id: { videoId: string }
-        snippet: { channelId: string; channelTitle: string; publishedAt: string }
+        snippet: { title: string; channelId: string; channelTitle: string; publishedAt: string }
       }>
     }
 
     const videoItems = videoSearch.items ?? []
     console.log(`[rising] found ${videoItems.length} videos from search`)
 
-    // ── Step 2: Collect unique channel IDs and video IDs ──────────────────────
-    const channelVideoMap = new Map<string, { videoIds: string[]; channelTitle: string }>()
+    // ── Step 2: Collect unique channel IDs, video IDs and titles ─────────────
+    const channelVideoMap = new Map<string, { videoIds: string[]; videoTitles: string[] }>()
     for (const v of videoItems) {
       const cid = v.snippet.channelId
       if (!cid) continue
-      const entry = channelVideoMap.get(cid) ?? { videoIds: [], channelTitle: v.snippet.channelTitle }
-      if (v.id.videoId) entry.videoIds.push(v.id.videoId)
+      const entry = channelVideoMap.get(cid) ?? { videoIds: [], videoTitles: [] }
+      if (v.id.videoId) {
+        entry.videoIds.push(v.id.videoId)
+        entry.videoTitles.push(v.snippet.title ?? '')
+      }
       channelVideoMap.set(cid, entry)
     }
 
@@ -107,17 +110,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, data: { topic, total_found: 0, channels: [], common_patterns: [] } })
     }
 
-    // ── Step 3: Batch-fetch video statistics ──────────────────────────────────
+    // ── Step 3: Batch-fetch video statistics + titles ─────────────────────────
     const allVideoIds = videoItems.map(v => v.id.videoId).filter(Boolean)
     const videoStatsRes = allVideoIds.length > 0
-      ? await ytFetch('/videos', { part: 'statistics', id: allVideoIds.join(',') }) as {
-          items?: Array<{ id: string; statistics: { viewCount?: string } }>
+      ? await ytFetch('/videos', { part: 'statistics,snippet', id: allVideoIds.join(',') }) as {
+          items?: Array<{ id: string; snippet: { title: string }; statistics: { viewCount?: string } }>
         }
       : { items: [] }
 
     const videoViewMap = new Map<string, number>()
+    const videoTitleMap = new Map<string, string>()
     for (const v of videoStatsRes.items ?? []) {
       videoViewMap.set(v.id, parseInt(v.statistics.viewCount ?? '0'))
+      videoTitleMap.set(v.id, v.snippet.title ?? '')
     }
 
     // ── Step 4: Batch-fetch channel statistics (up to 50 at a time) ───────────
@@ -174,6 +179,8 @@ export async function POST(req: NextRequest) {
     console.log(`[rising] after age filter (channel created within ${monthsMax === 0 ? 'any' : monthsMax} months): ${afterAgeFilter.length}`)
     console.log(`[rising] final filtered: ${afterAgeFilter.length}`)
 
+    const fmt = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}М` : n >= 1_000 ? `${Math.round(n / 1_000)}К` : String(n)
+
     // ── Step 6: Compute metrics ───────────────────────────────────────────────
     const enriched = afterAgeFilter.slice(0, 10).map(ch => {
       const subs = parseInt(ch.statistics.subscriberCount ?? '0')
@@ -182,11 +189,20 @@ export async function POST(req: NextRequest) {
       const publishedAt = new Date(ch.snippet.publishedAt).getTime()
       const monthsOld = Math.max(1, (now - publishedAt) / (1000 * 60 * 60 * 24 * 30.44))
 
-      // Use views of the recent videos we found for this channel
-      const chVideoIds = channelVideoMap.get(ch.id)?.videoIds ?? []
-      const recentViews = chVideoIds.map(vid => videoViewMap.get(vid) ?? 0)
-      const avgViews = recentViews.length > 0
-        ? Math.round(recentViews.reduce((a, b) => a + b, 0) / recentViews.length)
+      // Build top videos list with titles and view counts
+      const chEntry = channelVideoMap.get(ch.id)
+      const chVideoIds = chEntry?.videoIds ?? []
+      const topVideos = chVideoIds
+        .map(vid => ({
+          title: videoTitleMap.get(vid) ?? chEntry?.videoTitles[chVideoIds.indexOf(vid)] ?? '',
+          views: videoViewMap.get(vid) ?? 0,
+        }))
+        .filter(v => v.title)
+        .sort((a, b) => b.views - a.views)
+        .slice(0, 3)
+
+      const avgViews = topVideos.length > 0
+        ? Math.round(topVideos.reduce((s, v) => s + v.views, 0) / topVideos.length)
         : videos > 0 ? Math.round(totalViews / videos) : 0
 
       const viralRatio = subs > 0 ? Math.round((avgViews / subs) * 10) / 10 : 0
@@ -204,6 +220,7 @@ export async function POST(req: NextRequest) {
         upload_frequency: 0,
         avg_views: avgViews,
         viral_ratio: viralRatio,
+        top_videos: topVideos,
       }
     })
 
@@ -233,35 +250,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, data: { topic, total_found: 0, channels: [], common_patterns: [] } })
     }
 
-    // ── Step 7: Claude analysis ───────────────────────────────────────────────
+    // ── Step 7: Claude analysis with real video titles ────────────────────────
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
 
-    const channelsSummary = enriched.map(ch =>
-      `${ch.name}: ${ch.subscribers} подп., ${ch.months_old} мес. старый, ${ch.video_count} видео, ${ch.avg_views} ср. просм., виральность ${ch.viral_ratio}x`
-    ).join('\n')
+    const channelsSummary = enriched.map((ch, i) => {
+      const videoLines = ch.top_videos.length > 0
+        ? ch.top_videos.map((v, j) => `  ${j + 1}. "${v.title}" — ${fmt(v.views)} просм.`).join('\n')
+        : '  (нет данных по видео)'
+      return `Канал ${i + 1}: ${ch.name}
+  Возраст: ${ch.months_old} мес., ${fmt(ch.subscribers)} подп. (~${fmt(ch.monthly_growth_estimate)}/мес)
+  Видео: ${ch.video_count}, виральность ${ch.viral_ratio}x, ср. просмотры ${fmt(ch.avg_views)}
+  Топ видео:
+${videoLines}`
+    }).join('\n\n')
 
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1800,
+      max_tokens: 2500,
       messages: [{
         role: 'user',
-        content: `Ты эксперт по YouTube росту. Ниша: "${topic}".
-Восходящие каналы с недавней высокопросматриваемой активностью:
+        content: `Ты эксперт по YouTube росту.
+Проанализируй ${enriched.length} восходящих каналов в нише "${topic}".
+Для КАЖДОГО канала используй ТОЛЬКО ЕГО реальные названия видео для определения причины роста — не давай общих ответов типа "регулярные публикации".
+
 ${channelsSummary}
 
-Для каждого канала определи: причину роста, стратегию контента, что перенять.
 Верни JSON (ровно ${enriched.length} элементов в channels):
 {
   "channels": [
     {
-      "name": "название как в данных",
-      "growth_reason": "Конкретная причина роста (1-2 предложения)",
-      "strategy": "Стратегия контента (1-2 предложения)",
-      "key_takeaway": "Что скопировать (1 предложение)"
+      "name": "название канала как в данных",
+      "growth_reason": "Конкретная причина на основе РЕАЛЬНЫХ названий видео — что именно сработало в контенте",
+      "strategy": "Конкретная стратегия — формат видео, тематика, стиль заголовков на основе примеров",
+      "key_takeaway": "Что именно скопировать — с примером из топ видео этого канала"
     }
   ],
   "common_patterns": [
-    "Общий паттерн у нескольких каналов (1-2 предложения)"
+    "Конкретный паттерн у нескольких каналов с примером"
   ]
 }
 Только JSON, без markdown.`,

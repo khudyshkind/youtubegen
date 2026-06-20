@@ -140,6 +140,7 @@ interface RisingStarsResult {
     upload_frequency: number
     avg_views: number
     viral_ratio: number
+    top_videos?: Array<{ title: string; views: number }>
     growth_reason: string
     strategy: string
     key_takeaway: string
@@ -754,10 +755,12 @@ function TrendsTab({ externalResult, onClearExternal }: {
 
 // ─── Channel Tab ──────────────────────────────────────────────────────────────
 
-function ChannelTab({ externalResult, onClearExternal, initialChannel }: {
+function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromRisingStars, onBackToRisingStars }: {
   externalResult?: ChannelResult | null
   onClearExternal?: () => void
   initialChannel?: string
+  cameFromRisingStars?: boolean
+  onBackToRisingStars?: () => void
 }) {
   const { t } = useLang()
   const router = useRouter()
@@ -813,6 +816,13 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel }: {
 
   return (
     <div className="flex flex-col gap-5">
+      {cameFromRisingStars && onBackToRisingStars && (
+        <button onClick={onBackToRisingStars}
+          className="no-print flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors self-start">
+          ← Назад к восходящим звёздам
+        </button>
+      )}
+
       {externalResult && (
         <button onClick={onClearExternal}
           className="no-print flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors self-start">
@@ -1981,10 +1991,14 @@ function RisingStarsTab({
   externalResult,
   onClearExternal,
   onGoToChannel,
+  savedResult,
+  onResult,
 }: {
   externalResult?: RisingStarsResult | null
   onClearExternal?: () => void
   onGoToChannel: (channelUrl: string) => void
+  savedResult?: RisingStarsResult | null
+  onResult?: (r: RisingStarsResult | null) => void
 }) {
   const router = useRouter()
   const { setScriptParams, setStep } = useStudioStore()
@@ -1996,7 +2010,8 @@ function RisingStarsTab({
   const [anyAge, setAnyAge] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<RisingStarsResult | null>(null)
+  // Initialize from savedResult so results survive tab switches
+  const [result, setResult] = useState<RisingStarsResult | null>(savedResult ?? null)
 
   const displayResult = externalResult ?? result
 
@@ -2004,6 +2019,7 @@ function RisingStarsTab({
     if (!topic.trim()) { setError('Введите тему'); return }
     setError(null)
     setResult(null)
+    onResult?.(null)
     setLoading(true)
     try {
       const res = await fetch('/api/analytics/rising-stars', {
@@ -2021,6 +2037,7 @@ function RisingStarsTab({
         setError(json.code === 'NO_CREDITS' ? 'Недостаточно кредитов' : (json.error ?? 'Ошибка'))
       } else {
         setResult(json.data!)
+        onResult?.(json.data!)
         void refreshCredits()
       }
     } catch {
@@ -2045,7 +2062,14 @@ function RisingStarsTab({
         </button>
       )}
 
-      {!externalResult && (
+      {result && !externalResult && (
+        <button onClick={() => { setResult(null); onResult?.(null) }}
+          className="no-print self-start flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors">
+          ← Новый поиск
+        </button>
+      )}
+
+      {!externalResult && !result && (
         <Card>
           <div className="flex flex-col gap-4">
             <div>
@@ -2196,6 +2220,18 @@ function RisingStarsTab({
                   </div>
                 ))}
               </div>
+
+              {ch.top_videos && ch.top_videos.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Топ видео</p>
+                  {ch.top_videos.map((v, j) => (
+                    <div key={j} className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-slate-400 line-clamp-1 flex-1">{j + 1}. {v.title}</span>
+                      <span className="text-xs text-slate-500 shrink-0">{fmtNum(v.views)} просм.</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div className="flex flex-col gap-2 rounded-xl p-3"
                 style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.15)' }}>
@@ -2349,6 +2385,8 @@ export default function AnalyticsPage() {
   const [tab, setTab] = useState<Tab>('niche')
   const [openedReport, setOpenedReport] = useState<AnalyticsReport | null>(null)
   const [pendingChannelQuery, setPendingChannelQuery] = useState<string | null>(null)
+  const [risingStarsResult, setRisingStarsResult] = useState<RisingStarsResult | null>(null)
+  const [cameFromRisingStars, setCameFromRisingStars] = useState(false)
 
   function handleOpenReport(report: AnalyticsReport) {
     setOpenedReport(report)
@@ -2362,8 +2400,15 @@ export default function AnalyticsPage() {
 
   function handleGoToChannel(channelUrl: string) {
     setPendingChannelQuery(channelUrl)
+    setCameFromRisingStars(true)
     setTab('channel')
     clearOpenedReport()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function handleBackToRisingStars() {
+    setCameFromRisingStars(false)
+    setTab('rising_stars')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -2410,7 +2455,7 @@ export default function AnalyticsPage() {
         <div className="no-print flex gap-1 mb-6 p-1 rounded-xl"
           style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
           {TABS.map(({ id, label }) => (
-            <button key={id} onClick={() => { setTab(id); if (id !== openedReport?.report_type) clearOpenedReport() }}
+            <button key={id} onClick={() => { setTab(id); setCameFromRisingStars(false); if (id !== openedReport?.report_type) clearOpenedReport() }}
               className="flex-1 py-2.5 px-2 rounded-lg text-xs sm:text-sm font-medium transition-all"
               style={{
                 background: tab === id ? 'rgba(124,58,237,0.35)' : 'transparent',
@@ -2440,6 +2485,8 @@ export default function AnalyticsPage() {
             externalResult={openedReport?.report_type === 'channel' ? openedReport.result as ChannelResult : null}
             onClearExternal={clearOpenedReport}
             initialChannel={pendingChannelQuery ?? undefined}
+            cameFromRisingStars={cameFromRisingStars}
+            onBackToRisingStars={handleBackToRisingStars}
           />
         )}
         {tab === 'revenue' && (
@@ -2471,6 +2518,8 @@ export default function AnalyticsPage() {
             externalResult={openedReport?.report_type === 'rising_stars' ? openedReport.result as RisingStarsResult : null}
             onClearExternal={clearOpenedReport}
             onGoToChannel={handleGoToChannel}
+            savedResult={risingStarsResult}
+            onResult={r => setRisingStarsResult(r)}
           />
         )}
         {tab === 'history' && <HistoryTab onOpen={handleOpenReport} />}
