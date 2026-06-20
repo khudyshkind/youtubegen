@@ -91,7 +91,7 @@ async function generateGptMini(
     body: JSON.stringify({
       model: 'gpt-image-1-mini',
       prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
-      size: '1024x1024',
+      size: '1536x1024',
       quality: 'medium',
       n: 1,
     }),
