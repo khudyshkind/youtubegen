@@ -1982,6 +1982,7 @@ function RisingStarsTab({
   const [subMin, setSubMin] = useState('1000')
   const [subMax, setSubMax] = useState('100000')
   const [monthsMax, setMonthsMax] = useState(12)
+  const [anyAge, setAnyAge] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<RisingStarsResult | null>(null)
@@ -2001,7 +2002,7 @@ function RisingStarsTab({
           topic: topic.trim(),
           sub_min: parseInt(subMin) || 1000,
           sub_max: parseInt(subMax) || 100000,
-          months_max: monthsMax,
+          months_max: anyAge ? 0 : monthsMax,
         }),
       })
       const json = await res.json() as { ok: boolean; data?: RisingStarsResult; error?: string; code?: string }
@@ -2072,19 +2073,44 @@ function RisingStarsTab({
             </div>
 
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5">Канал создан не позднее</label>
-              <div className="flex gap-2">
-                {([3, 6, 12, 0] as const).map(m => (
-                  <button key={m} type="button" onClick={() => setMonthsMax(m)}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
-                    style={{
-                      background: monthsMax === m ? 'rgba(124,58,237,0.3)' : 'rgba(255,255,255,0.05)',
-                      border: `1px solid ${monthsMax === m ? 'rgba(124,58,237,0.6)' : 'rgba(255,255,255,0.1)'}`,
-                      color: monthsMax === m ? '#c4b5fd' : '#94a3b8',
-                    }}>
-                    {m === 0 ? 'Любой' : `${m} мес`}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs text-slate-400">
+                  Видео опубликованы за последние:{' '}
+                  <span className="text-violet-300 font-semibold">
+                    {anyAge ? 'любой период' : `${monthsMax} мес.`}
+                  </span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={anyAge}
+                    onChange={e => setAnyAge(e.target.checked)}
+                    className="w-3.5 h-3.5 accent-violet-500"
+                  />
+                  <span className="text-xs text-slate-400">Без ограничения</span>
+                </label>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={1}
+                  max={36}
+                  step={1}
+                  value={monthsMax}
+                  onChange={e => { setMonthsMax(parseInt(e.target.value)); setAnyAge(false) }}
+                  disabled={anyAge}
+                  className="flex-1 accent-violet-500 disabled:opacity-30"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  max={36}
+                  value={monthsMax}
+                  onChange={e => { const v = Math.max(1, Math.min(36, parseInt(e.target.value) || 1)); setMonthsMax(v); setAnyAge(false) }}
+                  disabled={anyAge}
+                  className="w-16 rounded-lg px-2 py-1.5 text-sm text-center text-white outline-none disabled:opacity-30"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                />
               </div>
             </div>
 
