@@ -6,6 +6,8 @@ import { hasCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SceneImage, SubtitleBlock } from '@/lib/types'
+import { getStyleConfig } from '@/lib/image-style-configs'
+import type { StyleConfig } from '@/lib/image-style-configs'
 
 export const maxDuration = 300
 
@@ -58,9 +60,9 @@ async function generateScenesFromSubtitles(
   imageCount: number,
   durationSec: number,
   subtitleBlocks: SubtitleBlock[],
+  styleConfig: StyleConfig,
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
-  // 77 scenes × ~70 tokens/scene = ~5400 tokens; cap at Haiku max 8192
   const maxTokens = Math.min(8192, Math.max(2500, imageCount * 80))
 
   const groups = splitSubtitlesIntoGroups(subtitleBlocks, imageCount)
@@ -83,11 +85,14 @@ async function generateScenesFromSubtitles(
 1. scene — краткое русское описание того что происходит
 2. prompt — конкретный английский промпт для генерации иллюстрации через AI
 
+СТИЛЬ ИЛЛЮСТРАЦИЙ (обязательно соблюдать в каждом промте):
+${styleConfig.claudeInstruction}
+
 ТРЕБОВАНИЯ К ПРОМПТАМ:
 - Только конкретные визуальные образы: предметы, люди, места, действия
 - Никаких абстракций («концепция», «идея», «символ»)
-- Cinematic lighting, photorealistic, 25–35 слов
 - Без текста, надписей, логотипов
+- Строго соответствовать указанному стилю
 
 СЦЕНЫ:
 ${scenesWithText.map((s, i) => `Сцена ${i + 1} [${fmtSec(s.start)}–${fmtSec(s.end)}]: "${s.text}"`).join('\n')}
@@ -105,7 +110,7 @@ ${scenesWithText.map((s, i) => `Сцена ${i + 1} [${fmtSec(s.start)}–${fmtS
   while (promptResults.length < imageCount) {
     promptResults.push({
       scene: `Сцена ${promptResults.length + 1}`,
-      prompt: `Cinematic scene related to ${topic}, dramatic lighting, photorealistic, wide shot`,
+      prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
     })
   }
 
@@ -168,6 +173,7 @@ async function generateScenesFromScript(
   topic: string,
   durationSec: number,
   imageCount: number,
+  styleConfig: StyleConfig,
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
   const maxTokens = Math.min(8192, Math.max(2500, imageCount * 80))
@@ -186,11 +192,14 @@ async function generateScenesFromScript(
 1. scene — краткое русское описание того что происходит
 2. prompt — конкретный английский промпт для генерации иллюстрации через AI
 
+СТИЛЬ ИЛЛЮСТРАЦИЙ (обязательно соблюдать в каждом промте):
+${styleConfig.claudeInstruction}
+
 ТРЕБОВАНИЯ К ПРОМПТАМ:
 - Только конкретные визуальные образы: предметы, люди, места, действия
 - Никаких абстракций («концепция», «идея», «символ»)
-- Cinematic lighting, photorealistic, 25–35 слов
 - Без текста, надписей, логотипов
+- Строго соответствовать указанному стилю
 
 ОТРЫВКИ:
 ${blocksWithTimecodes.map((b, i) => `Сцена ${i + 1} [${fmtSec(b.start)}–${fmtSec(b.end)}]:\n"${b.text.slice(0, 400)}"`).join('\n\n')}
@@ -210,7 +219,7 @@ ${blocksWithTimecodes.map((b, i) => `Сцена ${i + 1} [${fmtSec(b.start)}–$
     const i = promptResults.length
     promptResults.push({
       scene: blocksWithTimecodes[i]?.text.slice(0, 80).trim() ?? `Сцена ${i + 1}`,
-      prompt: `Cinematic scene related to ${topic}, dramatic lighting, photorealistic, wide shot`,
+      prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
     })
   }
 
@@ -324,12 +333,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
     }
 
+    // Resolve style config — used both for Claude prompts and Flux suffix
+    const styleConfig = getStyleConfig(image_style)
+    console.log(`[images] engine=${engine} style="${image_style ?? 'default'}" suffix="${styleConfig.fluxSuffix.slice(0, 60)}"`)
+
     const hasSubtitles = Array.isArray(subtitle_blocks) && subtitle_blocks.length > 0
-    console.log(`[images] engine=${engine} mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
+    console.log(`[images] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
 
     const scenes = hasSubtitles
-      ? await generateScenesFromSubtitles(topic, count, duration_sec, subtitle_blocks!)
-      : await generateScenesFromScript(script, topic, duration_sec, count)
+      ? await generateScenesFromSubtitles(topic, count, duration_sec, subtitle_blocks!, styleConfig)
+      : await generateScenesFromScript(script, topic, duration_sec, count, styleConfig)
 
     console.log(`[images] scenes generated: ${scenes.length}`)
 
@@ -349,8 +362,10 @@ export async function POST(request: NextRequest) {
       await Promise.all(
         scenes.slice(batchStart, batchEnd).map(async (scn, batchIdx) => {
           const i = batchStart + batchIdx
-          const styledPrompt = image_style ? `${scn.prompt}, ${image_style}` : scn.prompt
-          console.log(`[images] generating ${i + 1}/${scenes.length}`)
+          // Use strong fluxSuffix from config — not the raw image_style string.
+          // Raw image_style is too vague and can conflict with Claude's base prompt.
+          const styledPrompt = `${scn.prompt}, ${styleConfig.fluxSuffix}`
+          console.log(`[images] generating ${i + 1}/${scenes.length} prompt="${styledPrompt.slice(0, 80)}"`)
           try {
             const url = engine === 'gpt_mini'
               ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)

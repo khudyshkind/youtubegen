@@ -6,6 +6,7 @@ import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SceneImage } from '@/lib/types'
+import { getStyleConfig } from '@/lib/image-style-configs'
 
 export const maxDuration = 120
 
@@ -23,15 +24,16 @@ interface FalImageResult {
   images: Array<{ url: string }>
 }
 
-async function enhancePrompt(raw: string): Promise<string> {
+async function enhancePrompt(raw: string, styleHint: string): Promise<string> {
   try {
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 200,
-      system: `You are an expert at writing image generation prompts for AI image models (photorealistic style).
+      system: `You are an expert at writing image generation prompts for AI image models.
+STYLE: ${styleHint}
 RULES: Generate LITERAL visual descriptions only. No metaphors, no abstract art.
-Start with the MAIN VISUAL SUBJECT. Add camera angle, lighting, time of day, colors, environment.
+Start with the MAIN VISUAL SUBJECT. Add relevant details matching the style.
 30–40 words. English only. Return only the prompt text, nothing else.`,
       messages: [{ role: 'user', content: `Enhance this scene description: ${raw}` }],
     })
@@ -140,9 +142,10 @@ export async function POST(request: NextRequest) {
     const check = await requireCredits(user.id, engine === 'gpt_mini' ? 'image_gpt_mini' : 'image', supabase)
     if (!check.ok) return NextResponse.json(check, { status: 402 })
 
-    const enhancedBase = await enhancePrompt(prompt)
-    const enhancedPrompt = image_style ? `${enhancedBase}, ${image_style}` : enhancedBase
-    console.log(`[image-single] engine=${engine} scene_index=${scene_index} prompt:`, enhancedPrompt)
+    const styleConfig = getStyleConfig(image_style)
+    const enhancedBase = await enhancePrompt(prompt, styleConfig.enhanceSystemHint)
+    const enhancedPrompt = `${enhancedBase}, ${styleConfig.fluxSuffix}`
+    console.log(`[image-single] engine=${engine} scene_index=${scene_index} style="${image_style ?? 'default'}" prompt:`, enhancedPrompt)
 
     const { data: projectRow } = await supabase
       .from('projects')
