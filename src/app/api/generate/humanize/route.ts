@@ -7,7 +7,33 @@ import { env } from '@/lib/env'
 
 export const maxDuration = 60
 
-const HUMANIZE_PROMPT = `Ты редактор текста. Перепиши этот сценарий так чтобы он звучал как живой человек а не как ИИ.
+function detectLanguage(text: string): 'en' | 'ru' {
+  const latin = (text.match(/[a-zA-Z]/g) ?? []).length
+  const cyrillic = (text.match(/[а-яёА-ЯЁ]/g) ?? []).length
+  return latin > cyrillic ? 'en' : 'ru'
+}
+
+function buildHumanizePrompt(lang: 'en' | 'ru'): string {
+  if (lang === 'en') {
+    return `You are a text editor. Rewrite this script to sound like a real human, not an AI.
+
+Rules:
+1. Add small speech imperfections — thoughts that trail off and come back, slight repetitions for emphasis
+2. Use conversational phrases and contractions
+3. Vary sentence length — mix short and long, sometimes very short for impact. Like this.
+4. Add personal asides: 'by the way', 'interestingly', 'here's the thing', 'you know what?'
+5. Remove perfect structure — real people don't always speak in order
+6. Replace formal words with conversational synonyms
+7. Add rhetorical questions to the audience
+8. Keep all meaning and facts — only the style changes
+9. Keep scene markers [SCENE N] if present
+10. Keep approximately the same volume of text
+
+IMPORTANT: The text is in English. Keep it in English. Do NOT translate to any other language.
+
+Return only the rewritten text without explanations.`
+  }
+  return `Ты редактор текста. Перепиши этот сценарий так чтобы он звучал как живой человек а не как ИИ.
 
 Правила переписывания:
 1. Добавь небольшие речевые несовершенства — незаконченные мысли которые потом возвращаются, лёгкие повторения для акцента
@@ -21,7 +47,10 @@ const HUMANIZE_PROMPT = `Ты редактор текста. Перепиши э
 9. Сохрани маркеры сцен [СЦЕНА N] если они есть
 10. Объём текста должен остаться примерно таким же
 
+ВАЖНО: Текст на русском языке. Сохрани русский язык. НЕ переводи на другой язык.
+
 Верни только переписанный текст без пояснений.`
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,6 +74,7 @@ export async function POST(request: NextRequest) {
     }
 
     const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const lang = detectLanguage(script)
 
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
@@ -52,7 +82,7 @@ export async function POST(request: NextRequest) {
       messages: [
         {
           role: 'user',
-          content: `${HUMANIZE_PROMPT}\n\nСЦЕНАРИЙ:\n${script}`,
+          content: `${buildHumanizePrompt(lang)}\n\nТЕКСТ:\n${script}`,
         },
       ],
     })

@@ -71,9 +71,9 @@ export default function ToolsPage() {
 
   function handleUseInStudio() {
     if (!resultText.trim()) return
-    setScript(resultText)
-    setStep(2)
-    router.push('/studio')
+    useStudioStore.getState().setScript(resultText)
+    useStudioStore.getState().setStep(2)
+    router.push('/studio?from=tools')
   }
 
   const creditCost = (mode: 'unique' | 'human' | 'both') => mode === 'both' ? t('tools.cr2') : t('tools.cr1')
