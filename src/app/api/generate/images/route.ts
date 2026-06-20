@@ -317,108 +317,141 @@ async function generateImageGptMini(
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    const supabase = await createServerSupabase()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
-    }
-
-    const { script, topic, duration_sec, image_count, project_id, image_interval, subtitle_blocks, engine = 'flux', image_style }: ImagesRequest =
-      await request.json()
-
-    if (!script?.trim() || !topic?.trim()) {
-      return NextResponse.json({ ok: false, error: 'script и topic обязательны' }, { status: 400 })
-    }
-
-    // Raised from 20 → 200; client sends the actual count, server no longer hard-caps
-    const count = Math.max(1, Math.min(200, image_count ?? 1))
-    const interval = Math.max(3, Math.min(30, image_interval ?? 10))
-    const costPerImage = engine === 'gpt_mini' ? CREDIT_COSTS.image_gpt_mini : CREDIT_COSTS.image_flux
-    const totalCost = costPerImage * count
-
-    const enough = await hasCredits(user.id, totalCost, supabase)
-    if (!enough) {
-      return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
-    }
-
-    // Resolve style config — used both for Claude prompts and Flux suffix
-    const styleConfig = getStyleConfig(image_style)
-    console.log(`[images] engine=${engine} style="${image_style ?? 'default'}" suffix="${styleConfig.fluxSuffix.slice(0, 60)}"`)
-
-    // Clear existing scene_images before regenerating so stale images aren't served
-    // if the user refreshes the page while generation is in progress
-    if (project_id) {
-      await supabase
-        .from('projects')
-        .update({ scene_images: [] })
-        .eq('id', project_id)
-        .eq('user_id', user.id)
-    }
-
-    const hasSubtitles = Array.isArray(subtitle_blocks) && subtitle_blocks.length > 0
-    console.log(`[images] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
-
-    const scenes = hasSubtitles
-      ? await generateScenesFromSubtitles(topic, count, duration_sec, subtitle_blocks!, styleConfig)
-      : await generateScenesFromScript(script, topic, duration_sec, count, styleConfig)
-
-    console.log(`[images] scenes generated: ${scenes.length}`)
-
-    const serviceClient = createServiceClient()
-    const sceneImages: SceneImage[] = new Array(scenes.length)
-    let successCount = 0
-    let failCount = 0
-
-    // Generate in parallel batches of 5 to stay within rate limits and timeouts.
-    // Sequential (1 at a time) × 77 images × ~7s = ~540s >> 300s Vercel limit.
-    // Parallel 5 at a time × 16 rounds × ~7s = ~110s — safely within limit.
-    const CONCURRENCY = 5
-    for (let batchStart = 0; batchStart < scenes.length; batchStart += CONCURRENCY) {
-      const batchEnd = Math.min(batchStart + CONCURRENCY, scenes.length)
-      console.log(`[images] batch ${Math.floor(batchStart / CONCURRENCY) + 1}: scenes ${batchStart + 1}–${batchEnd} (success=${successCount} failed=${failCount})`)
-
-      await Promise.all(
-        scenes.slice(batchStart, batchEnd).map(async (scn, batchIdx) => {
-          const i = batchStart + batchIdx
-          const styledPrompt = `${scn.prompt}, ${styleConfig.fluxSuffix}`
-          console.log(`[images] scene ${i + 1} REQUESTED style: "${image_style ?? 'default'}"`)
-          console.log(`[images] scene ${i + 1} claude prompt result: "${scn.prompt.slice(0, 120)}"`)
-          console.log(`[images] scene ${i + 1} FINAL flux prompt: "${styledPrompt.slice(0, 180)}"`)
-          console.log(`[images] scene ${i + 1} NEGATIVE prompt: "${styleConfig.negativePrompt}"`)
-          try {
-            const url = engine === 'gpt_mini'
-              ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
-              : await generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient)
-            sceneImages[i] = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end }
-            successCount++
-            await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
-            console.log(`[images] scene ${i + 1} RESULT url: ${url?.slice(0, 100) ?? 'NULL'}`)
-          } catch (err) {
-            failCount++
-            const msg = err instanceof Error ? err.message : String(err)
-            console.error(`[images] scene ${i + 1} FAILED:`, msg)
-            sceneImages[i] = { scene_index: i, prompt: styledPrompt, url: null, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end }
-          }
-        })
-      )
-    }
-
-    console.log(`[images] done: success=${successCount} failed=${failCount} total=${scenes.length}`)
-
-    const validImages = sceneImages.filter(Boolean)
-    if (project_id) {
-      await supabase
-        .from('projects')
-        .update({ scene_images: validImages, image_interval: interval, status: 'generating_video' })
-        .eq('id', project_id)
-        .eq('user_id', user.id)
-    }
-
-    return NextResponse.json({ ok: true, data: { scene_images: validImages, success_count: successCount, fail_count: failCount } })
-  } catch (error) {
-    console.error('[generate/images]', error)
-    return NextResponse.json({ ok: false, error: 'Ошибка генерации иллюстраций' }, { status: 500 })
+  // === Pre-stream checks — return plain JSON on failure ===
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
   }
+
+  const { script, topic, duration_sec, image_count, project_id, image_interval, subtitle_blocks, engine = 'flux', image_style }: ImagesRequest =
+    await request.json()
+
+  if (!script?.trim() || !topic?.trim()) {
+    return NextResponse.json({ ok: false, error: 'script и topic обязательны' }, { status: 400 })
+  }
+
+  const count = Math.max(1, Math.min(200, image_count ?? 1))
+  const interval = Math.max(3, Math.min(30, image_interval ?? 10))
+  const costPerImage = engine === 'gpt_mini' ? CREDIT_COSTS.image_gpt_mini : CREDIT_COSTS.image_flux
+  const totalCost = costPerImage * count
+
+  const enough = await hasCredits(user.id, totalCost, supabase)
+  if (!enough) {
+    return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
+  }
+
+  const styleConfig = getStyleConfig(image_style)
+  console.log(`[images] engine=${engine} style="${image_style ?? 'default'}" suffix="${styleConfig.fluxSuffix.slice(0, 60)}"`)
+
+  // === SSE streaming — keeps the connection alive for the full generation ===
+  const encoder = new TextEncoder()
+  const send = (data: object) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        if (project_id) {
+          await supabase
+            .from('projects')
+            .update({ scene_images: [] })
+            .eq('id', project_id)
+            .eq('user_id', user.id)
+        }
+
+        const hasSubtitles = Array.isArray(subtitle_blocks) && subtitle_blocks.length > 0
+        console.log(`[images] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
+
+        const scenes = hasSubtitles
+          ? await generateScenesFromSubtitles(topic, count, duration_sec, subtitle_blocks!, styleConfig)
+          : await generateScenesFromScript(script, topic, duration_sec, count, styleConfig)
+
+        console.log(`[images] scenes generated: ${scenes.length}`)
+
+        // Tell the client how many images to expect so it can show a progress bar
+        controller.enqueue(send({ type: 'start', total: scenes.length }))
+
+        const serviceClient = createServiceClient()
+        const sceneImages: SceneImage[] = new Array(scenes.length)
+        let successCount = 0
+        let failCount = 0
+
+        const CONCURRENCY = 5
+        for (let batchStart = 0; batchStart < scenes.length; batchStart += CONCURRENCY) {
+          const batchEnd = Math.min(batchStart + CONCURRENCY, scenes.length)
+          const batchNewImages: SceneImage[] = []
+          console.log(`[images] batch ${Math.floor(batchStart / CONCURRENCY) + 1}: scenes ${batchStart + 1}–${batchEnd}`)
+
+          await Promise.all(
+            scenes.slice(batchStart, batchEnd).map(async (scn, batchIdx) => {
+              const i = batchStart + batchIdx
+              const styledPrompt = `${scn.prompt}, ${styleConfig.fluxSuffix}`
+              console.log(`[images] scene ${i + 1} REQUESTED style: "${image_style ?? 'default'}"`)
+              console.log(`[images] scene ${i + 1} claude prompt result: "${scn.prompt.slice(0, 120)}"`)
+              console.log(`[images] scene ${i + 1} FINAL flux prompt: "${styledPrompt.slice(0, 180)}"`)
+              console.log(`[images] scene ${i + 1} NEGATIVE prompt: "${styleConfig.negativePrompt}"`)
+              try {
+                const url = engine === 'gpt_mini'
+                  ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
+                  : await generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient)
+                const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end }
+                sceneImages[i] = img
+                successCount++
+                if (url) batchNewImages.push(img)
+                await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
+                console.log(`[images] scene ${i + 1} RESULT url: ${url?.slice(0, 100) ?? 'NULL'}`)
+              } catch (err) {
+                failCount++
+                const msg = err instanceof Error ? err.message : String(err)
+                console.error(`[images] scene ${i + 1} FAILED:`, msg)
+                sceneImages[i] = { scene_index: i, prompt: styledPrompt, url: null, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end }
+              }
+            })
+          )
+
+          // Send progress after every batch so the client can update its UI immediately
+          controller.enqueue(send({
+            type: 'progress',
+            completed: successCount + failCount,
+            total: scenes.length,
+            images: batchNewImages,
+          }))
+        }
+
+        console.log(`[images] done: success=${successCount} failed=${failCount} total=${scenes.length}`)
+
+        const validImages = sceneImages.filter(Boolean)
+        if (project_id) {
+          await supabase
+            .from('projects')
+            .update({ scene_images: validImages, image_interval: interval, status: 'generating_video' })
+            .eq('id', project_id)
+            .eq('user_id', user.id)
+        }
+
+        controller.enqueue(send({
+          type: 'done',
+          images: validImages,
+          success_count: successCount,
+          fail_count: failCount,
+        }))
+        controller.close()
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        console.error('[generate/images] stream error:', msg)
+        try {
+          controller.enqueue(send({ type: 'error', error: 'Ошибка генерации иллюстраций' }))
+          controller.close()
+        } catch { /* controller may already be closed on a second error */ }
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  })
 }

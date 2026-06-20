@@ -188,6 +188,8 @@ export default function Step5Images() {
   const [uploadError, setUploadError] = useState('')
   const imageFilesRef = useRef<HTMLInputElement>(null)
 
+  const [progress, setProgress] = useState<{ completed: number; total: number } | null>(null)
+
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editingPrompt, setEditingPrompt] = useState('')
   const editingPromptRef = useRef('')
@@ -300,9 +302,9 @@ export default function Step5Images() {
     if (!script?.trim()) { setError(t('step5.err_no_script')); return }
     setError('')
     setLoading(true)
-    // Clear old images immediately — prevents stale images showing during generation
-    // and prevents browser cache from serving old content at unchanged Supabase URLs
+    setProgress(null)
     setSceneImages([])
+
     try {
       const res = await fetch('/api/generate/images', {
         method: 'POST',
@@ -315,24 +317,81 @@ export default function Step5Images() {
           image_style: imageStyle ?? undefined,
         }),
       })
-      const json = await res.json()
-      if (!json.ok) {
+
+      // Pre-stream errors (401, 402, 400) are plain JSON
+      if (!res.ok) {
+        const json = await res.json()
         if (json.code === 'NO_CREDITS') { setError(`${t('step5.err_gen')} (${creditCost} ${t('nav.credits_suffix')})`); return }
-        throw new Error(json.error)
+        throw new Error(json.error ?? t('step5.err_gen'))
       }
-      // Cache-bust all URLs: scenes 0–(oldCount-1) reuse the same Supabase storage paths,
-      // so the browser would show cached old images without a timestamp query param.
-      const ts = Date.now()
-      const images = (json.data.scene_images as SceneImage[]).map((img) => ({
-        ...img,
-        url: img.url ? `${img.url}?t=${ts}` : img.url,
-      }))
-      setSceneImages(images)
-      void refreshCredits()
+
+      // Read SSE stream
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        // SSE events are separated by \n\n; keep the last incomplete chunk in buffer
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() ?? ''
+
+        for (const part of parts) {
+          const line = part.trim()
+          if (!line.startsWith('data: ')) continue
+          try {
+            const data = JSON.parse(line.slice(6)) as {
+              type: string
+              total?: number
+              completed?: number
+              images?: SceneImage[]
+              error?: string
+            }
+
+            if (data.type === 'start') {
+              setProgress({ completed: 0, total: data.total ?? imageCount })
+            } else if (data.type === 'progress') {
+              setProgress({ completed: data.completed ?? 0, total: data.total ?? imageCount })
+              if (data.images?.length) {
+                const ts = Date.now()
+                const newImgs = data.images.map((img) => ({
+                  ...img,
+                  url: img.url ? `${img.url}?t=${ts}` : img.url,
+                }))
+                // Merge into existing progressively-rendered images
+                const current = useStudioStore.getState().sceneImages
+                const merged = [...current]
+                for (const img of newImgs) {
+                  const idx = merged.findIndex((p) => p.scene_index === img.scene_index)
+                  if (idx >= 0) merged[idx] = img
+                  else merged.push(img)
+                }
+                setSceneImages(merged.sort((a, b) => a.scene_index - b.scene_index))
+              }
+            } else if (data.type === 'done') {
+              const ts = Date.now()
+              setSceneImages((data.images ?? []).map((img) => ({
+                ...img,
+                url: img.url ? `${img.url}?t=${ts}` : img.url,
+              })))
+              void refreshCredits()
+            } else if (data.type === 'error') {
+              throw new Error(data.error ?? t('step5.err_gen'))
+            }
+          } catch (parseErr) {
+            if (parseErr instanceof SyntaxError) continue // malformed chunk — skip
+            throw parseErr
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step5.err_gen'))
     } finally {
       setLoading(false)
+      setProgress(null)
     }
   }
 
@@ -597,7 +656,10 @@ export default function Step5Images() {
         {loading ? (
           <>
             <SpinnerIcon className="w-4 h-4 animate-spin" />
-            {t('step5.generating')}
+            {progress
+              ? `${progress.completed} / ${progress.total} · ${t('step5.generating')}`
+              : t('step5.generating')
+            }
           </>
         ) : sceneImages.length > 0 ? (
           `↺ ${t('step2.regenerate')} (−${creditCost} ${t('nav.credits_suffix')})`
@@ -605,6 +667,32 @@ export default function Step5Images() {
           `🎨 ${t('btn.generate')} ${imageCount} (−${creditCost} ${t('nav.credits_suffix')})`
         )}
       </button>
+
+      {loading && progress && (
+        <div
+          className="flex flex-col gap-2 rounded-xl px-4 py-3"
+          style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium" style={{ color: '#A78BFA' }}>{t('step5.generating')}</span>
+            <span className="text-xs tabular-nums" style={{ color: '#94A3B8' }}>
+              {progress.completed} / {progress.total}
+            </span>
+          </div>
+          <div className="w-full rounded-full overflow-hidden" style={{ height: 6, background: 'rgba(255,255,255,0.08)' }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0}%`,
+                background: 'linear-gradient(90deg, #7C3AED, #A78BFA)',
+              }}
+            />
+          </div>
+          <p className="text-xs" style={{ color: '#64748B' }}>
+            {progress.completed} {t('step5.progress_of')} {progress.total} {t('step5.progress_images')}
+          </p>
+        </div>
+      )}
 
       {!loading && (
         <div className="flex gap-2">
