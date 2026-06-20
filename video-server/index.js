@@ -91,6 +91,14 @@ async function sbPatch(table, qs, body) {
   return res.status === 204 ? [] : res.json()
 }
 
+async function updateJob(jobId, data) {
+  try {
+    await sbPatch('video_jobs', `id=eq.${jobId}`, data)
+  } catch (e) {
+    console.error(`[job:${jobId}] updateJob failed:`, e.message)
+  }
+}
+
 // ── Queue operations (bot_content_queue) ─────────────────────────────────────
 async function getQueue() {
   try {
@@ -1880,8 +1888,10 @@ const VF_BASE =
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
-app.post('/render', verifySecret, async (req, res) => {
+// ── Async video rendering pipeline ─────────────────────────────────────────
+async function processVideoJob(jobId, body) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytgen-'))
+  await updateJob(jobId, { status: 'processing', progress: 5 })
 
   try {
     const {
@@ -1894,13 +1904,9 @@ app.post('/render', verifySecret, async (req, res) => {
       transition = 'cut',
       transition_duration = 0.5,
       effects = [],
-    } = req.body
+    } = body
 
-    if (!audio_url || !Array.isArray(images) || !images.length || !project_id) {
-      return res.status(400).json({ ok: false, error: 'Missing audio_url, images, or project_id' })
-    }
-
-    console.log('[render] project:', project_id,
+    console.log(`[job:${jobId}] project:`, project_id,
       '| images:', images.length,
       '| transition:', transition,
       '| effects:', effects,
@@ -2009,6 +2015,7 @@ app.post('/render', verifySecret, async (req, res) => {
         clipPaths.push(...batchResults)
       }
       console.log(`[ffmpeg] pre-conversion done, ${clipPaths.length} clips ready`)
+      await updateJob(jobId, { progress: 10 })
 
       // Sequential xfade: process 2 clips at a time to avoid OOM (SIGKILL) on Railway.
       // Running all N clips simultaneously in one xfade command opens N H264 decoders at once
@@ -2067,6 +2074,7 @@ app.post('/render', verifySecret, async (req, res) => {
         })
       })
       console.log('[ffmpeg] xfade+mux done:', transition, td + 's')
+      await updateJob(jobId, { progress: 40 })
     } else {
       // Concat demuxer — simple cut between scenes
       const concatLines = []
@@ -2096,6 +2104,7 @@ app.post('/render', verifySecret, async (req, res) => {
         })
       })
       console.log('[ffmpeg] concat done')
+      await updateJob(jobId, { progress: 40 })
     }
 
     // ── Pass 2: Apply visual effects ─────────────────────────────────────────
@@ -2125,6 +2134,7 @@ app.post('/render', verifySecret, async (req, res) => {
       })
       currentPath = tempEffectsPath
       console.log('[ffmpeg] effects applied:', effects.join(', '))
+      await updateJob(jobId, { progress: 60 })
     }
 
     // ── Pass 3: Burn subtitles ────────────────────────────────────────────────
@@ -2156,6 +2166,7 @@ app.post('/render', verifySecret, async (req, res) => {
           })
         })
         console.log('[ffmpeg] subtitle burn-in done')
+        await updateJob(jobId, { progress: 80 })
       } catch (subsErr) {
         console.warn('[ffmpeg] subtitle burn-in failed, skipping subs:', subsErr.message)
         fs.renameSync(currentPath, outputPath)
@@ -2164,6 +2175,7 @@ app.post('/render', verifySecret, async (req, res) => {
       fs.renameSync(currentPath, outputPath)
     }
 
+    await updateJob(jobId, { progress: 95 })
     // Upload MP4 to Supabase Storage via REST API
     const fileBuffer = fs.readFileSync(outputPath)
     const storagePath = `${project_id}/output.mp4`
@@ -2185,16 +2197,67 @@ app.post('/render', verifySecret, async (req, res) => {
     }
 
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/videos/${storagePath}`
-    return res.json({ ok: true, video_url: publicUrl })
+    await updateJob(jobId, {
+      status: 'completed',
+      progress: 100,
+      video_url: publicUrl,
+      completed_at: new Date().toISOString(),
+    })
+    console.log(`[job:${jobId}] done →`, publicUrl)
   } catch (err) {
-    console.error('[/render]', err)
-    return res.status(500).json({ ok: false, error: err.message })
+    console.error(`[job:${jobId}] failed:`, err.message)
+    await updateJob(jobId, { status: 'failed', error_message: err.message })
   } finally {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true })
     } catch (e) {
       console.warn('[cleanup] rmSync failed:', e.message)
     }
+  }
+}
+
+app.post('/render', verifySecret, async (req, res) => {
+  const { audio_url, images, project_id, user_id } = req.body
+
+  if (!audio_url || !Array.isArray(images) || !images.length || !project_id) {
+    return res.status(400).json({ ok: false, error: 'Missing audio_url, images, or project_id' })
+  }
+
+  let jobId
+  try {
+    const rows = await sbPost('video_jobs', {
+      project_id,
+      user_id: user_id ?? null,
+      status: 'pending',
+      progress: 0,
+    })
+    jobId = Array.isArray(rows) ? rows[0]?.id : rows?.id
+    if (!jobId) throw new Error('no id returned from video_jobs insert')
+  } catch (err) {
+    console.error('[render] create job failed:', err.message)
+    return res.status(500).json({ ok: false, error: 'Failed to create render job' })
+  }
+
+  // Fire-and-forget: process in background without blocking the HTTP response
+  setImmediate(() => {
+    processVideoJob(jobId, req.body).catch((err) =>
+      console.error(`[job:${jobId}] unhandled:`, err.message)
+    )
+  })
+
+  return res.json({ ok: true, job_id: jobId, status: 'pending' })
+})
+
+app.get('/status/:jobId', verifySecret, async (req, res) => {
+  try {
+    const rows = await sbGet(
+      'video_jobs',
+      `id=eq.${req.params.jobId}&select=id,status,progress,video_url,error_message`
+    )
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'Job not found' })
+    return res.json({ ok: true, ...rows[0] })
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message })
   }
 })
 

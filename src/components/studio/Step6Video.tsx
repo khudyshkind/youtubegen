@@ -7,7 +7,7 @@ import { refreshCredits } from '@/lib/refresh-credits'
 import { useLang } from '@/hooks/useLang'
 
 type DownloadState = 'idle' | 'loading' | 'done' | 'error'
-type RenderState = 'idle' | 'loading' | 'done' | 'error'
+type RenderState = 'idle' | 'queued' | 'processing' | 'done' | 'error'
 
 const TRANSITIONS_BASE = [
   { id: 'cut',        icon: '✂️'  },
@@ -91,6 +91,9 @@ export default function Step6Video() {
   const [downloadError, setDownloadError] = useState('')
   const [renderState, setRenderState] = useState<RenderState>(videoUrl ? 'done' : 'idle')
   const [renderError, setRenderError] = useState('')
+  const [renderJobId, setRenderJobId] = useState<string | null>(null)
+  const [renderProgress, setRenderProgress] = useState(0)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [burnIn, setBurnIn] = useState(true)
   const [transition, setTransition] = useState('cut')
   const [transitionDuration, setTransitionDuration] = useState(0.5)
@@ -116,6 +119,9 @@ export default function Step6Video() {
     document.addEventListener('mousedown', onOutside)
     return () => document.removeEventListener('mousedown', onOutside)
   }, [])
+
+  // Stop polling on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   function downloadSrt() {
     const content = toSrt(subtitleBlocks)
@@ -166,10 +172,39 @@ export default function Step6Video() {
     }
   }
 
+  function startPolling(jobId: string) {
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/generate/video/status?job_id=${jobId}`)
+        const json = await res.json() as { ok: boolean; status?: string; progress?: number; video_url?: string; error_message?: string }
+        if (!res.ok || !json.ok) return
+
+        setRenderProgress(json.progress ?? 0)
+
+        if (json.status === 'completed' && json.video_url) {
+          clearInterval(pollRef.current!)
+          pollRef.current = null
+          setVideoUrl(json.video_url)
+          void refreshCredits()
+          setRenderState('done')
+        } else if (json.status === 'failed') {
+          clearInterval(pollRef.current!)
+          pollRef.current = null
+          setRenderError(json.error_message ?? 'Ошибка рендеринга')
+          setRenderState('error')
+        } else if (json.status === 'processing') {
+          setRenderState('processing')
+        }
+      } catch (_) {}
+    }, 3000)
+  }
+
   async function handleRender() {
     if (!audioUrl || !hasImages || !projectId) return
-    setRenderState('loading')
+    setRenderState('queued')
     setRenderError('')
+    setRenderProgress(0)
     try {
       const images = sceneImages
         .filter((img) => img.url)
@@ -190,11 +225,13 @@ export default function Step6Video() {
           effects,
         }),
       })
-      const json = await res.json()
-      if (!res.ok || !json.ok) throw new Error((json as { error?: string }).error ?? `HTTP ${res.status}`)
-      setVideoUrl(json.data.video_url)
-      void refreshCredits()
-      setRenderState('done')
+      const json = await res.json() as { ok: boolean; data?: { job_id: string }; error?: string }
+      if (!res.ok || !json.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+
+      const jobId = json.data!.job_id
+      setRenderJobId(jobId)
+      setRenderState('processing')
+      startPolling(jobId)
     } catch (err) {
       setRenderError(err instanceof Error ? err.message : String(err))
       setRenderState('error')
@@ -474,7 +511,7 @@ export default function Step6Video() {
             ? { border: '2px solid rgba(16,185,129,0.4)', background: 'rgba(16,185,129,0.06)' }
             : renderState === 'error'
             ? { border: '2px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.06)' }
-            : renderState === 'loading'
+            : renderState === 'queued' || renderState === 'processing'
             ? { border: '2px solid rgba(37,99,235,0.3)', background: 'rgba(37,99,235,0.06)' }
             : { border: '2px solid rgba(124,58,237,0.25)', background: 'rgba(124,58,237,0.05)' }
         }
@@ -517,14 +554,38 @@ export default function Step6Video() {
           </>
         )}
 
-        {renderState === 'loading' && (
-          <div className="flex flex-col items-center gap-3 py-2">
-            <svg className="w-8 h-8 text-violet-400 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-            </svg>
-            <p className="text-sm font-semibold text-blue-300">{t('step6.rendering')}</p>
-            <p className="text-xs text-blue-400">{t('step6.render_hint')}</p>
+        {(renderState === 'queued' || renderState === 'processing') && (
+          <div className="flex flex-col gap-3 py-2">
+            <div className="flex items-center gap-3">
+              <svg className="w-6 h-6 text-blue-400 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-blue-300">
+                  {renderState === 'queued' ? t('step6.render_queued') : t('step6.rendering')}
+                </p>
+                <p className="text-xs text-blue-400 mt-0.5">{t('step6.render_hint')}</p>
+              </div>
+              <span className="text-xs font-mono text-blue-400 shrink-0">{renderProgress}%</span>
+            </div>
+            <div className="w-full rounded-full overflow-hidden" style={{ height: '6px', background: 'rgba(255,255,255,0.08)' }}>
+              <div
+                className="h-full rounded-full transition-all duration-700"
+                style={{
+                  width: `${renderProgress}%`,
+                  background: 'linear-gradient(90deg, #6D28D9, #2563EB)',
+                  boxShadow: '0 0 8px rgba(99,102,241,0.6)',
+                }}
+              />
+            </div>
+            <p className="text-xs text-blue-500 text-center">
+              {renderProgress < 10 ? t('step6.progress_prep')
+                : renderProgress < 40 ? t('step6.progress_xfade')
+                : renderProgress < 65 ? t('step6.progress_effects')
+                : renderProgress < 85 ? t('step6.progress_subs')
+                : t('step6.progress_upload')}
+            </p>
           </div>
         )}
 
@@ -551,7 +612,7 @@ export default function Step6Video() {
               </a>
               <button
                 type="button"
-                onClick={() => setRenderState('idle')}
+                onClick={() => { setRenderState('idle'); setRenderProgress(0); setRenderJobId(null) }}
                 className="px-4 py-2 btn-ghost-dark rounded-xl text-sm"
               >
                 {t('step6.reassemble')}
@@ -566,7 +627,7 @@ export default function Step6Video() {
             <p className="text-xs text-red-400 mb-3">{renderError}</p>
             <button
               type="button"
-              onClick={() => setRenderState('idle')}
+              onClick={() => { setRenderState('idle'); setRenderProgress(0); setRenderJobId(null) }}
               className="px-4 py-2 text-white font-medium rounded-xl text-xs transition-colors"
               style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.3)' }}
             >

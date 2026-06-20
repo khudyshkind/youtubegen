@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
-import { requireCredits, spendCredits } from '@/lib/credits'
-import { trackEvent } from '@/lib/analytics'
-import { sendVideoReadyEmail } from '@/lib/email'
+import { createServerSupabase } from '@/lib/supabase-server'
+import { requireCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import type { SceneImage, SubtitleBlock, SubtitleStyle } from '@/lib/types'
 
-export const maxDuration = 300
+export const maxDuration = 30
 
 interface RenderRequest {
   project_id: string
@@ -66,6 +64,7 @@ export async function POST(request: NextRequest) {
         subtitle_blocks,
         subtitle_style,
         project_id,
+        user_id: user.id,
         transition,
         transition_duration,
         effects,
@@ -74,45 +73,17 @@ export async function POST(request: NextRequest) {
 
     if (!renderRes.ok) {
       const errBody = await renderRes.json().catch(() => ({}))
-      const msg =
-        (errBody as { error?: string }).error ?? `Railway HTTP ${renderRes.status}`
+      const msg = (errBody as { error?: string }).error ?? `Railway HTTP ${renderRes.status}`
       return NextResponse.json({ ok: false, error: msg }, { status: 502 })
     }
 
-    const { video_url } = (await renderRes.json()) as { video_url: string }
+    const { job_id } = (await renderRes.json()) as { job_id: string }
 
-    await supabase
-      .from('projects')
-      .update({ video_url, status: 'generating_seo' })
-      .eq('id', project_id)
-      .eq('user_id', user.id)
-
-    await spendCredits(user.id, 2, 'video', project_id)
-    void trackEvent(user.id, 'step_completed', { step: 'video', project_id })
-    void trackEvent(user.id, 'video_downloaded', { project_id })
-
-    // Fire-and-forget: send "video ready" email
-    void (async () => {
-      try {
-        const svc = createServiceClient()
-        const { data: profile } = await svc.from('profiles').select('email, full_name').eq('id', user.id).single()
-        const { data: project } = await svc.from('projects').select('title').eq('id', project_id).single()
-        if (profile?.email) {
-          await sendVideoReadyEmail(
-            { email: profile.email, name: profile.full_name },
-            { id: project_id, title: project?.title ?? 'Без названия' },
-          )
-        }
-      } catch (e) {
-        console.error('[render] sendVideoReadyEmail error:', e)
-      }
-    })()
-
-    return NextResponse.json({ ok: true, data: { video_url } })
+    return NextResponse.json({ ok: true, data: { job_id } })
   } catch (error) {
     console.error('[generate/video/render]', error)
     return NextResponse.json(
-      { ok: false, error: 'Ошибка сборки видео' },
+      { ok: false, error: 'Ошибка запуска рендеринга' },
       { status: 500 }
     )
   }
