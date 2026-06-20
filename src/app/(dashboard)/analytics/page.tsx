@@ -125,12 +125,34 @@ interface CompareResult {
   steal_ideas:      Array<{ from_channel: string; idea: string; example_video: string }>
 }
 
+interface RisingStarsResult {
+  topic: string
+  total_found: number
+  channels: Array<{
+    channel_id: string
+    name: string
+    url: string
+    created_at: string
+    months_old: number
+    subscribers: number
+    monthly_growth_estimate: number
+    video_count: number
+    upload_frequency: number
+    avg_views: number
+    viral_ratio: number
+    growth_reason: string
+    strategy: string
+    key_takeaway: string
+  }>
+  common_patterns: string[]
+}
+
 interface AnalyticsReport {
   id: string
-  report_type: 'niche' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare'
+  report_type: 'niche' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars'
   title: string
   query: string
-  result: NicheResult | TrendResult | ChannelResult | RevenueResult | CommentsResult | KeywordsResult | CompareResult
+  result: NicheResult | TrendResult | ChannelResult | RevenueResult | CommentsResult | KeywordsResult | CompareResult | RisingStarsResult
   created_at: string
 }
 
@@ -721,15 +743,16 @@ function TrendsTab({ externalResult, onClearExternal }: {
 
 // ─── Channel Tab ──────────────────────────────────────────────────────────────
 
-function ChannelTab({ externalResult, onClearExternal }: {
+function ChannelTab({ externalResult, onClearExternal, initialChannel }: {
   externalResult?: ChannelResult | null
   onClearExternal?: () => void
+  initialChannel?: string
 }) {
   const { t } = useLang()
   const router = useRouter()
   const { setScriptParams, setStep } = useStudioStore()
 
-  const [channel, setChannel] = useState('')
+  const [channel, setChannel] = useState(initialChannel ?? '')
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(-1)
   const [error, setError] = useState('')
@@ -1941,6 +1964,247 @@ function CompareTab({
 
 // ─── History Tab ──────────────────────────────────────────────────────────────
 
+// ─── Rising Stars ─────────────────────────────────────────────────────────────
+
+function RisingStarsTab({
+  externalResult,
+  onClearExternal,
+  onGoToChannel,
+}: {
+  externalResult?: RisingStarsResult | null
+  onClearExternal?: () => void
+  onGoToChannel: (channelUrl: string) => void
+}) {
+  const router = useRouter()
+  const { setScriptParams, setStep } = useStudioStore()
+
+  const [topic, setTopic] = useState('')
+  const [subMin, setSubMin] = useState('1000')
+  const [subMax, setSubMax] = useState('100000')
+  const [monthsMax, setMonthsMax] = useState(12)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<RisingStarsResult | null>(null)
+
+  const displayResult = externalResult ?? result
+
+  async function handleSearch() {
+    if (!topic.trim()) { setError('Введите тему'); return }
+    setError(null)
+    setResult(null)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/analytics/rising-stars', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: topic.trim(),
+          sub_min: parseInt(subMin) || 1000,
+          sub_max: parseInt(subMax) || 100000,
+          months_max: monthsMax,
+        }),
+      })
+      const json = await res.json() as { ok: boolean; data?: RisingStarsResult; error?: string; code?: string }
+      if (!json.ok) {
+        setError(json.code === 'NO_CREDITS' ? 'Недостаточно кредитов' : (json.error ?? 'Ошибка'))
+      } else {
+        setResult(json.data!)
+        void refreshCredits()
+      }
+    } catch {
+      setError('Ошибка сети')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function goToStudio() {
+    setScriptParams({ topic: topic || (displayResult?.topic ?? '') })
+    setStep(1)
+    router.push('/studio')
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      {externalResult && (
+        <button onClick={onClearExternal}
+          className="no-print self-start flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors">
+          ← Новый поиск
+        </button>
+      )}
+
+      {!externalResult && (
+        <Card>
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Ниша / тема</label>
+              <input
+                value={topic}
+                onChange={e => setTopic(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !loading && void handleSearch()}
+                placeholder="Автомобили, Кулинария, Технологии..."
+                className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-violet-500/50"
+                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">Подписчиков от–до</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={subMin}
+                  onChange={e => setSubMin(e.target.value)}
+                  min={0}
+                  className="flex-1 rounded-xl px-3 py-2.5 text-sm text-white outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                />
+                <span className="text-slate-500 text-sm">—</span>
+                <input
+                  type="number"
+                  value={subMax}
+                  onChange={e => setSubMax(e.target.value)}
+                  min={0}
+                  className="flex-1 rounded-xl px-3 py-2.5 text-sm text-white outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">Канал создан не позднее</label>
+              <div className="flex gap-2">
+                {([3, 6, 12, 0] as const).map(m => (
+                  <button key={m} type="button" onClick={() => setMonthsMax(m)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
+                    style={{
+                      background: monthsMax === m ? 'rgba(124,58,237,0.3)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${monthsMax === m ? 'rgba(124,58,237,0.6)' : 'rgba(255,255,255,0.1)'}`,
+                      color: monthsMax === m ? '#c4b5fd' : '#94a3b8',
+                    }}>
+                    {m === 0 ? 'Любой' : `${m} мес`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {error && <p className="text-sm text-red-400">{error}</p>}
+
+            <button onClick={() => void handleSearch()} disabled={loading}
+              className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
+              {loading ? <Spinner /> : '🚀'}
+              Найти восходящие каналы · −6 кр.
+            </button>
+          </div>
+        </Card>
+      )}
+
+      {loading && (
+        <Card>
+          <div className="flex flex-col gap-3 py-2">
+            {['Ищу каналы по теме...', 'Анализирую статистику...', 'Считаю метрики роста...', 'Анализирую паттерны (Claude)...'].map((step, i) => (
+              <div key={i} className="flex items-center gap-3 text-sm" style={{ color: i === 0 ? '#a78bfa' : '#334155' }}>
+                {i === 0 ? <Spinner /> : <span className="w-4 h-4" />}
+                {step}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {displayResult && (
+        <div className="flex flex-col gap-4 analytics-result">
+          <div className="rounded-2xl p-4 text-center"
+            style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)' }}>
+            <p className="text-base font-bold text-violet-300">
+              🚀 Найдено {displayResult.total_found} восходящих каналов в нише «{displayResult.topic}»
+            </p>
+          </div>
+
+          {displayResult.total_found === 0 && (
+            <Card>
+              <p className="text-sm text-slate-400 text-center py-4">
+                По заданным критериям каналов не найдено. Попробуйте расширить диапазон подписчиков или увеличить период.
+              </p>
+            </Card>
+          )}
+
+          {displayResult.channels.map((ch, i) => (
+            <div key={i} className="rounded-2xl p-5 flex flex-col gap-3"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base font-bold text-white">🚀 {ch.name}</h3>
+                  <a href={ch.url} target="_blank" rel="noreferrer"
+                    className="text-xs text-violet-400 hover:text-violet-300 transition-colors truncate block mt-0.5">
+                    {ch.url}
+                  </a>
+                </div>
+                <span className="text-2xl font-bold shrink-0"
+                  style={{ color: ch.viral_ratio >= 5 ? '#4ade80' : ch.viral_ratio >= 2 ? '#facc15' : '#94a3b8' }}>
+                  {ch.viral_ratio}×
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { icon: '📅', label: 'Возраст', value: `${ch.months_old} мес.` },
+                  { icon: '👥', label: 'Подписчики', value: `${fmtNum(ch.subscribers)} (~${fmtNum(ch.monthly_growth_estimate)}/мес)` },
+                  { icon: '🎬', label: 'Видео', value: `${ch.video_count}${ch.upload_frequency > 0 ? ` (${ch.upload_frequency}/нед)` : ''}` },
+                  { icon: '👁', label: 'Ср. просмотры', value: fmtNum(ch.avg_views) },
+                ].map(stat => (
+                  <div key={stat.label} className="flex flex-col gap-0.5">
+                    <p className="text-xs text-slate-500">{stat.icon} {stat.label}</p>
+                    <p className="text-sm font-semibold text-white">{stat.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-2 rounded-xl p-3"
+                style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.15)' }}>
+                <p className="text-xs text-slate-300">
+                  <span className="text-amber-400">💡</span> <strong>Причина роста:</strong> {ch.growth_reason}
+                </p>
+                <p className="text-xs text-slate-300">
+                  <span className="text-blue-400">🎯</span> <strong>Стратегия:</strong> {ch.strategy}
+                </p>
+                <p className="text-xs text-slate-300">
+                  <span className="text-green-400">✅</span> <strong>Что перенять:</strong> {ch.key_takeaway}
+                </p>
+              </div>
+
+              <button
+                onClick={() => onGoToChannel(ch.url)}
+                className="no-print self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white transition-colors"
+                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                📊 Детальный анализ канала →
+              </button>
+            </div>
+          ))}
+
+          {displayResult.common_patterns.length > 0 && (
+            <Card>
+              <SectionTitle>Общие паттерны успеха</SectionTitle>
+              <ul className="flex flex-col gap-2">
+                {displayResult.common_patterns.map((p, i) => (
+                  <li key={i} className="flex gap-2 text-sm text-slate-300">
+                    <span className="text-violet-400 shrink-0">📌</span>{p}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          <button onClick={goToStudio}
+            className="no-print btn-gradient w-full py-3.5 rounded-xl text-sm font-semibold text-white">
+            🎬 Создать видео в этой нише →
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const REPORT_ICONS: Record<string, string> = {
   niche: '🔍',
   trends: '🔥',
@@ -1949,6 +2213,7 @@ const REPORT_ICONS: Record<string, string> = {
   comments: '💬',
   keywords: '🔎',
   compare: '⚡',
+  rising_stars: '🚀',
 }
 
 function HistoryTab({ onOpen }: { onOpen: (report: AnalyticsReport) => void }) {
@@ -2040,12 +2305,13 @@ function HistoryTab({ onOpen }: { onOpen: (report: AnalyticsReport) => void }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type Tab = 'niche' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'history'
+type Tab = 'niche' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars' | 'history'
 
 export default function AnalyticsPage() {
   const { t } = useLang()
   const [tab, setTab] = useState<Tab>('niche')
   const [openedReport, setOpenedReport] = useState<AnalyticsReport | null>(null)
+  const [pendingChannelQuery, setPendingChannelQuery] = useState<string | null>(null)
 
   function handleOpenReport(report: AnalyticsReport) {
     setOpenedReport(report)
@@ -2057,15 +2323,23 @@ export default function AnalyticsPage() {
     setOpenedReport(null)
   }
 
+  function handleGoToChannel(channelUrl: string) {
+    setPendingChannelQuery(channelUrl)
+    setTab('channel')
+    clearOpenedReport()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const TABS: Array<{ id: Tab; label: string }> = [
-    { id: 'niche',    label: t('analytics.tab_niche') },
-    { id: 'trends',   label: t('analytics.tab_trends') },
-    { id: 'channel',  label: t('analytics.tab_channel') },
-    { id: 'revenue',  label: t('analytics.tab_revenue') },
-    { id: 'comments', label: t('analytics.tab_comments') },
-    { id: 'keywords', label: t('analytics.tab_keywords') },
-    { id: 'compare',  label: t('analytics.tab_compare') },
-    { id: 'history',  label: t('analytics.tab_history') },
+    { id: 'niche',         label: t('analytics.tab_niche') },
+    { id: 'trends',        label: t('analytics.tab_trends') },
+    { id: 'channel',       label: t('analytics.tab_channel') },
+    { id: 'revenue',       label: t('analytics.tab_revenue') },
+    { id: 'comments',      label: t('analytics.tab_comments') },
+    { id: 'keywords',      label: t('analytics.tab_keywords') },
+    { id: 'compare',       label: t('analytics.tab_compare') },
+    { id: 'rising_stars',  label: t('analytics.tab_rising_stars') },
+    { id: 'history',       label: t('analytics.tab_history') },
   ]
 
   return (
@@ -2128,6 +2402,7 @@ export default function AnalyticsPage() {
           <ChannelTab
             externalResult={openedReport?.report_type === 'channel' ? openedReport.result as ChannelResult : null}
             onClearExternal={clearOpenedReport}
+            initialChannel={pendingChannelQuery ?? undefined}
           />
         )}
         {tab === 'revenue' && (
@@ -2152,6 +2427,13 @@ export default function AnalyticsPage() {
           <CompareTab
             externalResult={openedReport?.report_type === 'compare' ? openedReport.result as CompareResult : null}
             onClearExternal={clearOpenedReport}
+          />
+        )}
+        {tab === 'rising_stars' && (
+          <RisingStarsTab
+            externalResult={openedReport?.report_type === 'rising_stars' ? openedReport.result as RisingStarsResult : null}
+            onClearExternal={clearOpenedReport}
+            onGoToChannel={handleGoToChannel}
           />
         )}
         {tab === 'history' && <HistoryTab onOpen={handleOpenReport} />}

@@ -742,6 +742,7 @@ export const translations = {
     'analytics.tab_comments':      '💬 Комментарии',
     'analytics.tab_keywords':      '🔎 Ключевые слова',
     'analytics.tab_compare':       '⚡ Сравнение',
+    'analytics.tab_rising_stars':  '🚀 Восходящие звёзды',
     'analytics.tab_history':       '📋 История',
 
     // Niche tab
@@ -1569,6 +1570,7 @@ export const translations = {
     'analytics.tab_comments':      '💬 Comments',
     'analytics.tab_keywords':      '🔎 Keywords',
     'analytics.tab_compare':       '⚡ Compare',
+    'analytics.tab_rising_stars':  '🚀 Rising Stars',
     'analytics.tab_history':       '📋 History',
 
     'analytics.niche_topic_label': 'Topic or niche',

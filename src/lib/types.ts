@@ -42,6 +42,7 @@ export const CREDIT_COSTS = {
   comments_analysis: 4,
   keywords_analysis: 3,
   channels_compare:  6,
+  rising_stars:      6,
 } as const
 
 export type AudioEngine = 'elevenlabs' | 'openai' | 'google' | 'apihost'
