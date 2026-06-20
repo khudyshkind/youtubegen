@@ -337,6 +337,16 @@ export async function POST(request: NextRequest) {
     const styleConfig = getStyleConfig(image_style)
     console.log(`[images] engine=${engine} style="${image_style ?? 'default'}" suffix="${styleConfig.fluxSuffix.slice(0, 60)}"`)
 
+    // Clear existing scene_images before regenerating so stale images aren't served
+    // if the user refreshes the page while generation is in progress
+    if (project_id) {
+      await supabase
+        .from('projects')
+        .update({ scene_images: [] })
+        .eq('id', project_id)
+        .eq('user_id', user.id)
+    }
+
     const hasSubtitles = Array.isArray(subtitle_blocks) && subtitle_blocks.length > 0
     console.log(`[images] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
 

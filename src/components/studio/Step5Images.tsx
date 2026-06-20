@@ -300,6 +300,9 @@ export default function Step5Images() {
     if (!script?.trim()) { setError(t('step5.err_no_script')); return }
     setError('')
     setLoading(true)
+    // Clear old images immediately — prevents stale images showing during generation
+    // and prevents browser cache from serving old content at unchanged Supabase URLs
+    setSceneImages([])
     try {
       const res = await fetch('/api/generate/images', {
         method: 'POST',
@@ -317,7 +320,14 @@ export default function Step5Images() {
         if (json.code === 'NO_CREDITS') { setError(`${t('step5.err_gen')} (${creditCost} ${t('nav.credits_suffix')})`); return }
         throw new Error(json.error)
       }
-      setSceneImages(json.data.scene_images as SceneImage[])
+      // Cache-bust all URLs: scenes 0–(oldCount-1) reuse the same Supabase storage paths,
+      // so the browser would show cached old images without a timestamp query param.
+      const ts = Date.now()
+      const images = (json.data.scene_images as SceneImage[]).map((img) => ({
+        ...img,
+        url: img.url ? `${img.url}?t=${ts}` : img.url,
+      }))
+      setSceneImages(images)
       void refreshCredits()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step5.err_gen'))
