@@ -327,6 +327,121 @@ async function checkGitHub(): Promise<ServiceResult> {
   }
 }
 
+async function checkYouTubeAPI(): Promise<ServiceResult> {
+  const base = {
+    key: 'youtube_api',
+    name: 'YouTube Data API v3',
+    icon: '▶️',
+    link: 'https://console.cloud.google.com/apis/api/youtube.googleapis.com',
+  }
+  const apiKey = env('YOUTUBE_API_KEY')
+  if (!apiKey) return unconfigured(base, 'YOUTUBE_API_KEY')
+  try {
+    // i18nLanguages costs 1 quota unit — cheapest valid call
+    const res = await safeFetch(
+      `https://www.googleapis.com/youtube/v3/i18nLanguages?part=snippet&key=${apiKey}`
+    )
+    if (res.status === 403) {
+      const data = await res.json().catch(() => ({})) as { error?: { message?: string } }
+      return { ...base, status: 'error', metrics: [], error: data.error?.message ?? 'Доступ запрещён' }
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({})) as { error?: { message?: string } }
+      return { ...base, status: 'error', metrics: [], error: data.error?.message ?? `HTTP ${res.status}` }
+    }
+    return {
+      ...base, status: 'ok',
+      metrics: [
+        { label: 'Статус', value: '✓ Ключ активен' },
+        { label: 'Дневная квота', value: '10 000 единиц (по умолчанию)' },
+        { label: 'Использование', value: '↗ Смотреть в GCP Console' },
+      ],
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Ошибка'
+    return { ...base, status: 'error', metrics: [], error: msg.includes('aborted') ? 'Таймаут' : msg }
+  }
+}
+
+async function checkApihost(): Promise<ServiceResult> {
+  const base = {
+    key: 'apihost',
+    name: 'APIHOST.RU (TTS)',
+    icon: '🎙️',
+    link: 'https://apihost.ru',
+  }
+  const apiKey = env('APIHOST_API_KEY')
+  if (!apiKey) return unconfigured(base, 'APIHOST_API_KEY')
+  try {
+    const res = await safeFetch('https://apihost.ru/api/v1/balance', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    })
+    if (res.status === 401 || res.status === 403) {
+      return { ...base, status: 'error', metrics: [], error: 'Ключ недействителен' }
+    }
+    if (!res.ok) {
+      // Balance endpoint unavailable — key is set, show as ok
+      return {
+        ...base, status: 'ok',
+        metrics: [
+          { label: 'Статус', value: '✓ Ключ настроен' },
+          { label: 'Баланс', value: '↗ Проверить на сайте' },
+        ],
+      }
+    }
+    const data = await res.json() as Record<string, unknown>
+    const balance = (data.balance ?? data.amount ?? data.rub ?? null) as number | null
+    const balanceStr = balance !== null ? `${Number(balance).toLocaleString('ru-RU')} ₽` : '—'
+    const status: Status = balance !== null && balance < 50 ? 'warn' : 'ok'
+    return {
+      ...base, status,
+      metrics: [
+        { label: 'Статус', value: '✓ Ключ активен' },
+        { label: 'Баланс', value: balanceStr },
+      ],
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Ошибка'
+    return { ...base, status: 'error', metrics: [], error: msg.includes('aborted') ? 'Таймаут' : msg }
+  }
+}
+
+async function checkGoogleCloud(): Promise<ServiceResult> {
+  const base = {
+    key: 'google_cloud',
+    name: 'Google Cloud (TTS)',
+    icon: '☁️',
+    link: 'https://console.cloud.google.com',
+  }
+  const apiKey = env('GOOGLE_TTS_API_KEY')
+  if (!apiKey) return unconfigured(base, 'GOOGLE_TTS_API_KEY')
+  try {
+    const res = await safeFetch(
+      `https://texttospeech.googleapis.com/v1/voices?key=${apiKey}&languageCode=ru-RU`
+    )
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      const data = await res.json().catch(() => ({})) as { error?: { message?: string } }
+      return { ...base, status: 'error', metrics: [], error: data.error?.message ?? 'Ключ недействителен' }
+    }
+    if (!res.ok) return { ...base, status: 'error', metrics: [], error: `HTTP ${res.status}` }
+    const data = await res.json() as { voices?: unknown[] }
+    const voiceCount = Array.isArray(data.voices) ? data.voices.length : 0
+    const youtubeConfigured = !!env('YOUTUBE_API_KEY')
+    return {
+      ...base, status: 'ok',
+      metrics: [
+        { label: 'Cloud TTS API', value: '✓ Активен' },
+        { label: 'Голосов (ru-RU)', value: String(voiceCount) },
+        { label: 'YouTube API', value: youtubeConfigured ? '✓ Настроен' : '⚠ Не задан' },
+        { label: 'OAuth', value: '↗ Проверить в GCP Console' },
+      ],
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Ошибка'
+    return { ...base, status: 'error', metrics: [], error: msg.includes('aborted') ? 'Таймаут' : msg }
+  }
+}
+
 async function checkVercel(): Promise<ServiceResult> {
   const base = {
     key: 'vercel', name: 'Vercel (Деплой)', icon: '▲',
@@ -383,19 +498,25 @@ export async function GET() {
     checkPaddle(),
     checkGitHub(),
     checkVercel(),
+    checkYouTubeAPI(),
+    checkApihost(),
+    checkGoogleCloud(),
   ])
 
   const FALLBACKS: Pick<ServiceResult, 'key' | 'name' | 'icon' | 'link'>[] = [
-    { key: 'anthropic',  name: 'Anthropic',    icon: '🤖', link: 'https://console.anthropic.com' },
-    { key: 'openai',     name: 'OpenAI',        icon: '🎤', link: 'https://platform.openai.com' },
-    { key: 'elevenlabs', name: 'ElevenLabs',    icon: '🔊', link: 'https://elevenlabs.io' },
-    { key: 'fal',        name: 'fal.ai',        icon: '🎨', link: 'https://fal.ai' },
-    { key: 'resend',     name: 'Resend',        icon: '📧', link: 'https://resend.com' },
-    { key: 'railway',    name: 'Railway',       icon: '🎬', link: 'https://railway.app' },
-    { key: 'supabase',   name: 'Supabase',      icon: '🗄️', link: 'https://supabase.com' },
-    { key: 'paddle',     name: 'Paddle',        icon: '💳', link: 'https://vendors.paddle.com' },
-    { key: 'github',     name: 'GitHub',        icon: '📦', link: 'https://github.com' },
-    { key: 'vercel',     name: 'Vercel',        icon: '▲',  link: 'https://vercel.com' },
+    { key: 'anthropic',    name: 'Anthropic',          icon: '🤖', link: 'https://console.anthropic.com' },
+    { key: 'openai',       name: 'OpenAI',              icon: '🎤', link: 'https://platform.openai.com' },
+    { key: 'elevenlabs',   name: 'ElevenLabs',          icon: '🔊', link: 'https://elevenlabs.io' },
+    { key: 'fal',          name: 'fal.ai',              icon: '🎨', link: 'https://fal.ai' },
+    { key: 'resend',       name: 'Resend',              icon: '📧', link: 'https://resend.com' },
+    { key: 'railway',      name: 'Railway',             icon: '🎬', link: 'https://railway.app' },
+    { key: 'supabase',     name: 'Supabase',            icon: '🗄️', link: 'https://supabase.com' },
+    { key: 'paddle',       name: 'Paddle',              icon: '💳', link: 'https://vendors.paddle.com' },
+    { key: 'github',       name: 'GitHub',              icon: '📦', link: 'https://github.com' },
+    { key: 'vercel',       name: 'Vercel',              icon: '▲',  link: 'https://vercel.com' },
+    { key: 'youtube_api',  name: 'YouTube Data API v3', icon: '▶️', link: 'https://console.cloud.google.com/apis/api/youtube.googleapis.com' },
+    { key: 'apihost',      name: 'APIHOST.RU (TTS)',    icon: '🎙️', link: 'https://apihost.ru' },
+    { key: 'google_cloud', name: 'Google Cloud (TTS)',  icon: '☁️', link: 'https://console.cloud.google.com' },
   ]
 
   const services: ServiceResult[] = results.map((r, i) => {
