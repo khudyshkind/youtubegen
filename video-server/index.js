@@ -1976,21 +1976,23 @@ app.post('/render', verifySecret, async (req, res) => {
     const td = Math.max(0.1, Math.min(1.5, Number(transition_duration) || 0.5))
 
     if (useXfade) {
-      // Each image as a looped video input; extend duration by td so xfade has overlap material
+      // Each image as a looped video input; extend duration by td so xfade has overlap material.
+      // -pix_fmt yuv420p BEFORE -i forces the JPEG decoder to output yuv420p instead of the
+      // deprecated yuvj420p (JPEG full-range) — the swscaler inside the scale filter cannot
+      // handle yuvj420p and crashes with "Failed to configure output pad" despite format= in
+      // the filter graph, because format negotiation for looped image inputs happens too late.
       const ffArgs = []
       for (let i = 0; i < imagePaths.length; i++) {
-        ffArgs.push('-loop', '1', '-t', String(durations[i] + td), '-i', imagePaths[i])
+        ffArgs.push('-loop', '1', '-t', String(durations[i] + td), '-pix_fmt', 'yuv420p', '-i', imagePaths[i])
       }
       ffArgs.push('-i', finalAudioPath)
       const audioIdx = imagePaths.length
 
       // Build filter_complex: scale each input, then chain xfade filters.
-      // format=yuv420p MUST come FIRST — JPEGs decode to yuvj420p (JPEG full-range YUV).
-      // scale/pad cannot do implicit format conversion; if format is placed after scale,
-      // FFmpeg fails to negotiate formats and crashes with "Failed to configure output pad".
+      // No format= needed here — decoder already outputs yuv420p via the input -pix_fmt flag.
       const filterComplex = []
       for (let i = 0; i < imagePaths.length; i++) {
-        filterComplex.push(`[${i}:v]format=yuv420p,${VF_BASE}[v${i}]`)
+        filterComplex.push(`[${i}:v]${VF_BASE}[v${i}]`)
       }
 
       // xfade chain: [v0][v1]xfade@offset0 → [x0]; [x0][v2]xfade@offset1 → [x1]; ...
