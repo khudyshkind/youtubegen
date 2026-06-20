@@ -74,6 +74,8 @@ async function generateScenesFromSubtitles(
     return { start, end, text }
   })
 
+  console.log(`[images/subtitles] claude style instruction: "${styleConfig.claudeInstruction}"`)
+
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: maxTokens,
@@ -103,6 +105,7 @@ ${scenesWithText.map((s, i) => `Сцена ${i + 1} [${fmtSec(s.start)}–${fmtS
   })
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
+  console.log(`[images/subtitles] claude raw response (first 600): ${rawText.slice(0, 600)}`)
   const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
 
   let promptResults: Array<{ scene: string; prompt: string }> = JSON.parse(cleaned)
@@ -181,6 +184,8 @@ async function generateScenesFromScript(
   const blocks = splitScriptByWords(script, imageCount)
   const blocksWithTimecodes = calculateTimecodes(blocks, durationSec)
 
+  console.log(`[images/script] claude style instruction: "${styleConfig.claudeInstruction}"`)
+
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: maxTokens,
@@ -210,6 +215,7 @@ ${blocksWithTimecodes.map((b, i) => `Сцена ${i + 1} [${fmtSec(b.start)}–$
   })
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
+  console.log(`[images/script] claude raw response (first 600): ${rawText.slice(0, 600)}`)
   const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
 
   let promptResults: Array<{ scene: string; prompt: string }> = JSON.parse(cleaned)
@@ -232,6 +238,7 @@ ${blocksWithTimecodes.map((b, i) => `Сцена ${i + 1} [${fmtSec(b.start)}–$
 
 async function generateImageFlux(
   prompt: string,
+  negativePrompt: string,
   userId: string,
   projectId: string | undefined,
   sceneIndex: number,
@@ -241,6 +248,7 @@ async function generateImageFlux(
   const result = await fal.subscribe('fal-ai/flux/dev', {
     input: {
       prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
+      negative_prompt: negativePrompt,
       image_size: { width: 1280, height: 720 },
       num_images: 1,
       num_inference_steps: 35,
@@ -372,22 +380,23 @@ export async function POST(request: NextRequest) {
       await Promise.all(
         scenes.slice(batchStart, batchEnd).map(async (scn, batchIdx) => {
           const i = batchStart + batchIdx
-          // Use strong fluxSuffix from config — not the raw image_style string.
-          // Raw image_style is too vague and can conflict with Claude's base prompt.
           const styledPrompt = `${scn.prompt}, ${styleConfig.fluxSuffix}`
-          console.log(`[images] generating ${i + 1}/${scenes.length} prompt="${styledPrompt.slice(0, 80)}"`)
+          console.log(`[images] scene ${i + 1} REQUESTED style: "${image_style ?? 'default'}"`)
+          console.log(`[images] scene ${i + 1} claude prompt result: "${scn.prompt.slice(0, 120)}"`)
+          console.log(`[images] scene ${i + 1} FINAL flux prompt: "${styledPrompt.slice(0, 180)}"`)
+          console.log(`[images] scene ${i + 1} NEGATIVE prompt: "${styleConfig.negativePrompt}"`)
           try {
             const url = engine === 'gpt_mini'
               ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
-              : await generateImageFlux(styledPrompt, user.id, project_id, i, serviceClient)
+              : await generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient)
             sceneImages[i] = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end }
             successCount++
             await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
-            console.log(`[images] OK ${i + 1}/${scenes.length} url=${url?.slice(0, 60)}`)
+            console.log(`[images] scene ${i + 1} RESULT url: ${url?.slice(0, 100) ?? 'NULL'}`)
           } catch (err) {
             failCount++
             const msg = err instanceof Error ? err.message : String(err)
-            console.error(`[images] FAILED scene ${i + 1}:`, msg)
+            console.error(`[images] scene ${i + 1} FAILED:`, msg)
             sceneImages[i] = { scene_index: i, prompt: styledPrompt, url: null, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end }
           }
         })

@@ -46,6 +46,7 @@ Start with the MAIN VISUAL SUBJECT. Add relevant details matching the style.
 
 async function generateFlux(
   prompt: string,
+  negativePrompt: string,
   userId: string,
   projectId: string,
   sceneIndex: number,
@@ -55,6 +56,7 @@ async function generateFlux(
   const result = await fal.subscribe('fal-ai/flux/dev', {
     input: {
       prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
+      negative_prompt: negativePrompt,
       image_size: { width: 1280, height: 720 },
       num_images: 1,
       num_inference_steps: 35,
@@ -145,7 +147,9 @@ export async function POST(request: NextRequest) {
     const styleConfig = getStyleConfig(image_style)
     const enhancedBase = await enhancePrompt(prompt, styleConfig.enhanceSystemHint)
     const enhancedPrompt = `${enhancedBase}, ${styleConfig.fluxSuffix}`
-    console.log(`[image-single] engine=${engine} scene_index=${scene_index} style="${image_style ?? 'default'}" prompt:`, enhancedPrompt)
+    console.log(`[image-single] engine=${engine} scene_index=${scene_index} style="${image_style ?? 'default'}"`)
+    console.log(`[image-single] FINAL flux prompt: "${enhancedPrompt.slice(0, 180)}"`)
+    console.log(`[image-single] NEGATIVE prompt: "${styleConfig.negativePrompt}"`)
 
     const { data: projectRow } = await supabase
       .from('projects')
@@ -165,7 +169,7 @@ export async function POST(request: NextRequest) {
 
     const storedUrl = engine === 'gpt_mini'
       ? await generateGptMini(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
-      : await generateFlux(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
+      : await generateFlux(enhancedPrompt, styleConfig.negativePrompt, user.id, project_id, scene_index, serviceClient)
 
     const newImage: SceneImage = {
       ...(originalScene ?? {}),
