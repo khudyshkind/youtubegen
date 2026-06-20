@@ -1984,12 +1984,13 @@ app.post('/render', verifySecret, async (req, res) => {
       ffArgs.push('-i', finalAudioPath)
       const audioIdx = imagePaths.length
 
-      // Build filter_complex: scale each input, then chain xfade filters
-      // format=yuv420p is required: JPEGs decode to yuvj420p (full-range) which xfade
-      // cannot handle — it tries to reinitialize and crashes with "deprecated pixel format".
-      const filterParts = []
+      // Build filter_complex: scale each input, then chain xfade filters.
+      // format=yuv420p MUST come FIRST — JPEGs decode to yuvj420p (JPEG full-range YUV).
+      // scale/pad cannot do implicit format conversion; if format is placed after scale,
+      // FFmpeg fails to negotiate formats and crashes with "Failed to configure output pad".
+      const filterComplex = []
       for (let i = 0; i < imagePaths.length; i++) {
-        filterParts.push(`[${i}:v]${VF_BASE},format=yuv420p[v${i}]`)
+        filterComplex.push(`[${i}:v]format=yuv420p,${VF_BASE}[v${i}]`)
       }
 
       // xfade chain: [v0][v1]xfade@offset0 → [x0]; [x0][v2]xfade@offset1 → [x1]; ...
@@ -1999,14 +2000,17 @@ app.post('/render', verifySecret, async (req, res) => {
         cumOffset += durations[i]
         const offset = Math.max(0, cumOffset - (i + 1) * td)
         const outLabel = i === imagePaths.length - 2 ? '[vout]' : `[x${i}]`
-        filterParts.push(
+        filterComplex.push(
           `${prevLabel}[v${i + 1}]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}${outLabel}`
         )
         prevLabel = outLabel
       }
 
+      const filterComplexStr = filterComplex.join(';')
+      console.log(`[ffmpeg] xfade filter_complex (${imagePaths.length} scenes): ${filterComplexStr.slice(0, 300)}...`)
+
       ffArgs.push(
-        '-filter_complex', filterParts.join(';'),
+        '-filter_complex', filterComplexStr,
         '-map', '[vout]',
         '-map', `${audioIdx}:a`,
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
@@ -2060,7 +2064,9 @@ app.post('/render', verifySecret, async (req, res) => {
     let currentPath = tempBasePath
 
     if (effectFilters.length > 0) {
-      const vfEffects = effectFilters.join(',')
+      // Prepend format=yuv420p so any decoded pixel format is normalised before effects filters.
+      const vfEffects = `format=yuv420p,${effectFilters.join(',')}`
+      console.log(`[ffmpeg] effects vf: ${vfEffects}`)
       await new Promise((resolve, reject) => {
         execFile('ffmpeg', [
           '-i', tempBasePath,
