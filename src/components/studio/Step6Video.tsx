@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import type { SubtitleBlock } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
@@ -95,6 +95,10 @@ export default function Step6Video() {
   const [transition, setTransition] = useState('cut')
   const [transitionDuration, setTransitionDuration] = useState(0.5)
   const [effects, setEffects] = useState<string[]>([])
+  const [transitionOpen, setTransitionOpen] = useState(false)
+  const [effectsOpen, setEffectsOpen] = useState(false)
+  const transitionRef = useRef<HTMLDivElement>(null)
+  const effectsRef = useRef<HTMLDivElement>(null)
 
   const hasAudio = !!audioUrl
   const hasImages = sceneImages.length > 0
@@ -103,6 +107,15 @@ export default function Step6Video() {
   function toggleEffect(id: string) {
     setEffects((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
   }
+
+  useEffect(() => {
+    function onOutside(e: MouseEvent) {
+      if (transitionRef.current && !transitionRef.current.contains(e.target as Node)) setTransitionOpen(false)
+      if (effectsRef.current && !effectsRef.current.contains(e.target as Node)) setEffectsOpen(false)
+    }
+    document.addEventListener('mousedown', onOutside)
+    return () => document.removeEventListener('mousedown', onOutside)
+  }, [])
 
   function downloadSrt() {
     const content = toSrt(subtitleBlocks)
@@ -326,25 +339,40 @@ export default function Step6Video() {
       {hasImages && (
         <div className="rounded-xl p-4" style={cardStyle}>
           <p className="text-sm font-semibold text-slate-200 mb-3">{t('step6.transitions')}</p>
-          <div
-            className="flex gap-2 overflow-x-auto pb-1"
-            style={{ scrollbarWidth: 'none' }}
-          >
-            {TRANSITIONS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTransition(t.id)}
-                className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl text-xs shrink-0 transition-all"
-                style={transition === t.id
-                  ? { background: 'rgba(124,58,237,0.25)', border: '1px solid rgba(124,58,237,0.5)', color: '#C4B5FD' }
-                  : { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#94A3B8' }
-                }
-              >
-                <span>{t.icon}</span>
-                <span className="whitespace-nowrap">{t.label}</span>
-              </button>
-            ))}
+          <div className="relative" ref={transitionRef}>
+            <button
+              type="button"
+              onClick={() => setTransitionOpen((o) => !o)}
+              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-all"
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#CBD5E1' }}
+            >
+              <span className="flex items-center gap-2">
+                <span>{TRANSITIONS.find((tr) => tr.id === transition)?.icon}</span>
+                <span>{TRANSITIONS.find((tr) => tr.id === transition)?.label}</span>
+              </span>
+              <span style={{ color: '#64748B', fontSize: '0.65rem', display: 'inline-block', transform: transitionOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
+            </button>
+            {transitionOpen && (
+              <div className="absolute left-0 right-0 top-full mt-1 rounded-xl overflow-hidden z-50"
+                style={{ background: 'rgba(15,12,35,0.98)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
+                {TRANSITIONS.map((tr) => (
+                  <button
+                    key={tr.id}
+                    type="button"
+                    onClick={() => { setTransition(tr.id); setTransitionOpen(false) }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors"
+                    style={{
+                      background: transition === tr.id ? 'rgba(124,58,237,0.2)' : 'transparent',
+                      color: transition === tr.id ? '#C4B5FD' : '#94A3B8',
+                    }}
+                  >
+                    <span>{tr.icon}</span>
+                    <span>{tr.label}</span>
+                    {transition === tr.id && <span className="ml-auto text-xs">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {transition !== 'cut' && (
@@ -383,25 +411,57 @@ export default function Step6Video() {
               </span>
             )}
           </div>
-          <div className="grid grid-cols-4 gap-2">
-            {EFFECTS.map((e) => {
-              const active = effects.includes(e.id)
-              return (
-                <button
-                  key={e.id}
-                  type="button"
-                  onClick={() => toggleEffect(e.id)}
-                  className="flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl text-xs transition-all"
-                  style={active
-                    ? { background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.4)', color: '#C4B5FD' }
-                    : { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#64748B' }
-                  }
-                >
-                  <span className="text-base">{e.icon}</span>
-                  <span className="whitespace-nowrap">{e.label}</span>
-                </button>
-              )
-            })}
+          <div className="relative" ref={effectsRef}>
+            <button
+              type="button"
+              onClick={() => setEffectsOpen((o) => !o)}
+              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-all"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: effects.length > 0 ? '1px solid rgba(124,58,237,0.4)' : '1px solid rgba(255,255,255,0.12)',
+                color: effects.length > 0 ? '#C4B5FD' : '#CBD5E1',
+              }}
+            >
+              <span>
+                {effects.length === 0
+                  ? t('step6.no_effects')
+                  : `${t('step6.effects_selected')}: ${effects.length}`}
+              </span>
+              <span style={{ color: '#64748B', fontSize: '0.65rem', display: 'inline-block', transform: effectsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
+            </button>
+            {effectsOpen && (
+              <div className="absolute left-0 right-0 top-full mt-1 rounded-xl overflow-hidden z-50"
+                style={{ background: 'rgba(15,12,35,0.98)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
+                {EFFECTS.map((e) => {
+                  const active = effects.includes(e.id)
+                  return (
+                    <button
+                      key={e.id}
+                      type="button"
+                      onClick={() => toggleEffect(e.id)}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors"
+                      style={{
+                        background: active ? 'rgba(124,58,237,0.2)' : 'transparent',
+                        color: active ? '#C4B5FD' : '#94A3B8',
+                      }}
+                    >
+                      <span className="text-base">{e.icon}</span>
+                      <span>{e.label}</span>
+                      <span
+                        className="ml-auto w-4 h-4 rounded flex items-center justify-center text-xs shrink-0"
+                        style={{
+                          border: `1px solid ${active ? '#7C3AED' : 'rgba(255,255,255,0.2)'}`,
+                          background: active ? 'rgba(124,58,237,0.4)' : 'transparent',
+                          color: '#C4B5FD',
+                        }}
+                      >
+                        {active ? '✓' : ''}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

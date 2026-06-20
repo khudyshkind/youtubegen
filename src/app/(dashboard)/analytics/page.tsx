@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useLang } from '@/hooks/useLang'
 import { useStudioStore } from '@/lib/studio-store'
@@ -2387,6 +2387,16 @@ export default function AnalyticsPage() {
   const [pendingChannelQuery, setPendingChannelQuery] = useState<string | null>(null)
   const [risingStarsResult, setRisingStarsResult] = useState<RisingStarsResult | null>(null)
   const [cameFromRisingStars, setCameFromRisingStars] = useState(false)
+  const [tabOpen, setTabOpen] = useState(false)
+  const tabRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onOutside(e: MouseEvent) {
+      if (tabRef.current && !tabRef.current.contains(e.target as Node)) setTabOpen(false)
+    }
+    document.addEventListener('mousedown', onOutside)
+    return () => document.removeEventListener('mousedown', onOutside)
+  }, [])
 
   function handleOpenReport(report: AnalyticsReport) {
     setOpenedReport(report)
@@ -2452,19 +2462,36 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Tabs */}
-        <div className="no-print flex gap-1 mb-6 p-1 rounded-xl"
-          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-          {TABS.map(({ id, label }) => (
-            <button key={id} onClick={() => { setTab(id); setCameFromRisingStars(false); if (id !== openedReport?.report_type) clearOpenedReport() }}
-              className="flex-1 py-2.5 px-2 rounded-lg text-xs sm:text-sm font-medium transition-all"
-              style={{
-                background: tab === id ? 'rgba(124,58,237,0.35)' : 'transparent',
-                color: tab === id ? '#c4b5fd' : '#64748b',
-                border: tab === id ? '1px solid rgba(124,58,237,0.5)' : '1px solid transparent',
-              }}>
-              {label}
-            </button>
-          ))}
+        <div className="no-print relative mb-6" ref={tabRef}>
+          <button
+            type="button"
+            onClick={() => setTabOpen((o) => !o)}
+            className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
+            style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.35)', color: '#C4B5FD' }}
+          >
+            <span>{TABS.find(({ id }) => id === tab)?.label}</span>
+            <span style={{ color: '#7C3AED', fontSize: '0.65rem', display: 'inline-block', transform: tabOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
+          </button>
+          {tabOpen && (
+            <div className="absolute left-0 right-0 top-full mt-1 rounded-xl overflow-hidden z-50"
+              style={{ background: 'rgba(15,12,35,0.98)', border: '1px solid rgba(124,58,237,0.2)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
+              {TABS.map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => { setTab(id); setCameFromRisingStars(false); if (id !== openedReport?.report_type) clearOpenedReport(); setTabOpen(false) }}
+                  className="w-full flex items-center px-4 py-3 text-sm text-left transition-colors"
+                  style={{
+                    background: tab === id ? 'rgba(124,58,237,0.2)' : 'transparent',
+                    color: tab === id ? '#C4B5FD' : '#94A3B8',
+                  }}
+                >
+                  <span className="flex-1">{label}</span>
+                  {tab === id && <span className="text-xs text-violet-400">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Tab content */}
