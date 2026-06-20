@@ -259,6 +259,7 @@ export const IMAGE_STYLES = {
   watercolor:  'watercolor painting style, soft colors, textured paper, artistic',
   cinematic:   'cinematic photography, dramatic lighting, movie still, wide-angle',
   cyberpunk:   'neon cyberpunk style, vibrant neon colors, futuristic dystopia',
+  doodle:      'flat 2D doodle cartoon, minimalist stick figures, bold black outlines, simple comedic style',
 } as const
 
 export type ImageStyleKey = keyof typeof IMAGE_STYLES

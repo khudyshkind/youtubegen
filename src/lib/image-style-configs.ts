@@ -42,6 +42,13 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     enhanceSystemHint: 'Cinematic photography style. Dramatic lighting, movie still.',
     fallbackPrompt: 'Cinematic scene related to {topic}, dramatic lighting, movie still, wide angle',
   },
+  'flat 2D doodle cartoon, minimalist stick figures, bold black outlines, simple comedic style': {
+    claudeInstruction: 'Minimalist doodle cartoon scene. Stick-figure characters with round white heads, simple dot eyes, thin limbs. Describe only actions and objects — no complex faces, no realistic textures, no detailed clothing. Bold outlines, flat colors. 20–25 words.',
+    fluxSuffix: 'flat 2D doodle cartoon style, minimalist character design, round white head, simple black dot eyes, thin stick-figure body, bold black outlines, flat color illustration, simple comedic animation style, vector art, expressive minimalistic faces, hyperbolic comedic poses',
+    negativePrompt: 'photorealistic, photograph, 3d render, detailed shading, gradient, realistic anatomy, complex textures, cinematic lighting, watercolor, pencil sketch, detailed faces',
+    enhanceSystemHint: 'Minimalist doodle cartoon style with simple stick-figure characters, bold black outlines, flat colors. No photorealism, no detail.',
+    fallbackPrompt: 'Simple doodle cartoon scene related to {topic}, stick figure characters, flat colors, bold outlines, minimalist style',
+  },
   'neon cyberpunk style, vibrant neon colors, futuristic dystopia': {
     claudeInstruction: 'Neon cyberpunk aesthetic. Futuristic urban dystopia, glowing neon lights. Describe city scenes with neon glow vocabulary. 20–25 words.',
     fluxSuffix: 'neon cyberpunk aesthetic, glowing neon lights, futuristic city, dark dystopian atmosphere, vibrant neon colors',
