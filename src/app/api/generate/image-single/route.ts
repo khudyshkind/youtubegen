@@ -53,7 +53,9 @@ async function generateFlux(
   serviceClient: ReturnType<typeof createServiceClient>,
 ): Promise<string> {
   fal.config({ credentials: env('FAL_KEY') })
-  const result = await fal.subscribe('fal-ai/flux/dev', {
+  // negative_prompt is a valid Flux.dev API parameter but missing from the fal SDK type.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = await (fal.subscribe as any)('fal-ai/flux/dev', {
     input: {
       prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
       negative_prompt: negativePrompt,
