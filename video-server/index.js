@@ -1945,6 +1945,7 @@ async function processVideoJob(jobId, body) {
       subtitle_blocks,
       subtitle_style,
       project_id,
+      user_id,
       image_interval,
       transition = 'cut',
       transition_duration = 0.5,
