@@ -20,6 +20,9 @@ const API_SECRET            = process.env.RAILWAY_API_SECRET
 const SUPABASE_URL          = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
 
+const RENDI_API_KEY = process.env.RENDI_API_KEY
+const RENDI_API_URL = process.env.RENDI_API_URL || 'https://api.rendi.dev/v1/run-ffmpeg-command'
+
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN
 
 // ── Russia payment config ─────────────────────────────────────────────────────
@@ -2084,51 +2087,153 @@ const VF_BASE =
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
-// ── Batch xfade helper ─────────────────────────────────────────────────────
-// Process a batch of pre-encoded clips into one video via a single filter_complex
-// xfade chain. Each clip is decoded/encoded exactly once: O(N) per batch vs the
-// old O(N²) linear accumulation (where each step re-encoded the growing accumulator).
-// Safe memory: BATCH_SIZE=8 opens 8 decoders simultaneously (~80–120 MB on Railway).
-async function xfadeBatchPass(clips, clipDurations, transition, td, tmpDir, batchId) {
-  if (clips.length === 1) {
-    return { path: clips[0], contentDuration: clipDurations[0] }
+// ── Rendi API wrapper ──────────────────────────────────────────────────────
+// Sends an FFmpeg command to Rendi.dev for remote execution.
+// inputFiles: { in_1: "https://...", in_2: "https://..." }
+// outputFiles: { out_1: "output.mp4" }
+// ffmpegCommand: "-i {{in_1}} -vf ... {{out_1}}"  (no leading "ffmpeg")
+// Returns: { out_1: "https://rendi-cdn.../output.mp4", ... }
+async function runFFmpegOnRendi(inputFiles, outputFiles, ffmpegCommand, timeoutMs = 600000) {
+  if (!RENDI_API_KEY) throw new Error('RENDI_API_KEY not configured')
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    console.log(`[rendi] → ${ffmpegCommand.slice(0, 150)}`)
+    const res = await fetch(RENDI_API_URL, {
+      method: 'POST',
+      headers: { 'X-API-KEY': RENDI_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input_files: inputFiles, output_files: outputFiles, ffmpeg_command: ffmpegCommand }),
+      signal: ctrl.signal,
+    })
+    const result = await res.json()
+    if (!res.ok || result.status !== 'SUCCESS') {
+      console.error('[rendi] failure:', JSON.stringify(result).slice(0, 500))
+      throw new Error(`Rendi: ${result.error ?? result.status ?? `HTTP ${res.status}`}`)
+    }
+    console.log('[rendi] ✓ outputs:', Object.keys(result.output_files || {}).join(', '))
+    return result.output_files || {}
+  } finally {
+    clearTimeout(timer)
   }
-  const outPath = path.join(tmpDir, `batch_${batchId}.mp4`)
+}
 
-  // Build [0:v][1:v]xfade=offset=O1[vt1];[vt1][2:v]xfade=offset=O2[vt2];...
-  // Offset_k = cumulative content duration of clips 0..k-1 minus td (transition overlap).
+// Parse audio duration from public URL via music-metadata (no ffprobe needed)
+async function getAudioDuration(url) {
+  const { parseURL } = await import('music-metadata')
+  const meta = await parseURL(url)
+  const dur = meta.format.duration
+  if (!dur || !isFinite(dur)) throw new Error(`music-metadata: no duration for ${url.slice(0, 80)}`)
+  return dur
+}
+
+// Upload raw bytes to B2 (SRT subtitle temp files, etc.)
+async function uploadBytesToB2(buffer, key, contentType = 'application/octet-stream') {
+  const bucket   = (process.env.B2_BUCKET || '').trim()
+  const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
+  const region   = (process.env.B2_REGION || 'us-east-005').trim()
+  const uploadUrl = `${endpoint}/${bucket}/${key}`
+  const parsed = new URL(uploadUrl)
+  const now = new Date()
+  const amzDate    = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  const dateStamp  = amzDate.slice(0, 8)
+  const service    = 's3'
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
+  const bodyHash = crypto.createHash('sha256').update(buffer).digest('hex')
+  const canonicalHeaders =
+    `content-type:${contentType}\n` +
+    `host:${parsed.hostname}\n` +
+    `x-amz-content-sha256:${bodyHash}\n` +
+    `x-amz-date:${amzDate}\n`
+  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date'
+  const canonicalRequest = ['PUT', parsed.pathname, '', canonicalHeaders, signedHeaders, bodyHash].join('\n')
+  const stringToSign = [
+    'AWS4-HMAC-SHA256', amzDate, credentialScope,
+    crypto.createHash('sha256').update(canonicalRequest).digest('hex'),
+  ].join('\n')
+  const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${process.env.B2_APPLICATION_KEY}`, dateStamp), region), service), 'aws4_request')
+  const signature  = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex')
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credentialScope}, ` +
+    `SignedHeaders=${signedHeaders}, Signature=${signature}`
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType, 'x-amz-content-sha256': bodyHash, 'x-amz-date': amzDate, 'Authorization': authorization },
+    body: buffer,
+  })
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`[b2-bytes] HTTP ${res.status}: ${errBody.slice(0, 300)}`)
+  }
+  return uploadUrl
+}
+
+// Burn SRT subtitles via Rendi (uploads SRT to B2 first, passes URL to Rendi)
+async function burnSubtitlesRendi(videoUrl, subtitle_blocks, subtitle_style, jobId) {
+  const srtContent = blocksToSrt(subtitle_blocks)
+  const srtKey = `temp/subs_${jobId}.srt`
+  let srtUrl
+  try {
+    srtUrl = await uploadBytesToB2(Buffer.from(srtContent, 'utf-8'), srtKey, 'text/plain')
+    console.log('[rendi] SRT uploaded:', srtKey)
+  } catch (e) {
+    console.warn('[rendi] SRT upload failed, skipping subtitles:', e.message)
+    return videoUrl
+  }
+  const sizeMap  = { small: 18, medium: 22, large: 28 }
+  const alignMap = { top: 8, center: 5, bottom: 2 }
+  const fontSize  = sizeMap[subtitle_style.size] ?? 22
+  const alignment = alignMap[subtitle_style.position] ?? 2
+  const colour    = hexToAss(subtitle_style.color)
+  const bg        = subtitle_style.background
+  // Omit FontName to avoid spaces in name causing shell-split issues on Rendi's side
+  let forceStyle = `FontSize=${fontSize},PrimaryColour=${colour},OutlineColour=&H000000,Outline=2,Bold=1,Alignment=${alignment}`
+  if (bg) forceStyle += ',BorderStyle=3,BackColour=&H80000000'
+  try {
+    const result = await runFFmpegOnRendi(
+      { in_1: videoUrl, in_2: srtUrl },
+      { out_1: 'output_subs.mp4' },
+      `-i {{in_1}} -vf "subtitles={{in_2}}:force_style='${forceStyle}'" -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`
+    )
+    console.log('[rendi] subtitle burn-in done')
+    return result.out_1
+  } catch (subsErr) {
+    console.warn('[rendi] subtitle burn-in failed, using video without subs:', subsErr.message)
+    return videoUrl
+  }
+}
+
+// ── Batch xfade helper (Rendi) ─────────────────────────────────────────────
+// Process a batch of clip URLs via Rendi filter_complex xfade chain.
+// O(N) per batch — each clip decoded/encoded exactly once on Rendi's servers.
+async function xfadeBatchPassRendi(clipUrls, clipDurations, transition, td, batchId) {
+  if (clipUrls.length === 1) {
+    return { url: clipUrls[0], contentDuration: clipDurations[0] }
+  }
+  const inputFiles = {}
+  for (let i = 0; i < clipUrls.length; i++) {
+    inputFiles[`in_${i + 1}`] = clipUrls[i]
+  }
   const filterParts = []
   let cumDur = 0
   let prevLabel = '[0:v]'
-  for (let i = 1; i < clips.length; i++) {
+  for (let i = 1; i < clipUrls.length; i++) {
     cumDur += clipDurations[i - 1]
     const offset = Math.max(0, cumDur - td).toFixed(3)
-    const outLabel = i === clips.length - 1 ? '[vout]' : `[vt${i}]`
-    filterParts.push(
-      `${prevLabel}[${i}:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset}${outLabel}`
-    )
+    const outLabel = i === clipUrls.length - 1 ? '[vout]' : `[vt${i}]`
+    filterParts.push(`${prevLabel}[${i}:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset}${outLabel}`)
     prevLabel = outLabel
   }
-
-  await new Promise((resolve, reject) => {
-    execFile('ffmpeg', [
-      ...clips.flatMap(p => ['-i', p]),
-      '-filter_complex', filterParts.join(';'),
-      '-map', '[vout]',
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
-      '-pix_fmt', 'yuv420p', '-an', '-y', outPath,
-    ], { maxBuffer: 50 * 1024 * 1024 }, (err, _stdout, stderr) => {
-      if (err) {
-        console.error(`[ffmpeg] xfade batch ${batchId} STDERR:\n${stderr.slice(-600)}`)
-        reject(new Error(`xfade batch ${batchId}: ${stderr.slice(-300)}`))
-      } else resolve()
-    })
-  })
-
-  return { path: outPath, contentDuration: clipDurations.reduce((a, b) => a + b, 0) }
+  const inputArgs = clipUrls.map((_, i) => `-i {{in_${i + 1}}}`).join(' ')
+  const result = await runFFmpegOnRendi(
+    inputFiles,
+    { out_1: `${batchId}.mp4` },
+    `${inputArgs} -filter_complex "${filterParts.join(';')}" -map [vout] -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -an {{out_1}}`
+  )
+  return { url: result.out_1, contentDuration: clipDurations.reduce((a, b) => a + b, 0) }
 }
 
-// ── Async video rendering pipeline ─────────────────────────────────────────
+// ── Async video rendering pipeline (Rendi) ────────────────────────────────
 async function processVideoJob(jobId, body) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytgen-'))
   await updateJob(jobId, { status: 'processing', progress: 5 })
@@ -2156,47 +2261,30 @@ async function processVideoJob(jobId, body) {
       '| burnIn:', subtitle_style?.burnIn ?? false)
 
     const defaultDuration = Math.max(1, Number(image_interval) || 10)
+    const effectFilters = (Array.isArray(effects) ? effects : []).map(e => EFFECT_FILTERS[e]).filter(Boolean)
+    const useXfade = transition && transition !== 'cut' && images.length > 1
+    const td = Math.max(0.1, Math.min(1.5, Number(transition_duration) || 0.5))
 
-    // ── Stage 1: Download audio + normalize ──────────────────────────────────
-    console.time(T('1_audio_download+norm'))
-    const audioPath = path.join(tmpDir, 'audio.mp3')
-    await downloadFile(audio_url, audioPath)
+    // ── Stage 1: Normalize audio via Rendi + get duration ────────────────────
+    console.time(T('1_audio_norm'))
+    // Normalize loudness to -14 LUFS (YouTube standard). Duration is read from
+    // the original URL since loudnorm preserves duration exactly.
+    const audioDuration = await getAudioDuration(audio_url)
+    console.log(`[audio] duration: ${audioDuration.toFixed(2)}s`)
 
-    // Normalize loudness to -14 LUFS (YouTube standard)
-    const audioNormPath = path.join(tmpDir, 'audio_norm.mp3')
-    let finalAudioPath = audioPath
+    let finalAudioUrl = audio_url
     try {
-      await new Promise((resolve, reject) => {
-        execFile('ffmpeg', [
-          '-i', audioPath,
-          '-filter:a', 'loudnorm=I=-14:LRA=7:TP=-1',
-          '-ar', '44100',
-          '-y', audioNormPath,
-        ], { maxBuffer: 10 * 1024 * 1024 }, (err, _stdout, stderr) => {
-          if (err) reject(new Error(stderr.slice(-300)))
-          else resolve()
-        })
-      })
-      finalAudioPath = audioNormPath
-      console.log('[audio] loudnorm applied')
+      const normResult = await runFFmpegOnRendi(
+        { in_1: audio_url },
+        { out_1: 'audio_norm.mp3' },
+        '-i {{in_1}} -filter:a loudnorm=I=-14:LRA=7:TP=-1 -ar 44100 {{out_1}}'
+      )
+      finalAudioUrl = normResult.out_1
+      console.log('[audio] loudnorm applied via Rendi')
     } catch (normErr) {
       console.warn('[audio] loudnorm failed, using original:', normErr.message)
     }
-    console.timeEnd(T('1_audio_download+norm'))
-
-    // Compute audio duration BEFORE image downloads so we can start clip encoding
-    // immediately after each individual image — no need to download all 20 first.
-    const audioDuration = await new Promise((resolve, reject) => {
-      execFile('ffprobe', [
-        '-v', 'quiet',
-        '-show_entries', 'format=duration',
-        '-of', 'csv=p=0',
-        finalAudioPath,
-      ], (err, stdout) => {
-        if (err) reject(new Error(`ffprobe: ${err.message}`))
-        else resolve(parseFloat(stdout.trim()))
-      })
-    })
+    console.timeEnd(T('1_audio_norm'))
 
     const durations = images.map((img) => {
       if (img.timecode_start && img.timecode_end) {
@@ -2210,271 +2298,153 @@ async function processVideoJob(jobId, body) {
       durations[durations.length - 1] += audioDuration - totalImagesDuration
     }
     console.log(`[job:${jobId}] durations (${durations.length}): [${durations.map(d => d.toFixed(2)).join(', ')}]`)
-    {
-      const m = process.memoryUsage()
-      console.log(`[job:${jobId}] [mem:start] rss=${Math.round(m.rss / 1024 / 1024)}MB heap=${Math.round(m.heapUsed / 1024 / 1024)}MB`)
-    }
 
-    const tempBasePath = path.join(tmpDir, 'temp_1.mp4')
     const outputPath = path.join(tmpDir, 'output.mp4')
 
-    // Pre-compute effects filter chain — used inside both xfade and concat mux passes
-    // to avoid a separate encode pass (saves ~4-5 min for a 3-min video at CRF 20).
-    const effectFilters = (Array.isArray(effects) ? effects : [])
-      .map((e) => EFFECT_FILTERS[e])
-      .filter(Boolean)
-
-    // ── Pass 1: Assemble images into video ──────────────────────────────────
-    const useXfade = transition && transition !== 'cut' && images.length > 1
-    const td = Math.max(0.1, Math.min(1.5, Number(transition_duration) || 0.5))
-
     if (useXfade) {
-      // ── Stage 2: Download images + encode clips ─────────────────────────────
-      console.time(T('2_img_download'))
+      // ── Stage 2: Encode all clips via Rendi (parallel) ──────────────────────
       console.time(T('2_clips_encode'))
-      // Sequential download → encode → delete source for each clip.
-      // JPEG decoder outputs yuvj420p; xfade crashes on it → pre-encode to H264 (yuv420p).
-      // Running even 4 parallel libx264 processes (~120 MB each) + Node (~80 MB) = ~560 MB
-      // which OOM-kills Railway's default 512 MB container (SIGKILL = server restart).
-      // Sequential keeps peak RAM under ~200 MB: 1 FFmpeg + Node.
-      console.log(`[ffmpeg] pre-converting ${images.length} images to clips (sequential)…`)
-      const clipPaths = []
-      let totalDownloadMs = 0
-      let totalEncodeMs = 0
-      for (let i = 0; i < images.length; i++) {
-        const imgPath = path.join(tmpDir, `img_${String(i).padStart(3, '0')}.jpg`)
-        console.log(`[job:${jobId}] img_${i}: downloading from ${images[i].url}`)
-        const t0dl = Date.now()
-        await downloadFile(images[i].url, imgPath)
-        totalDownloadMs += Date.now() - t0dl
-        const imgSize = fs.statSync(imgPath).size
-        console.log(`[job:${jobId}] img_${i}: ${imgSize} bytes`)
-        if (imgSize === 0) throw new Error(`img_${i}: empty file from ${images[i].url}`)
-
-        const clipPath = path.join(tmpDir, `clip_${i}.mp4`)
+      console.log(`[rendi] encoding ${images.length} clips in parallel...`)
+      const clipUrls = await Promise.all(images.map(async (img, i) => {
         const clipDur = (durations[i] + td).toFixed(3)
-        console.log(`[job:${jobId}] clip_${i}: encoding ${clipDur}s (dur=${durations[i].toFixed(2)}s)`)
-        const t0enc = Date.now()
-        await new Promise((resolve, reject) => {
-          execFile('ffmpeg', [
-            '-loop', '1', '-t', clipDur,
-            '-i', imgPath,
-            '-vf', VF_BASE,
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'stillimage', '-crf', '28',
-            '-pix_fmt', 'yuv420p', '-an', '-y', clipPath,
-          ], { maxBuffer: 10 * 1024 * 1024 }, (err, _stdout, stderr) => {
-            if (err) {
-              const head = stderr ? stderr.slice(0, 500) : ''
-              const tail = stderr ? stderr.slice(-500) : err.message
-              console.error(`[ffmpeg] clip_${i} FAILED (exit ${err.code})\nHEAD:\n${head}\nTAIL:\n${tail}`)
-              reject(new Error(`clip_${i}: ${tail.slice(-300)}`))
-            } else {
-              const clipSize = fs.statSync(clipPath).size
-              console.log(`[job:${jobId}] clip_${i}: done, ${clipSize} bytes`)
-              resolve()
-            }
-          })
-        })
-        totalEncodeMs += Date.now() - t0enc
-        // Delete source image immediately after encoding — no need to keep it on disk
-        try { fs.unlinkSync(imgPath) } catch (_) {}
-        clipPaths.push(clipPath)
-      }
-      console.log(`[ffmpeg] pre-conversion done, ${clipPaths.length} clips ready`)
-      console.log(`[perf] img download total: ${(totalDownloadMs/1000).toFixed(1)}s | clip encode total: ${(totalEncodeMs/1000).toFixed(1)}s`)
-      console.timeEnd(T('2_img_download'))
+        const result = await runFFmpegOnRendi(
+          { in_1: img.url },
+          { out_1: `clip_${i}.mp4` },
+          `-loop 1 -t ${clipDur} -i {{in_1}} -vf "${VF_BASE}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
+        )
+        console.log(`[rendi] clip_${i} done`)
+        return result.out_1
+      }))
+      console.log(`[rendi] all ${clipUrls.length} clips encoded`)
       console.timeEnd(T('2_clips_encode'))
-      {
-        const m = process.memoryUsage()
-        console.log(`[job:${jobId}] [mem:post-clips] rss=${Math.round(m.rss / 1024 / 1024)}MB heap=${Math.round(m.heapUsed / 1024 / 1024)}MB`)
-      }
-      await updateJob(jobId, { progress: 10 })
+      await updateJob(jobId, { progress: 20 })
 
-      // ── Stage 3: Batch xfade + mux + effects (combined) ─────────────────────
+      // ── Stage 3: Batch xfade → merge → mux+effects ──────────────────────────
       console.time(T('3_xfade'))
-      const XFADE_BATCH_SIZE = 8
+      const XFADE_BATCH_SIZE = 4
 
-      // Phase A: process clips in batches of 8 via filter_complex.
-      // Each clip is decoded+encoded exactly once per batch (O(N) total vs O(N²) sequential).
+      // Phase A: process clips in batches of 4 via Rendi filter_complex
       const batchResults = []
-      for (let b = 0; b < clipPaths.length; b += XFADE_BATCH_SIZE) {
-        const bClips = clipPaths.slice(b, b + XFADE_BATCH_SIZE)
-        const bDurs = durations.slice(b, b + XFADE_BATCH_SIZE)
-        const bNum = Math.floor(b / XFADE_BATCH_SIZE)
-        console.log(`[ffmpeg] xfade batch ${bNum}: ${bClips.length} clips, ${bDurs.reduce((a, c) => a + c, 0).toFixed(1)}s`)
-        const result = await xfadeBatchPass(bClips, bDurs, transition, td, tmpDir, `${bNum}`)
+      for (let b = 0; b < clipUrls.length; b += XFADE_BATCH_SIZE) {
+        const bClips = clipUrls.slice(b, b + XFADE_BATCH_SIZE)
+        const bDurs  = durations.slice(b, b + XFADE_BATCH_SIZE)
+        const bNum   = Math.floor(b / XFADE_BATCH_SIZE)
+        console.log(`[rendi] xfade batch ${bNum}: ${bClips.length} clips, ${bDurs.reduce((a, c) => a + c, 0).toFixed(1)}s`)
+        const result = await xfadeBatchPassRendi(bClips, bDurs, transition, td, `batch_${bNum}`)
         batchResults.push(result)
-        // Free clip files that were consumed by this batch (single-clip pass-throughs are freed in merge)
-        if (bClips.length > 1) {
-          for (const cp of bClips) { try { fs.unlinkSync(cp) } catch (_) {} }
-        }
       }
-      console.log(`[ffmpeg] ${batchResults.length} batch(es) ready, merging...`)
+      console.log(`[rendi] ${batchResults.length} batch(es) ready, merging...`)
 
-      // Phase B: merge batch outputs (only ceil(N/8) steps vs N-1 steps before).
-      let accPath = batchResults[0].path
+      // Phase B: merge batch outputs
+      let accUrl = batchResults[0].url
       let accDur = batchResults[0].contentDuration
       for (let i = 1; i < batchResults.length; i++) {
-        const nextAccPath = path.join(tmpDir, `merge_${i}.mp4`)
         const offset = Math.max(0, accDur - td)
-        await new Promise((resolve, reject) => {
-          execFile('ffmpeg', [
-            '-i', accPath,
-            '-i', batchResults[i].path,
-            '-filter_complex', `[0:v][1:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}[vout]`,
-            '-map', '[vout]',
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
-            '-pix_fmt', 'yuv420p', '-an', '-y', nextAccPath,
-          ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-            if (err) reject(new Error(`batch merge ${i}: ${stderr.slice(-300)}`))
-            else resolve()
-          })
-        })
-        try { fs.unlinkSync(accPath) } catch (_) {}
-        try { fs.unlinkSync(batchResults[i].path) } catch (_) {}
+        const mergeResult = await runFFmpegOnRendi(
+          { in_1: accUrl, in_2: batchResults[i].url },
+          { out_1: `merge_${i}.mp4` },
+          `-i {{in_1}} -i {{in_2}} -filter_complex "[0:v][1:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}[vout]" -map [vout] -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -an {{out_1}}`
+        )
+        accUrl = mergeResult.out_1
         accDur += batchResults[i].contentDuration
-        accPath = nextAccPath
-      }
-      {
-        const m = process.memoryUsage()
-        console.log(`[job:${jobId}] [mem:post-xfade] rss=${Math.round(m.rss / 1024 / 1024)}MB heap=${Math.round(m.heapUsed / 1024 / 1024)}MB`)
       }
 
-      // Phase C: mux audio + bake effects in one pass.
-      // Previously: mux→CRF26 (no effects) then a separate effects→CRF20 pass.
-      // Now: single pass at CRF20 with effects filter chain, saving ~4-5 min for 3-min video.
+      // Phase C: mux audio + bake effects in one pass (saves a separate encode)
       const muxVf = effectFilters.length > 0
         ? `format=yuv420p,${effectFilters.join(',')}`
         : 'format=yuv420p'
-      console.log(`[ffmpeg] mux+effects vf: ${muxVf}`)
-      await new Promise((resolve, reject) => {
-        execFile('ffmpeg', [
-          '-i', accPath,
-          '-i', finalAudioPath,
-          '-map', '0:v', '-map', '1:a',
-          '-vf', muxVf,
-          '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
-          '-maxrate', '6M', '-bufsize', '12M',
-          '-pix_fmt', 'yuv420p',
-          '-c:a', 'aac', '-b:a', '128k',
-          '-movflags', '+faststart',
-          '-t', String(audioDuration),
-          '-y', tempBasePath,
-        ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-          if (err) reject(new Error(`FFmpeg mux+effects: ${stderr.slice(-400)}`))
-          else resolve()
-        })
-      })
-      try { fs.unlinkSync(accPath) } catch (_) {}
-      console.log(`[ffmpeg] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
+      console.log(`[rendi] mux+effects vf: ${muxVf}`)
+      const muxResult = await runFFmpegOnRendi(
+        { in_1: accUrl, in_2: finalAudioUrl },
+        { out_1: 'temp_1.mp4' },
+        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf "${muxVf}" -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
+      )
+      let currentUrl = muxResult.out_1
+      console.log(`[rendi] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
       console.timeEnd(T('3_xfade'))
       await updateJob(jobId, { progress: 60 })
-    } else {
-      // ── Stage 2+3 (cut): Download images + concat ───────────────────────────
-      console.time(T('2_img_download'))
-      // Concat demuxer — simple cut between scenes
-      // Download all images first (concat demuxer needs all file paths simultaneously)
-      const imagePaths = []
-      for (let i = 0; i < images.length; i++) {
-        const imgPath = path.join(tmpDir, `img_${String(i).padStart(3, '0')}.jpg`)
-        console.log(`[job:${jobId}] img_${i}: downloading from ${images[i].url}`)
-        await downloadFile(images[i].url, imgPath)
-        const imgSize = fs.statSync(imgPath).size
-        console.log(`[job:${jobId}] img_${i}: ${imgSize} bytes`)
-        if (imgSize === 0) throw new Error(`img_${i}: empty file from ${images[i].url}`)
-        imagePaths.push(imgPath)
-      }
-      console.timeEnd(T('2_img_download'))
 
-      console.time(T('3_concat'))
-      const concatLines = []
-      for (let i = 0; i < imagePaths.length; i++) {
-        concatLines.push(`file '${imagePaths[i]}'`)
-        concatLines.push(`duration ${durations[i]}`)
-      }
-      concatLines.push(`file '${imagePaths[imagePaths.length - 1]}'`)
-      const concatPath = path.join(tmpDir, 'concat.txt')
-      fs.writeFileSync(concatPath, concatLines.join('\n'))
+      // ── Stage 4: effects merged into Stage 3 mux pass ──────────────────────
+      console.log(`[perf] 4_effects: ${effectFilters.length > 0 ? `merged into mux (${effects.join(', ')})` : 'skipped (no effects)'}`)
 
-      // Bake effects into the concat pass to avoid a separate effects encode.
-      const concatVf = effectFilters.length > 0
-        ? `${VF_BASE},format=yuv420p,${effectFilters.join(',')}`
-        : VF_BASE
-      await new Promise((resolve, reject) => {
-        execFile('ffmpeg', [
-          '-f', 'concat', '-safe', '0', '-i', concatPath,
-          '-i', finalAudioPath,
-          '-vf', concatVf,
-          '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
-          '-maxrate', '6M', '-bufsize', '12M',
-          '-pix_fmt', 'yuv420p',
-          '-c:a', 'aac', '-b:a', '128k',
-          '-movflags', '+faststart',
-          '-t', String(audioDuration),
-          '-y', tempBasePath,
-        ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-          if (err) reject(new Error(`FFmpeg concat: ${stderr.slice(-400)}`))
-          else resolve()
-        })
-      })
-      console.log(`[ffmpeg] concat+effects done: effects=[${effects.join(', ')}]`)
-      console.timeEnd(T('3_concat'))
-      await updateJob(jobId, { progress: 60 })
-    }
-
-    // ── Stage 4: effects merged into Stage 3 mux pass ────────────────────────
-    // No separate encode pass needed — effects were baked into the mux command above.
-    console.log(`[perf] 4_effects: ${effectFilters.length > 0 ? `merged into mux (${effects.join(', ')})` : 'skipped (no effects)'}`)
-    const currentPath = tempBasePath
-
-    // ── Stage 5: Burn subtitles ───────────────────────────────────────────────
-    if (subtitle_blocks?.length && subtitle_style?.burnIn) {
-      console.time(T('5_subtitles'))
-      const srtPath = path.join(tmpDir, 'subs.srt')
-      fs.writeFileSync(srtPath, blocksToSrt(subtitle_blocks))
-
-      const sizeMap = { small: 18, medium: 22, large: 28 }
-      const alignMap = { top: 8, center: 5, bottom: 2 }
-      const fontSize = sizeMap[subtitle_style.size] ?? 22
-      const alignment = alignMap[subtitle_style.position] ?? 2
-      const colour = hexToAss(subtitle_style.color)
-      const bg = subtitle_style.background
-
-      const escaped = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:')
-      let forceStyle = `FontName=Liberation Sans,FontSize=${fontSize},PrimaryColour=${colour},OutlineColour=&H000000,Outline=2,Bold=1,Alignment=${alignment}`
-      if (bg) forceStyle += ',BorderStyle=3,BackColour=&H80000000'
-
-      try {
-        await new Promise((resolve, reject) => {
-          execFile('ffmpeg', [
-            '-i', currentPath,
-            '-vf', `subtitles='${escaped}':force_style='${forceStyle}'`,
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
-            '-maxrate', '4M', '-bufsize', '8M',
-            '-pix_fmt', 'yuv420p',
-            '-c:a', 'copy',
-            '-y', outputPath,
-          ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-            if (err) reject(new Error(`FFmpeg subtitles: ${stderr.slice(-400)}`))
-            else resolve()
-          })
-        })
-        console.log('[ffmpeg] subtitle burn-in done')
+      // ── Stage 5: Burn subtitles ─────────────────────────────────────────────
+      if (subtitle_blocks?.length && subtitle_style?.burnIn) {
+        console.time(T('5_subtitles'))
+        currentUrl = await burnSubtitlesRendi(currentUrl, subtitle_blocks, subtitle_style, jobId)
         console.timeEnd(T('5_subtitles'))
         await updateJob(jobId, { progress: 80 })
-      } catch (subsErr) {
-        console.warn('[ffmpeg] subtitle burn-in failed, skipping subs:', subsErr.message)
-        console.timeEnd(T('5_subtitles'))
-        fs.renameSync(currentPath, outputPath)
+      } else {
+        console.log('[perf] 5_subtitles: skipped (no burn-in)')
       }
+
+      // Download final output from Rendi for B2 upload
+      await downloadFile(currentUrl, outputPath)
+
     } else {
-      console.log('[perf] 5_subtitles: skipped (no burn-in)')
-      fs.renameSync(currentPath, outputPath)
+      // ── Stage 2+3 (cut): Encode clips in parallel + concat via Rendi ────────
+      console.time(T('2_clips_encode'))
+      console.log(`[rendi] encoding ${images.length} clips in parallel (cut)...`)
+      const clipUrls = await Promise.all(images.map(async (img, i) => {
+        const result = await runFFmpegOnRendi(
+          { in_1: img.url },
+          { out_1: `clip_${i}.mp4` },
+          `-loop 1 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${VF_BASE}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
+        )
+        console.log(`[rendi] clip_${i} done`)
+        return result.out_1
+      }))
+      console.timeEnd(T('2_clips_encode'))
+      await updateJob(jobId, { progress: 20 })
+
+      console.time(T('3_concat'))
+      // Build filter_complex concat + effects chain
+      const concatInputFiles = {}
+      for (let i = 0; i < clipUrls.length; i++) {
+        concatInputFiles[`in_${i + 1}`] = clipUrls[i]
+      }
+      concatInputFiles[`in_${clipUrls.length + 1}`] = finalAudioUrl
+
+      const effectsChain = effectFilters.length > 0
+        ? `,format=yuv420p,${effectFilters.join(',')}`
+        : ',format=yuv420p'
+      const filterStr =
+        clipUrls.map((_, i) => `[${i}:v]`).join('') +
+        `concat=n=${clipUrls.length}:v=1${effectsChain}[vout]`
+      const inputArgs =
+        clipUrls.map((_, i) => `-i {{in_${i + 1}}}`).join(' ') +
+        ` -i {{in_${clipUrls.length + 1}}}`
+      const audioIdx = clipUrls.length // 0-based audio input index
+
+      const concatResult = await runFFmpegOnRendi(
+        concatInputFiles,
+        { out_1: 'temp_1.mp4' },
+        `${inputArgs} -filter_complex "${filterStr}" -map [vout] -map ${audioIdx}:a -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
+      )
+      let currentUrl = concatResult.out_1
+      console.log(`[rendi] concat+effects done: effects=[${effects.join(', ')}]`)
+      console.timeEnd(T('3_concat'))
+      await updateJob(jobId, { progress: 60 })
+
+      // ── Stage 4: effects merged into concat pass ────────────────────────────
+      console.log(`[perf] 4_effects: ${effectFilters.length > 0 ? `merged into concat (${effects.join(', ')})` : 'skipped (no effects)'}`)
+
+      // ── Stage 5: Burn subtitles ─────────────────────────────────────────────
+      if (subtitle_blocks?.length && subtitle_style?.burnIn) {
+        console.time(T('5_subtitles'))
+        currentUrl = await burnSubtitlesRendi(currentUrl, subtitle_blocks, subtitle_style, jobId)
+        console.timeEnd(T('5_subtitles'))
+        await updateJob(jobId, { progress: 80 })
+      } else {
+        console.log('[perf] 5_subtitles: skipped (no burn-in)')
+      }
+
+      // Download final output from Rendi for B2 upload
+      await downloadFile(currentUrl, outputPath)
     }
 
     await updateJob(jobId, { progress: 95 })
 
-    // ── Stage 6: Upload to Backblaze B2 ──────────────────────────────────────
+    // ── Stage 6: Upload to Backblaze B2 ────────────────────────────────────
     const fileSizeBytes = fs.statSync(outputPath).size
     console.log(`[upload] file size: ${fileSizeBytes} bytes = ${(fileSizeBytes / 1024 / 1024).toFixed(2)} MB`)
     console.time(T('6_b2_upload'))
