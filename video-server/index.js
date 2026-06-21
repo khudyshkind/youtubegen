@@ -21,6 +21,9 @@ const SUPABASE_URL          = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 // ── Cloudflare R2 client (S3-compatible, no egress fees, no file size limit) ──
+// forcePathStyle: true is required for R2. Without it, AWS SDK v3 prepends the bucket
+// name to the hostname (virtual-hosted style: bucket.account.r2.cloudflarestorage.com)
+// but Cloudflare doesn't issue wildcard TLS certs for those subdomains → SSL error 40.
 const r2 = new S3Client({
   region: 'auto',
   endpoint: process.env.R2_ENDPOINT,
@@ -28,6 +31,7 @@ const r2 = new S3Client({
     accessKeyId: process.env.R2_ACCESS_KEY_ID,
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   },
+  forcePathStyle: true,
 })
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN
 
