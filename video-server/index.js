@@ -1933,6 +1933,74 @@ async function uploadVideoToR2(filePath, projectId, userId) {
   )
 }
 
+// Upload final video to Backblaze B2 (S3-compatible).
+// R2 was replaced because Cloudflare R2 rejects TLS handshakes from Railway IPs at WAF level.
+async function uploadVideoToB2(filePath, projectId, userId) {
+  const fileBuffer = fs.readFileSync(filePath)
+  const key = `users/${userId}/${projectId}/output_${Date.now()}.mp4`
+  const bucket = (process.env.B2_BUCKET || '').trim()
+  const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
+  const region = (process.env.B2_REGION || 'us-east-005').trim()
+
+  console.log(`[b2] node:${process.version}  endpoint: ${endpoint}  bucket: ${bucket}`)
+  console.log(`[b2] uploading ${key} (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB)`)
+
+  const uploadUrl = `${endpoint}/${bucket}/${key}`
+  const parsed = new URL(uploadUrl)
+  const host = parsed.hostname
+  const urlPath = parsed.pathname
+
+  // AWS SigV4 with actual body hash (B2 requires this, unlike R2 which accepted UNSIGNED-PAYLOAD)
+  const now = new Date()
+  const amzDate = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  const dateStamp = amzDate.slice(0, 8)
+  const service = 's3'
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
+  const bodyHash = crypto.createHash('sha256').update(fileBuffer).digest('hex')
+
+  const canonicalHeaders =
+    `content-type:video/mp4\n` +
+    `host:${host}\n` +
+    `x-amz-content-sha256:${bodyHash}\n` +
+    `x-amz-date:${amzDate}\n`
+  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date'
+  const canonicalRequest = ['PUT', urlPath, '', canonicalHeaders, signedHeaders, bodyHash].join('\n')
+
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    crypto.createHash('sha256').update(canonicalRequest).digest('hex'),
+  ].join('\n')
+
+  const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${process.env.B2_APPLICATION_KEY}`, dateStamp), region), service), 'aws4_request')
+  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex')
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credentialScope}, ` +
+    `SignedHeaders=${signedHeaders}, Signature=${signature}`
+
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'video/mp4',
+      'x-amz-content-sha256': bodyHash,
+      'x-amz-date': amzDate,
+      'Authorization': authorization,
+    },
+    body: fileBuffer,
+  })
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`[b2-upload] HTTP ${res.status}: ${errBody.slice(0, 400)}`)
+  }
+
+  const publicUrl = `${endpoint}/${bucket}/${key}`
+  console.log('[b2] uploaded:', publicUrl)
+  return publicUrl
+}
+
 function downloadFile(url, destPath, _redirects = 0) {
   return new Promise((resolve, reject) => {
     if (_redirects > 5) {
@@ -2015,30 +2083,6 @@ const VF_BASE =
   'pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1'
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
-
-// Temporary network diagnostic endpoint — remove after R2 issue is resolved
-app.get('/diag-r2', verifySecret, async (_req, res) => {
-  const R2_HOST = '4fe8b4a8ca29485c89058c901215dc02.r2.cloudflarestorage.com'
-  const run = (cmd, args) => new Promise((resolve) => {
-    execFile(cmd, args, { maxBuffer: 4 * 1024 * 1024, timeout: 15000 }, (err, stdout, stderr) => {
-      resolve({ stdout: stdout || '', stderr: stderr || '', code: err?.code ?? 0 })
-    })
-  })
-
-  const [curlR2, curlCF, dig] = await Promise.all([
-    run('curl', ['-v', '--max-time', '10', `https://${R2_HOST}`]),
-    run('curl', ['-v', '--max-time', '10', 'https://www.cloudflare.com']),
-    run('dig', ['+short', R2_HOST]).catch(() => run('nslookup', [R2_HOST])),
-  ])
-
-  res.json({
-    node: process.version,
-    openssl: process.versions.openssl,
-    r2_endpoint_curl: { stdout: curlR2.stdout.slice(0, 2000), stderr: curlR2.stderr.slice(0, 2000), code: curlR2.code },
-    cloudflare_com_curl: { stdout: curlCF.stdout.slice(0, 500), stderr: curlCF.stderr.slice(0, 1000), code: curlCF.code },
-    dns: { stdout: dig.stdout.slice(0, 500), stderr: dig.stderr.slice(0, 500), code: dig.code },
-  })
-})
 
 // ── Async video rendering pipeline ─────────────────────────────────────────
 async function processVideoJob(jobId, body) {
@@ -2370,7 +2414,7 @@ async function processVideoJob(jobId, body) {
     console.log(`[upload] file size: ${fileSizeBytes} bytes = ${(fileSizeBytes / 1024 / 1024).toFixed(2)} MB`)
 
     // Upload to Cloudflare R2 — no file size limit, free egress
-    const publicUrl = await uploadVideoToR2(outputPath, project_id, user_id ?? 'anon')
+    const publicUrl = await uploadVideoToB2(outputPath, project_id, user_id ?? 'anon')
     await updateJob(jobId, {
       status: 'completed',
       progress: 100,
