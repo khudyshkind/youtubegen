@@ -2068,10 +2068,10 @@ function blocksToSrt(blocks) {
 
 // FFmpeg -vf filter string for each named effect
 const EFFECT_FILTERS = {
-  film_grain: 'noise=alls=15:allf=t+u',
+  film_grain: 'noise=alls=25:allf=t+u',           // 25 survives H.264 compression better than 15
   ken_burns: "zoompan=z='min(1.3,1+0.0004*in)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1280x720:fps=25",
-  vignette: 'vignette=PI/4',
-  haze: 'colorbalance=rs=0.05:gs=0.05:bs=0.15',
+  vignette: 'vignette=PI/3',                       // PI/3 (~60°) more visible than PI/4 (~45°)
+  haze: 'colorbalance=rs=0.05:gs=0.02:bs=0.25',   // stronger blue shift for visible cool haze
   grayscale: 'hue=s=0',
   cinematic: "curves=r='0/0 1/0.88':b='0/0.05 1/0.95',colorbalance=ss=0.08",
   lens_flare: "curves=r='0/0.02 0.5/0.55 1/1':g='0/0 0.5/0.5 1/0.97':b='0/0.05 0.5/0.45 1/0.9'",
@@ -2351,8 +2351,8 @@ async function processVideoJob(jobId, body) {
         execFile('ffmpeg', [
           '-i', tempBasePath,
           '-vf', vfEffects,
-          '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
-          '-maxrate', '4M', '-bufsize', '8M',
+          '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
+          '-maxrate', '6M', '-bufsize', '12M',
           '-pix_fmt', 'yuv420p',
           '-c:a', 'copy',
           '-y', tempEffectsPath,

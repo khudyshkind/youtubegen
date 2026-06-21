@@ -594,6 +594,7 @@ export default function Step6Video() {
             <p className="text-sm font-semibold text-green-400 mb-3">{t('step6.video_done')}</p>
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
             <video
+              key={videoUrl}
               controls
               src={videoUrl}
               className="w-full rounded-lg mb-3"
