@@ -11,7 +11,7 @@ const AnthropicPkg = require('@anthropic-ai/sdk')
 const Anthropic = AnthropicPkg.default ?? AnthropicPkg
 const cron = require('node-cron')
 const RssParser = require('rss-parser')
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3')
+// R2 upload uses Node's native https + manual AWS SigV4 (no SDK dependency)
 
 const app = express()
 app.use(express.json({ limit: '2mb' }))
@@ -20,19 +20,6 @@ const API_SECRET            = process.env.RAILWAY_API_SECRET
 const SUPABASE_URL          = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-// ── Cloudflare R2 client (S3-compatible, no egress fees, no file size limit) ──
-// forcePathStyle: true is required for R2. Without it, AWS SDK v3 prepends the bucket
-// name to the hostname (virtual-hosted style: bucket.account.r2.cloudflarestorage.com)
-// but Cloudflare doesn't issue wildcard TLS certs for those subdomains → SSL error 40.
-const r2 = new S3Client({
-  region: 'auto',
-  endpoint: process.env.R2_ENDPOINT,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-  },
-  forcePathStyle: true,
-})
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN
 
 // ── Russia payment config ─────────────────────────────────────────────────────
@@ -1836,20 +1823,89 @@ function verifySecret(req, res, next) {
   next()
 }
 
-// Upload final video to Cloudflare R2 (no file size limit, free egress).
-// Uses streaming (ReadStream + ContentLength) to avoid loading the file into RAM.
+// Upload final video to Cloudflare R2.
+// Uses Node's native https module + manual AWS SigV4 (UNSIGNED-PAYLOAD for streaming).
+// No SDK dependency — avoids any SDK-specific TLS behaviour.
 async function uploadVideoToR2(filePath, projectId, userId) {
   const stat = fs.statSync(filePath)
   const key = `users/${userId}/${projectId}/output.mp4`
-  console.log(`[r2] uploading ${key} (${(stat.size / 1024 / 1024).toFixed(2)} MB)`)
-  await r2.send(new PutObjectCommand({
-    Bucket: process.env.R2_BUCKET,
-    Key: key,
-    Body: fs.createReadStream(filePath),
-    ContentLength: stat.size,
-    ContentType: 'video/mp4',
-  }))
-  const publicUrl = `${process.env.R2_PUBLIC_URL}/${key}`
+  const fileSize = stat.size
+  const bucket = (process.env.R2_BUCKET || '').trim()
+  const endpoint = (process.env.R2_ENDPOINT || '').trim().replace(/\/$/, '')
+  const publicBase = (process.env.R2_PUBLIC_URL || '').trim().replace(/\/$/, '')
+
+  console.log(`[r2] endpoint: ${endpoint}  bucket: ${bucket}`)
+  console.log(`[r2] uploading ${key} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`)
+
+  const parsed = new URL(`${endpoint}/${bucket}/${key}`)
+  const host = parsed.hostname
+  const urlPath = parsed.pathname  // /<bucket>/<key>
+
+  // AWS SigV4 — UNSIGNED-PAYLOAD allows streaming without body hash
+  const now = new Date()
+  const amzDate = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')  // 20250101T120000Z
+  const dateStamp = amzDate.slice(0, 8)
+  const region = 'auto'
+  const service = 's3'
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
+
+  const canonicalHeaders =
+    `content-type:video/mp4\n` +
+    `host:${host}\n` +
+    `x-amz-content-sha256:UNSIGNED-PAYLOAD\n` +
+    `x-amz-date:${amzDate}\n`
+  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date'
+
+  const canonicalRequest = ['PUT', urlPath, '', canonicalHeaders, signedHeaders, 'UNSIGNED-PAYLOAD'].join('\n')
+
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    crypto.createHash('sha256').update(canonicalRequest).digest('hex'),
+  ].join('\n')
+
+  const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${process.env.R2_SECRET_ACCESS_KEY}`, dateStamp), region), service), 'aws4_request')
+  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex')
+
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${process.env.R2_ACCESS_KEY_ID}/${credentialScope}, ` +
+    `SignedHeaders=${signedHeaders}, Signature=${signature}`
+
+  await new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: host,
+        port: 443,
+        path: urlPath,
+        method: 'PUT',
+        headers: {
+          'Host': host,
+          'Content-Type': 'video/mp4',
+          'Content-Length': fileSize,
+          'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
+          'x-amz-date': amzDate,
+          'Authorization': authorization,
+        },
+      },
+      (res) => {
+        let body = ''
+        res.on('data', (c) => { body += c })
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve()
+          } else {
+            reject(new Error(`[r2-upload] HTTP ${res.statusCode}: ${body.slice(0, 300)}`))
+          }
+        })
+      },
+    )
+    req.on('error', (err) => reject(new Error(`[r2-upload] ${err.message}`)))
+    fs.createReadStream(filePath).pipe(req)
+  })
+
+  const publicUrl = `${publicBase}/${key}`
   console.log('[r2] uploaded:', publicUrl)
   return publicUrl
 }
@@ -1857,7 +1913,7 @@ async function uploadVideoToR2(filePath, projectId, userId) {
 function downloadFile(url, destPath, _redirects = 0) {
   return new Promise((resolve, reject) => {
     if (_redirects > 5) {
-      return reject(new Error(`Too many redirects: ${url}`))
+      return reject(new Error(`[download] too many redirects: ${url}`))
     }
     const file = fs.createWriteStream(destPath)
     const client = url.startsWith('https') ? https : http
@@ -1872,20 +1928,20 @@ function downloadFile(url, destPath, _redirects = 0) {
       if (response.statusCode !== 200) {
         file.close()
         fs.unlink(destPath, () => {})
-        reject(new Error(`HTTP ${response.statusCode} for ${url}`))
+        reject(new Error(`[download] HTTP ${response.statusCode} for ${url}`))
         return
       }
       response.pipe(file)
       response.on('error', (err) => {
         fs.unlink(destPath, () => {})
-        reject(err)
+        reject(new Error(`[download] response stream error for ${url}: ${err.message}`))
       })
       file.on('finish', () => file.close(resolve))
-      file.on('error', reject)
+      file.on('error', (err) => reject(new Error(`[download] file write error: ${err.message}`)))
     })
     req.on('error', (err) => {
       fs.unlink(destPath, () => {})
-      reject(err)
+      reject(new Error(`[download] request error for ${url}: ${err.message}`))
     })
   })
 }
