@@ -1821,6 +1821,76 @@ function verifySecret(req, res, next) {
   next()
 }
 
+// Upload a file to Supabase Storage using TUS resumable protocol.
+// Standard POST /object endpoint is limited to 50 MB (free plan default).
+// TUS bypasses this — supports files up to 5 GB with 6 MB chunks.
+async function uploadToSupabaseTUS(filePath, bucketName, storagePath) {
+  const fileSize = fs.statSync(filePath).size
+  const CHUNK = 6 * 1024 * 1024  // 6 MB per PATCH
+
+  const meta = [
+    `bucketName ${Buffer.from(bucketName).toString('base64')}`,
+    `objectName ${Buffer.from(storagePath).toString('base64')}`,
+    `contentType ${Buffer.from('video/mp4').toString('base64')}`,
+    `cacheControl ${Buffer.from('3600').toString('base64')}`,
+  ].join(',')
+
+  // Step 1: Create upload session
+  const createRes = await fetch(`${SUPABASE_URL}/storage/v1/upload/resumable`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+      'Tus-Resumable': '1.0.0',
+      'Upload-Length': String(fileSize),
+      'Upload-Metadata': meta,
+      'x-upsert': 'true',
+    },
+  })
+  if (createRes.status !== 201) {
+    const body = await createRes.text().catch(() => '')
+    throw new Error(`TUS create failed ${createRes.status}: ${body}`)
+  }
+  let uploadUrl = createRes.headers.get('location') || createRes.headers.get('Location')
+  if (!uploadUrl) throw new Error('TUS: no Location header')
+  if (!uploadUrl.startsWith('http')) uploadUrl = `${SUPABASE_URL}${uploadUrl}`
+
+  // Step 2: Upload in chunks
+  const fd = fs.openSync(filePath, 'r')
+  try {
+    let offset = 0
+    while (offset < fileSize) {
+      const chunkLen = Math.min(CHUNK, fileSize - offset)
+      const chunk = Buffer.alloc(chunkLen)
+      fs.readSync(fd, chunk, 0, chunkLen, offset)
+
+      const patchRes = await fetch(uploadUrl, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+          'Content-Type': 'application/offset+octet-stream',
+          'Upload-Offset': String(offset),
+          'Content-Length': String(chunkLen),
+          'Tus-Resumable': '1.0.0',
+        },
+        body: chunk,
+      })
+      if (patchRes.status !== 204) {
+        const body = await patchRes.text().catch(() => '')
+        throw new Error(`TUS PATCH failed at offset ${offset}, status ${patchRes.status}: ${body}`)
+      }
+      offset = parseInt(
+        patchRes.headers.get('upload-offset') || patchRes.headers.get('Upload-Offset') || String(offset + chunkLen),
+        10,
+      )
+      console.log(`[upload] TUS ${(offset / 1024 / 1024).toFixed(1)} MB / ${(fileSize / 1024 / 1024).toFixed(1)} MB`)
+    }
+  } finally {
+    fs.closeSync(fd)
+  }
+
+  return `${SUPABASE_URL}/storage/v1/object/public/${bucketName}/${storagePath}`
+}
+
 function downloadFile(url, destPath, _redirects = 0) {
   return new Promise((resolve, reject) => {
     if (_redirects > 5) {
@@ -2206,6 +2276,9 @@ async function processVideoJob(jobId, body) {
           execFile('ffmpeg', [
             '-i', currentPath,
             '-vf', `subtitles='${escaped}':force_style='${forceStyle}'`,
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
+            '-maxrate', '4M', '-bufsize', '8M',
+            '-pix_fmt', 'yuv420p',
             '-c:a', 'copy',
             '-y', outputPath,
           ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
@@ -2224,27 +2297,14 @@ async function processVideoJob(jobId, body) {
     }
 
     await updateJob(jobId, { progress: 95 })
-    // Upload MP4 to Supabase Storage via REST API
-    const fileBuffer = fs.readFileSync(outputPath)
+
+    // Log final file size
+    const fileSizeBytes = fs.statSync(outputPath).size
+    console.log(`[upload] file size: ${fileSizeBytes} bytes = ${(fileSizeBytes / 1024 / 1024).toFixed(2)} MB`)
+
+    // Upload via TUS resumable protocol — no 50 MB limit (unlike standard POST REST API)
     const storagePath = `${project_id}/output.mp4`
-    const uploadUrl = `${SUPABASE_URL}/storage/v1/object/videos/${storagePath}`
-
-    const uploadRes = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-        'Content-Type': 'video/mp4',
-        'x-upsert': 'true',
-      },
-      body: fileBuffer,
-    })
-
-    if (!uploadRes.ok) {
-      const errText = await uploadRes.text()
-      throw new Error(`Supabase upload failed ${uploadRes.status}: ${errText}`)
-    }
-
-    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/videos/${storagePath}`
+    const publicUrl = await uploadToSupabaseTUS(outputPath, 'videos', storagePath)
     await updateJob(jobId, {
       status: 'completed',
       progress: 100,
