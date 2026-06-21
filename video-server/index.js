@@ -1824,8 +1824,10 @@ function verifySecret(req, res, next) {
 }
 
 // Upload final video to Cloudflare R2.
-// Uses Node's native https module + manual AWS SigV4 (UNSIGNED-PAYLOAD for streaming).
-// No SDK dependency — avoids any SDK-specific TLS behaviour.
+// Three-attempt strategy to isolate TLS stack issues:
+//   1. fetch / undici (Node built-in, different TLS negotiation from https.request)
+//   2. curl (system libssl — completely independent of Node's bundled OpenSSL)
+// SigV4 signing is shared; only the HTTP transport differs.
 async function uploadVideoToR2(filePath, projectId, userId) {
   const stat = fs.statSync(filePath)
   const key = `users/${userId}/${projectId}/output.mp4`
@@ -1834,16 +1836,18 @@ async function uploadVideoToR2(filePath, projectId, userId) {
   const endpoint = (process.env.R2_ENDPOINT || '').trim().replace(/\/$/, '')
   const publicBase = (process.env.R2_PUBLIC_URL || '').trim().replace(/\/$/, '')
 
+  console.log(`[r2] node:${process.version} openssl:${process.versions.openssl}`)
   console.log(`[r2] endpoint: ${endpoint}  bucket: ${bucket}`)
   console.log(`[r2] uploading ${key} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`)
 
-  const parsed = new URL(`${endpoint}/${bucket}/${key}`)
+  const uploadUrl = `${endpoint}/${bucket}/${key}`
+  const parsed = new URL(uploadUrl)
   const host = parsed.hostname
-  const urlPath = parsed.pathname  // /<bucket>/<key>
+  const urlPath = parsed.pathname
 
   // AWS SigV4 — UNSIGNED-PAYLOAD allows streaming without body hash
   const now = new Date()
-  const amzDate = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')  // 20250101T120000Z
+  const amzDate = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
   const dateStamp = amzDate.slice(0, 8)
   const region = 'auto'
   const service = 's3'
@@ -1855,7 +1859,6 @@ async function uploadVideoToR2(filePath, projectId, userId) {
     `x-amz-content-sha256:UNSIGNED-PAYLOAD\n` +
     `x-amz-date:${amzDate}\n`
   const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date'
-
   const canonicalRequest = ['PUT', urlPath, '', canonicalHeaders, signedHeaders, 'UNSIGNED-PAYLOAD'].join('\n')
 
   const stringToSign = [
@@ -1868,46 +1871,66 @@ async function uploadVideoToR2(filePath, projectId, userId) {
   const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
   const signingKey = hmac(hmac(hmac(hmac(`AWS4${process.env.R2_SECRET_ACCESS_KEY}`, dateStamp), region), service), 'aws4_request')
   const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex')
-
   const authorization =
     `AWS4-HMAC-SHA256 Credential=${process.env.R2_ACCESS_KEY_ID}/${credentialScope}, ` +
     `SignedHeaders=${signedHeaders}, Signature=${signature}`
 
-  await new Promise((resolve, reject) => {
-    const req = https.request(
-      {
-        hostname: host,
-        port: 443,
-        path: urlPath,
-        method: 'PUT',
-        headers: {
-          'Host': host,
-          'Content-Type': 'video/mp4',
-          'Content-Length': fileSize,
-          'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
-          'x-amz-date': amzDate,
-          'Authorization': authorization,
-        },
+  const publicUrl = `${publicBase}/${key}`
+
+  // ── Attempt 1: fetch / undici ──────────────────────────────────────────────
+  console.log('[r2] attempt 1: fetch (undici)...')
+  let fetchErr = null
+  try {
+    const buf = fs.readFileSync(filePath)
+    const res = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'video/mp4',
+        'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
+        'x-amz-date': amzDate,
+        'Authorization': authorization,
       },
-      (res) => {
-        let body = ''
-        res.on('data', (c) => { body += c })
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve()
-          } else {
-            reject(new Error(`[r2-upload] HTTP ${res.statusCode}: ${body.slice(0, 300)}`))
-          }
-        })
-      },
-    )
-    req.on('error', (err) => reject(new Error(`[r2-upload] ${err.message}`)))
-    fs.createReadStream(filePath).pipe(req)
+      body: buf,
+    })
+    if (res.ok) {
+      console.log('[r2] uploaded via fetch:', publicUrl)
+      return publicUrl
+    }
+    const errBody = await res.text().catch(() => '')
+    fetchErr = new Error(`HTTP ${res.status}: ${errBody.slice(0, 300)}`)
+    console.warn('[r2] fetch HTTP error:', fetchErr.message)
+  } catch (err) {
+    fetchErr = err
+    console.warn('[r2] fetch failed:', err.message)
+  }
+
+  // ── Attempt 2: curl (system libssl, independent of Node's OpenSSL) ─────────
+  console.log('[r2] attempt 2: curl...')
+  const curlOut = await new Promise((resolve, reject) => {
+    execFile('curl', [
+      '-sS', '-o', '/dev/null', '-w', '%{http_code}',
+      '--upload-file', filePath,
+      '-H', `Content-Type: video/mp4`,
+      '-H', `x-amz-content-sha256: UNSIGNED-PAYLOAD`,
+      '-H', `x-amz-date: ${amzDate}`,
+      '-H', `Authorization: ${authorization}`,
+      uploadUrl,
+    ], { maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err && !stdout) {
+        return reject(new Error(`[r2-curl] ${err.message}: ${(stderr || '').slice(0, 200)}`))
+      }
+      resolve(stdout || '')
+    })
   })
 
-  const publicUrl = `${publicBase}/${key}`
-  console.log('[r2] uploaded:', publicUrl)
-  return publicUrl
+  const curlStatus = parseInt(curlOut.trim(), 10)
+  if (curlStatus >= 200 && curlStatus < 300) {
+    console.log('[r2] uploaded via curl:', publicUrl)
+    return publicUrl
+  }
+  throw new Error(
+    `[r2] all upload attempts failed. curl=${curlStatus}; fetch: ${fetchErr?.message ?? 'n/a'}`
+  )
 }
 
 function downloadFile(url, destPath, _redirects = 0) {
