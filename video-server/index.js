@@ -2088,6 +2088,8 @@ app.get('/health', (_req, res) => res.json({ ok: true }))
 async function processVideoJob(jobId, body) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytgen-'))
   await updateJob(jobId, { status: 'processing', progress: 5 })
+  const T = (label) => `[${jobId.slice(0,8)}] ${label}`
+  console.time(T('TOTAL'))
 
   try {
     const {
@@ -2111,7 +2113,8 @@ async function processVideoJob(jobId, body) {
 
     const defaultDuration = Math.max(1, Number(image_interval) || 10)
 
-    // Download audio
+    // ── Stage 1: Download audio + normalize ──────────────────────────────────
+    console.time(T('1_audio_download+norm'))
     const audioPath = path.join(tmpDir, 'audio.mp3')
     await downloadFile(audio_url, audioPath)
 
@@ -2135,6 +2138,7 @@ async function processVideoJob(jobId, body) {
     } catch (normErr) {
       console.warn('[audio] loudnorm failed, using original:', normErr.message)
     }
+    console.timeEnd(T('1_audio_download+norm'))
 
     // Compute audio duration BEFORE image downloads so we can start clip encoding
     // immediately after each individual image — no need to download all 20 first.
@@ -2176,6 +2180,9 @@ async function processVideoJob(jobId, body) {
     const td = Math.max(0.1, Math.min(1.5, Number(transition_duration) || 0.5))
 
     if (useXfade) {
+      // ── Stage 2: Download images + encode clips ─────────────────────────────
+      console.time(T('2_img_download'))
+      console.time(T('2_clips_encode'))
       // Sequential download → encode → delete source for each clip.
       // JPEG decoder outputs yuvj420p; xfade crashes on it → pre-encode to H264 (yuv420p).
       // Running even 4 parallel libx264 processes (~120 MB each) + Node (~80 MB) = ~560 MB
@@ -2183,10 +2190,14 @@ async function processVideoJob(jobId, body) {
       // Sequential keeps peak RAM under ~200 MB: 1 FFmpeg + Node.
       console.log(`[ffmpeg] pre-converting ${images.length} images to clips (sequential)…`)
       const clipPaths = []
+      let totalDownloadMs = 0
+      let totalEncodeMs = 0
       for (let i = 0; i < images.length; i++) {
         const imgPath = path.join(tmpDir, `img_${String(i).padStart(3, '0')}.jpg`)
         console.log(`[job:${jobId}] img_${i}: downloading from ${images[i].url}`)
+        const t0dl = Date.now()
         await downloadFile(images[i].url, imgPath)
+        totalDownloadMs += Date.now() - t0dl
         const imgSize = fs.statSync(imgPath).size
         console.log(`[job:${jobId}] img_${i}: ${imgSize} bytes`)
         if (imgSize === 0) throw new Error(`img_${i}: empty file from ${images[i].url}`)
@@ -2194,6 +2205,7 @@ async function processVideoJob(jobId, body) {
         const clipPath = path.join(tmpDir, `clip_${i}.mp4`)
         const clipDur = (durations[i] + td).toFixed(3)
         console.log(`[job:${jobId}] clip_${i}: encoding ${clipDur}s (dur=${durations[i].toFixed(2)}s)`)
+        const t0enc = Date.now()
         await new Promise((resolve, reject) => {
           execFile('ffmpeg', [
             '-loop', '1', '-t', clipDur,
@@ -2214,17 +2226,23 @@ async function processVideoJob(jobId, body) {
             }
           })
         })
+        totalEncodeMs += Date.now() - t0enc
         // Delete source image immediately after encoding — no need to keep it on disk
         try { fs.unlinkSync(imgPath) } catch (_) {}
         clipPaths.push(clipPath)
       }
       console.log(`[ffmpeg] pre-conversion done, ${clipPaths.length} clips ready`)
+      console.log(`[perf] img download total: ${(totalDownloadMs/1000).toFixed(1)}s | clip encode total: ${(totalEncodeMs/1000).toFixed(1)}s`)
+      console.timeEnd(T('2_img_download'))
+      console.timeEnd(T('2_clips_encode'))
       {
         const m = process.memoryUsage()
         console.log(`[job:${jobId}] [mem:post-clips] rss=${Math.round(m.rss / 1024 / 1024)}MB heap=${Math.round(m.heapUsed / 1024 / 1024)}MB`)
       }
       await updateJob(jobId, { progress: 10 })
 
+      // ── Stage 3: xfade transitions + mux audio ──────────────────────────────
+      console.time(T('3_xfade'))
       // Sequential xfade: process 2 clips at a time to avoid OOM (SIGKILL) on Railway.
       // Running all N clips simultaneously in one xfade command opens N H264 decoders at once
       // which exhausts container memory for N>10. Sequential ensures max 2 inputs per command.
@@ -2291,8 +2309,11 @@ async function processVideoJob(jobId, body) {
         console.log(`[job:${jobId}] [mem:post-xfade] rss=${Math.round(m.rss / 1024 / 1024)}MB heap=${Math.round(m.heapUsed / 1024 / 1024)}MB`)
       }
       console.log('[ffmpeg] xfade+mux done:', transition, td + 's')
+      console.timeEnd(T('3_xfade'))
       await updateJob(jobId, { progress: 40 })
     } else {
+      // ── Stage 2+3 (cut): Download images + concat ───────────────────────────
+      console.time(T('2_img_download'))
       // Concat demuxer — simple cut between scenes
       // Download all images first (concat demuxer needs all file paths simultaneously)
       const imagePaths = []
@@ -2305,7 +2326,9 @@ async function processVideoJob(jobId, body) {
         if (imgSize === 0) throw new Error(`img_${i}: empty file from ${images[i].url}`)
         imagePaths.push(imgPath)
       }
+      console.timeEnd(T('2_img_download'))
 
+      console.time(T('3_concat'))
       const concatLines = []
       for (let i = 0; i < imagePaths.length; i++) {
         concatLines.push(`file '${imagePaths[i]}'`)
@@ -2333,10 +2356,11 @@ async function processVideoJob(jobId, body) {
         })
       })
       console.log('[ffmpeg] concat done')
+      console.timeEnd(T('3_concat'))
       await updateJob(jobId, { progress: 40 })
     }
 
-    // ── Pass 2: Apply visual effects ─────────────────────────────────────────
+    // ── Stage 4: Apply visual effects ────────────────────────────────────────
     const effectFilters = (Array.isArray(effects) ? effects : [])
       .map((e) => EFFECT_FILTERS[e])
       .filter(Boolean)
@@ -2344,6 +2368,7 @@ async function processVideoJob(jobId, body) {
     let currentPath = tempBasePath
 
     if (effectFilters.length > 0) {
+      console.time(T('4_effects'))
       // Prepend format=yuv420p so any decoded pixel format is normalised before effects filters.
       const vfEffects = `format=yuv420p,${effectFilters.join(',')}`
       console.log(`[ffmpeg] effects vf: ${vfEffects}`)
@@ -2363,11 +2388,15 @@ async function processVideoJob(jobId, body) {
       })
       currentPath = tempEffectsPath
       console.log('[ffmpeg] effects applied:', effects.join(', '))
+      console.timeEnd(T('4_effects'))
       await updateJob(jobId, { progress: 60 })
+    } else {
+      console.log('[perf] 4_effects: skipped (no effects)')
     }
 
-    // ── Pass 3: Burn subtitles ────────────────────────────────────────────────
+    // ── Stage 5: Burn subtitles ───────────────────────────────────────────────
     if (subtitle_blocks?.length && subtitle_style?.burnIn) {
+      console.time(T('5_subtitles'))
       const srtPath = path.join(tmpDir, 'subs.srt')
       fs.writeFileSync(srtPath, blocksToSrt(subtitle_blocks))
 
@@ -2398,23 +2427,28 @@ async function processVideoJob(jobId, body) {
           })
         })
         console.log('[ffmpeg] subtitle burn-in done')
+        console.timeEnd(T('5_subtitles'))
         await updateJob(jobId, { progress: 80 })
       } catch (subsErr) {
         console.warn('[ffmpeg] subtitle burn-in failed, skipping subs:', subsErr.message)
+        console.timeEnd(T('5_subtitles'))
         fs.renameSync(currentPath, outputPath)
       }
     } else {
+      console.log('[perf] 5_subtitles: skipped (no burn-in)')
       fs.renameSync(currentPath, outputPath)
     }
 
     await updateJob(jobId, { progress: 95 })
 
-    // Log final file size
+    // ── Stage 6: Upload to Backblaze B2 ──────────────────────────────────────
     const fileSizeBytes = fs.statSync(outputPath).size
     console.log(`[upload] file size: ${fileSizeBytes} bytes = ${(fileSizeBytes / 1024 / 1024).toFixed(2)} MB`)
-
-    // Upload to Cloudflare R2 — no file size limit, free egress
+    console.time(T('6_b2_upload'))
     const publicUrl = await uploadVideoToB2(outputPath, project_id, user_id ?? 'anon')
+    console.timeEnd(T('6_b2_upload'))
+    console.timeEnd(T('TOTAL'))
+
     await updateJob(jobId, {
       status: 'completed',
       progress: 100,
@@ -2424,6 +2458,7 @@ async function processVideoJob(jobId, body) {
     console.log(`[job:${jobId}] done →`, publicUrl)
   } catch (err) {
     console.error(`[job:${jobId}] failed:`, err.message)
+    try { console.timeEnd(T('TOTAL')) } catch (_) {}
     await updateJob(jobId, { status: 'failed', error_message: err.message })
   } finally {
     try {
