@@ -1821,16 +1821,32 @@ function verifySecret(req, res, next) {
   next()
 }
 
-function downloadFile(url, destPath) {
+function downloadFile(url, destPath, _redirects = 0) {
   return new Promise((resolve, reject) => {
+    if (_redirects > 5) {
+      return reject(new Error(`Too many redirects: ${url}`))
+    }
     const file = fs.createWriteStream(destPath)
     const client = url.startsWith('https') ? https : http
     const req = client.get(url, (response) => {
+      // Follow redirects
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        file.close()
+        fs.unlink(destPath, () => {})
+        resolve(downloadFile(response.headers.location, destPath, _redirects + 1))
+        return
+      }
       if (response.statusCode !== 200) {
-        reject(new Error(`HTTP ${response.statusCode} downloading ${url}`))
+        file.close()
+        fs.unlink(destPath, () => {})
+        reject(new Error(`HTTP ${response.statusCode} for ${url}`))
         return
       }
       response.pipe(file)
+      response.on('error', (err) => {
+        fs.unlink(destPath, () => {})
+        reject(err)
+      })
       file.on('finish', () => file.close(resolve))
       file.on('error', reject)
     })
@@ -1943,7 +1959,13 @@ async function processVideoJob(jobId, body) {
     const imagePaths = []
     for (let i = 0; i < images.length; i++) {
       const imgPath = path.join(tmpDir, `img_${String(i).padStart(3, '0')}.jpg`)
+      console.log(`[job:${jobId}] img_${i}: downloading from ${images[i].url}`)
       await downloadFile(images[i].url, imgPath)
+      const imgSize = fs.statSync(imgPath).size
+      console.log(`[job:${jobId}] img_${i}: ${imgSize} bytes`)
+      if (imgSize === 0) {
+        throw new Error(`img_${i}: empty file (0 bytes) downloaded from ${images[i].url}`)
+      }
       imagePaths.push(imgPath)
     }
 
@@ -1972,6 +1994,7 @@ async function processVideoJob(jobId, body) {
     if (totalImagesDuration < audioDuration) {
       durations[durations.length - 1] += audioDuration - totalImagesDuration
     }
+    console.log(`[job:${jobId}] durations (${durations.length}): [${durations.map(d => d.toFixed(2)).join(', ')}]`)
 
     const tempBasePath = path.join(tmpDir, 'temp_1.mp4')
     const tempEffectsPath = path.join(tmpDir, 'temp_2.mp4')
@@ -1996,19 +2019,26 @@ async function processVideoJob(jobId, body) {
         const batchResults = await Promise.all(slice.map((imgPath, j) => {
           const i = b + j
           const clipPath = path.join(tmpDir, `clip_${i}.mp4`)
+          const clipDur = (durations[i] + td).toFixed(3)
+          console.log(`[job:${jobId}] clip_${i}: encoding ${clipDur}s from img_${i} (dur=${durations[i].toFixed(2)}s)`)
           return new Promise((resolve, reject) => {
             execFile('ffmpeg', [
-              '-loop', '1', '-t', String(durations[i] + td),
+              '-loop', '1', '-t', clipDur,
               '-i', imgPath,
               '-vf', VF_BASE,
               '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'stillimage', '-crf', '28',
               '-pix_fmt', 'yuv420p', '-an', '-y', clipPath,
-            ], { maxBuffer: 5 * 1024 * 1024 }, (err, _stdout, stderr) => {
+            ], { maxBuffer: 10 * 1024 * 1024 }, (err, _stdout, stderr) => {
               if (err) {
-                const detail = stderr ? stderr.slice(-600) : err.message
-                console.error(`[ffmpeg] clip_${i} STDERR:\n${detail}`)
-                reject(new Error(`clip_${i}: ${detail.slice(-300)}`))
-              } else resolve(clipPath)
+                const head = stderr ? stderr.slice(0, 500) : ''
+                const tail = stderr ? stderr.slice(-500) : err.message
+                console.error(`[ffmpeg] clip_${i} FAILED (exit ${err.code})\nHEAD:\n${head}\nTAIL:\n${tail}`)
+                reject(new Error(`clip_${i}: ${tail.slice(-300)}`))
+              } else {
+                const size = fs.statSync(clipPath).size
+                console.log(`[job:${jobId}] clip_${i}: done, ${size} bytes`)
+                resolve(clipPath)
+              }
             })
           })
         }))
