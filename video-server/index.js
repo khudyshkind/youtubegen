@@ -2016,6 +2016,30 @@ const VF_BASE =
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
+// Temporary network diagnostic endpoint — remove after R2 issue is resolved
+app.get('/diag-r2', verifySecret, async (_req, res) => {
+  const R2_HOST = '4fe8b4a8ca29485c89058c901215dc02.r2.cloudflarestorage.com'
+  const run = (cmd, args) => new Promise((resolve) => {
+    execFile(cmd, args, { maxBuffer: 4 * 1024 * 1024, timeout: 15000 }, (err, stdout, stderr) => {
+      resolve({ stdout: stdout || '', stderr: stderr || '', code: err?.code ?? 0 })
+    })
+  })
+
+  const [curlR2, curlCF, dig] = await Promise.all([
+    run('curl', ['-v', '--max-time', '10', `https://${R2_HOST}`]),
+    run('curl', ['-v', '--max-time', '10', 'https://www.cloudflare.com']),
+    run('dig', ['+short', R2_HOST]).catch(() => run('nslookup', [R2_HOST])),
+  ])
+
+  res.json({
+    node: process.version,
+    openssl: process.versions.openssl,
+    r2_endpoint_curl: { stdout: curlR2.stdout.slice(0, 2000), stderr: curlR2.stderr.slice(0, 2000), code: curlR2.code },
+    cloudflare_com_curl: { stdout: curlCF.stdout.slice(0, 500), stderr: curlCF.stderr.slice(0, 1000), code: curlCF.code },
+    dns: { stdout: dig.stdout.slice(0, 500), stderr: dig.stderr.slice(0, 500), code: dig.code },
+  })
+})
+
 // ── Async video rendering pipeline ─────────────────────────────────────────
 async function processVideoJob(jobId, body) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytgen-'))
