@@ -11,6 +11,7 @@ const AnthropicPkg = require('@anthropic-ai/sdk')
 const Anthropic = AnthropicPkg.default ?? AnthropicPkg
 const cron = require('node-cron')
 const RssParser = require('rss-parser')
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3')
 
 const app = express()
 app.use(express.json({ limit: '2mb' }))
@@ -18,6 +19,16 @@ app.use(express.json({ limit: '2mb' }))
 const API_SECRET            = process.env.RAILWAY_API_SECRET
 const SUPABASE_URL          = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+// ── Cloudflare R2 client (S3-compatible, no egress fees, no file size limit) ──
+const r2 = new S3Client({
+  region: 'auto',
+  endpoint: process.env.R2_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  },
+})
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN
 
 // ── Russia payment config ─────────────────────────────────────────────────────
@@ -1821,74 +1832,22 @@ function verifySecret(req, res, next) {
   next()
 }
 
-// Upload a file to Supabase Storage using TUS resumable protocol.
-// Standard POST /object endpoint is limited to 50 MB (free plan default).
-// TUS bypasses this — supports files up to 5 GB with 6 MB chunks.
-async function uploadToSupabaseTUS(filePath, bucketName, storagePath) {
-  const fileSize = fs.statSync(filePath).size
-  const CHUNK = 6 * 1024 * 1024  // 6 MB per PATCH
-
-  const meta = [
-    `bucketName ${Buffer.from(bucketName).toString('base64')}`,
-    `objectName ${Buffer.from(storagePath).toString('base64')}`,
-    `contentType ${Buffer.from('video/mp4').toString('base64')}`,
-    `cacheControl ${Buffer.from('3600').toString('base64')}`,
-  ].join(',')
-
-  // Step 1: Create upload session
-  const createRes = await fetch(`${SUPABASE_URL}/storage/v1/upload/resumable`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-      'Tus-Resumable': '1.0.0',
-      'Upload-Length': String(fileSize),
-      'Upload-Metadata': meta,
-      'x-upsert': 'true',
-    },
-  })
-  if (createRes.status !== 201) {
-    const body = await createRes.text().catch(() => '')
-    throw new Error(`TUS create failed ${createRes.status}: ${body}`)
-  }
-  let uploadUrl = createRes.headers.get('location') || createRes.headers.get('Location')
-  if (!uploadUrl) throw new Error('TUS: no Location header')
-  if (!uploadUrl.startsWith('http')) uploadUrl = `${SUPABASE_URL}${uploadUrl}`
-
-  // Step 2: Upload in chunks
-  const fd = fs.openSync(filePath, 'r')
-  try {
-    let offset = 0
-    while (offset < fileSize) {
-      const chunkLen = Math.min(CHUNK, fileSize - offset)
-      const chunk = Buffer.alloc(chunkLen)
-      fs.readSync(fd, chunk, 0, chunkLen, offset)
-
-      const patchRes = await fetch(uploadUrl, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-          'Content-Type': 'application/offset+octet-stream',
-          'Upload-Offset': String(offset),
-          'Content-Length': String(chunkLen),
-          'Tus-Resumable': '1.0.0',
-        },
-        body: chunk,
-      })
-      if (patchRes.status !== 204) {
-        const body = await patchRes.text().catch(() => '')
-        throw new Error(`TUS PATCH failed at offset ${offset}, status ${patchRes.status}: ${body}`)
-      }
-      offset = parseInt(
-        patchRes.headers.get('upload-offset') || patchRes.headers.get('Upload-Offset') || String(offset + chunkLen),
-        10,
-      )
-      console.log(`[upload] TUS ${(offset / 1024 / 1024).toFixed(1)} MB / ${(fileSize / 1024 / 1024).toFixed(1)} MB`)
-    }
-  } finally {
-    fs.closeSync(fd)
-  }
-
-  return `${SUPABASE_URL}/storage/v1/object/public/${bucketName}/${storagePath}`
+// Upload final video to Cloudflare R2 (no file size limit, free egress).
+// Uses streaming (ReadStream + ContentLength) to avoid loading the file into RAM.
+async function uploadVideoToR2(filePath, projectId, userId) {
+  const stat = fs.statSync(filePath)
+  const key = `users/${userId}/${projectId}/output.mp4`
+  console.log(`[r2] uploading ${key} (${(stat.size / 1024 / 1024).toFixed(2)} MB)`)
+  await r2.send(new PutObjectCommand({
+    Bucket: process.env.R2_BUCKET,
+    Key: key,
+    Body: fs.createReadStream(filePath),
+    ContentLength: stat.size,
+    ContentType: 'video/mp4',
+  }))
+  const publicUrl = `${process.env.R2_PUBLIC_URL}/${key}`
+  console.log('[r2] uploaded:', publicUrl)
+  return publicUrl
 }
 
 function downloadFile(url, destPath, _redirects = 0) {
@@ -2302,9 +2261,8 @@ async function processVideoJob(jobId, body) {
     const fileSizeBytes = fs.statSync(outputPath).size
     console.log(`[upload] file size: ${fileSizeBytes} bytes = ${(fileSizeBytes / 1024 / 1024).toFixed(2)} MB`)
 
-    // Upload via TUS resumable protocol — no 50 MB limit (unlike standard POST REST API)
-    const storagePath = `${project_id}/output.mp4`
-    const publicUrl = await uploadToSupabaseTUS(outputPath, 'videos', storagePath)
+    // Upload to Cloudflare R2 — no file size limit, free egress
+    const publicUrl = await uploadVideoToR2(outputPath, project_id, user_id ?? 'anon')
     await updateJob(jobId, {
       status: 'completed',
       progress: 100,
