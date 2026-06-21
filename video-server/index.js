@@ -2084,6 +2084,50 @@ const VF_BASE =
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
+// ── Batch xfade helper ─────────────────────────────────────────────────────
+// Process a batch of pre-encoded clips into one video via a single filter_complex
+// xfade chain. Each clip is decoded/encoded exactly once: O(N) per batch vs the
+// old O(N²) linear accumulation (where each step re-encoded the growing accumulator).
+// Safe memory: BATCH_SIZE=8 opens 8 decoders simultaneously (~80–120 MB on Railway).
+async function xfadeBatchPass(clips, clipDurations, transition, td, tmpDir, batchId) {
+  if (clips.length === 1) {
+    return { path: clips[0], contentDuration: clipDurations[0] }
+  }
+  const outPath = path.join(tmpDir, `batch_${batchId}.mp4`)
+
+  // Build [0:v][1:v]xfade=offset=O1[vt1];[vt1][2:v]xfade=offset=O2[vt2];...
+  // Offset_k = cumulative content duration of clips 0..k-1 minus td (transition overlap).
+  const filterParts = []
+  let cumDur = 0
+  let prevLabel = '[0:v]'
+  for (let i = 1; i < clips.length; i++) {
+    cumDur += clipDurations[i - 1]
+    const offset = Math.max(0, cumDur - td).toFixed(3)
+    const outLabel = i === clips.length - 1 ? '[vout]' : `[vt${i}]`
+    filterParts.push(
+      `${prevLabel}[${i}:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset}${outLabel}`
+    )
+    prevLabel = outLabel
+  }
+
+  await new Promise((resolve, reject) => {
+    execFile('ffmpeg', [
+      ...clips.flatMap(p => ['-i', p]),
+      '-filter_complex', filterParts.join(';'),
+      '-map', '[vout]',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
+      '-pix_fmt', 'yuv420p', '-an', '-y', outPath,
+    ], { maxBuffer: 50 * 1024 * 1024 }, (err, _stdout, stderr) => {
+      if (err) {
+        console.error(`[ffmpeg] xfade batch ${batchId} STDERR:\n${stderr.slice(-600)}`)
+        reject(new Error(`xfade batch ${batchId}: ${stderr.slice(-300)}`))
+      } else resolve()
+    })
+  })
+
+  return { path: outPath, contentDuration: clipDurations.reduce((a, b) => a + b, 0) }
+}
+
 // ── Async video rendering pipeline ─────────────────────────────────────────
 async function processVideoJob(jobId, body) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytgen-'))
@@ -2172,8 +2216,13 @@ async function processVideoJob(jobId, body) {
     }
 
     const tempBasePath = path.join(tmpDir, 'temp_1.mp4')
-    const tempEffectsPath = path.join(tmpDir, 'temp_2.mp4')
     const outputPath = path.join(tmpDir, 'output.mp4')
+
+    // Pre-compute effects filter chain — used inside both xfade and concat mux passes
+    // to avoid a separate encode pass (saves ~4-5 min for a 3-min video at CRF 20).
+    const effectFilters = (Array.isArray(effects) ? effects : [])
+      .map((e) => EFFECT_FILTERS[e])
+      .filter(Boolean)
 
     // ── Pass 1: Assemble images into video ──────────────────────────────────
     const useXfade = transition && transition !== 'cut' && images.length > 1
@@ -2241,76 +2290,85 @@ async function processVideoJob(jobId, body) {
       }
       await updateJob(jobId, { progress: 10 })
 
-      // ── Stage 3: xfade transitions + mux audio ──────────────────────────────
+      // ── Stage 3: Batch xfade + mux + effects (combined) ─────────────────────
       console.time(T('3_xfade'))
-      // Sequential xfade: process 2 clips at a time to avoid OOM (SIGKILL) on Railway.
-      // Running all N clips simultaneously in one xfade command opens N H264 decoders at once
-      // which exhausts container memory for N>10. Sequential ensures max 2 inputs per command.
-      console.log(`[ffmpeg] xfade sequential: ${clipPaths.length} clips, transition=${transition}`)
+      const XFADE_BATCH_SIZE = 8
 
-      let accPath = clipPaths[0]   // accumulator starts as first clip (has d0+td tail)
-      let accDuration = durations[0]  // content duration of accumulator (not file duration)
+      // Phase A: process clips in batches of 8 via filter_complex.
+      // Each clip is decoded+encoded exactly once per batch (O(N) total vs O(N²) sequential).
+      const batchResults = []
+      for (let b = 0; b < clipPaths.length; b += XFADE_BATCH_SIZE) {
+        const bClips = clipPaths.slice(b, b + XFADE_BATCH_SIZE)
+        const bDurs = durations.slice(b, b + XFADE_BATCH_SIZE)
+        const bNum = Math.floor(b / XFADE_BATCH_SIZE)
+        console.log(`[ffmpeg] xfade batch ${bNum}: ${bClips.length} clips, ${bDurs.reduce((a, c) => a + c, 0).toFixed(1)}s`)
+        const result = await xfadeBatchPass(bClips, bDurs, transition, td, tmpDir, `${bNum}`)
+        batchResults.push(result)
+        // Free clip files that were consumed by this batch (single-clip pass-throughs are freed in merge)
+        if (bClips.length > 1) {
+          for (const cp of bClips) { try { fs.unlinkSync(cp) } catch (_) {} }
+        }
+      }
+      console.log(`[ffmpeg] ${batchResults.length} batch(es) ready, merging...`)
 
-      for (let i = 1; i < clipPaths.length; i++) {
-        const nextAccPath = path.join(tmpDir, `acc_${i}.mp4`)
-        const offset = Math.max(0, accDuration - td)
-
+      // Phase B: merge batch outputs (only ceil(N/8) steps vs N-1 steps before).
+      let accPath = batchResults[0].path
+      let accDur = batchResults[0].contentDuration
+      for (let i = 1; i < batchResults.length; i++) {
+        const nextAccPath = path.join(tmpDir, `merge_${i}.mp4`)
+        const offset = Math.max(0, accDur - td)
         await new Promise((resolve, reject) => {
           execFile('ffmpeg', [
             '-i', accPath,
-            '-i', clipPaths[i],
+            '-i', batchResults[i].path,
             '-filter_complex', `[0:v][1:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}[vout]`,
             '-map', '[vout]',
             '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
             '-pix_fmt', 'yuv420p', '-an', '-y', nextAccPath,
           ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-            if (err) {
-              console.error(`[ffmpeg] xfade step ${i} STDERR:\n${stderr.slice(-400)}`)
-              reject(new Error(`xfade step ${i}: ${stderr.slice(-300)}`))
-            } else resolve()
+            if (err) reject(new Error(`batch merge ${i}: ${stderr.slice(-300)}`))
+            else resolve()
           })
         })
-
-        // Free disk: delete consumed clip and old accumulator immediately
-        try { fs.unlinkSync(clipPaths[i]) } catch (_) {}
-        if (i > 1) {
-          try { fs.unlinkSync(accPath) } catch (_) {}
-        }
-
-        accDuration += durations[i]
+        try { fs.unlinkSync(accPath) } catch (_) {}
+        try { fs.unlinkSync(batchResults[i].path) } catch (_) {}
+        accDur += batchResults[i].contentDuration
         accPath = nextAccPath
       }
-      // clipPaths[0] was the initial accPath — delete it now that xfade is done
-      try { fs.unlinkSync(clipPaths[0]) } catch (_) {}
+      {
+        const m = process.memoryUsage()
+        console.log(`[job:${jobId}] [mem:post-xfade] rss=${Math.round(m.rss / 1024 / 1024)}MB heap=${Math.round(m.heapUsed / 1024 / 1024)}MB`)
+      }
 
-      console.log(`[ffmpeg] xfade done, muxing audio`)
-      // Mux the accumulated video with audio into tempBasePath
+      // Phase C: mux audio + bake effects in one pass.
+      // Previously: mux→CRF26 (no effects) then a separate effects→CRF20 pass.
+      // Now: single pass at CRF20 with effects filter chain, saving ~4-5 min for 3-min video.
+      const muxVf = effectFilters.length > 0
+        ? `format=yuv420p,${effectFilters.join(',')}`
+        : 'format=yuv420p'
+      console.log(`[ffmpeg] mux+effects vf: ${muxVf}`)
       await new Promise((resolve, reject) => {
         execFile('ffmpeg', [
           '-i', accPath,
           '-i', finalAudioPath,
           '-map', '0:v', '-map', '1:a',
-          '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
-          '-maxrate', '4M', '-bufsize', '8M',
+          '-vf', muxVf,
+          '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
+          '-maxrate', '6M', '-bufsize', '12M',
           '-pix_fmt', 'yuv420p',
           '-c:a', 'aac', '-b:a', '128k',
           '-movflags', '+faststart',
           '-t', String(audioDuration),
           '-y', tempBasePath,
         ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-          if (err) reject(new Error(`FFmpeg mux: ${stderr.slice(-400)}`))
+          if (err) reject(new Error(`FFmpeg mux+effects: ${stderr.slice(-400)}`))
           else resolve()
         })
       })
-      // Delete final accumulator (now muxed into tempBasePath)
       try { fs.unlinkSync(accPath) } catch (_) {}
-      {
-        const m = process.memoryUsage()
-        console.log(`[job:${jobId}] [mem:post-xfade] rss=${Math.round(m.rss / 1024 / 1024)}MB heap=${Math.round(m.heapUsed / 1024 / 1024)}MB`)
-      }
-      console.log('[ffmpeg] xfade+mux done:', transition, td + 's')
+      console.log(`[ffmpeg] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
       console.timeEnd(T('3_xfade'))
-      await updateJob(jobId, { progress: 40 })
+      await updateJob(jobId, { progress: 60 })
     } else {
       // ── Stage 2+3 (cut): Download images + concat ───────────────────────────
       console.time(T('2_img_download'))
@@ -2338,13 +2396,17 @@ async function processVideoJob(jobId, body) {
       const concatPath = path.join(tmpDir, 'concat.txt')
       fs.writeFileSync(concatPath, concatLines.join('\n'))
 
+      // Bake effects into the concat pass to avoid a separate effects encode.
+      const concatVf = effectFilters.length > 0
+        ? `${VF_BASE},format=yuv420p,${effectFilters.join(',')}`
+        : VF_BASE
       await new Promise((resolve, reject) => {
         execFile('ffmpeg', [
           '-f', 'concat', '-safe', '0', '-i', concatPath,
           '-i', finalAudioPath,
-          '-vf', VF_BASE,
-          '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
-          '-maxrate', '4M', '-bufsize', '8M',
+          '-vf', concatVf,
+          '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
+          '-maxrate', '6M', '-bufsize', '12M',
           '-pix_fmt', 'yuv420p',
           '-c:a', 'aac', '-b:a', '128k',
           '-movflags', '+faststart',
@@ -2355,44 +2417,15 @@ async function processVideoJob(jobId, body) {
           else resolve()
         })
       })
-      console.log('[ffmpeg] concat done')
+      console.log(`[ffmpeg] concat+effects done: effects=[${effects.join(', ')}]`)
       console.timeEnd(T('3_concat'))
-      await updateJob(jobId, { progress: 40 })
-    }
-
-    // ── Stage 4: Apply visual effects ────────────────────────────────────────
-    const effectFilters = (Array.isArray(effects) ? effects : [])
-      .map((e) => EFFECT_FILTERS[e])
-      .filter(Boolean)
-
-    let currentPath = tempBasePath
-
-    if (effectFilters.length > 0) {
-      console.time(T('4_effects'))
-      // Prepend format=yuv420p so any decoded pixel format is normalised before effects filters.
-      const vfEffects = `format=yuv420p,${effectFilters.join(',')}`
-      console.log(`[ffmpeg] effects vf: ${vfEffects}`)
-      await new Promise((resolve, reject) => {
-        execFile('ffmpeg', [
-          '-i', tempBasePath,
-          '-vf', vfEffects,
-          '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
-          '-maxrate', '6M', '-bufsize', '12M',
-          '-pix_fmt', 'yuv420p',
-          '-c:a', 'copy',
-          '-y', tempEffectsPath,
-        ], { maxBuffer: 20 * 1024 * 1024 }, (err, _stdout, stderr) => {
-          if (err) reject(new Error(`FFmpeg effects: ${stderr.slice(-400)}`))
-          else resolve()
-        })
-      })
-      currentPath = tempEffectsPath
-      console.log('[ffmpeg] effects applied:', effects.join(', '))
-      console.timeEnd(T('4_effects'))
       await updateJob(jobId, { progress: 60 })
-    } else {
-      console.log('[perf] 4_effects: skipped (no effects)')
     }
+
+    // ── Stage 4: effects merged into Stage 3 mux pass ────────────────────────
+    // No separate encode pass needed — effects were baked into the mux command above.
+    console.log(`[perf] 4_effects: ${effectFilters.length > 0 ? `merged into mux (${effects.join(', ')})` : 'skipped (no effects)'}`)
+    const currentPath = tempBasePath
 
     // ── Stage 5: Burn subtitles ───────────────────────────────────────────────
     if (subtitle_blocks?.length && subtitle_style?.burnIn) {
