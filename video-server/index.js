@@ -1955,21 +1955,8 @@ async function processVideoJob(jobId, body) {
       console.warn('[audio] loudnorm failed, using original:', normErr.message)
     }
 
-    // Download all scene images
-    const imagePaths = []
-    for (let i = 0; i < images.length; i++) {
-      const imgPath = path.join(tmpDir, `img_${String(i).padStart(3, '0')}.jpg`)
-      console.log(`[job:${jobId}] img_${i}: downloading from ${images[i].url}`)
-      await downloadFile(images[i].url, imgPath)
-      const imgSize = fs.statSync(imgPath).size
-      console.log(`[job:${jobId}] img_${i}: ${imgSize} bytes`)
-      if (imgSize === 0) {
-        throw new Error(`img_${i}: empty file (0 bytes) downloaded from ${images[i].url}`)
-      }
-      imagePaths.push(imgPath)
-    }
-
-    // Get exact audio duration via ffprobe
+    // Compute audio duration BEFORE image downloads so we can start clip encoding
+    // immediately after each individual image — no need to download all 20 first.
     const audioDuration = await new Promise((resolve, reject) => {
       execFile('ffprobe', [
         '-v', 'quiet',
@@ -1982,69 +1969,79 @@ async function processVideoJob(jobId, body) {
       })
     })
 
-    // Compute per-image durations from timecodes when available and meaningful
     const durations = images.map((img) => {
       if (img.timecode_start && img.timecode_end) {
         const tc = parseSecs(img.timecode_end) - parseSecs(img.timecode_start)
-        if (tc > 0.5) return tc  // valid proportional timecode
+        if (tc > 0.5) return tc
       }
-      return defaultDuration  // fallback: old projects or no timecodes
+      return defaultDuration
     })
     const totalImagesDuration = durations.reduce((a, b) => a + b, 0)
     if (totalImagesDuration < audioDuration) {
       durations[durations.length - 1] += audioDuration - totalImagesDuration
     }
     console.log(`[job:${jobId}] durations (${durations.length}): [${durations.map(d => d.toFixed(2)).join(', ')}]`)
+    {
+      const m = process.memoryUsage()
+      console.log(`[job:${jobId}] [mem:start] rss=${Math.round(m.rss / 1024 / 1024)}MB heap=${Math.round(m.heapUsed / 1024 / 1024)}MB`)
+    }
 
     const tempBasePath = path.join(tmpDir, 'temp_1.mp4')
     const tempEffectsPath = path.join(tmpDir, 'temp_2.mp4')
     const outputPath = path.join(tmpDir, 'output.mp4')
 
     // ── Pass 1: Assemble images into video ──────────────────────────────────
-    const useXfade = transition && transition !== 'cut' && imagePaths.length > 1
+    const useXfade = transition && transition !== 'cut' && images.length > 1
     const td = Math.max(0.1, Math.min(1.5, Number(transition_duration) || 0.5))
 
     if (useXfade) {
-      // JPEG decoder always outputs yuvj420p regardless of -pix_fmt or format= filters.
-      // xfade creates ~2 internal swscale instances per transition; those get yuvj420p and crash.
-      // Solution: pre-encode each image to a yuv420p H264 clip BEFORE xfade.
-      // H264 always decodes as yuv420p — xfade never sees yuvj420p.
-      // Process clips in batches of 4 to avoid exhausting Railway container resources.
-      // Running all 20 in parallel causes EAGAIN / "Resource temporarily unavailable" errors.
-      console.log(`[ffmpeg] pre-converting ${imagePaths.length} images to yuv420p clips (batch=4)…`)
-      const CLIP_BATCH = 4
+      // Sequential download → encode → delete source for each clip.
+      // JPEG decoder outputs yuvj420p; xfade crashes on it → pre-encode to H264 (yuv420p).
+      // Running even 4 parallel libx264 processes (~120 MB each) + Node (~80 MB) = ~560 MB
+      // which OOM-kills Railway's default 512 MB container (SIGKILL = server restart).
+      // Sequential keeps peak RAM under ~200 MB: 1 FFmpeg + Node.
+      console.log(`[ffmpeg] pre-converting ${images.length} images to clips (sequential)…`)
       const clipPaths = []
-      for (let b = 0; b < imagePaths.length; b += CLIP_BATCH) {
-        const slice = imagePaths.slice(b, b + CLIP_BATCH)
-        const batchResults = await Promise.all(slice.map((imgPath, j) => {
-          const i = b + j
-          const clipPath = path.join(tmpDir, `clip_${i}.mp4`)
-          const clipDur = (durations[i] + td).toFixed(3)
-          console.log(`[job:${jobId}] clip_${i}: encoding ${clipDur}s from img_${i} (dur=${durations[i].toFixed(2)}s)`)
-          return new Promise((resolve, reject) => {
-            execFile('ffmpeg', [
-              '-loop', '1', '-t', clipDur,
-              '-i', imgPath,
-              '-vf', VF_BASE,
-              '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'stillimage', '-crf', '28',
-              '-pix_fmt', 'yuv420p', '-an', '-y', clipPath,
-            ], { maxBuffer: 10 * 1024 * 1024 }, (err, _stdout, stderr) => {
-              if (err) {
-                const head = stderr ? stderr.slice(0, 500) : ''
-                const tail = stderr ? stderr.slice(-500) : err.message
-                console.error(`[ffmpeg] clip_${i} FAILED (exit ${err.code})\nHEAD:\n${head}\nTAIL:\n${tail}`)
-                reject(new Error(`clip_${i}: ${tail.slice(-300)}`))
-              } else {
-                const size = fs.statSync(clipPath).size
-                console.log(`[job:${jobId}] clip_${i}: done, ${size} bytes`)
-                resolve(clipPath)
-              }
-            })
+      for (let i = 0; i < images.length; i++) {
+        const imgPath = path.join(tmpDir, `img_${String(i).padStart(3, '0')}.jpg`)
+        console.log(`[job:${jobId}] img_${i}: downloading from ${images[i].url}`)
+        await downloadFile(images[i].url, imgPath)
+        const imgSize = fs.statSync(imgPath).size
+        console.log(`[job:${jobId}] img_${i}: ${imgSize} bytes`)
+        if (imgSize === 0) throw new Error(`img_${i}: empty file from ${images[i].url}`)
+
+        const clipPath = path.join(tmpDir, `clip_${i}.mp4`)
+        const clipDur = (durations[i] + td).toFixed(3)
+        console.log(`[job:${jobId}] clip_${i}: encoding ${clipDur}s (dur=${durations[i].toFixed(2)}s)`)
+        await new Promise((resolve, reject) => {
+          execFile('ffmpeg', [
+            '-loop', '1', '-t', clipDur,
+            '-i', imgPath,
+            '-vf', VF_BASE,
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'stillimage', '-crf', '28',
+            '-pix_fmt', 'yuv420p', '-an', '-y', clipPath,
+          ], { maxBuffer: 10 * 1024 * 1024 }, (err, _stdout, stderr) => {
+            if (err) {
+              const head = stderr ? stderr.slice(0, 500) : ''
+              const tail = stderr ? stderr.slice(-500) : err.message
+              console.error(`[ffmpeg] clip_${i} FAILED (exit ${err.code})\nHEAD:\n${head}\nTAIL:\n${tail}`)
+              reject(new Error(`clip_${i}: ${tail.slice(-300)}`))
+            } else {
+              const clipSize = fs.statSync(clipPath).size
+              console.log(`[job:${jobId}] clip_${i}: done, ${clipSize} bytes`)
+              resolve()
+            }
           })
-        }))
-        clipPaths.push(...batchResults)
+        })
+        // Delete source image immediately after encoding — no need to keep it on disk
+        try { fs.unlinkSync(imgPath) } catch (_) {}
+        clipPaths.push(clipPath)
       }
       console.log(`[ffmpeg] pre-conversion done, ${clipPaths.length} clips ready`)
+      {
+        const m = process.memoryUsage()
+        console.log(`[job:${jobId}] [mem:post-clips] rss=${Math.round(m.rss / 1024 / 1024)}MB heap=${Math.round(m.heapUsed / 1024 / 1024)}MB`)
+      }
       await updateJob(jobId, { progress: 10 })
 
       // Sequential xfade: process 2 clips at a time to avoid OOM (SIGKILL) on Railway.
@@ -2075,7 +2072,8 @@ async function processVideoJob(jobId, body) {
           })
         })
 
-        // Delete previous accumulator (not the original clips) to free disk space
+        // Free disk: delete consumed clip and old accumulator immediately
+        try { fs.unlinkSync(clipPaths[i]) } catch (_) {}
         if (i > 1) {
           try { fs.unlinkSync(accPath) } catch (_) {}
         }
@@ -2083,6 +2081,8 @@ async function processVideoJob(jobId, body) {
         accDuration += durations[i]
         accPath = nextAccPath
       }
+      // clipPaths[0] was the initial accPath — delete it now that xfade is done
+      try { fs.unlinkSync(clipPaths[0]) } catch (_) {}
 
       console.log(`[ffmpeg] xfade done, muxing audio`)
       // Mux the accumulated video with audio into tempBasePath
@@ -2103,10 +2103,28 @@ async function processVideoJob(jobId, body) {
           else resolve()
         })
       })
+      // Delete final accumulator (now muxed into tempBasePath)
+      try { fs.unlinkSync(accPath) } catch (_) {}
+      {
+        const m = process.memoryUsage()
+        console.log(`[job:${jobId}] [mem:post-xfade] rss=${Math.round(m.rss / 1024 / 1024)}MB heap=${Math.round(m.heapUsed / 1024 / 1024)}MB`)
+      }
       console.log('[ffmpeg] xfade+mux done:', transition, td + 's')
       await updateJob(jobId, { progress: 40 })
     } else {
       // Concat demuxer — simple cut between scenes
+      // Download all images first (concat demuxer needs all file paths simultaneously)
+      const imagePaths = []
+      for (let i = 0; i < images.length; i++) {
+        const imgPath = path.join(tmpDir, `img_${String(i).padStart(3, '0')}.jpg`)
+        console.log(`[job:${jobId}] img_${i}: downloading from ${images[i].url}`)
+        await downloadFile(images[i].url, imgPath)
+        const imgSize = fs.statSync(imgPath).size
+        console.log(`[job:${jobId}] img_${i}: ${imgSize} bytes`)
+        if (imgSize === 0) throw new Error(`img_${i}: empty file from ${images[i].url}`)
+        imagePaths.push(imgPath)
+      }
+
       const concatLines = []
       for (let i = 0; i < imagePaths.length; i++) {
         concatLines.push(`file '${imagePaths[i]}'`)
