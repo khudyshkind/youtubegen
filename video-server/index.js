@@ -2255,7 +2255,7 @@ async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId
     const result = await runFFmpegOnVGF(
       { in_1: videoUrl, in_2: srtUrl },
       { out_1: 'output_subs.mp4' },
-      `-i {{in_1}} -vf subtitles={{in_2}}:force_style='${forceStyle}' -c:v h264_nvenc -cq 26 -preset p4 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`
+      `-i {{in_1}} -vf subtitles={{in_2}}:force_style='${forceStyle}' -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`
     )
     console.log('[vgf] subtitle burn-in done')
     return result.out_1
@@ -2290,7 +2290,7 @@ async function xfadeBatchPassVGF(clipUrls, clipDurations, transition, td, batchI
   const result = await runFFmpegOnVGF(
     inputFiles,
     { out_1: `${batchId}.mp4` },
-    `${inputArgs} -filter_complex "${filterParts.join(';')}" -map [vout] -c:v h264_nvenc -cq 18 -preset p1 -pix_fmt yuv420p -an {{out_1}}`
+    `${inputArgs} -filter_complex "${filterParts.join(';')}" -map [vout] -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -an {{out_1}}`
   )
   return { url: result.out_1, contentDuration: clipDurations.reduce((a, b) => a + b, 0) }
 }
@@ -2372,7 +2372,7 @@ async function processVideoJob(jobId, body) {
         const result = await runFFmpegOnVGF(
           { in_1: img.url },
           { out_1: `clip_${i}.mp4` },
-          `-loop 1 -t ${clipDur} -i {{in_1}} -vf "${VF_BASE}" -c:v h264_nvenc -cq 28 -preset p1 -pix_fmt yuv420p -an {{out_1}}`
+          `-loop 1 -t ${clipDur} -i {{in_1}} -vf "${VF_BASE}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
         )
         console.log(`[vgf] clip_${i} done`)
         return result.out_1
@@ -2405,7 +2405,7 @@ async function processVideoJob(jobId, body) {
         const mergeResult = await runFFmpegOnVGF(
           { in_1: accUrl, in_2: batchResults[i].url },
           { out_1: `merge_${i}.mp4` },
-          `-i {{in_1}} -i {{in_2}} -filter_complex "[0:v][1:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}[vout]" -map [vout] -c:v h264_nvenc -cq 18 -preset p1 -pix_fmt yuv420p -an {{out_1}}`
+          `-i {{in_1}} -i {{in_2}} -filter_complex "[0:v][1:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}[vout]" -map [vout] -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -an {{out_1}}`
         )
         accUrl = mergeResult.out_1
         accDur += batchResults[i].contentDuration
@@ -2419,7 +2419,7 @@ async function processVideoJob(jobId, body) {
       const muxResult = await runFFmpegOnVGF(
         { in_1: accUrl, in_2: finalAudioUrl },
         { out_1: 'temp_1.mp4' },
-        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v h264_nvenc -cq 20 -preset p4 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
+        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
       )
       let currentUrl = muxResult.out_1
       console.log(`[vgf] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
@@ -2450,7 +2450,7 @@ async function processVideoJob(jobId, body) {
         const result = await runFFmpegOnVGF(
           { in_1: img.url },
           { out_1: `clip_${i}.mp4` },
-          `-loop 1 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${VF_BASE}" -c:v h264_nvenc -cq 28 -preset p1 -pix_fmt yuv420p -an {{out_1}}`
+          `-loop 1 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${VF_BASE}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
         )
         console.log(`[vgf] clip_${i} done`)
         return result.out_1
@@ -2480,7 +2480,7 @@ async function processVideoJob(jobId, body) {
       const concatResult = await runFFmpegOnVGF(
         concatInputFiles,
         { out_1: 'temp_1.mp4' },
-        `${inputArgs} -filter_complex ${filterStr} -map [vout] -map ${audioIdx}:a -c:v h264_nvenc -cq 20 -preset p4 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
+        `${inputArgs} -filter_complex ${filterStr} -map [vout] -map ${audioIdx}:a -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
       )
       let currentUrl = concatResult.out_1
       console.log(`[vgf] concat+effects done: effects=[${effects.join(', ')}]`)
