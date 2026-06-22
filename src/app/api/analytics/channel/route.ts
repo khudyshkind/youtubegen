@@ -3,56 +3,47 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
-import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-function getChannelPrompt1(lang: string): string {
-  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — upload_frequency, growth_trend, best_topics, worst_topics, strengths, weaknesses — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+const CHANNEL_SYSTEM_PROMPT_1 = `Ты опытный YouTube аналитик, специализирующийся на углублённом анализе каналов. На основе данных канала (подписчики, видео, просмотры) и топ видео определи ключевые характеристики канала.
 
-You are an experienced YouTube analyst specializing in in-depth channel analysis. Based on channel data (subscribers, videos, views) and top videos, identify the key characteristics of the channel.
+МЕТОДОЛОГИЯ АНАЛИЗА:
+• upload_frequency — частота публикаций (оцени по количеству видео и возрасту канала)
+• growth_trend — "Растёт" / "Стабильно" / "Снижается" (оцени по соотношению просмотров к подписчикам)
+• best_topics — топ 3 темы, которые работают лучше всего (определи по названиям и просмотрам топ видео)
+• worst_topics — 2 темы, которые уступают другим по показателям
+• strengths — 3 конкретные сильные стороны канала на основе данных
+• weaknesses — 2 конкретные слабые стороны
 
-ANALYSIS METHODOLOGY:
-• upload_frequency — publishing frequency (estimate from video count and channel age if known) — in ${lang}
-• growth_trend — in ${lang} (e.g., for Russian: "Растёт" / "Стабильно" / "Снижается")
-• best_topics — top 3 topics that perform best — in ${lang}
-• worst_topics — 2 topics that underperform — in ${lang}
-• strengths — 3 specific strengths based on data — in ${lang}
-• weaknesses — 2 specific weaknesses — in ${lang}
+ВАЖНО: Основывай анализ ТОЛЬКО на реальных данных из запроса. Не придумывай числа и факты, которых нет в данных.
 
-IMPORTANT: Base your analysis ONLY on real data provided in the request. Do not invent numbers or facts not present in the data.
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"upload_frequency":"X видео в неделю","growth_trend":"Растёт","best_topics":["Тема 1","Тема 2","Тема 3"],"worst_topics":["Слабая тема 1","Слабая тема 2"],"strengths":["Сила 1","Сила 2","Сила 3"],"weaknesses":["Слабость 1","Слабость 2"]}
 
-RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"upload_frequency":"<in ${lang}>","growth_trend":"<in ${lang}>","best_topics":["<in ${lang}>","<in ${lang}>","<in ${lang}>"],"worst_topics":["<in ${lang}>","<in ${lang}>"],"strengths":["<in ${lang}>","<in ${lang}>","<in ${lang}>"],"weaknesses":["<in ${lang}>","<in ${lang}>"]}
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
-}
+const CHANNEL_SYSTEM_PROMPT_2 = `Ты опытный YouTube аналитик, специализирующийся на определении форматов видео и разработке стратегий роста каналов. На основе данных канала и топ видео определи какие форматы работают и дай практические рекомендации.
 
-function getChannelPrompt2(lang: string): string {
-  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — format names, recommendations — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+МЕТОДОЛОГИЯ ОПРЕДЕЛЕНИЯ ФОРМАТОВ:
+• Анализируй названия топ видео для определения форматов: тест-драйвы, обзоры, сравнения, топы, how-to, разборы, истории
+• best_formats — топ 2-3 формата с наибольшими средними просмотрами
+• worst_formats — 1-2 формата с наименьшими просмотрами
+• avg_views — среднее количество просмотров для видео в этом формате (оцени из данных)
 
-You are an experienced YouTube analyst specializing in identifying video formats and developing growth strategies for channels. Based on channel data and top videos, identify which formats work and provide practical recommendations.
+РЕКОМЕНДАЦИИ:
+• 3 конкретных совета что изменить или улучшить
+• Основывай на реальных данных — слабых сторонах и возможностях канала
+• Конкретные действия, а не общие советы типа "публикуй чаще"
 
-FORMAT IDENTIFICATION METHODOLOGY:
-• Analyze top video titles to identify formats (reviews, comparisons, top-lists, how-to, breakdowns, stories)
-• best_formats — top 2-3 formats with highest average views — names in ${lang}
-• worst_formats — 1-2 formats with lowest views — names in ${lang}
-• avg_views — average view count for videos in this format (estimate from the data)
+ВАЖНО: НЕ включай поле "example" с конкретными названиями видео — заголовки видео в JSON вызывают проблемы с экранированием.
 
-RECOMMENDATIONS:
-• 3 concrete tips on what to change or improve — in ${lang}
-• Base on real data — channel weaknesses and opportunities
-• Specific actions, not generic advice like "post more often"
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"best_formats":[{"name":"Тест-драйвы","avg_views":450000},{"name":"Обзоры","avg_views":280000}],"worst_formats":[{"name":"Слабый формат","avg_views":5000}],"recommendations":["Конкретная рекомендация 1","Рекомендация 2","Рекомендация 3"]}
 
-CRITICAL: Do NOT include an "example" field with specific video names — video titles in JSON cause escaping issues.
-
-RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"best_formats":[{"name":"<in ${lang}>","avg_views":450000},{"name":"<in ${lang}>","avg_views":280000}],"worst_formats":[{"name":"<in ${lang}>","avg_views":5000}],"recommendations":["<in ${lang}>","<in ${lang}>","<in ${lang}>"]}
-
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
-}
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
 
 function parseClaudeJson<T>(text: string, label: string): T {
   console.log(`[channel] ${label} raw:`, text.substring(0, 500))
@@ -98,7 +89,6 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json() as { channel?: string; lang?: string }
     const channelInput = body.channel?.trim() ?? ''
-    const userLang = resolveUserLang(req, body.lang)
     if (!channelInput) return NextResponse.json({ ok: false, error: 'Введите канал' }, { status: 400 })
 
     console.log(`[channel] start input="${channelInput}"`)
@@ -235,8 +225,8 @@ export async function POST(req: NextRequest) {
     const msg1 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 500,
-      system: [{ type: 'text', text: getChannelPrompt1(userLang), cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: `${dataCtx}${langNote(userLang)}` }],
+      system: [{ type: 'text', text: CHANNEL_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: dataCtx }],
     })
     console.log('[channel] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
     const text1 = (msg1.content[0] as { text: string }).text
@@ -256,8 +246,8 @@ export async function POST(req: NextRequest) {
     const msg2 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 800,
-      system: [{ type: 'text', text: getChannelPrompt2(userLang), cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: `${dataCtx}\n\nОпредели форматы видео и дай рекомендации.${langNote(userLang)}` }],
+      system: [{ type: 'text', text: CHANNEL_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `${dataCtx}\n\nОпредели форматы видео и дай рекомендации.` }],
     })
     console.log('[channel] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
     const text2 = (msg2.content[0] as { text: string }).text

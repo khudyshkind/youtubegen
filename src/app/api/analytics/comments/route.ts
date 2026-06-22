@@ -3,50 +3,46 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
-import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-function getCommentsPrompt(lang: string): string {
-  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — video_requests, pain_points, unanswered_questions, positive_reactions, negative_reactions, video_ideas, audience_portrait — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+const COMMENTS_SYSTEM_PROMPT = `Ты опытный аналитик аудитории YouTube, специализирующийся на извлечении ценных инсайтов из комментариев зрителей. Твоя задача — систематически анализировать комментарии, чтобы помочь автору лучше понять свою аудиторию и создавать контент, который резонирует.
 
-You are an experienced YouTube audience analyst specializing in extracting valuable insights from viewer comments. Your task is to systematically analyze comments to help the content creator better understand their audience and create content that resonates.
+МЕТОДОЛОГИЯ АНАЛИЗА КОММЕНТАРИЕВ:
 
-COMMENT ANALYSIS METHODOLOGY:
+1. ЗАПРОСЫ НА ВИДЕО (video_requests)
+• Что аудитория ЯВНО просит снять — ищи фразы типа "снимите про", "хочется видео о", "расскажите про"
+• count — примерное количество похожих запросов (1 = единичный, 5+ = популярный запрос)
+• Группируй похожие запросы в один
 
-1. VIDEO REQUESTS (video_requests) — in ${lang}
-• What the audience EXPLICITLY asks to see
-• count — approximate number of similar requests (1 = isolated, 5+ = popular)
+2. БОЛИ И ПРОБЛЕМЫ (pain_points)
+• Проблемы аудитории: что не работает, что непонятно, что раздражает
+• Формулируй как конкретную проблему, а не абстракцию
 
-2. PAIN POINTS (pain_points) — in ${lang}
-• Problems the audience faces: what doesn't work, what's unclear, what frustrates them
-• Frame as a concrete problem, not an abstraction
+3. НЕЗАКРЫТЫЕ ВОПРОСЫ (unanswered_questions)
+• Вопросы на которые зрители не нашли ответа в видео
 
-3. UNANSWERED QUESTIONS (unanswered_questions) — in ${lang}
-• Questions viewers didn't find answers to in the video
+4. ПОЗИТИВНЫЕ РЕАКЦИИ (positive_reactions)
+• Что конкретно понравилось: формат, подача, конкретные моменты
 
-4. POSITIVE REACTIONS (positive_reactions) — in ${lang}
-• What specifically was liked: format, delivery, specific moments
+5. НЕГАТИВНЫЕ РЕАКЦИИ (negative_reactions)
+• Что не понравилось, что критикуют, что хотят изменить
 
-5. NEGATIVE REACTIONS (negative_reactions) — in ${lang}
-• What wasn't liked, what's criticized, what people want changed
+6. ИДЕИ ДЛЯ ВИДЕО (video_ideas)
+• title — готовое рабочее название видео
+• reason — почему сработает (аудитория просит / много похожих вопросов)
+• based_on — из каких комментариев родилась идея
 
-6. VIDEO IDEAS (video_ideas) — ALL fields in ${lang}
-• title — a ready working video title
-• reason — why it will work
-• based_on — which comments the idea comes from
+7. ПОРТРЕТ АУДИТОРИИ (audience_portrait)
+• Кто смотрит: возраст, уровень экспертизы, интересы
+• 2-3 предложения конкретного описания
 
-7. AUDIENCE PORTRAIT (audience_portrait) — in ${lang}
-• Who watches: age, expertise level, interests
-• 2-3 sentences of concrete description
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"video_requests":[{"request":"Снимите про зимние шины","count":5}],"pain_points":["боль 1","боль 2"],"unanswered_questions":["вопрос 1","вопрос 2"],"positive_reactions":["что понравилось 1"],"negative_reactions":["что не понравилось 1"],"video_ideas":[{"title":"Готовое название видео","reason":"почему сработает","based_on":"из какого комментария идея"}],"audience_portrait":"Краткое описание кто смотрит"}
 
-RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"video_requests":[{"request":"<in ${lang}>","count":5}],"pain_points":["<in ${lang}>","<in ${lang}>"],"unanswered_questions":["<in ${lang}>","<in ${lang}>"],"positive_reactions":["<in ${lang}>"],"negative_reactions":["<in ${lang}>"],"video_ideas":[{"title":"<in ${lang}>","reason":"<in ${lang}>","based_on":"<in ${lang}>"}],"audience_portrait":"<in ${lang}>"}
-
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
-}
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
 
 function parseClaudeJson<T>(text: string, label: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -193,7 +189,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as { url?: string; count?: number; lang?: string }
     const url = body.url?.trim() ?? ''
     const count = [50, 100, 200].includes(body.count ?? 0) ? (body.count as 50 | 100 | 200) : 100
-    const userLang = resolveUserLang(req, body.lang)
 
     if (!url) return NextResponse.json({ ok: false, error: 'Введите URL видео или канала' }, { status: 400 })
     if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
@@ -272,8 +267,8 @@ export async function POST(req: NextRequest) {
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1200,
-      system: [{ type: 'text', text: getCommentsPrompt(userLang), cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: `Видео/канал на тему: "${topic}"\n\n${selectedComments.length} комментариев:\n${commentsText}${langNote(userLang)}` }],
+      system: [{ type: 'text', text: COMMENTS_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Видео/канал на тему: "${topic}"\n\n${selectedComments.length} комментариев:\n${commentsText}` }],
     })
     const raw = (msg.content[0] as { text: string }).text
     console.log('[comments] claude raw:', raw.substring(0, 300))

@@ -3,46 +3,56 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
-import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-function getKeywordsPrompt1(lang: string): string {
-  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — competition, recommendation — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+const KEYWORDS_SYSTEM_PROMPT_1 = `Ты опытный YouTube SEO аналитик, специализирующийся на оценке ключевых слов. На основе статистических данных (средние просмотры топ-5 видео и количество конкурирующих видео) оцени каждое ключевое слово.
 
-You are an experienced YouTube SEO analyst specializing in keyword evaluation. Based on statistical data about keywords (average views of top-5 videos and number of competing videos), assess each keyword.
+МЕТОДОЛОГИЯ ОЦЕНКИ:
+• difficulty (1-10) — сложность ранжирования по этому запросу
+  - 1-3: низкая конкуренция, мало видео, легко войти
+  - 4-6: средняя конкуренция, нужна качественная работа
+  - 7-10: высокая конкуренция, нужен сильный канал
+  - Учитывай: video_count (больше = выше difficulty), avg_views (больше = выше difficulty)
 
-SCORING METHODOLOGY:
-• difficulty (1-10) — how hard it is to rank for this query
-• potential (1-10) — monetization and traffic potential
-• competition — competition description in ${lang} (e.g., for Russian: "Низкая" / "Средняя" / "Высокая")
-• recommendation — concrete advice in ${lang} (e.g., for Russian: "Стоит снять" / "Сложно, но возможно" / "Слишком высокая конкуренция" + reason)
+• potential (1-10) — потенциал монетизации и трафика
+  - 1-3: низкий интерес аудитории, мало просмотров
+  - 4-6: средний интерес
+  - 7-10: высокий интерес, много просмотров у топ видео
+  - Учитывай: avg_views топ-5 видео (больше = выше potential)
 
-IMPORTANT: Scores must be realistic and useful for a content creator choosing a topic.
+• competition — "Низкая" / "Средняя" / "Высокая"
+• recommendation — конкретный совет: "Стоит снять" / "Сложно, но возможно" / "Слишком высокая конкуренция" + причина
 
-RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"keywords":[{"keyword":"keyword phrase","difficulty":6,"potential":8,"competition":"<in ${lang}>","recommendation":"<in ${lang}>"}]}
+ВАЖНО: Оценки должны быть реалистичными и полезными для контент-мейкера при выборе темы.
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.`
-}
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"keywords":[{"keyword":"авто зимой","difficulty":6,"potential":8,"competition":"Средняя","recommendation":"Стоит снять — хороший баланс просмотров и конкуренции"}]}
 
-function getKeywordsPrompt2(lang: string): string {
-  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — best_keywords, low_competition, insights — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
 
-You are an experienced YouTube SEO strategist helping content creators choose the best keywords for maximum reach. Based on the keyword list, select the most promising ones and provide a final niche analysis.
+const KEYWORDS_SYSTEM_PROMPT_2 = `Ты опытный YouTube SEO стратег, помогающий контент-мейкерам выбирать лучшие ключевые слова. На основе списка ключевых слов выбери наиболее перспективные и дай итоговый анализ ниши.
 
-SELECTION METHODOLOGY:
-• best_keywords — 3-5 best keywords with optimal balance of potential and competition — in ${lang}
-• low_competition — 3-5 keywords with minimum competition — in ${lang}
-• insights — brief analytical conclusion about the niche (2-3 sentences) — in ${lang}
+МЕТОДОЛОГИЯ ОТБОРА:
+• best_keywords — 3-5 лучших ключевых слов с оптимальным балансом потенциала и конкуренции
+  - Лучшее = высокий потенциал + низкая/средняя сложность
+  - Это ключевые слова для создания основного контента
 
-RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"best_keywords":["<in ${lang}>","<in ${lang}>","<in ${lang}>"],"low_competition":["<in ${lang}>","<in ${lang}>"],"insights":"<2-3 sentence niche conclusion in ${lang}>"}
+• low_competition — 3-5 ключевых слов с минимальной конкуренцией
+  - Даже если у них меньше просмотров — по ним легче ранжироваться
+  - Отлично подходят для новых каналов, которым нужны первые просмотры
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.`
-}
+• insights — краткий аналитический вывод по нише (2-3 предложения)
+  - Общая оценка ниши
+  - Стратегическая рекомендация
+  - На чём сосредоточиться
+
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"best_keywords":["ключевое слово 1","ключевое слово 2","ключевое слово 3"],"low_competition":["слово с низкой конкуренцией 1","слово с низкой конкуренцией 2"],"insights":"Краткий вывод по нише в 2-3 предложениях с конкретными рекомендациями"}
+
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
 
 function parseClaudeJson<T>(text: string, label: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -219,20 +229,19 @@ export async function POST(req: NextRequest) {
     const keywordsList = suggestions.map(s => `- "${s}"`).join('\n')
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
-    const userLang = resolveUserLang(req, lang)
 
     const [msg1, msg2] = await Promise.all([
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 800,
-        system: [{ type: 'text', text: getKeywordsPrompt1(userLang), cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: `Ниша: "${keyword}"\nДанные (avg_views — среднее топ-5 видео, video_count — конкуренция):\n${keywordsData}${langNote(userLang)}` }],
+        system: [{ type: 'text', text: KEYWORDS_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: `Ниша: "${keyword}"\nДанные (avg_views — среднее топ-5 видео, video_count — конкуренция):\n${keywordsData}` }],
       }),
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 400,
-        system: [{ type: 'text', text: getKeywordsPrompt2(userLang), cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: `Ниша: "${keyword}"\nКлючевые слова:\n${keywordsList}${langNote(userLang)}` }],
+        system: [{ type: 'text', text: KEYWORDS_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: `Ниша: "${keyword}"\nКлючевые слова:\n${keywordsList}` }],
       }),
     ])
 

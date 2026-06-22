@@ -3,7 +3,6 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
-import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 60
 
@@ -24,15 +23,38 @@ function parseClaudeJson<T>(text: string, label: string): T {
   throw new Error(`${label}: unbalanced braces`)
 }
 
+const REVENUE_SYSTEM_PROMPT = `Ты эксперт по монетизации YouTube. На основе ниши и географии аудитории определи реалистичный RPM (доход на 1000 просмотров после вычета 45% YouTube).
+
+ОРИЕНТИРЫ RPM ПО РЫНКАМ:
+- США / Канада / Австралия / Великобритания: $4-15 (премиум рекламодатели)
+- Западная Европа (DE/FR/NL/SE/CH): $3-10
+- Восточная Европа / СНГ / Россия: $0.5-3
+- LATAM (BR/MX/AR): $0.5-2
+- ЮВА (TH/PH/ID/MY): $0.3-1.5
+- Индия: $0.2-1
+- Смешанная / глобальная аудитория: $1.5-5
+
+МНОЖИТЕЛИ ПО НИШАМ:
+- Финансы / бизнес / недвижимость / страхование: 2-3x
+- Технологии / ПО / SaaS: 1.5-2x
+- Авто / здоровье / юриспруденция: 1.2-1.8x
+- Образование / наука / история: 1x
+- Развлечения / юмор / игры / лайфстайл: 0.5-0.8x
+
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"rpm_min":1.5,"rpm_max":3.5,"rpm_avg":2.5,"niche_factor":"Средний","explanation":"Автомобильная ниша — умеренный RPM благодаря рекламодателям из сферы автодилеров и страхования"}
+
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+
 const COUNTRY_LABELS: Record<string, string> = {
-  ru: 'Russia',
-  us: 'US / Canada / Australia',
-  eu: 'Western Europe',
-  cis: 'CIS / Eastern Europe',
-  latam: 'LATAM (Brazil / Mexico / Argentina)',
-  sea: 'SE Asia (Thailand / Philippines / Indonesia)',
-  india: 'India',
-  mix: 'Mixed / Global Audience',
+  ru: 'Россия / СНГ',
+  us: 'США / Канада / Австралия',
+  eu: 'Западная Европа',
+  cis: 'СНГ / Восточная Европа',
+  latam: 'LATAM (Бразилия / Мексика / Аргентина)',
+  sea: 'ЮВА (Таиланд / Филиппины / Индонезия)',
+  india: 'Индия',
+  mix: 'Смешанная / глобальная аудитория',
 }
 
 export async function POST(req: NextRequest) {
@@ -45,7 +67,6 @@ export async function POST(req: NextRequest) {
     const niche = body.niche?.trim() ?? ''
     const views = Math.max(0, Math.round(body.views ?? 0))
     const country = body.country ?? 'mix'
-    const userLang = resolveUserLang(req, body.lang)
 
     if (!niche) return NextResponse.json({ ok: false, error: 'Введите нишу' }, { status: 400 })
     if (views <= 0) return NextResponse.json({ ok: false, error: 'Введите количество просмотров' }, { status: 400 })
@@ -53,39 +74,14 @@ export async function POST(req: NextRequest) {
     const check = await requireCredits(user.id, 'revenue_calc', supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
-    const countryLabel = COUNTRY_LABELS[country] ?? 'Mixed / Global Audience'
-
-    const prompt = `You are a YouTube monetization expert.
-Niche: ${niche}
-Audience market: ${countryLabel}
-
-Determine a realistic RPM (revenue per 1000 views after YouTube's 45% cut).
-
-Market RPM benchmarks:
-- US / CA / AU / UK: $4-15 (premium advertisers)
-- Western Europe (DE/FR/NL/SE/CH): $3-10
-- Eastern Europe / CIS / Russia: $0.5-3
-- LATAM (BR/MX/AR): $0.5-2
-- SE Asia (TH/PH/ID/MY): $0.3-1.5
-- India: $0.2-1
-- Mixed / global audience: $1.5-5
-
-Niche multipliers:
-- Finance / business / real estate / insurance: 2-3x base
-- Technology / software / SaaS: 1.5-2x base
-- Auto / health / legal: 1.2-1.8x base
-- Education / science / history: 1x base
-- Entertainment / humor / gaming / lifestyle: 0.5-0.8x base
-
-Return JSON STRICTLY in this format, only JSON, no text before or after:
-{"rpm_min":1.5,"rpm_max":3.5,"rpm_avg":2.5,"niche_factor":"Medium","explanation":"Auto niche in Russia has moderate RPM due to auto dealer and insurance advertisers"}
-${langNote(userLang)}`
+    const countryLabel = COUNTRY_LABELS[country] ?? 'Смешанная / глобальная аудитория'
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 300,
-      messages: [{ role: 'user', content: prompt }],
+      system: [{ type: 'text', text: REVENUE_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Ниша: ${niche}\nРынок аудитории: ${countryLabel}` }],
     })
     const raw = (msg.content[0] as { text: string }).text
 

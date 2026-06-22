@@ -3,7 +3,6 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
-import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 120
 
@@ -38,84 +37,74 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
-function getNichePrompt1(lang: string): string {
-  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value in the JSON — competition_level, competition_reason, trend, growth, trend_reason, monetization timeframes — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+const NICHE_SYSTEM_PROMPT_1 = `Ты опытный YouTube аналитик, специализирующийся на анализе ниш. На основе данных о топ каналах и топ видео оцени нишу и верни метрики в JSON.
 
-You are an experienced YouTube analyst specializing in niche analysis. Based on data about top channels and top videos, assess the niche and return metrics in JSON.
+МЕТОДОЛОГИЯ ОЦЕНКИ КОНКУРЕНЦИИ:
+• competition_score 1-10 где 1 = минимальная конкуренция, 10 = максимальная
+• Учитывай: количество подписчиков топ каналов, средние просмотры видео, частоту публикаций
+• Высокая конкуренция (8-10): каналы с миллионами подписчиков, видео с миллионами просмотров
+• Средняя конкуренция (4-7): каналы 100К-1М подписчиков, 50К-500К просмотров видео
+• Низкая конкуренция (1-3): каналы до 100К подписчиков, до 50К просмотров видео
 
-COMPETITION SCORING METHODOLOGY:
-• competition_score 1-10 where 1 = minimum competition, 10 = maximum
-• Consider: top channel subscriber counts, average video views, publishing frequency
-• High competition (8-10): million+ subscriber channels, videos with millions of views
-• Medium competition (4-7): 100K-1M subscriber channels, 50K-500K video views
-• Low competition (1-3): under 100K subscriber channels, under 50K video views
+ОЦЕНКА ТРЕНДА:
+• Анализируй даты публикации топ видео — если свежие видео набирают много просмотров — растёт
+• trend: "Растёт" / "Стабильно" / "Снижается"
+• growth: процент роста в формате "+23%" или "-5%" (приблизительная оценка)
 
-TREND ASSESSMENT METHODOLOGY:
-• Analyze top video publication dates — if recent videos are getting many views — growing
-• trend and growth values MUST be in ${lang}
+ОЦЕНКА RPM:
+• RPM (Revenue Per Mille) — доход с 1000 просмотров в USD после вычета 45% YouTube
+• Рыночные тиры:
+  - США / Канада / Австралия / Великобритания: $4-15
+  - Западная Европа (DE/FR/NL/SE): $3-10
+  - Восточная Европа / СНГ / Россия: $0.5-3
+  - Латинская Америка (BR/MX/AR): $0.5-2
+  - ЮВА (TH/PH/ID/MY): $0.3-1.5
+  - Индия: $0.2-1
+• Множители по нишам (применять к базовому рынку):
+  - Финансы / бизнес / недвижимость / страхование: 2-3x
+  - Технологии / программное обеспечение: 1.5-2x
+  - Авто / здоровье: 1.2-1.8x
+  - Образование / наука: 1x
+  - Развлечения / юмор / игры: 0.5-0.8x
+• rpm_min и rpm_max — диапазон для данной ниши на основе предоставленных данных
 
-RPM ASSESSMENT METHODOLOGY:
-• RPM (Revenue Per Mille) — revenue per 1000 views in USD after YouTube's 45% cut
-• Market tiers:
-  - US / CA / AU / UK: $4-15 (premium advertisers, high CPM)
-  - Western Europe (DE/FR/NL/SE/CH): $3-10
-  - Eastern Europe / CIS / Russia: $0.5-3
-  - LATAM (BR/MX/AR): $0.5-2
-  - SE Asia (TH/PH/ID/MY): $0.3-1.5
-  - India: $0.2-1
-• Niche multipliers (apply on top of market base):
-  - Finance / business / real estate / insurance: 2-3x
-  - Technology / software: 1.5-2x
-  - Auto / health: 1.2-1.8x
-  - Education / science: 1x
-  - Entertainment / humor / gaming: 0.5-0.8x
-• rpm_min and rpm_max — range for this niche based on the data provided
+ОЦЕНКА МОНЕТИЗАЦИИ (время до монетизации):
+• YouTube требует 1000 подписчиков и 4000 часов просмотров за 12 месяцев
+• monetization_1_video: 1 видео в неделю
+• monetization_2_videos: 2 видео в неделю
+• monetization_3_videos: 3 видео в неделю
 
-MONETIZATION ASSESSMENT (time to monetization):
-• YouTube requires 1000 subscribers and 4000 watch hours in 12 months
-• monetization_1_video: publishing 1 video per week
-• monetization_2_videos: publishing 2 videos per week
-• monetization_3_videos: publishing 3 videos per week
-• monetization timeframe values MUST be in ${lang}
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"competition_score":7,"competition_level":"Высокая","competition_reason":"коротко почему","trend":"Растёт","growth":"+23%","trend_reason":"коротко почему","rpm_min":1.5,"rpm_max":3.0,"monetization_1_video":"18-24 мес","monetization_2_videos":"10-14 мес","monetization_3_videos":"7-10 мес"}
 
-RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"competition_score":7,"competition_level":"<in ${lang}>","competition_reason":"<in ${lang}>","trend":"<in ${lang}>","growth":"<in ${lang}>","trend_reason":"<in ${lang}>","rpm_min":1.5,"rpm_max":3.0,"monetization_1_video":"<in ${lang}>","monetization_2_videos":"<in ${lang}>","monetization_3_videos":"<in ${lang}>"}
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
-}
+const NICHE_SYSTEM_PROMPT_2 = `Ты опытный YouTube аналитик, специализирующийся на анализе ниш и форматов контента. На основе данных о топ каналах и видео определи поднишы, форматы и дай практические рекомендации.
 
-function getNichePrompt2(lang: string): string {
-  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value in the JSON — sub-niche names, competition levels, format names, days, recommendations — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+МЕТОДОЛОГИЯ ОПРЕДЕЛЕНИЯ ПОДНИШЕЙ:
+• Поднища — более узкая тема в рамках основной ниши (например, в "авто": "электромобили", "тюнинг", "покупка авто")
+• Определи 3 поднишы с хорошим потенциалом на основе видео
+• subniches_competition — уровень конкуренции: "Низкая" / "Средняя" / "Высокая"
 
-You are an experienced YouTube analyst specializing in niche and content format analysis. Based on data about top channels and videos, identify sub-niches, formats, and provide practical recommendations.
+МЕТОДОЛОГИЯ ОПРЕДЕЛЕНИЯ ФОРМАТОВ:
+• Формат = тип видео: обзоры, тест-драйвы, сравнения, топы, how-to, разборы, истории
+• top_formats — форматы с наибольшим количеством просмотров (из данных топ видео)
+• avg_views — среднее количество просмотров для видео в этом формате
 
-SUB-NICHE IDENTIFICATION METHODOLOGY:
-• A sub-niche is a narrower topic within the main niche (e.g., within "auto": "electric vehicles", "tuning", "car buying")
-• Identify 3 sub-niches with good potential based on the videos
-• subniches_competition — competition level for each sub-niche — MUST be in ${lang}
+РЕКОМЕНДАЦИИ:
+• Конкретные практические советы для нового канала в этой нише
+• Что делать в первые 3 месяца
+• Какие форматы и темы выбрать
+• Как выделиться на фоне конкурентов
 
-FORMAT IDENTIFICATION METHODOLOGY:
-• Format = video type: reviews, test-drives, comparisons, top-lists, how-to, breakdowns, stories
-• top_formats — formats with the highest view counts (from top video data)
-• avg_views — average view count for videos in this format
-• Format names MUST be in ${lang}
+ЛУЧШЕЕ ВРЕМЯ ПУБЛИКАЦИИ:
+• best_days — дни недели с наибольшей активностью аудитории в этой нише
+• best_hours — оптимальное время публикации (учитывай контекст рынка/региона)
 
-RECOMMENDATIONS:
-• Concrete practical advice for a new channel in this niche
-• What to do in the first 3 months
-• Which formats and topics to choose
-• How to differentiate from competitors
-• ALL recommendations MUST be in ${lang}
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"subniches":["Поднища 1","Поднища 2","Поднища 3"],"subniches_competition":["Низкая","Средняя","Низкая"],"top_formats":[{"name":"Тест-драйвы","avg_views":450000},{"name":"Обзоры","avg_views":280000},{"name":"Сравнения","avg_views":150000}],"best_days":["Вторник","Четверг"],"best_hours":"18:00-20:00","recommendations":["Совет 1","Совет 2","Совет 3"]}
 
-BEST PUBLISHING TIME:
-• best_days — days of the week with highest audience activity — MUST be in ${lang}
-• best_hours — optimal publishing time
-
-RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"subniches":["<in ${lang}>","<in ${lang}>","<in ${lang}>"],"subniches_competition":["<in ${lang}>","<in ${lang}>","<in ${lang}>"],"top_formats":[{"name":"<in ${lang}>","avg_views":450000},{"name":"<in ${lang}>","avg_views":280000},{"name":"<in ${lang}>","avg_views":150000}],"best_days":["<in ${lang}>","<in ${lang}>"],"best_hours":"18:00-20:00","recommendations":["<in ${lang}>","<in ${lang}>","<in ${lang}>"]}
-
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
-}
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
 
 function cacheKey(topic: string, country: string, lang: string) {
   return `${topic.toLowerCase().trim()}|${country}|${lang}|v2`
@@ -246,26 +235,18 @@ export async function POST(req: NextRequest) {
     // ── Claude: two small requests ────────────────────────────────────────────
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
-    const userLang = resolveUserLang(req, lang)
-    console.log('[niche] userLang:', userLang)
-    console.log('[niche] langNote:', langNote(userLang))
 
     const dataCtx = `Топ каналы: ${JSON.stringify(channelsData.slice(0, 5))}
 Топ видео: ${JSON.stringify(videosData.slice(0, 5))}
 Язык: ${lang}, Страна: ${country}`
-
-    const prompt1 = `Ниша: "${topic}"\n${dataCtx}${langNote(userLang)}`
-    const prompt2 = `Ниша: "${topic}"\n${dataCtx}\n\nОпредели топ форматы на основе РЕАЛЬНЫХ видео выше.${langNote(userLang)}`
-    console.log('[niche] prompt1 tail:', prompt1.slice(-200))
-    console.log('[niche] prompt2 tail:', prompt2.slice(-200))
 
     // Request 1 — metrics
     console.log('[niche] step 5a: claude metrics')
     const msg1 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 500,
-      system: [{ type: 'text', text: getNichePrompt1(userLang), cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: prompt1 }],
+      system: [{ type: 'text', text: NICHE_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Ниша: "${topic}"\n${dataCtx}` }],
     })
     console.log('[niche] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
     const text1 = (msg1.content[0] as { text: string }).text
@@ -290,8 +271,8 @@ export async function POST(req: NextRequest) {
     const msg2 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 600,
-      system: [{ type: 'text', text: getNichePrompt2(userLang), cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: prompt2 }],
+      system: [{ type: 'text', text: NICHE_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Ниша: "${topic}"\n${dataCtx}\n\nОпредели топ форматы на основе РЕАЛЬНЫХ видео выше.` }],
     })
     console.log('[niche] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
     const text2 = (msg2.content[0] as { text: string }).text

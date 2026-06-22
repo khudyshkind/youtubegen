@@ -4,39 +4,40 @@ import { createServerSupabase, createServiceClient } from '@/lib/supabase-server
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
-import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-function getRisingStarsPrompt(lang: string): string {
-  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — growth_reason, strategy, key_takeaway, common_patterns — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+const RISING_STARS_SYSTEM_PROMPT = `Ты эксперт по анализу роста YouTube каналов, специализирующийся на выявлении восходящих звёзд — новых каналов, которые стремительно набирают аудиторию. Ты умеешь точно определять причины вирусного роста и конкретные стратегии, работающие в данной нише.
 
-You are an expert in YouTube channel growth analysis, specializing in identifying rising stars — new channels that are rapidly building an audience. You can pinpoint the reasons behind viral growth and the specific strategies that work in a given niche.
+МЕТОДОЛОГИЯ АНАЛИЗА КАНАЛОВ:
 
-CHANNEL ANALYSIS METHODOLOGY — ALL output in ${lang}:
+ОПРЕДЕЛЕНИЕ ПРИЧИНЫ РОСТА (growth_reason):
+• Анализируй РЕАЛЬНЫЕ названия топ видео канала — они напрямую показывают что сработало
+• Ищи паттерны: "скандальные" заголовки, эксклюзивная информация, уникальный формат, первые в нише
+• Не давай общих ответов типа "регулярные публикации" или "качественный контент"
+• Хороший пример: "Первым протестировал новый iPhone 16 Pro за неделю до релиза — 2.1М просмотров"
+• Плохой пример: "Активно публикует контент по теме"
 
-IDENTIFYING GROWTH REASON (growth_reason) — in ${lang}:
-• Analyze the REAL titles of the channel's top videos — they directly show what worked
-• Look for patterns: scandalous headlines, exclusive information, unique format, first in the niche
-• Don't give generic answers — be specific with real examples from the video titles
+ОПРЕДЕЛЕНИЕ СТРАТЕГИИ (strategy):
+• Конкретный подход к созданию контента на основе реальных видео
+• Формат видео (длина, структура, подача), стиль заголовков, тематические углы
+• Пример: "Сравнительные обзоры в формате 60 секунд с провокационными заголовками-вопросами"
 
-IDENTIFYING STRATEGY (strategy) — in ${lang}:
-• Concrete approach to content creation based on real videos
-• Video format, title style, thematic angles
+КЛЮЧЕВОЙ ВЫВОД (key_takeaway):
+• Одно конкретное действие которое можно повторить — с примером реального видео канала
+• Пример: "Скопируй формат 'Честный обзор [продукта] через 6 месяцев' — это видео набрало 890К просмотров"
+• Не "изучай успешные каналы" а конкретная техника
 
-KEY TAKEAWAY (key_takeaway) — in ${lang}:
-• One specific action that can be replicated — with an example from the channel's real video
+ОБЩИЕ ПАТТЕРНЫ (common_patterns):
+• Что объединяет несколько каналов из списка
+• Конкретный паттерн с примерами
 
-COMMON PATTERNS (common_patterns) — in ${lang}:
-• What unites several channels on the list — specific pattern with examples
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"channels":[{"name":"название канала точно как в данных","growth_reason":"Конкретная причина на основе РЕАЛЬНЫХ названий видео","strategy":"Конкретная стратегия: формат, темы, стиль","key_takeaway":"Что именно скопировать с примером топ видео"}],"common_patterns":["Конкретный паттерн найденный у нескольких каналов с примером"]}
 
-RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"channels":[{"name":"channel name exactly as in the data","growth_reason":"<in ${lang}>","strategy":"<in ${lang}>","key_takeaway":"<in ${lang}>"}],"common_patterns":["<in ${lang}>"]}
-
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.`
-}
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
 
 function parseClaudeJson<T>(text: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -84,7 +85,6 @@ export async function POST(req: NextRequest) {
     const subMax = body.sub_max ?? 100000
     // months_max=0 means no age restriction; undefined falls back to 0 (no restriction)
     const monthsMax = body.months_max ?? 0
-    const userLang = resolveUserLang(req, body.lang)
 
     console.log(`[rising] start topic="${topic}" sub_min=${subMin} sub_max=${subMax} months_max=${monthsMax}`)
 
@@ -298,10 +298,10 @@ ${videoLines}`
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2500,
-      system: [{ type: 'text', text: getRisingStarsPrompt(userLang), cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: RISING_STARS_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{
         role: 'user',
-        content: `Ниша: "${topic}". Проанализируй ${enriched.length} восходящих каналов.\n\n${channelsSummary}\n\nВерни JSON ровно с ${enriched.length} элементами в channels.${langNote(userLang)}`,
+        content: `Ниша: "${topic}". Проанализируй ${enriched.length} восходящих каналов.\n\n${channelsSummary}\n\nВерни JSON ровно с ${enriched.length} элементами в channels.`,
       }],
     })
     console.log('[rising] cache input:', msg.usage.input_tokens, 'cache_read:', msg.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg.usage.cache_creation_input_tokens ?? 0)
