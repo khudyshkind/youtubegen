@@ -2086,7 +2086,7 @@ function blocksToSrt(blocks) {
 // Spaces in curve points use backslash-escape (\\ in JS → \ at runtime → FFmpeg unescapes).
 const EFFECT_FILTERS = {
   film_grain: 'noise=alls=25:allf=t+u',
-  ken_burns: 'zoompan=z=min(1.3\\,1+0.0004*in):x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):d=1:s=1280x720:fps=25',
+  ken_burns: 'zoompan=z=min(1.3\\\\,zoom+0.0004):x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):d=1:s=1280x720:fps=25',
   vignette: 'vignette=PI/3',
   haze: 'colorbalance=rs=0.05:gs=0.02:bs=0.25',
   grayscale: 'hue=s=0',
