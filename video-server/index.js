@@ -2117,10 +2117,24 @@ async function runFFmpegOnRendi(inputFiles, outputFiles, ffmpegCommand, timeoutM
   }
 }
 
-// Parse audio duration from public URL via music-metadata (no ffprobe needed)
+// Parse audio duration from public URL via music-metadata (no ffprobe needed).
+// music-metadata v10 dropped parseURL; we fetch the first 512KB (contains
+// MP3 Xing/VBR headers) + total file size for accurate CBR duration.
 async function getAudioDuration(url) {
-  const { parseURL } = await import('music-metadata')
-  const meta = await parseURL(url)
+  const { parseBuffer } = await import('music-metadata')
+  // HEAD to get total file size (needed for CBR bitrate-based duration estimate)
+  let totalSize
+  try {
+    const headRes = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(10000) })
+    totalSize = parseInt(headRes.headers.get('content-length') || '0', 10) || undefined
+  } catch (_) { /* no-op — size is optional */ }
+  // Fetch first 512KB (enough for Xing/VBRI frames and ID3 tags)
+  const rangeRes = await fetch(url, {
+    headers: { Range: 'bytes=0-524287' },
+    signal: AbortSignal.timeout(30000),
+  })
+  const buffer = new Uint8Array(await rangeRes.arrayBuffer())
+  const meta = await parseBuffer(buffer, { mimeType: 'audio/mpeg', size: totalSize })
   const dur = meta.format.duration
   if (!dur || !isFinite(dur)) throw new Error(`music-metadata: no duration for ${url.slice(0, 80)}`)
   return dur
