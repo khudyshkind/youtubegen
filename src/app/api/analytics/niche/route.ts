@@ -143,7 +143,7 @@ IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`
 }
 
 function cacheKey(topic: string, country: string, contentLang: string, uiLang: string) {
-  return `${topic.toLowerCase().trim()}|${country}|${contentLang}|${uiLang}|v6`
+  return `${topic.toLowerCase().trim()}|${country}|${contentLang}|${uiLang}|v7`
 }
 
 export async function POST(req: NextRequest) {
@@ -219,16 +219,21 @@ export async function POST(req: NextRequest) {
 
     // ── YouTube data ──────────────────────────────────────────────────────────
 
-    const regionCode = country === 'worldwide' ? 'US' : country
+    // regionCode and relevanceLanguage come ONLY from contentLang/country — ui_lang has no effect
+    const regionCode = country === 'worldwide' ? undefined : country
+    console.log(`[niche] content_lang: ${contentLang} | ui_lang: ${uiLang} | youtube relevanceLanguage: ${contentLang} | regionCode: ${regionCode ?? 'omitted'}`)
+
+    const channelSearchParams: Record<string, string> = {
+      part: 'snippet', type: 'channel', q: topic,
+      maxResults: '50', relevanceLanguage: contentLang,
+    }
+    if (regionCode) channelSearchParams.regionCode = regionCode
 
     console.log('[niche] step 1: search channels')
-    const channelSearch = await ytFetch('/search', {
-      part: 'snippet', type: 'channel', q: topic,
-      maxResults: '10', relevanceLanguage: contentLang, regionCode,
-    }) as { items?: Array<{ id: { channelId: string } }> }
+    const channelSearch = await ytFetch('/search', channelSearchParams) as { items?: Array<{ id: { channelId: string } }> }
 
     const channelIds = (channelSearch.items ?? []).map(i => i.id.channelId).filter(Boolean).join(',')
-    console.log(`[niche] channel ids: ${channelIds.slice(0, 80)}`)
+    console.log(`[niche] channel ids count: ${(channelSearch.items ?? []).length}`)
 
     let channelsData: Array<{ channelId: string; name: string; subscribers: number; videos: number; views: number }> = []
     if (channelIds) {
@@ -236,28 +241,36 @@ export async function POST(req: NextRequest) {
       const statsRes = await ytFetch('/channels', {
         part: 'statistics,snippet', id: channelIds,
       }) as { items?: Array<{ id: string; snippet: { title: string }; statistics: { subscriberCount?: string; videoCount?: string; viewCount?: string } }> }
-      channelsData = (statsRes.items ?? [])
-        .map(ch => ({
-          channelId: ch.id,
-          name: ch.snippet.title,
-          subscribers: parseInt(ch.statistics.subscriberCount ?? '0'),
-          videos: parseInt(ch.statistics.videoCount ?? '0'),
-          views: parseInt(ch.statistics.viewCount ?? '0'),
-        }))
-        .filter(ch => {
-          const avgViews = ch.videos > 0 ? Math.round(ch.views / ch.videos) : 0
-          return ch.subscribers >= 1000 && ch.videos >= 10 && avgViews >= 1000
-        })
-      console.log(`[niche] channels after filter: ${channelsData.length}`)
+
+      const allChannels = (statsRes.items ?? []).map(ch => ({
+        channelId: ch.id,
+        name: ch.snippet.title,
+        subscribers: parseInt(ch.statistics.subscriberCount ?? '0'),
+        videos: parseInt(ch.statistics.videoCount ?? '0'),
+        views: parseInt(ch.statistics.viewCount ?? '0'),
+      }))
+
+      // Filter strict: 10k subs + 20 videos; fallback to 1k + 10 if < 3 results
+      const strict = allChannels.filter(ch => ch.subscribers >= 10000 && ch.videos >= 20)
+      channelsData = strict.length >= 3
+        ? strict
+        : allChannels.filter(ch => ch.subscribers >= 1000 && ch.videos >= 10)
+
+      // Sort by subscribers DESC, take top 5
+      channelsData.sort((a, b) => b.subscribers - a.subscribers)
+      channelsData = channelsData.slice(0, 5)
+      console.log(`[niche] channels after filter+sort: ${channelsData.length} (strict: ${strict.length})`)
     }
 
     console.log('[niche] step 3: search videos')
     const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString()
-    const videoSearch = await ytFetch('/search', {
+    const videoSearchParams: Record<string, string> = {
       part: 'snippet', type: 'video', q: topic,
       order: 'viewCount', publishedAfter: oneYearAgo,
-      maxResults: '10', relevanceLanguage: contentLang, regionCode,
-    }) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; channelTitle: string; publishedAt: string } }> }
+      maxResults: '10', relevanceLanguage: contentLang,
+    }
+    if (regionCode) videoSearchParams.regionCode = regionCode
+    const videoSearch = await ytFetch('/search', videoSearchParams) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; channelTitle: string; publishedAt: string } }> }
 
     const videoIds = (videoSearch.items ?? []).map(v => v.id.videoId).filter(Boolean).join(',')
     console.log(`[niche] video ids: ${videoIds.slice(0, 80)}`)

@@ -462,7 +462,7 @@ function NicheTab({ externalResult, onClearExternal, onAnalyzeChannel }: {
 
   const [topic, setTopic] = useState('')
   const [country, setCountry] = useState('RU')
-  const [contentLang, setContentLang] = useState<string>(uiLang)
+  const [contentLang, setContentLang] = useState<string>('ru')
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(-1)
   const [error, setError] = useState('')
