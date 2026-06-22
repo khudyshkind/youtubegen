@@ -270,7 +270,7 @@ export async function POST(req: NextRequest) {
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1200,
       system: [{ type: 'text', text: getCommentsPrompt(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Видео/канал на тему: "${topic}"\n\n${selectedComments.length} комментариев:\n${commentsText}${langNote(userLang)}` }],

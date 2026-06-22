@@ -202,7 +202,7 @@ export async function POST(req: NextRequest) {
     // Request 1 — flat trend list
     console.log('[trends] step 3a: claude trend list')
     const msg1 = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 500,
       system: [{ type: 'text', text: getTrendsPrompt1(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `${dataCtx}${langNote(userLang)}` }],
@@ -219,7 +219,7 @@ export async function POST(req: NextRequest) {
     console.log('[trends] step 3b: claude video ideas')
     const trendNames = (trendList.trends ?? []).slice(0, 4).map(t => t.topic)
     const msg2 = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 600,
       system: [{ type: 'text', text: getTrendsPrompt2(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Ниша: "${topic}". Тренды: ${JSON.stringify(trendNames)}\n\nДля каждого тренда — 3 идеи для видео.${langNote(userLang)}` }],

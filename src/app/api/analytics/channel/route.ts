@@ -233,7 +233,7 @@ export async function POST(req: NextRequest) {
     // Request 1 — overview + topics
     console.log('[channel] step 5a: claude overview')
     const msg1 = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 500,
       system: [{ type: 'text', text: getChannelPrompt1(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `${dataCtx}${langNote(userLang)}` }],
@@ -254,7 +254,7 @@ export async function POST(req: NextRequest) {
     // Request 2 — formats + recommendations (no "example" field — video titles break JSON escaping)
     console.log('[channel] step 5b: claude formats')
     const msg2 = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 800,
       system: [{ type: 'text', text: getChannelPrompt2(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `${dataCtx}\n\nОпредели форматы видео и дай рекомендации.${langNote(userLang)}` }],

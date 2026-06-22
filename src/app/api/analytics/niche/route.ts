@@ -262,7 +262,7 @@ export async function POST(req: NextRequest) {
     // Request 1 — metrics
     console.log('[niche] step 5a: claude metrics')
     const msg1 = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 500,
       system: [{ type: 'text', text: getNichePrompt1(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: prompt1 }],
@@ -288,7 +288,7 @@ export async function POST(req: NextRequest) {
     // Request 2 — recommendations + formats with real avg_views
     console.log('[niche] step 5b: claude recommendations')
     const msg2 = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 600,
       system: [{ type: 'text', text: getNichePrompt2(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: prompt2 }],
