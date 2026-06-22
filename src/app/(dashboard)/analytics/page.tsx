@@ -16,7 +16,7 @@ interface NicheResult {
   monetization: { videos_per_week_1: string; videos_per_week_2: string; videos_per_week_3: string }
   best_time: { days: string[]; hours: string }
   top_formats: Array<{ name: string; avg_views: number }>
-  top_channels: Array<{ name: string; subscribers: number; videos: number; avg_views: number }>
+  top_channels: Array<{ channelId?: string; name: string; subscribers: number; videos: number; avg_views: number }>
   top_videos: Array<{ title: string; views: number; channel: string; url: string }>
   recommendations: string[]
 }
@@ -259,11 +259,12 @@ function ProgressSteps({ steps, current, t }: { steps: string[]; current: number
 
 // ─── Niche result renderer (shared between NicheTab and HistoryTab) ───────────
 
-function NicheResultView({ result, cached, t, onCreateVideo }: {
+function NicheResultView({ result, cached, t, onCreateVideo, onAnalyzeChannel }: {
   result: NicheResult
   cached: boolean
   t: (k: string) => string
   onCreateVideo: () => void
+  onAnalyzeChannel?: (channelUrl: string) => void
 }) {
   return (
     <div className="analytics-result flex flex-col gap-5">
@@ -370,17 +371,38 @@ function NicheResultView({ result, cached, t, onCreateVideo }: {
                   <th className="text-right pb-2">{t('analytics.subscribers')}</th>
                   <th className="text-right pb-2">{t('analytics.videos_count')}</th>
                   <th className="text-right pb-2">{t('analytics.avg_views')}</th>
+                  {onAnalyzeChannel && <th className="pb-2" />}
                 </tr>
               </thead>
               <tbody>
-                {result.top_channels.map((ch, i) => (
-                  <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                    <td className="py-2 text-white font-medium">{ch.name}</td>
-                    <td className="py-2 text-right text-slate-300">{fmtNum(ch.subscribers)}</td>
-                    <td className="py-2 text-right text-slate-300">{fmtNum(ch.videos)}</td>
-                    <td className="py-2 text-right text-slate-300">{fmtNum(ch.avg_views)}</td>
-                  </tr>
-                ))}
+                {result.top_channels.map((ch, i) => {
+                  const channelUrl = ch.channelId
+                    ? `https://youtube.com/channel/${ch.channelId}`
+                    : `https://youtube.com/@${encodeURIComponent(ch.name)}`
+                  return (
+                    <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                      <td className="py-2 font-medium">
+                        <a href={channelUrl} target="_blank" rel="noreferrer"
+                          className="text-violet-300 hover:text-violet-200 transition-colors">
+                          {ch.name}
+                        </a>
+                      </td>
+                      <td className="py-2 text-right text-slate-300">{fmtNum(ch.subscribers)}</td>
+                      <td className="py-2 text-right text-slate-300">{fmtNum(ch.videos)}</td>
+                      <td className="py-2 text-right text-slate-300">{fmtNum(ch.avg_views)}</td>
+                      {onAnalyzeChannel && (
+                        <td className="py-2 pl-2">
+                          <button
+                            onClick={() => onAnalyzeChannel(channelUrl)}
+                            className="text-xs px-2 py-1 rounded-lg transition-colors whitespace-nowrap"
+                            style={{ background: 'rgba(124,58,237,0.2)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.3)' }}>
+                            📊 Анализ
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -429,9 +451,10 @@ function NicheResultView({ result, cached, t, onCreateVideo }: {
 
 // ─── Niche Tab ────────────────────────────────────────────────────────────────
 
-function NicheTab({ externalResult, onClearExternal }: {
+function NicheTab({ externalResult, onClearExternal, onAnalyzeChannel }: {
   externalResult?: NicheResult | null
   onClearExternal?: () => void
+  onAnalyzeChannel?: (channelUrl: string) => void
 }) {
   const { t, lang: uiLang } = useLang()
   const router = useRouter()
@@ -514,27 +537,62 @@ function NicheTab({ externalResult, onClearExternal }: {
               />
             </div>
             <div className="flex gap-3 flex-wrap">
-              <div className="flex-1 min-w-32">
+              <div className="flex-1 min-w-36">
                 <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.country_label')}</label>
                 <select value={country} onChange={e => setCountry(e.target.value)}
                   className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none"
                   style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <option value="RU">{t('analytics.country_ru')}</option>
-                  <option value="UA">{t('analytics.country_ua')}</option>
-                  <option value="KZ">{t('analytics.country_kz')}</option>
-                  <option value="US">{t('analytics.country_world')}</option>
+                  <option value="worldwide">🌍 Весь мир</option>
+                  <option value="US">🇺🇸 США</option>
+                  <option value="GB">🇬🇧 Великобритания</option>
+                  <option value="CA">🇨🇦 Канада</option>
+                  <option value="AU">🇦🇺 Австралия</option>
+                  <option value="DE">🇩🇪 Германия</option>
+                  <option value="FR">🇫🇷 Франция</option>
+                  <option value="ES">🇪🇸 Испания</option>
+                  <option value="IT">🇮🇹 Италия</option>
+                  <option value="BR">🇧🇷 Бразилия</option>
+                  <option value="MX">🇲🇽 Мексика</option>
+                  <option value="IN">🇮🇳 Индия</option>
+                  <option value="JP">🇯🇵 Япония</option>
+                  <option value="KR">🇰🇷 Южная Корея</option>
+                  <option value="RU">🇷🇺 Россия</option>
+                  <option value="UA">🇺🇦 Украина</option>
+                  <option value="KZ">🇰🇿 Казахстан</option>
+                  <option value="PL">🇵🇱 Польша</option>
+                  <option value="NL">🇳🇱 Нидерланды</option>
+                  <option value="TR">🇹🇷 Турция</option>
+                  <option value="AE">🇦🇪 ОАЭ</option>
+                  <option value="SA">🇸🇦 Саудовская Аравия</option>
                 </select>
               </div>
-              <div className="flex-1 min-w-32">
+              <div className="flex-1 min-w-36">
                 <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.lang_label')}</label>
                 <select value={contentLang} onChange={e => setContentLang(e.target.value)}
                   className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none"
                   style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <option value="ru">{t('analytics.lang_ru')}</option>
-                  <option value="en">{t('analytics.lang_en')}</option>
+                  <option value="en">Английский</option>
+                  <option value="ru">Русский</option>
+                  <option value="de">Немецкий</option>
+                  <option value="fr">Французский</option>
+                  <option value="es">Испанский</option>
+                  <option value="it">Итальянский</option>
+                  <option value="pt">Португальский</option>
+                  <option value="ja">Японский</option>
+                  <option value="ko">Корейский</option>
+                  <option value="hi">Хинди</option>
+                  <option value="tr">Турецкий</option>
+                  <option value="ar">Арабский</option>
+                  <option value="pl">Польский</option>
+                  <option value="nl">Нидерландский</option>
+                  <option value="uk">Украинский</option>
                 </select>
               </div>
             </div>
+            <p className="text-xs text-slate-500 flex gap-1.5 items-start">
+              <span className="shrink-0 mt-0.5">ℹ️</span>
+              <span>Результаты зависят от выбранного рынка и языка контента — анализ английского YouTube даст другие каналы и тренды чем анализ русского рынка.</span>
+            </p>
             {error && <p className="text-sm text-red-400">{error}</p>}
             <button onClick={() => void handleAnalyze()} disabled={loading}
               className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
@@ -557,6 +615,7 @@ function NicheTab({ externalResult, onClearExternal }: {
           cached={!externalResult && cached}
           t={t}
           onCreateVideo={goToStudio}
+          onAnalyzeChannel={onAnalyzeChannel}
         />
       )}
     </div>
@@ -2427,6 +2486,14 @@ export default function AnalyticsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  function handleGoToChannelFromNiche(channelUrl: string) {
+    setPendingChannelQuery(channelUrl)
+    setCameFromRisingStars(false)
+    setTab('channel')
+    clearOpenedReport()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const TABS: Array<{ id: Tab; label: string }> = [
     { id: 'niche',         label: t('analytics.tab_niche') },
     { id: 'trends',        label: t('analytics.tab_trends') },
@@ -2504,6 +2571,7 @@ export default function AnalyticsPage() {
           <NicheTab
             externalResult={openedReport?.report_type === 'niche' ? openedReport.result as NicheResult : null}
             onClearExternal={clearOpenedReport}
+            onAnalyzeChannel={handleGoToChannelFromNiche}
           />
         )}
         {tab === 'trends' && (

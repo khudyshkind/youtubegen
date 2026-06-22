@@ -143,7 +143,7 @@ IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`
 }
 
 function cacheKey(topic: string, country: string, contentLang: string, uiLang: string) {
-  return `${topic.toLowerCase().trim()}|${country}|${contentLang}|${uiLang}|v5`
+  return `${topic.toLowerCase().trim()}|${country}|${contentLang}|${uiLang}|v6`
 }
 
 export async function POST(req: NextRequest) {
@@ -219,28 +219,36 @@ export async function POST(req: NextRequest) {
 
     // ── YouTube data ──────────────────────────────────────────────────────────
 
+    const regionCode = country === 'worldwide' ? 'US' : country
+
     console.log('[niche] step 1: search channels')
     const channelSearch = await ytFetch('/search', {
       part: 'snippet', type: 'channel', q: topic,
-      maxResults: '10', relevanceLanguage: contentLang, regionCode: country,
+      maxResults: '10', relevanceLanguage: contentLang, regionCode,
     }) as { items?: Array<{ id: { channelId: string } }> }
 
     const channelIds = (channelSearch.items ?? []).map(i => i.id.channelId).filter(Boolean).join(',')
     console.log(`[niche] channel ids: ${channelIds.slice(0, 80)}`)
 
-    let channelsData: Array<{ name: string; subscribers: number; videos: number; views: number }> = []
+    let channelsData: Array<{ channelId: string; name: string; subscribers: number; videos: number; views: number }> = []
     if (channelIds) {
       console.log('[niche] step 2: channel stats')
       const statsRes = await ytFetch('/channels', {
         part: 'statistics,snippet', id: channelIds,
-      }) as { items?: Array<{ snippet: { title: string }; statistics: { subscriberCount?: string; videoCount?: string; viewCount?: string } }> }
-      channelsData = (statsRes.items ?? []).map(ch => ({
-        name: ch.snippet.title,
-        subscribers: parseInt(ch.statistics.subscriberCount ?? '0'),
-        videos: parseInt(ch.statistics.videoCount ?? '0'),
-        views: parseInt(ch.statistics.viewCount ?? '0'),
-      }))
-      console.log(`[niche] channels: ${channelsData.length}`)
+      }) as { items?: Array<{ id: string; snippet: { title: string }; statistics: { subscriberCount?: string; videoCount?: string; viewCount?: string } }> }
+      channelsData = (statsRes.items ?? [])
+        .map(ch => ({
+          channelId: ch.id,
+          name: ch.snippet.title,
+          subscribers: parseInt(ch.statistics.subscriberCount ?? '0'),
+          videos: parseInt(ch.statistics.videoCount ?? '0'),
+          views: parseInt(ch.statistics.viewCount ?? '0'),
+        }))
+        .filter(ch => {
+          const avgViews = ch.videos > 0 ? Math.round(ch.views / ch.videos) : 0
+          return ch.subscribers >= 1000 && ch.videos >= 10 && avgViews >= 1000
+        })
+      console.log(`[niche] channels after filter: ${channelsData.length}`)
     }
 
     console.log('[niche] step 3: search videos')
@@ -248,7 +256,7 @@ export async function POST(req: NextRequest) {
     const videoSearch = await ytFetch('/search', {
       part: 'snippet', type: 'video', q: topic,
       order: 'viewCount', publishedAfter: oneYearAgo,
-      maxResults: '10', relevanceLanguage: contentLang, regionCode: country,
+      maxResults: '10', relevanceLanguage: contentLang, regionCode,
     }) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; channelTitle: string; publishedAt: string } }> }
 
     const videoIds = (videoSearch.items ?? []).map(v => v.id.videoId).filter(Boolean).join(',')
@@ -353,6 +361,7 @@ export async function POST(req: NextRequest) {
         typeof f === 'string' ? { name: f, avg_views: 0 } : { name: f.name, avg_views: f.avg_views ?? 0 }
       ),
       top_channels: channelsData.slice(0, 5).map(c => ({
+        channelId: c.channelId,
         name: c.name,
         subscribers: c.subscribers,
         videos: c.videos,
