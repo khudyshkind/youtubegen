@@ -2113,7 +2113,9 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
     const errBody = await submitRes.text().catch(() => '')
     throw new Error(`VGF submit HTTP ${submitRes.status}: ${errBody.slice(0, 300)}`)
   }
-  const { id: jobId } = await submitRes.json()
+  const submitBody = await submitRes.json()
+  console.log('[vgf] submit response:', JSON.stringify(submitBody).slice(0, 300))
+  const jobId = submitBody.id ?? submitBody.job_id ?? submitBody.jobId ?? submitBody.data?.id
   console.log(`[vgf] job submitted: ${jobId}`)
 
   // Poll until completed or timed out
@@ -2124,8 +2126,13 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
       `https://verygoodffmpeg.com/api/jobs/${jobId}`,
       { headers: { 'Authorization': `Bearer ${VGF_API_KEY}` }, signal: AbortSignal.timeout(15000) }
     ).catch(e => { console.warn('[vgf] poll fetch error:', e.message); return null })
-    if (!pollRes || !pollRes.ok) { console.warn(`[vgf] poll HTTP ${pollRes?.status ?? 'err'}, retrying...`); continue }
+    if (!pollRes || !pollRes.ok) {
+      const errTxt = pollRes ? await pollRes.text().catch(() => '') : ''
+      console.warn(`[vgf] poll HTTP ${pollRes?.status ?? 'err'}: ${errTxt.slice(0, 200)}`)
+      continue
+    }
     const status = await pollRes.json()
+    if (!status.status) console.log('[vgf] poll raw:', JSON.stringify(status).slice(0, 300))
     console.log(`[vgf] job ${jobId} status: ${status.status}`)
     if (status.status === 'completed') {
       const result = {}
