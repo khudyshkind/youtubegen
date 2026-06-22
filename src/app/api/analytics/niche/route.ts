@@ -77,7 +77,9 @@ MONETIZATION ASSESSMENT (time to monetization):
 • Format: "18-24 мес", "10-14 мес", "7-10 мес"
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"competition_score":7,"competition_level":"Высокая","competition_reason":"brief reason why","trend":"Растёт","growth":"+23%","trend_reason":"brief reason why","rpm_min":1.5,"rpm_max":3.0,"monetization_1_video":"18-24 мес","monetization_2_videos":"10-14 мес","monetization_3_videos":"7-10 мес"}
+{"competition_score":7,"competition_level":"<level>","competition_reason":"<reason>","trend":"<trend>","growth":"<growth>","trend_reason":"<reason>","rpm_min":1.5,"rpm_max":3.0,"monetization_1_video":"<timeframe>","monetization_2_videos":"<timeframe>","monetization_3_videos":"<timeframe>"}
+
+OUTPUT LANGUAGE: Write all text values (competition_level, competition_reason, trend, growth, trend_reason, monetization timeframes) in the language specified by the IMPORTANT instruction in the user message.
 
 IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
 
@@ -104,11 +106,11 @@ BEST PUBLISHING TIME:
 • best_hours — optimal publishing time (specify based on the market/region context)
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"subniches":["Sub-niche 1","Sub-niche 2","Sub-niche 3"],"subniches_competition":["Низкая","Средняя","Низкая"],"top_formats":[{"name":"Test-drives","avg_views":450000},{"name":"Reviews","avg_views":280000},{"name":"Comparisons","avg_views":150000}],"best_days":["Tuesday","Thursday"],"best_hours":"18:00-20:00","recommendations":["Tip 1","Tip 2","Tip 3"]}
+{"subniches":["<sub-niche>","<sub-niche>","<sub-niche>"],"subniches_competition":["<level>","<level>","<level>"],"top_formats":[{"name":"<format>","avg_views":450000},{"name":"<format>","avg_views":280000},{"name":"<format>","avg_views":150000}],"best_days":["<day>","<day>"],"best_hours":"18:00-20:00","recommendations":["<tip>","<tip>","<tip>"]}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.
+OUTPUT LANGUAGE: Write ALL text values (sub-niche names, competition levels, format names, best_days, recommendations) in the language specified by the IMPORTANT instruction in the user message.
 
-OUTPUT LANGUAGE: Write sub-niche names, format names, recommendations, and best_days in the same language as the niche topic provided.`
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
 
 function cacheKey(topic: string, country: string, lang: string) {
   return `${topic.toLowerCase().trim()}|${country}|${lang}|v2`
@@ -241,11 +243,16 @@ export async function POST(req: NextRequest) {
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const userLang = resolveUserLang(req, lang)
     console.log('[niche] userLang:', userLang)
-    console.log('[niche] langNote preview:', langNote(userLang).slice(0, 80))
+    console.log('[niche] langNote:', langNote(userLang))
 
     const dataCtx = `Топ каналы: ${JSON.stringify(channelsData.slice(0, 5))}
 Топ видео: ${JSON.stringify(videosData.slice(0, 5))}
 Язык: ${lang}, Страна: ${country}`
+
+    const prompt1 = `Ниша: "${topic}"\n${dataCtx}${langNote(userLang)}`
+    const prompt2 = `Ниша: "${topic}"\n${dataCtx}\n\nОпредели топ форматы на основе РЕАЛЬНЫХ видео выше.${langNote(userLang)}`
+    console.log('[niche] prompt1 tail:', prompt1.slice(-200))
+    console.log('[niche] prompt2 tail:', prompt2.slice(-200))
 
     // Request 1 — metrics
     console.log('[niche] step 5a: claude metrics')
@@ -253,7 +260,7 @@ export async function POST(req: NextRequest) {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
       system: [{ type: 'text', text: NICHE_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: `Ниша: "${topic}"\n${dataCtx}${langNote(userLang)}` }],
+      messages: [{ role: 'user', content: prompt1 }],
     })
     console.log('[niche] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
     const text1 = (msg1.content[0] as { text: string }).text
@@ -279,7 +286,7 @@ export async function POST(req: NextRequest) {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 600,
       system: [{ type: 'text', text: NICHE_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: `Ниша: "${topic}"\n${dataCtx}\n\nОпредели топ форматы на основе РЕАЛЬНЫХ видео выше.${langNote(userLang)}` }],
+      messages: [{ role: 'user', content: prompt2 }],
     })
     console.log('[niche] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
     const text2 = (msg2.content[0] as { text: string }).text
