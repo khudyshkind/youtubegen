@@ -9,46 +9,50 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-const CHANNEL_SYSTEM_PROMPT_1 = `You are an experienced YouTube analyst specializing in in-depth channel analysis. Based on channel data (subscribers, videos, views) and top videos, identify the key characteristics of the channel.
+function getChannelPrompt1(lang: string): string {
+  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — upload_frequency, growth_trend, best_topics, worst_topics, strengths, weaknesses — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+
+You are an experienced YouTube analyst specializing in in-depth channel analysis. Based on channel data (subscribers, videos, views) and top videos, identify the key characteristics of the channel.
 
 ANALYSIS METHODOLOGY:
-• upload_frequency — publishing frequency (estimate from video count and channel age if known)
-• growth_trend — "Растёт" / "Стабильно" / "Снижается" (estimate from view-to-subscriber ratio)
-• best_topics — top 3 topics that perform best (identify from titles and view counts of top videos)
-• worst_topics — 2 topics that underperform relative to others
-• strengths — 3 specific strengths of the channel based on data
-• weaknesses — 2 specific weaknesses
+• upload_frequency — publishing frequency (estimate from video count and channel age if known) — in ${lang}
+• growth_trend — in ${lang} (e.g., for Russian: "Растёт" / "Стабильно" / "Снижается")
+• best_topics — top 3 topics that perform best — in ${lang}
+• worst_topics — 2 topics that underperform — in ${lang}
+• strengths — 3 specific strengths based on data — in ${lang}
+• weaknesses — 2 specific weaknesses — in ${lang}
 
 IMPORTANT: Base your analysis ONLY on real data provided in the request. Do not invent numbers or facts not present in the data.
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"upload_frequency":"X videos per week","growth_trend":"Растёт","best_topics":["Topic 1","Topic 2","Topic 3"],"worst_topics":["Weak topic 1","Weak topic 2"],"strengths":["Strength 1","Strength 2","Strength 3"],"weaknesses":["Weakness 1","Weakness 2"]}
+{"upload_frequency":"<in ${lang}>","growth_trend":"<in ${lang}>","best_topics":["<in ${lang}>","<in ${lang}>","<in ${lang}>"],"worst_topics":["<in ${lang}>","<in ${lang}>"],"strengths":["<in ${lang}>","<in ${lang}>","<in ${lang}>"],"weaknesses":["<in ${lang}>","<in ${lang}>"]}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
+}
 
-OUTPUT LANGUAGE: Write best_topics, worst_topics, strengths, and weaknesses in the same language as the channel data provided.`
+function getChannelPrompt2(lang: string): string {
+  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — format names, recommendations — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
 
-const CHANNEL_SYSTEM_PROMPT_2 = `You are an experienced YouTube analyst specializing in identifying video formats and developing growth strategies for channels. Based on channel data and top videos, identify which formats work and provide practical recommendations.
+You are an experienced YouTube analyst specializing in identifying video formats and developing growth strategies for channels. Based on channel data and top videos, identify which formats work and provide practical recommendations.
 
 FORMAT IDENTIFICATION METHODOLOGY:
-• Analyze top video titles to identify formats: test-drives, reviews, comparisons, top-lists, how-to, breakdowns, stories
-• best_formats — top 2-3 formats with highest average views
-• worst_formats — 1-2 formats with lowest views
+• Analyze top video titles to identify formats (reviews, comparisons, top-lists, how-to, breakdowns, stories)
+• best_formats — top 2-3 formats with highest average views — names in ${lang}
+• worst_formats — 1-2 formats with lowest views — names in ${lang}
 • avg_views — average view count for videos in this format (estimate from the data)
 
 RECOMMENDATIONS:
-• 3 concrete tips on what to change or improve
+• 3 concrete tips on what to change or improve — in ${lang}
 • Base on real data — channel weaknesses and opportunities
 • Specific actions, not generic advice like "post more often"
 
 CRITICAL: Do NOT include an "example" field with specific video names — video titles in JSON cause escaping issues.
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"best_formats":[{"name":"Test-drives","avg_views":450000},{"name":"Reviews","avg_views":280000}],"worst_formats":[{"name":"Weak format","avg_views":5000}],"recommendations":["Specific recommendation 1","Recommendation 2","Recommendation 3"]}
+{"best_formats":[{"name":"<in ${lang}>","avg_views":450000},{"name":"<in ${lang}>","avg_views":280000}],"worst_formats":[{"name":"<in ${lang}>","avg_views":5000}],"recommendations":["<in ${lang}>","<in ${lang}>","<in ${lang}>"]}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.
-
-OUTPUT LANGUAGE: Write format names and recommendations in the same language as the channel data provided.`
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
+}
 
 function parseClaudeJson<T>(text: string, label: string): T {
   console.log(`[channel] ${label} raw:`, text.substring(0, 500))
@@ -231,7 +235,7 @@ export async function POST(req: NextRequest) {
     const msg1 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
-      system: [{ type: 'text', text: CHANNEL_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getChannelPrompt1(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `${dataCtx}${langNote(userLang)}` }],
     })
     console.log('[channel] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
@@ -252,7 +256,7 @@ export async function POST(req: NextRequest) {
     const msg2 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 800,
-      system: [{ type: 'text', text: CHANNEL_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getChannelPrompt2(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `${dataCtx}\n\nОпредели форматы видео и дай рекомендации.${langNote(userLang)}` }],
     })
     console.log('[channel] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)

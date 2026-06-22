@@ -10,50 +10,33 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-const RISING_STARS_SYSTEM_PROMPT = `You are an expert in YouTube channel growth analysis, specializing in identifying rising stars — new channels that are rapidly building an audience. You can pinpoint the reasons behind viral growth and the specific strategies that work in a given niche.
+function getRisingStarsPrompt(lang: string): string {
+  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — growth_reason, strategy, key_takeaway, common_patterns — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
 
-CHANNEL ANALYSIS METHODOLOGY:
+You are an expert in YouTube channel growth analysis, specializing in identifying rising stars — new channels that are rapidly building an audience. You can pinpoint the reasons behind viral growth and the specific strategies that work in a given niche.
 
-IDENTIFYING GROWTH REASON (growth_reason):
+CHANNEL ANALYSIS METHODOLOGY — ALL output in ${lang}:
+
+IDENTIFYING GROWTH REASON (growth_reason) — in ${lang}:
 • Analyze the REAL titles of the channel's top videos — they directly show what worked
-• Look for patterns: "scandalous" headlines, exclusive information, unique format, first in the niche
-• Don't give generic answers like "regular publications" or "quality content"
-• Good example: "First to test the new iPhone 16 Pro a week before launch — 2.1M views"
-• Bad example: "Actively publishes content on the topic"
+• Look for patterns: scandalous headlines, exclusive information, unique format, first in the niche
+• Don't give generic answers — be specific with real examples from the video titles
 
-IDENTIFYING STRATEGY (strategy):
+IDENTIFYING STRATEGY (strategy) — in ${lang}:
 • Concrete approach to content creation based on real videos
-• Video format (length, structure, delivery), title style, thematic angles
-• Example: "Comparative reviews in 60-second format with provocative question-based titles"
+• Video format, title style, thematic angles
 
-KEY TAKEAWAY (key_takeaway):
+KEY TAKEAWAY (key_takeaway) — in ${lang}:
 • One specific action that can be replicated — with an example from the channel's real video
-• Example: "Copy the 'Honest review of [product] after 6 months' format — this video got 890K views"
-• Not "study successful channels" but a concrete technique
 
-COMMON PATTERNS (common_patterns):
-• What unites several channels on the list
-• Specific pattern with examples
-• Example: "3 of 5 channels use the format 'Bought X for $Y — honest quality review'"
+COMMON PATTERNS (common_patterns) — in ${lang}:
+• What unites several channels on the list — specific pattern with examples
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{
-  "channels": [
-    {
-      "name": "channel name exactly as in the data",
-      "growth_reason": "Specific reason based on REAL video titles",
-      "strategy": "Specific strategy: format, topics, style",
-      "key_takeaway": "What exactly to copy with example from top video"
-    }
-  ],
-  "common_patterns": [
-    "Specific pattern found across multiple channels with example"
-  ]
+{"channels":[{"name":"channel name exactly as in the data","growth_reason":"<in ${lang}>","strategy":"<in ${lang}>","key_takeaway":"<in ${lang}>"}],"common_patterns":["<in ${lang}>"]}
+
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.`
 }
-
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.
-
-OUTPUT LANGUAGE: Write all analysis values in the same language as the channel data provided.`
 
 function parseClaudeJson<T>(text: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -315,7 +298,7 @@ ${videoLines}`
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 2500,
-      system: [{ type: 'text', text: RISING_STARS_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getRisingStarsPrompt(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{
         role: 'user',
         content: `Ниша: "${topic}". Проанализируй ${enriched.length} восходящих каналов.\n\n${channelsSummary}\n\nВерни JSON ровно с ${enriched.length} элементами в channels.${langNote(userLang)}`,

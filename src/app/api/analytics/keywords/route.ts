@@ -9,53 +9,40 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-const KEYWORDS_SYSTEM_PROMPT_1 = `You are an experienced YouTube SEO analyst specializing in keyword evaluation. Based on statistical data about keywords (average views of top-5 videos and number of competing videos), assess each keyword.
+function getKeywordsPrompt1(lang: string): string {
+  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — competition, recommendation — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+
+You are an experienced YouTube SEO analyst specializing in keyword evaluation. Based on statistical data about keywords (average views of top-5 videos and number of competing videos), assess each keyword.
 
 SCORING METHODOLOGY:
 • difficulty (1-10) — how hard it is to rank for this query
-  - 1-3: low competition, few videos, easy to enter
-  - 4-6: medium competition, quality work needed
-  - 7-10: high competition, strong channel required
-  - Consider: video_count (higher = higher difficulty), avg_views (higher = higher difficulty)
-
 • potential (1-10) — monetization and traffic potential
-  - 1-3: low audience interest, few views
-  - 4-6: medium interest
-  - 7-10: high interest, many views on top videos
-  - Consider: avg_views of top-5 videos (higher = higher potential)
-
-• competition — competition description: "Низкая" / "Средняя" / "Высокая"
-• recommendation — concrete advice: "Стоит снять" / "Сложно, но возможно" / "Слишком высокая конкуренция" + reason
+• competition — competition description in ${lang} (e.g., for Russian: "Низкая" / "Средняя" / "Высокая")
+• recommendation — concrete advice in ${lang} (e.g., for Russian: "Стоит снять" / "Сложно, но возможно" / "Слишком высокая конкуренция" + reason)
 
 IMPORTANT: Scores must be realistic and useful for a content creator choosing a topic.
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"keywords":[{"keyword":"keyword phrase","difficulty":6,"potential":8,"competition":"Средняя","recommendation":"Стоит снять — хороший баланс просмотров и конкуренции"}]}
+{"keywords":[{"keyword":"keyword phrase","difficulty":6,"potential":8,"competition":"<in ${lang}>","recommendation":"<in ${lang}>"}]}
 
 IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.`
+}
 
-const KEYWORDS_SYSTEM_PROMPT_2 = `You are an experienced YouTube SEO strategist helping content creators choose the best keywords for maximum reach. Based on the keyword list, select the most promising ones and provide a final niche analysis.
+function getKeywordsPrompt2(lang: string): string {
+  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — best_keywords, low_competition, insights — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+
+You are an experienced YouTube SEO strategist helping content creators choose the best keywords for maximum reach. Based on the keyword list, select the most promising ones and provide a final niche analysis.
 
 SELECTION METHODOLOGY:
-• best_keywords — 3-5 best keywords with optimal balance of potential and competition
-  - Best = high potential + low/medium difficulty
-  - These are the keywords to build primary content around
-
-• low_competition — 3-5 keywords with minimum competition
-  - Even if they have fewer views — they're easier to rank for
-  - Great for new channels that need their first views
-
-• insights — brief analytical conclusion about the niche (2-3 sentences)
-  - Overall niche assessment
-  - Strategic recommendation
-  - What to focus on
+• best_keywords — 3-5 best keywords with optimal balance of potential and competition — in ${lang}
+• low_competition — 3-5 keywords with minimum competition — in ${lang}
+• insights — brief analytical conclusion about the niche (2-3 sentences) — in ${lang}
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"best_keywords":["keyword 1","keyword 2","keyword 3"],"low_competition":["low competition word 1","low competition word 2"],"insights":"Brief 2-3 sentence niche conclusion with specific recommendations"}
+{"best_keywords":["<in ${lang}>","<in ${lang}>","<in ${lang}>"],"low_competition":["<in ${lang}>","<in ${lang}>"],"insights":"<2-3 sentence niche conclusion in ${lang}>"}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.
-
-OUTPUT LANGUAGE: Write keyword values and insights in the same language as the niche topic provided.`
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.`
+}
 
 function parseClaudeJson<T>(text: string, label: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -238,13 +225,13 @@ export async function POST(req: NextRequest) {
       anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 800,
-        system: [{ type: 'text', text: KEYWORDS_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: getKeywordsPrompt1(userLang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: `Ниша: "${keyword}"\nДанные (avg_views — среднее топ-5 видео, video_count — конкуренция):\n${keywordsData}${langNote(userLang)}` }],
       }),
       anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 400,
-        system: [{ type: 'text', text: KEYWORDS_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: getKeywordsPrompt2(userLang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: `Ниша: "${keyword}"\nКлючевые слова:\n${keywordsList}${langNote(userLang)}` }],
       }),
     ])

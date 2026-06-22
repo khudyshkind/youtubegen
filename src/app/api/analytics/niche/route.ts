@@ -38,7 +38,10 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
-const NICHE_SYSTEM_PROMPT_1 = `You are an experienced YouTube analyst specializing in niche analysis. Based on data about top channels and top videos, assess the niche and return metrics in JSON.
+function getNichePrompt1(lang: string): string {
+  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value in the JSON — competition_level, competition_reason, trend, growth, trend_reason, monetization timeframes — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+
+You are an experienced YouTube analyst specializing in niche analysis. Based on data about top channels and top videos, assess the niche and return metrics in JSON.
 
 COMPETITION SCORING METHODOLOGY:
 • competition_score 1-10 where 1 = minimum competition, 10 = maximum
@@ -49,8 +52,7 @@ COMPETITION SCORING METHODOLOGY:
 
 TREND ASSESSMENT METHODOLOGY:
 • Analyze top video publication dates — if recent videos are getting many views — growing
-• trend: "Растёт" / "Стабильно" / "Снижается"
-• growth: percentage growth in format "+23%" or "-5%" (approximate estimate)
+• trend and growth values MUST be in ${lang}
 
 RPM ASSESSMENT METHODOLOGY:
 • RPM (Revenue Per Mille) — revenue per 1000 views in USD after YouTube's 45% cut
@@ -74,43 +76,46 @@ MONETIZATION ASSESSMENT (time to monetization):
 • monetization_1_video: publishing 1 video per week
 • monetization_2_videos: publishing 2 videos per week
 • monetization_3_videos: publishing 3 videos per week
-• Format: "18-24 мес", "10-14 мес", "7-10 мес"
+• monetization timeframe values MUST be in ${lang}
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"competition_score":7,"competition_level":"<level>","competition_reason":"<reason>","trend":"<trend>","growth":"<growth>","trend_reason":"<reason>","rpm_min":1.5,"rpm_max":3.0,"monetization_1_video":"<timeframe>","monetization_2_videos":"<timeframe>","monetization_3_videos":"<timeframe>"}
-
-OUTPUT LANGUAGE: Write all text values (competition_level, competition_reason, trend, growth, trend_reason, monetization timeframes) in the language specified by the IMPORTANT instruction in the user message.
+{"competition_score":7,"competition_level":"<in ${lang}>","competition_reason":"<in ${lang}>","trend":"<in ${lang}>","growth":"<in ${lang}>","trend_reason":"<in ${lang}>","rpm_min":1.5,"rpm_max":3.0,"monetization_1_video":"<in ${lang}>","monetization_2_videos":"<in ${lang}>","monetization_3_videos":"<in ${lang}>"}
 
 IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
+}
 
-const NICHE_SYSTEM_PROMPT_2 = `You are an experienced YouTube analyst specializing in niche and content format analysis. Based on data about top channels and videos, identify sub-niches, formats, and provide practical recommendations.
+function getNichePrompt2(lang: string): string {
+  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value in the JSON — sub-niche names, competition levels, format names, days, recommendations — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+
+You are an experienced YouTube analyst specializing in niche and content format analysis. Based on data about top channels and videos, identify sub-niches, formats, and provide practical recommendations.
 
 SUB-NICHE IDENTIFICATION METHODOLOGY:
 • A sub-niche is a narrower topic within the main niche (e.g., within "auto": "electric vehicles", "tuning", "car buying")
 • Identify 3 sub-niches with good potential based on the videos
-• subniches_competition — competition level for each sub-niche: "Низкая" / "Средняя" / "Высокая"
+• subniches_competition — competition level for each sub-niche — MUST be in ${lang}
 
 FORMAT IDENTIFICATION METHODOLOGY:
 • Format = video type: reviews, test-drives, comparisons, top-lists, how-to, breakdowns, stories
 • top_formats — formats with the highest view counts (from top video data)
 • avg_views — average view count for videos in this format
+• Format names MUST be in ${lang}
 
 RECOMMENDATIONS:
 • Concrete practical advice for a new channel in this niche
 • What to do in the first 3 months
 • Which formats and topics to choose
 • How to differentiate from competitors
+• ALL recommendations MUST be in ${lang}
 
 BEST PUBLISHING TIME:
-• best_days — days of the week with highest audience activity for this niche
-• best_hours — optimal publishing time (specify based on the market/region context)
+• best_days — days of the week with highest audience activity — MUST be in ${lang}
+• best_hours — optimal publishing time
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"subniches":["<sub-niche>","<sub-niche>","<sub-niche>"],"subniches_competition":["<level>","<level>","<level>"],"top_formats":[{"name":"<format>","avg_views":450000},{"name":"<format>","avg_views":280000},{"name":"<format>","avg_views":150000}],"best_days":["<day>","<day>"],"best_hours":"18:00-20:00","recommendations":["<tip>","<tip>","<tip>"]}
-
-OUTPUT LANGUAGE: Write ALL text values (sub-niche names, competition levels, format names, best_days, recommendations) in the language specified by the IMPORTANT instruction in the user message.
+{"subniches":["<in ${lang}>","<in ${lang}>","<in ${lang}>"],"subniches_competition":["<in ${lang}>","<in ${lang}>","<in ${lang}>"],"top_formats":[{"name":"<in ${lang}>","avg_views":450000},{"name":"<in ${lang}>","avg_views":280000},{"name":"<in ${lang}>","avg_views":150000}],"best_days":["<in ${lang}>","<in ${lang}>"],"best_hours":"18:00-20:00","recommendations":["<in ${lang}>","<in ${lang}>","<in ${lang}>"]}
 
 IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
+}
 
 function cacheKey(topic: string, country: string, lang: string) {
   return `${topic.toLowerCase().trim()}|${country}|${lang}|v2`
@@ -259,7 +264,7 @@ export async function POST(req: NextRequest) {
     const msg1 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
-      system: [{ type: 'text', text: NICHE_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getNichePrompt1(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: prompt1 }],
     })
     console.log('[niche] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
@@ -285,7 +290,7 @@ export async function POST(req: NextRequest) {
     const msg2 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 600,
-      system: [{ type: 'text', text: NICHE_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getNichePrompt2(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: prompt2 }],
     })
     console.log('[niche] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)

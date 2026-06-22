@@ -37,7 +37,10 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
-const TRENDS_SYSTEM_PROMPT_1 = `You are an experienced YouTube analyst specializing in identifying trends and viral topics. Based on data about top videos for the specified period, identify 4 key trends in the niche.
+function getTrendsPrompt1(lang: string): string {
+  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — topic, urgency, reason — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+
+You are an experienced YouTube analyst specializing in identifying trends and viral topics. Based on data about top videos for the specified period, identify 4 key trends in the niche.
 
 TREND IDENTIFICATION METHODOLOGY:
 • A trend is a topic or format gaining views faster than usual
@@ -45,44 +48,39 @@ TREND IDENTIFICATION METHODOLOGY:
 • Videos with high views and recent dates are strong trend signals
 • Look for recurring topics and patterns in top video titles
 
-URGENCY LEVELS:
-• "Срочно" — trend is at its peak right now, must film immediately
-• "Актуально" — trend has been active for the past 1-2 weeks
-• "Набирает" — trend is just beginning, good time to enter
-• "Стабильно" — evergreen topic with steady audience interest
+URGENCY LEVELS (write in ${lang}):
+• urgency values must be in ${lang} (e.g., for Russian: "Срочно", "Актуально", "Набирает", "Стабильно")
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"trends":[{"topic":"Specific topic","urgency":"Срочно","reason":"Why it's going viral"},{"topic":"Topic 2","urgency":"Актуально","reason":"Reason"},{"topic":"Topic 3","urgency":"Набирает","reason":"Reason"},{"topic":"Topic 4","urgency":"Стабильно","reason":"Reason"}]}
+{"trends":[{"topic":"<in ${lang}>","urgency":"<in ${lang}>","reason":"<in ${lang}>"},{"topic":"<in ${lang}>","urgency":"<in ${lang}>","reason":"<in ${lang}>"},{"topic":"<in ${lang}>","urgency":"<in ${lang}>","reason":"<in ${lang}>"},{"topic":"<in ${lang}>","urgency":"<in ${lang}>","reason":"<in ${lang}>"}]}
 
 REQUIREMENTS:
 • Exactly 4 trends in the array
 • topic — specific topic, not an abstraction
 • reason — specific reason based on the video data
-• Write topic and reason in the same language as the video titles provided
 • Return ONLY valid JSON. No \`\`\`json. Start with { and end with }.`
+}
 
-const TRENDS_SYSTEM_PROMPT_2 = `You are an experienced YouTube analyst and content strategist. Based on a list of niche trends, generate concrete video ideas that can be filmed right now.
+function getTrendsPrompt2(lang: string): string {
+  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — trend names, video ideas — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+
+You are an experienced YouTube analyst and content strategist. Based on a list of niche trends, generate concrete video ideas that can be filmed right now.
 
 VIDEO IDEA GENERATION METHODOLOGY:
 • For each trend, suggest 3 different video ideas
 • Ideas must be specific — not "topic overview" but "5 reasons why X is better than Y in 2026"
 • Vary formats: top-list, breakdown, comparison, story, how-to, reaction
-• Consider that viewers already know about the trend — give them a new angle
 • Titles must be clickable and specific
-
-IDEA FORMAT:
-• An idea is a ready working video title or concept
-• Each idea must differ in format from the other two
-• Use numbers in titles when possible
+• ALL ideas MUST be in ${lang}
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"video_ideas":[{"trend":"trend name","ideas":["Specific idea/title 1","Specific idea/title 2","Specific idea/title 3"]}]}
+{"video_ideas":[{"trend":"<in ${lang}>","ideas":["<in ${lang}>","<in ${lang}>","<in ${lang}>"]}]}
 
 REQUIREMENTS:
 • video_ideas array contains one object per trend from the request
 • 3 ideas per trend
-• Write ideas in the same language as the trend topics provided
 • Return ONLY valid JSON. No \`\`\`json. Start with { and end with }.`
+}
 
 function cacheKey(topic: string, period: string, lang: string) {
   const day = new Date().toISOString().slice(0, 10)
@@ -206,7 +204,7 @@ export async function POST(req: NextRequest) {
     const msg1 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
-      system: [{ type: 'text', text: TRENDS_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getTrendsPrompt1(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `${dataCtx}${langNote(userLang)}` }],
     })
     console.log('[trends] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
@@ -223,7 +221,7 @@ export async function POST(req: NextRequest) {
     const msg2 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 600,
-      system: [{ type: 'text', text: TRENDS_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getTrendsPrompt2(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Ниша: "${topic}". Тренды: ${JSON.stringify(trendNames)}\n\nДля каждого тренда — 3 идеи для видео.${langNote(userLang)}` }],
     })
     console.log('[trends] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)

@@ -9,50 +9,44 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-const COMMENTS_SYSTEM_PROMPT = `You are an experienced YouTube audience analyst specializing in extracting valuable insights from viewer comments. Your task is to systematically analyze comments to help the content creator better understand their audience and create content that resonates.
+function getCommentsPrompt(lang: string): string {
+  return `CRITICAL: You MUST respond entirely in ${lang}. Every text value — video_requests, pain_points, unanswered_questions, positive_reactions, negative_reactions, video_ideas, audience_portrait — MUST be in ${lang}. Do NOT use English unless ${lang} is English.
+
+You are an experienced YouTube audience analyst specializing in extracting valuable insights from viewer comments. Your task is to systematically analyze comments to help the content creator better understand their audience and create content that resonates.
 
 COMMENT ANALYSIS METHODOLOGY:
 
-1. VIDEO REQUESTS (video_requests)
-• What the audience EXPLICITLY asks to see — look for phrases like "please make a video about", "I'd love to see", "could you cover", "what about", "would be interesting"
-• count — approximate number of similar requests (1 = isolated, 5+ = popular request)
-• Group similar requests into one
+1. VIDEO REQUESTS (video_requests) — in ${lang}
+• What the audience EXPLICITLY asks to see
+• count — approximate number of similar requests (1 = isolated, 5+ = popular)
 
-2. PAIN POINTS (pain_points)
+2. PAIN POINTS (pain_points) — in ${lang}
 • Problems the audience faces: what doesn't work, what's unclear, what frustrates them
 • Frame as a concrete problem, not an abstraction
-• Example: "Don't understand how to choose the right size" not "selection problem"
 
-3. UNANSWERED QUESTIONS (unanswered_questions)
+3. UNANSWERED QUESTIONS (unanswered_questions) — in ${lang}
 • Questions viewers didn't find answers to in the video
-• These are direct hints for future videos
-• Look for question marks in comments
 
-4. POSITIVE REACTIONS (positive_reactions)
+4. POSITIVE REACTIONS (positive_reactions) — in ${lang}
 • What specifically was liked: format, delivery, specific moments
-• What's praised, what's noted as useful, what people ask to continue
 
-5. NEGATIVE REACTIONS (negative_reactions)
+5. NEGATIVE REACTIONS (negative_reactions) — in ${lang}
 • What wasn't liked, what's criticized, what people want changed
-• Frame constructively — this is feedback, not complaints
 
-6. VIDEO IDEAS (video_ideas)
-• Concrete ideas for new videos based on comments
+6. VIDEO IDEAS (video_ideas) — ALL fields in ${lang}
 • title — a ready working video title
-• reason — why it will work (audience asks / many similar questions)
+• reason — why it will work
 • based_on — which comments the idea comes from
 
-7. AUDIENCE PORTRAIT (audience_portrait)
+7. AUDIENCE PORTRAIT (audience_portrait) — in ${lang}
 • Who watches: age, expertise level, interests
-• Their goals and motivations
 • 2-3 sentences of concrete description
 
 RESPONSE FORMAT — strictly JSON without markdown without explanations:
-{"video_requests":[{"request":"Make a video about winter tires","count":5}],"pain_points":["pain 1","pain 2"],"unanswered_questions":["question 1","question 2"],"positive_reactions":["liked 1"],"negative_reactions":["didn't like 1"],"video_ideas":[{"title":"Ready video title","reason":"why it will work","based_on":"which comment gave the idea"}],"audience_portrait":"Brief description of who watches"}
+{"video_requests":[{"request":"<in ${lang}>","count":5}],"pain_points":["<in ${lang}>","<in ${lang}>"],"unanswered_questions":["<in ${lang}>","<in ${lang}>"],"positive_reactions":["<in ${lang}>"],"negative_reactions":["<in ${lang}>"],"video_ideas":[{"title":"<in ${lang}>","reason":"<in ${lang}>","based_on":"<in ${lang}>"}],"audience_portrait":"<in ${lang}>"}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.
-
-OUTPUT LANGUAGE: Write all field values in the same language as the comments being analyzed. If comments are in Russian, respond in Russian. If in English, respond in English.`
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.`
+}
 
 function parseClaudeJson<T>(text: string, label: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -278,7 +272,7 @@ export async function POST(req: NextRequest) {
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1200,
-      system: [{ type: 'text', text: COMMENTS_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getCommentsPrompt(userLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Видео/канал на тему: "${topic}"\n\n${selectedComments.length} комментариев:\n${commentsText}${langNote(userLang)}` }],
     })
     const raw = (msg.content[0] as { text: string }).text
