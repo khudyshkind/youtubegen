@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 60
 
@@ -40,10 +41,11 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
-    const body = await req.json() as { niche?: string; views?: number; country?: string }
+    const body = await req.json() as { niche?: string; views?: number; country?: string; lang?: string }
     const niche = body.niche?.trim() ?? ''
     const views = Math.max(0, Math.round(body.views ?? 0))
     const country = body.country ?? 'mix'
+    const userLang = resolveUserLang(req, body.lang)
 
     if (!niche) return NextResponse.json({ ok: false, error: 'Введите нишу' }, { status: 400 })
     if (views <= 0) return NextResponse.json({ ok: false, error: 'Введите количество просмотров' }, { status: 400 })
@@ -76,7 +78,8 @@ Niche multipliers:
 - Entertainment / humor / gaming / lifestyle: 0.5-0.8x base
 
 Return JSON STRICTLY in this format, only JSON, no text before or after:
-{"rpm_min":1.5,"rpm_max":3.5,"rpm_avg":2.5,"niche_factor":"Medium","explanation":"Auto niche in Russia has moderate RPM due to auto dealer and insurance advertisers"}`
+{"rpm_min":1.5,"rpm_max":3.5,"rpm_avg":2.5,"niche_factor":"Medium","explanation":"Auto niche in Russia has moderate RPM due to auto dealer and insurance advertisers"}
+${langNote(userLang)}`
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const msg = await anthropic.messages.create({

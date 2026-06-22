@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 120
 
@@ -195,9 +196,10 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
-    const body = await req.json() as { url?: string; count?: number }
+    const body = await req.json() as { url?: string; count?: number; lang?: string }
     const url = body.url?.trim() ?? ''
     const count = [50, 100, 200].includes(body.count ?? 0) ? (body.count as 50 | 100 | 200) : 100
+    const userLang = resolveUserLang(req, body.lang)
 
     if (!url) return NextResponse.json({ ok: false, error: 'Введите URL видео или канала' }, { status: 400 })
     if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
@@ -277,7 +279,7 @@ export async function POST(req: NextRequest) {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1200,
       system: [{ type: 'text', text: COMMENTS_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: `Видео/канал на тему: "${topic}"\n\n${selectedComments.length} комментариев:\n${commentsText}` }],
+      messages: [{ role: 'user', content: `Видео/канал на тему: "${topic}"\n\n${selectedComments.length} комментариев:\n${commentsText}${langNote(userLang)}` }],
     })
     const raw = (msg.content[0] as { text: string }).text
     console.log('[comments] claude raw:', raw.substring(0, 300))

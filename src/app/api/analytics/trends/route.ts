@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 120
 
@@ -94,9 +95,10 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
-    const body = await req.json() as { topic?: string; period?: string }
+    const body = await req.json() as { topic?: string; period?: string; lang?: string }
     const topic = body.topic?.trim() ?? ''
     const period = body.period ?? 'week'
+    const userLang = resolveUserLang(req, body.lang)
 
     console.log(`[trends] start topic="${topic}" period=${period}`)
     if (!topic) return NextResponse.json({ ok: false, error: 'Введите тему' }, { status: 400 })
@@ -204,7 +206,7 @@ export async function POST(req: NextRequest) {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
       system: [{ type: 'text', text: TRENDS_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: dataCtx }],
+      messages: [{ role: 'user', content: `${dataCtx}${langNote(userLang)}` }],
     })
     console.log('[trends] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
     const text1 = (msg1.content[0] as { text: string }).text
@@ -221,7 +223,7 @@ export async function POST(req: NextRequest) {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 600,
       system: [{ type: 'text', text: TRENDS_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: `Ниша: "${topic}". Тренды: ${JSON.stringify(trendNames)}\n\nДля каждого тренда — 3 идеи для видео.` }],
+      messages: [{ role: 'user', content: `Ниша: "${topic}". Тренды: ${JSON.stringify(trendNames)}\n\nДля каждого тренда — 3 идеи для видео.${langNote(userLang)}` }],
     })
     console.log('[trends] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
     const text2 = (msg2.content[0] as { text: string }).text

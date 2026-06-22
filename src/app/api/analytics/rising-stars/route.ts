@@ -4,6 +4,7 @@ import { createServerSupabase, createServiceClient } from '@/lib/supabase-server
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
+import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 120
 
@@ -92,6 +93,7 @@ export async function POST(req: NextRequest) {
       sub_min?: number
       sub_max?: number
       months_max?: number
+      lang?: string
     }
 
     const topic = body.topic?.trim() ?? ''
@@ -99,6 +101,7 @@ export async function POST(req: NextRequest) {
     const subMax = body.sub_max ?? 100000
     // months_max=0 means no age restriction; undefined falls back to 0 (no restriction)
     const monthsMax = body.months_max ?? 0
+    const userLang = resolveUserLang(req, body.lang)
 
     console.log(`[rising] start topic="${topic}" sub_min=${subMin} sub_max=${subMax} months_max=${monthsMax}`)
 
@@ -315,7 +318,7 @@ ${videoLines}`
       system: [{ type: 'text', text: RISING_STARS_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{
         role: 'user',
-        content: `Ниша: "${topic}". Проанализируй ${enriched.length} восходящих каналов.\n\n${channelsSummary}\n\nВерни JSON ровно с ${enriched.length} элементами в channels.`,
+        content: `Ниша: "${topic}". Проанализируй ${enriched.length} восходящих каналов.\n\n${channelsSummary}\n\nВерни JSON ровно с ${enriched.length} элементами в channels.${langNote(userLang)}`,
       }],
     })
     console.log('[rising] cache input:', msg.usage.input_tokens, 'cache_read:', msg.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg.usage.cache_creation_input_tokens ?? 0)

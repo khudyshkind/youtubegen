@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 120
 
@@ -231,19 +232,20 @@ export async function POST(req: NextRequest) {
     const keywordsList = suggestions.map(s => `- "${s}"`).join('\n')
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const userLang = resolveUserLang(req, lang)
 
     const [msg1, msg2] = await Promise.all([
       anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 800,
         system: [{ type: 'text', text: KEYWORDS_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: `Ниша: "${keyword}"\nДанные (avg_views — среднее топ-5 видео, video_count — конкуренция):\n${keywordsData}` }],
+        messages: [{ role: 'user', content: `Ниша: "${keyword}"\nДанные (avg_views — среднее топ-5 видео, video_count — конкуренция):\n${keywordsData}${langNote(userLang)}` }],
       }),
       anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 400,
         system: [{ type: 'text', text: KEYWORDS_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: `Ниша: "${keyword}"\nКлючевые слова:\n${keywordsList}` }],
+        messages: [{ role: 'user', content: `Ниша: "${keyword}"\nКлючевые слова:\n${keywordsList}${langNote(userLang)}` }],
       }),
     ])
 

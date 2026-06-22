@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
+import { resolveUserLang, langNote } from '@/lib/user-lang'
 import type { SeoData, SubtitleBlock } from '@/lib/types'
 
 interface SeoRequest {
@@ -12,6 +13,7 @@ interface SeoRequest {
   project_id?: string
   duration_minutes?: number
   subtitle_blocks?: SubtitleBlock[]
+  lang?: string
 }
 
 // Build a sampled transcript timeline for Claude to identify real chapter moments.
@@ -126,8 +128,9 @@ export async function POST(request: NextRequest) {
     const check = await requireCredits(user.id, 'seo', supabase)
     if (!check.ok) return NextResponse.json(check, { status: 402 })
 
-    const { script, topic, project_id, duration_minutes = 5, subtitle_blocks }: SeoRequest =
+    const { script, topic, project_id, duration_minutes = 5, subtitle_blocks, lang }: SeoRequest =
       await request.json()
+    const userLang = resolveUserLang(request, lang)
 
     // Build timeline: real subtitles take priority over estimated scene markers
     const hasRealSubtitles = subtitle_blocks && subtitle_blocks.length > 0
@@ -148,7 +151,7 @@ export async function POST(request: NextRequest) {
 
 Сценарий (первые 2500 символов):
 ${script.slice(0, 2500)}
-${chaptersBlock}`
+${chaptersBlock}${langNote(userLang)}`
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const message = await anthropic.messages.create({
