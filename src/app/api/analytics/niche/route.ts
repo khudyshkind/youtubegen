@@ -142,8 +142,8 @@ RESPONSE FORMAT — strict JSON without markdown:
 IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json blocks. No explanations. Start with { end with }.`
 }
 
-function cacheKey(topic: string, country: string, lang: string) {
-  return `${topic.toLowerCase().trim()}|${country}|${lang}|v5`
+function cacheKey(topic: string, country: string, contentLang: string, uiLang: string) {
+  return `${topic.toLowerCase().trim()}|${country}|${contentLang}|${uiLang}|v5`
 }
 
 export async function POST(req: NextRequest) {
@@ -152,16 +152,17 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
-    const body = await req.json() as { topic?: string; country?: string; lang?: string }
+    const body = await req.json() as { topic?: string; country?: string; content_lang?: string; ui_lang?: string; lang?: string }
     const topic = body.topic?.trim() ?? ''
     const country = body.country ?? 'RU'
-    const lang = body.lang ?? 'ru'
+    const contentLang = body.content_lang ?? body.lang ?? 'ru'
+    const uiLang = body.ui_lang ?? body.lang ?? 'ru'
 
-    console.log(`[niche] start topic="${topic}" country=${country} lang=${lang}`)
+    console.log(`[niche] start topic="${topic}" country=${country} contentLang=${contentLang} uiLang=${uiLang}`)
     if (!topic) return NextResponse.json({ ok: false, error: 'Введите тему' }, { status: 400 })
 
     const svc = createServiceClient()
-    const key = cacheKey(topic, country, lang)
+    const key = cacheKey(topic, country, contentLang, uiLang)
 
     // Cache check — non-fatal
     try {
@@ -221,7 +222,7 @@ export async function POST(req: NextRequest) {
     console.log('[niche] step 1: search channels')
     const channelSearch = await ytFetch('/search', {
       part: 'snippet', type: 'channel', q: topic,
-      maxResults: '10', relevanceLanguage: lang, regionCode: country,
+      maxResults: '10', relevanceLanguage: contentLang, regionCode: country,
     }) as { items?: Array<{ id: { channelId: string } }> }
 
     const channelIds = (channelSearch.items ?? []).map(i => i.id.channelId).filter(Boolean).join(',')
@@ -247,7 +248,7 @@ export async function POST(req: NextRequest) {
     const videoSearch = await ytFetch('/search', {
       part: 'snippet', type: 'video', q: topic,
       order: 'viewCount', publishedAfter: oneYearAgo,
-      maxResults: '10', relevanceLanguage: lang, regionCode: country,
+      maxResults: '10', relevanceLanguage: contentLang, regionCode: country,
     }) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; channelTitle: string; publishedAt: string } }> }
 
     const videoIds = (videoSearch.items ?? []).map(v => v.id.videoId).filter(Boolean).join(',')
@@ -274,14 +275,14 @@ export async function POST(req: NextRequest) {
 
     const dataCtx = `Топ каналы: ${JSON.stringify(channelsData.slice(0, 5))}
 Топ видео: ${JSON.stringify(videosData.slice(0, 5))}
-Язык: ${lang}, Страна: ${country}`
+Язык контента: ${contentLang}, Страна: ${country}`
 
     // Request 1 — metrics
     console.log('[niche] step 5a: claude metrics')
     const msg1 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 500,
-      system: [{ type: 'text', text: getNichePrompt1(lang), cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getNichePrompt1(uiLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Ниша: "${topic}"\n${dataCtx}` }],
     })
     console.log('[niche] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
@@ -306,8 +307,8 @@ export async function POST(req: NextRequest) {
     console.log('[niche] step 5b: claude recommendations')
     const msg2 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 600,
-      system: [{ type: 'text', text: getNichePrompt2(lang), cache_control: { type: 'ephemeral' } }],
+      max_tokens: 1200,
+      system: [{ type: 'text', text: getNichePrompt2(uiLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Ниша: "${topic}"\n${dataCtx}\n\nОпредели топ форматы на основе РЕАЛЬНЫХ видео выше.` }],
     })
     console.log('[niche] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
