@@ -2101,7 +2101,8 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
     cmd = cmd.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), `{{${filename}}}`)
     outNames.push(filename)
   }
-  console.log(`[vgf] → ${cmd.slice(0, 150)}`)
+  console.log('[vgf] input_files:', JSON.stringify(inputFiles))
+  console.log('[vgf] ffmpeg_command:', cmd)
 
   const submitRes = await fetch('https://verygoodffmpeg.com/api/ffmpeg', {
     method: 'POST',
@@ -2143,6 +2144,7 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
       return result
     }
     if (status.status === 'failed') {
+      console.error('[vgf] error details:', JSON.stringify(status))
       throw new Error(`VGF job failed: ${status.error_message ?? 'unknown error'}`)
     }
   }
