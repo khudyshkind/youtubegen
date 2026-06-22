@@ -8,6 +8,43 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
+const CHANNEL_SYSTEM_PROMPT_1 = `Ты опытный YouTube аналитик специализирующийся на глубоком анализе каналов. По данным о канале (подписчики видео просмотры) и топ-видео определи ключевые характеристики канала.
+
+МЕТОДОЛОГИЯ АНАЛИЗА:
+• upload_frequency — частота публикаций (оцени по количеству видео и возрасту канала если известен)
+• growth_trend — «Растёт» / «Стабильно» / «Снижается» (оцени по соотношению просмотров и подписчиков)
+• best_topics — 3 темы которые лучше всего работают (определи по заголовкам и просмотрам топ-видео)
+• worst_topics — 2 темы которые работают хуже остальных
+• strengths — 3 конкретные сильные стороны канала основанные на данных
+• weaknesses — 2 конкретные слабые стороны
+
+ВАЖНО: Опирайся ТОЛЬКО на реальные данные переданные в запросе. Не придумывай цифры и факты которых нет в данных.
+
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"upload_frequency":"X видео в неделю","growth_trend":"Растёт","best_topics":["Тема 1","Тема 2","Тема 3"],"worst_topics":["Слабая тема 1","Слабая тема 2"],"strengths":["Сила 1","Сила 2","Сила 3"],"weaknesses":["Слабость 1","Слабость 2"]}
+
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Без \`\`\`json блоков. Без пояснений. Начни с { и закончи }.`
+
+const CHANNEL_SYSTEM_PROMPT_2 = `Ты опытный YouTube аналитик специализирующийся на определении форматов видео и разработке стратегии роста для каналов. По данным о канале и топ-видео определи форматы которые работают и дай практические рекомендации.
+
+МЕТОДОЛОГИЯ ОПРЕДЕЛЕНИЯ ФОРМАТОВ:
+• Анализируй заголовки топ-видео для определения форматов: тест-драйвы, обзоры, сравнения, топ-листы, how-to, разборы, истории
+• best_formats — топ 2-3 формата с наибольшими средними просмотрами
+• worst_formats — 1-2 формата с наименьшими просмотрами
+• avg_views — среднее количество просмотров для видео данного формата (оцени по данным)
+
+РЕКОМЕНДАЦИИ:
+• 3 конкретных совета что нужно изменить или улучшить
+• Основывайся на реальных данных — слабостях и возможностях канала
+• Конкретные действия а не общие советы типа «публикуй чаще»
+
+КРИТИЧЕСКИ ВАЖНО: НЕ включай поле «example» с примерами конкретных видео — названия видео в JSON приводят к проблемам с экранированием.
+
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"best_formats":[{"name":"Тест-драйвы","avg_views":450000},{"name":"Обзоры","avg_views":280000}],"worst_formats":[{"name":"Слабый формат","avg_views":5000}],"recommendations":["Конкретная рекомендация 1","Рекомендация 2","Рекомендация 3"]}
+
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Без \`\`\`json блоков. Без пояснений. Начни с { и закончи }.`
+
 function parseClaudeJson<T>(text: string, label: string): T {
   console.log(`[channel] ${label} raw:`, text.substring(0, 500))
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -185,17 +222,13 @@ export async function POST(req: NextRequest) {
 
     // Request 1 — overview + topics
     console.log('[channel] step 5a: claude overview')
-    const prompt1 = `Ты YouTube аналитик. ${dataCtx}
-
-Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
-{"upload_frequency":"X видео в неделю","growth_trend":"Растёт","best_topics":["Тема 1","Тема 2","Тема 3"],"worst_topics":["Слабая тема 1","Слабая тема 2"],"strengths":["Сила 1","Сила 2","Сила 3"],"weaknesses":["Слабость 1","Слабость 2"]}
-ВАЖНО: Верни ТОЛЬКО валидный JSON без markdown разметки, без \`\`\`json блоков, без пояснений. Начни ответ сразу с { и закончи }.`
-
     const msg1 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
-      messages: [{ role: 'user', content: prompt1 }],
+      system: [{ type: 'text', text: CHANNEL_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: dataCtx }],
     })
+    console.log('[channel] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
     const text1 = (msg1.content[0] as { text: string }).text
 
     interface Overview {
@@ -210,18 +243,13 @@ export async function POST(req: NextRequest) {
 
     // Request 2 — formats + recommendations (no "example" field — video titles break JSON escaping)
     console.log('[channel] step 5b: claude formats')
-    const prompt2 = `Ты YouTube аналитик. ${dataCtx}
-
-Определи форматы видео (тест-драйвы, обзоры, сравнения и т.д.) и дай рекомендации.
-Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
-{"best_formats":[{"name":"Тест-драйвы","avg_views":450000},{"name":"Обзоры","avg_views":280000}],"worst_formats":[{"name":"Слабый формат","avg_views":5000}],"recommendations":["Конкретная рекомендация 1","Рекомендация 2","Рекомендация 3"]}
-ВАЖНО: Верни ТОЛЬКО валидный JSON без markdown разметки, без \`\`\`json блоков, без пояснений. Начни ответ сразу с { и закончи }.`
-
     const msg2 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 800,
-      messages: [{ role: 'user', content: prompt2 }],
+      system: [{ type: 'text', text: CHANNEL_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `${dataCtx}\n\nОпредели форматы видео и дай рекомендации.` }],
     })
+    console.log('[channel] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
     const text2 = (msg2.content[0] as { text: string }).text
     console.log('[channel] claude2 raw:', text2.substring(0, 500))
 

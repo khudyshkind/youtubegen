@@ -8,6 +8,49 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
+const COMMENTS_SYSTEM_PROMPT = `Ты опытный аналитик аудитории YouTube специализирующийся на извлечении ценных инсайтов из комментариев зрителей. Твоя задача — систематически анализировать комментарии чтобы помочь создателю контента лучше понять свою аудиторию и создавать востребованный контент.
+
+МЕТОДОЛОГИЯ АНАЛИЗА КОММЕНТАРИЕВ:
+
+1. ЗАПРОСЫ НА ВИДЕО (video_requests)
+• Что аудитория ЯВНО просит снять — ищи фразы «сними про», «хочу видео о», «расскажи о», «как насчёт», «интересно было бы»
+• count — приблизительное количество похожих запросов (1 = единичный, 5+ = популярный запрос)
+• Группируй похожие запросы в один
+
+2. БОЛИ И ПРОБЛЕМЫ (pain_points)
+• Проблемы с которыми сталкивается аудитория: что не работает, что непонятно, что раздражает
+• Формулируй как конкретную проблему а не абстракцию
+• Пример: «Не понимают как выбрать правильный размер» а не «проблема с выбором»
+
+3. НЕЗАКРЫТЫЕ ВОПРОСЫ (unanswered_questions)
+• Вопросы на которые зрители не нашли ответа в видео
+• Это прямые подсказки для следующих видео
+• Ищи вопросительные предложения в комментариях
+
+4. ПОЗИТИВНЫЕ РЕАКЦИИ (positive_reactions)
+• Что конкретно понравилось: формат, подача, конкретные моменты
+• Что хвалят, что отмечают как полезное, что просят продолжить
+
+5. НЕГАТИВНЫЕ РЕАКЦИИ (negative_reactions)
+• Что не понравилось, что критикуют, что хотят изменить
+• Формулируй конструктивно — это обратная связь а не жалобы
+
+6. ИДЕИ ДЛЯ ВИДЕО (video_ideas)
+• Конкретные идеи для новых видео на основе комментариев
+• title — готовый рабочий заголовок видео
+• reason — почему это сработает (аудитория просит / много похожих вопросов)
+• based_on — из каких комментариев идея
+
+7. ПОРТРЕТ АУДИТОРИИ (audience_portrait)
+• Кто смотрит: возраст уровень экспертизы интересы
+• Какие у них цели и мотивация
+• 2-3 предложения конкретного описания
+
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"video_requests":[{"request":"Снимите про зимние шины","count":5}],"pain_points":["боль 1","боль 2"],"unanswered_questions":["вопрос 1","вопрос 2"],"positive_reactions":["что понравилось 1"],"negative_reactions":["что не понравилось 1"],"video_ideas":[{"title":"Готовое название видео","reason":"почему сработает","based_on":"из какого комментария идея"}],"audience_portrait":"Краткое описание кто смотрит"}
+
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Без \`\`\`json блоков. Без пояснений. Начни с { и закончи }.`
+
 function parseClaudeJson<T>(text: string, label: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
   const start = cleaned.indexOf('{')
@@ -227,31 +270,16 @@ export async function POST(req: NextRequest) {
       .map((c, i) => `${i + 1}. ${c}`)
       .join('\n')
 
-    const prompt = `Ты аналитик аудитории YouTube.
-Проанализируй эти ${selectedComments.length} комментариев с YouTube видео/канала на тему "${topic}".
-
-Комментарии:
-${commentsText}
-
-Найди и структурируй:
-1. Что аудитория ПРОСИТ снять (запросы на видео)
-2. Боли и проблемы аудитории
-3. Незакрытые вопросы (на что нет ответа в видео)
-4. Позитивные реакции (что понравилось)
-5. Негативные реакции (что не понравилось)
-6. Готовые идеи для видео из комментариев
-
-Верни JSON строго в этом формате, только JSON без пояснений:
-{"video_requests":[{"request":"Снимите про зимние шины","count":5}],"pain_points":["боль 1","боль 2"],"unanswered_questions":["вопрос 1","вопрос 2"],"positive_reactions":["что понравилось 1"],"negative_reactions":["что не понравилось 1"],"video_ideas":[{"title":"Готовое название видео","reason":"почему сработает","based_on":"из какого комментария идея"}],"audience_portrait":"Краткое описание кто смотрит"}`
-
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1200,
-      messages: [{ role: 'user', content: prompt }],
+      system: [{ type: 'text', text: COMMENTS_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Видео/канал на тему: "${topic}"\n\n${selectedComments.length} комментариев:\n${commentsText}` }],
     })
     const raw = (msg.content[0] as { text: string }).text
     console.log('[comments] claude raw:', raw.substring(0, 300))
+    console.log('[comments] cache input:', msg.usage.input_tokens, 'cache_read:', msg.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg.usage.cache_creation_input_tokens ?? 0)
 
     interface CommentsAnalysis {
       video_requests: Array<{ request: string; count: number }>

@@ -37,6 +37,66 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
+const NICHE_SYSTEM_PROMPT_1 = `Ты опытный YouTube аналитик специализирующийся на анализе ниш русскоязычного YouTube. Ты анализируешь данные о каналах и видео чтобы оценить конкурентность ниши потенциал роста и монетизацию.
+
+На основе переданных данных о топ-каналах и топ-видео оцени нишу и верни метрики в JSON.
+
+МЕТОДОЛОГИЯ ОЦЕНКИ КОНКУРЕНТНОСТИ:
+• competition_score 1-10 где 1 — минимальная конкуренция 10 — максимальная
+• Учитывай: количество подписчиков топ-каналов, среднее количество просмотров видео, частоту публикаций
+• Высокая конкуренция (8-10): каналы-миллионники, видео с миллионами просмотров
+• Средняя конкуренция (4-7): каналы 100к-1М, видео 50к-500к просмотров
+• Низкая конкуренция (1-3): каналы до 100к, видео до 50к просмотров
+
+МЕТОДОЛОГИЯ ОЦЕНКИ ТРЕНДА:
+• Анализируй даты публикации топ-видео — если недавние видео набирают много просмотров — растёт
+• trend: «Растёт» / «Стабильно» / «Снижается»
+• growth: процентный рост в формате «+23%» или «-5%» (приблизительная оценка)
+
+МЕТОДОЛОГИЯ ОЦЕНКИ RPM:
+• RPM (Revenue Per Mille) — доход за 1000 просмотров в USD
+• Финансы/бизнес: $3-8, Технологии: $2-5, Авто: $2-4, Образование: $1.5-3, Развлечения: $1-2
+• rpm_min и rpm_max — диапазон для данной ниши
+
+МЕТОДОЛОГИЯ ОЦЕНКИ МОНЕТИЗАЦИИ (срок до монетизации):
+• YouTube требует 1000 подписчиков и 4000 часов просмотра за 12 месяцев
+• monetization_1_video: при публикации 1 видео в неделю
+• monetization_2_videos: при публикации 2 видео в неделю
+• monetization_3_videos: при публикации 3 видео в неделю
+• Формат: «18-24 мес», «10-14 мес», «7-10 мес»
+
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"competition_score":7,"competition_level":"Высокая","competition_reason":"коротко почему","trend":"Растёт","growth":"+23%","trend_reason":"коротко почему","rpm_min":1.5,"rpm_max":3.0,"monetization_1_video":"18-24 мес","monetization_2_videos":"10-14 мес","monetization_3_videos":"7-10 мес"}
+
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Без \`\`\`json блоков. Без пояснений. Начни с { и закончи }.`
+
+const NICHE_SYSTEM_PROMPT_2 = `Ты опытный YouTube аналитик специализирующийся на анализе ниш и форматов контента для русскоязычного YouTube. На основе данных о топ-каналах и видео определи подниши форматы и дай практические рекомендации.
+
+МЕТОДОЛОГИЯ ОПРЕДЕЛЕНИЯ ПОДНИШ:
+• Подниша — более узкая тема внутри основной ниши (например внутри «авто» — «электромобили», «тюнинг», «покупка авто»)
+• Определи 3 подниши с хорошим потенциалом на основе видео
+• subniches_competition — конкурентность каждой подниши: «Низкая» / «Средняя» / «Высокая»
+
+МЕТОДОЛОГИЯ ОПРЕДЕЛЕНИЯ ФОРМАТОВ:
+• Формат — тип видео: обзоры тест-драйвы сравнения топ-листы how-to разборы истории
+• top_formats — форматы с наибольшими просмотрами (по данным топ-видео)
+• avg_views — среднее количество просмотров для видео этого формата
+
+РЕКОМЕНДАЦИИ:
+• Конкретные практические советы для нового канала в этой нише
+• Что делать в первые 3 месяца
+• Какие форматы и темы выбирать
+• Как отличиться от конкурентов
+
+ЛУЧШЕЕ ВРЕМЯ ПУБЛИКАЦИИ:
+• best_days — дни недели с наибольшей активностью аудитории для данной ниши
+• best_hours — оптимальное время публикации (МСК)
+
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"subniches":["Подниша 1","Подниша 2","Подниша 3"],"subniches_competition":["Низкая","Средняя","Низкая"],"top_formats":[{"name":"Тест-драйвы","avg_views":450000},{"name":"Обзоры","avg_views":280000},{"name":"Сравнения","avg_views":150000}],"best_days":["Вторник","Четверг"],"best_hours":"18:00-20:00","recommendations":["Совет 1","Совет 2","Совет 3"]}
+
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Без \`\`\`json блоков. Без пояснений. Начни с { и закончи }.`
+
 function cacheKey(topic: string, country: string, lang: string) {
   return `${topic.toLowerCase().trim()}|${country}|${lang}`
 }
@@ -173,17 +233,13 @@ export async function POST(req: NextRequest) {
 
     // Request 1 — metrics
     console.log('[niche] step 5a: claude metrics')
-    const prompt1 = `Ты YouTube аналитик. Ниша: "${topic}".
-${dataCtx}
-
-Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
-{"competition_score":7,"competition_level":"Высокая","competition_reason":"коротко почему","trend":"Растёт","growth":"+23%","trend_reason":"коротко почему","rpm_min":1.5,"rpm_max":3.0,"monetization_1_video":"18-24 мес","monetization_2_videos":"10-14 мес","monetization_3_videos":"7-10 мес"}`
-
     const msg1 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
-      messages: [{ role: 'user', content: prompt1 }],
+      system: [{ type: 'text', text: NICHE_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Ниша: "${topic}"\n${dataCtx}` }],
     })
+    console.log('[niche] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
     const text1 = (msg1.content[0] as { text: string }).text
 
     interface Metrics {
@@ -203,18 +259,13 @@ ${dataCtx}
 
     // Request 2 — recommendations + formats with real avg_views
     console.log('[niche] step 5b: claude recommendations')
-    const prompt2 = `Ты YouTube аналитик. Ниша: "${topic}".
-${dataCtx}
-
-Определи топ форматы на основе РЕАЛЬНЫХ видео выше. Для каждого формата укажи среднее количество просмотров из предоставленных данных.
-Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
-{"subniches":["Подниша 1","Подниша 2","Подниша 3"],"subniches_competition":["Низкая","Средняя","Низкая"],"top_formats":[{"name":"Тест-драйвы","avg_views":450000},{"name":"Обзоры","avg_views":280000},{"name":"Сравнения","avg_views":150000}],"best_days":["Вторник","Четверг"],"best_hours":"18:00-20:00","recommendations":["Совет 1","Совет 2","Совет 3"]}`
-
     const msg2 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 600,
-      messages: [{ role: 'user', content: prompt2 }],
+      system: [{ type: 'text', text: NICHE_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Ниша: "${topic}"\n${dataCtx}\n\nОпредели топ форматы на основе РЕАЛЬНЫХ видео выше.` }],
     })
+    console.log('[niche] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
     const text2 = (msg2.content[0] as { text: string }).text
 
     interface Recs {

@@ -36,6 +36,51 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
+const TRENDS_SYSTEM_PROMPT_1 = `Ты опытный YouTube аналитик специализирующийся на выявлении трендов и вирусных тем. По данным о топ-видео за указанный период определи 4 ключевых тренда в нише.
+
+МЕТОДОЛОГИЯ ОПРЕДЕЛЕНИЯ ТРЕНДОВ:
+• Тренд — это тема или формат который набирает просмотры быстрее обычного
+• Анализируй: заголовки видео, количество просмотров, дату публикации
+• Видео с высокими просмотрами и недавней датой — сильный сигнал тренда
+• Ищи повторяющиеся темы и паттерны в заголовках топ-видео
+
+УРОВНИ СРОЧНОСТИ:
+• «Срочно» — тренд на пике прямо сейчас, нужно снимать немедленно
+• «Актуально» — тренд активен последние 1-2 недели
+• «Набирает» — тренд только начинается, хорошее время войти
+• «Стабильно» — вечнозелёная тема с постоянным интересом
+
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"trends":[{"topic":"Конкретная тема","urgency":"Срочно","reason":"Почему вирусится"},{"topic":"Тема 2","urgency":"Актуально","reason":"Причина"},{"topic":"Тема 3","urgency":"Набирает","reason":"Причина"},{"topic":"Тема 4","urgency":"Стабильно","reason":"Причина"}]}
+
+ТРЕБОВАНИЯ:
+• Ровно 4 тренда в массиве
+• topic — конкретная тема не абстракция
+• reason — конкретная причина основанная на данных видео
+• Верни ТОЛЬКО валидный JSON. Без \`\`\`json. Начни с { и закончи }.`
+
+const TRENDS_SYSTEM_PROMPT_2 = `Ты опытный YouTube аналитик и контент-стратег. По списку трендов в нише генерируй конкретные идеи для видео которые можно снять прямо сейчас.
+
+МЕТОДОЛОГИЯ ГЕНЕРАЦИИ ИДЕЙ:
+• Для каждого тренда предложи 3 разные идеи видео
+• Идеи должны быть конкретными — не «обзор темы» а «5 причин почему X лучше Y в 2026»
+• Разнообразь форматы: топ-лист, разбор, сравнение, история, how-to, реакция
+• Учитывай что зрители уже знают о тренде — дай им новый угол зрения
+• Заголовки должны быть кликабельными и конкретными
+
+ФОРМАТ ИДЕЙ:
+• Идея — это готовый рабочий заголовок видео или его концепция
+• Каждая идея должна отличаться форматом от других двух
+• Используй цифры в заголовках когда возможно
+
+ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+{"video_ideas":[{"trend":"название тренда","ideas":["Конкретная идея/заголовок 1","Конкретная идея/заголовок 2","Конкретная идея/заголовок 3"]}]}
+
+ТРЕБОВАНИЯ:
+• Массив video_ideas содержит объект для каждого тренда из запроса
+• 3 идеи на каждый тренд
+• Верни ТОЛЬКО валидный JSON. Без \`\`\`json. Начни с { и закончи }.`
+
 function cacheKey(topic: string, period: string) {
   const day = new Date().toISOString().slice(0, 10)
   return `${topic.toLowerCase().trim()}|${period}|${day}`
@@ -153,16 +198,13 @@ export async function POST(req: NextRequest) {
 
     // Request 1 — flat trend list
     console.log('[trends] step 3a: claude trend list')
-    const prompt1 = `Ты YouTube аналитик. ${dataCtx}
-
-Найди 4 ключевых тренда. Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
-{"trends":[{"topic":"Конкретная тема","urgency":"Срочно","reason":"Почему вирусится"},{"topic":"Тема 2","urgency":"Актуально","reason":"Причина"},{"topic":"Тема 3","urgency":"Набирает","reason":"Причина"},{"topic":"Тема 4","urgency":"Стабильно","reason":"Причина"}]}`
-
     const msg1 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
-      messages: [{ role: 'user', content: prompt1 }],
+      system: [{ type: 'text', text: TRENDS_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: dataCtx }],
     })
+    console.log('[trends] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
     const text1 = (msg1.content[0] as { text: string }).text
 
     interface TrendList {
@@ -173,16 +215,13 @@ export async function POST(req: NextRequest) {
     // Request 2 — video ideas per trend
     console.log('[trends] step 3b: claude video ideas')
     const trendNames = (trendList.trends ?? []).slice(0, 4).map(t => t.topic)
-    const prompt2 = `Ты YouTube аналитик. Ниша: "${topic}". Тренды: ${JSON.stringify(trendNames)}
-
-Для каждого тренда — 3 идеи для видео. Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
-{"video_ideas":[{"trend":"${trendNames[0] ?? 'Тренд 1'}","ideas":["Идея 1","Идея 2","Идея 3"]},{"trend":"${trendNames[1] ?? 'Тренд 2'}","ideas":["Идея 1","Идея 2","Идея 3"]},{"trend":"${trendNames[2] ?? 'Тренд 3'}","ideas":["Идея 1","Идея 2","Идея 3"]},{"trend":"${trendNames[3] ?? 'Тренд 4'}","ideas":["Идея 1","Идея 2","Идея 3"]}]}`
-
     const msg2 = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 600,
-      messages: [{ role: 'user', content: prompt2 }],
+      system: [{ type: 'text', text: TRENDS_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Ниша: "${topic}". Тренды: ${JSON.stringify(trendNames)}\n\nДля каждого тренда — 3 идеи для видео.` }],
     })
+    console.log('[trends] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
     const text2 = (msg2.content[0] as { text: string }).text
 
     interface VideoIdeas {

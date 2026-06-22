@@ -11,6 +11,44 @@ import type { StyleConfig } from '@/lib/image-style-configs'
 
 export const maxDuration = 300
 
+const SCENES_SYSTEM_PROMPT = `Ты режиссёр-постановщик и арт-директор YouTube видео с большим опытом создания визуальных рядов для образовательного и развлекательного контента.
+
+Твоя задача: для каждой сцены видео написать краткое русское описание происходящего и конкретный английский промпт для генерации иллюстрации через AI.
+
+═══ ТРЕБОВАНИЯ К ОПИСАНИЮ СЦЕНЫ (поле "scene") ═══
+• Краткое русское описание (1-2 предложения) того что происходит в этот момент видео
+• Описывай действие объект или концепцию которые иллюстрируют сцену
+• Избегай абстракций — пиши конкретно
+
+═══ ТРЕБОВАНИЯ К ПРОМПТАМ (поле "prompt") ═══
+• Только конкретные визуальные образы: предметы люди места действия атмосфера
+• Никаких абстракций: нельзя писать «концепция» «идея» «символ» «метафора»
+• Без текста надписей логотипов водяных знаков
+• Промпт должен полностью соответствовать указанному стилю (будет передан отдельно)
+• Используй конкретные существительные: «aged leather-bound book on wooden desk» не «knowledge»
+• Указывай освещение и атмосферу: «soft morning light» «dramatic shadows» «golden hour»
+• Указывай точку обзора когда важно: «close-up» «wide shot» «aerial view» «eye level»
+• Промпты на английском языке — AI-генераторы работают лучше с английскими промптами
+
+═══ ПРАВИЛА СООТВЕТСТВИЯ СТИЛЮ ═══
+• Каждый промпт ОБЯЗАН соответствовать инструкции по стилю которую получишь в пользовательском сообщении
+• Стиль применяй последовательно ко всем сценам — не переключайся между стилями
+• Если стиль требует фотореализм — пиши фотографические описания
+• Если стиль требует иллюстрацию — описывай как художник
+• Если стиль требует определённую эпоху или атмосферу — передавай её в каждом промпте
+
+═══ КАЧЕСТВО И РАЗНООБРАЗИЕ ═══
+• Каждая сцена должна иметь УНИКАЛЬНЫЙ визуальный образ — не повторяй одни и те же объекты
+• Варьируй масштаб: крупный план детали → средний план персонажа → широкий план пространства
+• Варьируй угол: фронтальный → боковой → сверху → снизу
+• Промпт должен быть достаточно специфичным чтобы AI-генератор создал точное изображение
+• Избегай слишком общих промптов вроде «a person standing» — добавляй детали
+
+═══ ФОРМАТ ОТВЕТА ═══
+Ответь ТОЛЬКО валидным JSON массивом без markdown-обёрток.
+Количество элементов должно точно соответствовать количеству сцен в запросе.
+Формат каждого элемента: {"scene": "Русское описание", "prompt": "English prompt"}`
+
 type ImageEngine = 'flux' | 'gpt_mini'
 
 interface ImagesRequest {
@@ -79,30 +117,21 @@ async function generateScenesFromSubtitles(
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: maxTokens,
+    system: [{ type: 'text', text: SCENES_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     messages: [{
       role: 'user',
-      content: `Ты режиссёр-постановщик YouTube видео на тему "${topic}".
-Ниже — ${imageCount} сцен видео с текстом из реального аудио (расшифровка Whisper).
-Для каждой сцены напиши:
-1. scene — краткое русское описание того что происходит
-2. prompt — конкретный английский промпт для генерации иллюстрации через AI
+      content: `Видео на тему: "${topic}". Ниже — ${imageCount} сцен из реальной расшифровки аудио (Whisper).
 
-СТИЛЬ ИЛЛЮСТРАЦИЙ (обязательно соблюдать в каждом промте):
+СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
 ${styleConfig.claudeInstruction}
-
-ТРЕБОВАНИЯ К ПРОМПТАМ:
-- Только конкретные визуальные образы: предметы, люди, места, действия
-- Никаких абстракций («концепция», «идея», «символ»)
-- Без текста, надписей, логотипов
-- Строго соответствовать указанному стилю
 
 СЦЕНЫ:
 ${scenesWithText.map((s, i) => `Сцена ${i + 1} [${fmtSec(s.start)}–${fmtSec(s.end)}]: "${s.text}"`).join('\n')}
 
-Ответь ТОЛЬКО валидным JSON массивом (ровно ${imageCount} элементов) без markdown-обёрток:
-[{"scene": "Русское описание", "prompt": "English prompt"}]`,
+Ответь JSON массивом ровно ${imageCount} элементов.`,
     }],
   })
+  console.log('[images/subtitles] cache input:', message.usage.input_tokens, 'cache_read:', message.usage.cache_read_input_tokens ?? 0, 'cache_write:', message.usage.cache_creation_input_tokens ?? 0)
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
   console.log(`[images/subtitles] claude raw response (first 600): ${rawText.slice(0, 600)}`)
@@ -189,30 +218,21 @@ async function generateScenesFromScript(
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: maxTokens,
+    system: [{ type: 'text', text: SCENES_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     messages: [{
       role: 'user',
-      content: `Ты режиссёр-постановщик YouTube видео на тему "${topic}".
-Ниже — ${imageCount} отрывков сценария с уже вычисленными тайм-кодами.
-Для каждого отрывка напиши:
-1. scene — краткое русское описание того что происходит
-2. prompt — конкретный английский промпт для генерации иллюстрации через AI
+      content: `Видео на тему: "${topic}". Ниже — ${imageCount} отрывков сценария с тайм-кодами.
 
-СТИЛЬ ИЛЛЮСТРАЦИЙ (обязательно соблюдать в каждом промте):
+СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
 ${styleConfig.claudeInstruction}
-
-ТРЕБОВАНИЯ К ПРОМПТАМ:
-- Только конкретные визуальные образы: предметы, люди, места, действия
-- Никаких абстракций («концепция», «идея», «символ»)
-- Без текста, надписей, логотипов
-- Строго соответствовать указанному стилю
 
 ОТРЫВКИ:
 ${blocksWithTimecodes.map((b, i) => `Сцена ${i + 1} [${fmtSec(b.start)}–${fmtSec(b.end)}]:\n"${b.text.slice(0, 400)}"`).join('\n\n')}
 
-Ответь ТОЛЬКО валидным JSON массивом (ровно ${imageCount} элементов) без markdown-обёрток:
-[{"scene": "Русское описание", "prompt": "English prompt"}]`,
+Ответь JSON массивом ровно ${imageCount} элементов.`,
     }],
   })
+  console.log('[images/script] cache input:', message.usage.input_tokens, 'cache_read:', message.usage.cache_read_input_tokens ?? 0, 'cache_write:', message.usage.cache_creation_input_tokens ?? 0)
 
   const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
   console.log(`[images/script] claude raw response (first 600): ${rawText.slice(0, 600)}`)
