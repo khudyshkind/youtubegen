@@ -78,11 +78,11 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
-    const body = await req.json() as { niche?: string; views?: number; country?: string; lang?: string }
+    const body = await req.json() as { niche?: string; views?: number; country?: string; lang?: string; ui_lang?: string }
     const niche = body.niche?.trim() ?? ''
     const views = Math.max(0, Math.round(body.views ?? 0))
     const country = body.country ?? 'mix'
-    const lang = body.lang ?? 'ru'
+    const lang = body.ui_lang ?? body.lang ?? 'ru'
 
     if (!niche) return NextResponse.json({ ok: false, error: 'Введите нишу' }, { status: 400 })
     if (views <= 0) return NextResponse.json({ ok: false, error: 'Введите количество просмотров' }, { status: 400 })

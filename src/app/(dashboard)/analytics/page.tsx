@@ -433,13 +433,13 @@ function NicheTab({ externalResult, onClearExternal }: {
   externalResult?: NicheResult | null
   onClearExternal?: () => void
 }) {
-  const { t, lang: globalLang } = useLang()
+  const { t, lang: uiLang } = useLang()
   const router = useRouter()
   const { setScriptParams, setStep } = useStudioStore()
 
   const [topic, setTopic] = useState('')
   const [country, setCountry] = useState('RU')
-  const [lang, setLang] = useState<string>(globalLang)
+  const [contentLang, setContentLang] = useState<string>(uiLang)
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(-1)
   const [error, setError] = useState('')
@@ -463,7 +463,7 @@ function NicheTab({ externalResult, onClearExternal }: {
       const res = await fetch('/api/analytics/niche', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, country, lang }),
+        body: JSON.stringify({ topic, country, content_lang: contentLang, ui_lang: uiLang }),
       })
       const json = await res.json() as { ok: boolean; data?: NicheResult; cached?: boolean; error?: string; code?: string }
       if (!json.ok) {
@@ -527,7 +527,7 @@ function NicheTab({ externalResult, onClearExternal }: {
               </div>
               <div className="flex-1 min-w-32">
                 <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.lang_label')}</label>
-                <select value={lang} onChange={e => setLang(e.target.value)}
+                <select value={contentLang} onChange={e => setContentLang(e.target.value)}
                   className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none"
                   style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <option value="ru">{t('analytics.lang_ru')}</option>
@@ -597,7 +597,7 @@ function TrendsTab({ externalResult, onClearExternal }: {
       const res = await fetch('/api/analytics/trends', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, period, lang }),
+        body: JSON.stringify({ topic, period, ui_lang: lang }),
       })
       const json = await res.json() as { ok: boolean; data?: TrendResult; cached?: boolean; error?: string; code?: string }
       if (!json.ok) {
@@ -789,7 +789,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
       const res = await fetch('/api/analytics/channel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel, lang }),
+        body: JSON.stringify({ channel, ui_lang: lang }),
       })
       const json = await res.json() as { ok: boolean; data?: ChannelResult; cached?: boolean; error?: string; code?: string }
       if (!json.ok) {
@@ -1032,7 +1032,7 @@ function RevenueTab({
       const res = await fetch('/api/analytics/revenue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ niche, views: Number(views), country, lang }),
+        body: JSON.stringify({ niche, views: Number(views), country, ui_lang: lang }),
       })
       const json = await res.json() as { ok: boolean; data?: RevenueResult; error?: string }
       if (!json.ok) { setError(json.error ?? 'Ошибка'); return }
@@ -1223,7 +1223,7 @@ function CommentsTab({
       const res = await fetch('/api/analytics/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, count, lang }),
+        body: JSON.stringify({ url, count, ui_lang: lang }),
       })
       const json = await res.json() as { ok: boolean; data?: CommentsResult; error?: string }
       if (!json.ok) { setError(json.error ?? 'Ошибка'); return }
@@ -1440,9 +1440,10 @@ function KeywordsTab({
   onClearExternal: () => void
 }) {
   const router = useRouter()
+  const { lang: uiLang } = useLang()
   const { setScriptParams, setStep } = useStudioStore()
   const [keyword, setKeyword] = useState('')
-  const [lang, setLang] = useState<'ru' | 'en'>('ru')
+  const [contentLang, setContentLang] = useState<'ru' | 'en'>('ru')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<KeywordsResult | null>(null)
@@ -1463,7 +1464,7 @@ function KeywordsTab({
       const res = await fetch('/api/analytics/keywords', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, lang }),
+        body: JSON.stringify({ keyword, content_lang: contentLang, ui_lang: uiLang }),
       })
       const json = await res.json() as { ok: boolean; data?: KeywordsResult; error?: string; code?: string }
       if (!json.ok) { setError(json.error ?? 'Ошибка'); return }
@@ -1499,18 +1500,18 @@ function KeywordsTab({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-slate-400">Язык поиска</label>
+              <label className="text-xs font-medium text-slate-400">Язык контента</label>
               <div className="flex gap-2">
                 {(['ru', 'en'] as const).map(l => (
                   <button
                     key={l}
                     type="button"
-                    onClick={() => setLang(l)}
+                    onClick={() => setContentLang(l)}
                     className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
                     style={{
-                      background: lang === l ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.06)',
-                      color: lang === l ? '#c4b5fd' : '#64748b',
-                      border: lang === l ? '1px solid rgba(124,58,237,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                      background: contentLang === l ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.06)',
+                      color: contentLang === l ? '#c4b5fd' : '#64748b',
+                      border: contentLang === l ? '1px solid rgba(124,58,237,0.5)' : '1px solid rgba(255,255,255,0.1)',
                     }}>
                     {l === 'ru' ? '🇷🇺 Русский' : '🇺🇸 Английский'}
                   </button>
@@ -2033,7 +2034,7 @@ function RisingStarsTab({
           sub_min: parseInt(subMin) || 1000,
           sub_max: parseInt(subMax) || 100000,
           months_max: anyAge ? 0 : monthsMax,
-          lang,
+          ui_lang: lang,
         }),
       })
       const json = await res.json() as { ok: boolean; data?: RisingStarsResult; error?: string; code?: string }

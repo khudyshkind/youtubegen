@@ -177,9 +177,10 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
-    const body = await req.json() as { keyword?: string; lang?: string }
+    const body = await req.json() as { keyword?: string; content_lang?: string; ui_lang?: string; lang?: string }
     const keyword = body.keyword?.trim() ?? ''
-    const lang = body.lang === 'en' ? 'en' : 'ru'
+    const contentLang = body.content_lang ?? body.lang ?? 'ru'
+    const uiLang = body.ui_lang ?? body.lang ?? 'ru'
 
     if (!keyword) return NextResponse.json({ ok: false, error: 'Введите ключевое слово' }, { status: 400 })
 
@@ -195,10 +196,10 @@ export async function POST(req: NextRequest) {
       `${keyword} 2026`,
     ]
 
-    console.log(`[keywords] fetching suggestions for: ${keyword} (${lang})`)
+    console.log(`[keywords] fetching suggestions for: ${keyword} (content: ${contentLang}, ui: ${uiLang})`)
 
     const suggestionsArrays = await Promise.all(
-      seeds.map(seed => getAutocompleteSuggestions(seed, lang))
+      seeds.map(seed => getAutocompleteSuggestions(seed, contentLang))
     )
 
     // Deduplicate and add the keyword itself
@@ -244,13 +245,13 @@ export async function POST(req: NextRequest) {
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 800,
-        system: [{ type: 'text', text: getKeywordsPrompt1(lang), cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: getKeywordsPrompt1(uiLang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: `Ниша: "${keyword}"\nДанные (avg_views — среднее топ-5 видео, video_count — конкуренция):\n${keywordsData}` }],
       }),
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 400,
-        system: [{ type: 'text', text: getKeywordsPrompt2(lang), cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: getKeywordsPrompt2(uiLang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: `Ниша: "${keyword}"\nКлючевые слова:\n${keywordsList}` }],
       }),
     ])
@@ -296,7 +297,7 @@ export async function POST(req: NextRequest) {
 
     const result = {
       keyword,
-      lang,
+      lang: contentLang,
       total: enrichedKeywords.length,
       easy,
       medium,

@@ -98,13 +98,14 @@ export async function POST(req: NextRequest) {
       sub_max?: number
       months_max?: number
       lang?: string
+      ui_lang?: string
     }
 
     const topic = body.topic?.trim() ?? ''
     const subMin = body.sub_min ?? 1000
     const subMax = body.sub_max ?? 100000
     const monthsMax = body.months_max ?? 0
-    const lang = body.lang ?? 'ru'
+    const lang = body.ui_lang ?? body.lang ?? 'ru'
 
     console.log(`[rising] start topic="${topic}" sub_min=${subMin} sub_max=${subMax} months_max=${monthsMax}`)
 

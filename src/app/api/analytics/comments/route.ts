@@ -184,9 +184,9 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
-    const body = await req.json() as { url?: string; count?: number; lang?: string }
+    const body = await req.json() as { url?: string; count?: number; lang?: string; ui_lang?: string }
     const url = body.url?.trim() ?? ''
-    const lang = body.lang ?? 'ru'
+    const lang = body.ui_lang ?? body.lang ?? 'ru'
     const count = [50, 100, 200].includes(body.count ?? 0) ? (body.count as 50 | 100 | 200) : 100
 
     if (!url) return NextResponse.json({ ok: false, error: 'Введите URL видео или канала' }, { status: 400 })

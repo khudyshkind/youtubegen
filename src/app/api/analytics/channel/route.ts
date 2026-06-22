@@ -122,9 +122,9 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
-    const body = await req.json() as { channel?: string; lang?: string }
+    const body = await req.json() as { channel?: string; lang?: string; ui_lang?: string }
     const channelInput = body.channel?.trim() ?? ''
-    const lang = body.lang ?? 'ru'
+    const lang = body.ui_lang ?? body.lang ?? 'ru'
     if (!channelInput) return NextResponse.json({ ok: false, error: 'Введите канал' }, { status: 400 })
 
     console.log(`[channel] start input="${channelInput}" lang=${lang}`)
