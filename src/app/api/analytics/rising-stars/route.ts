@@ -33,7 +33,7 @@ function getRisingStarsPrompt(lang: string): string {
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
 {"channels":[{"name":"АвтоОбзор","growth_reason":"Первыми сделали тест-драйв нового Lada Vesta NG — видео набрало 2.1М просмотров за неделю","strategy":"Публикуют обзоры в день официального выхода модели — опережают конкурентов на 1-2 дня","key_takeaway":"Снимай видео в день анонса новой модели — видео с первым обзором набирают в 3-5 раз больше просмотров чем запоздалые"}],"common_patterns":["Все растущие каналы используют заголовки-вопросы типа 'Стоит ли покупать X в 2026?' — это увеличивает CTR до 8-12%"]}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
   : `You are an expert in YouTube channel growth analysis, specializing in identifying rising stars — new channels rapidly gaining audience. You pinpoint exact reasons for viral growth and specific strategies that work in a given niche.
 
 CHANNEL ANALYSIS METHODOLOGY:
@@ -56,7 +56,7 @@ COMMON PATTERNS (common_patterns): what unites several channels on the list — 
 RESPONSE FORMAT — strict JSON without markdown:
 {"channels":[{"name":"AutoReview","growth_reason":"First to test-drive the new model on launch day — video hit 2.1M views in one week","strategy":"Publish reviews on official release day — beats competitors by 1-2 days","key_takeaway":"Film on announcement day — first-review videos get 3-5x more views than delayed ones"}],"common_patterns":["All growing channels use question-style titles like 'Is X worth buying in 2026?' — this drives CTR to 8-12%"]}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { end with }.`
+IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json. No explanations. Start with { end with }.`
 }
 
 function parseClaudeJson<T>(text: string): T {

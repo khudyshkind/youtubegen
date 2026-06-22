@@ -433,13 +433,13 @@ function NicheTab({ externalResult, onClearExternal }: {
   externalResult?: NicheResult | null
   onClearExternal?: () => void
 }) {
-  const { t } = useLang()
+  const { t, lang: globalLang } = useLang()
   const router = useRouter()
   const { setScriptParams, setStep } = useStudioStore()
 
   const [topic, setTopic] = useState('')
   const [country, setCountry] = useState('RU')
-  const [lang, setLang] = useState('ru')
+  const [lang, setLang] = useState<string>(globalLang)
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(-1)
   const [error, setError] = useState('')

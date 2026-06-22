@@ -24,7 +24,7 @@ function getCommentsPrompt(lang: string): string {
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
 {"video_requests":[{"request":"Снимите про зимние шины для кроссовера","count":5},{"request":"Сравните масло 5W-30 и 5W-40","count":3}],"pain_points":["Дилеры навязывают дополнительные опции и непонятно как отказаться","Непонятно когда менять тормозные колодки без опыта"],"unanswered_questions":["Сколько реально тратится на содержание такой машины в год?","Есть ли смысл брать расширенную гарантию?"],"positive_reactions":["Честный отзыв без рекламы — редкость на ютубе","Очень понятно объяснили про каско без занудства"],"negative_reactions":["Слишком быстро говоришь — не успеваю записывать","Хотелось бы больше конкретных цифр"],"video_ideas":[{"title":"Реальные расходы на авто за год — считаю до копейки","reason":"Много вопросов про стоимость владения, аудитория хочет честных цифр","based_on":"Комментарии про непонятные расходы и вопросы про страховку"}],"audience_portrait":"Мужчины 28-45 лет, покупают или недавно купили первый новый автомобиль. Ищут честную информацию без рекламного глянца. Интересует практическая сторона: обслуживание, расходы, надёжность."}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
   : `You are an experienced YouTube audience analyst specializing in extracting valuable insights from viewer comments. Your task is to systematically analyze comments to help the creator understand their audience and create resonant content.
 
 COMMENT ANALYSIS METHODOLOGY:
@@ -39,7 +39,7 @@ COMMENT ANALYSIS METHODOLOGY:
 RESPONSE FORMAT — strict JSON without markdown:
 {"video_requests":[{"request":"Do a video on winter tires for SUVs","count":5},{"request":"Compare 5W-30 vs 5W-40 oil","count":3}],"pain_points":["Dealerships push add-ons and it's unclear how to refuse","Hard to know when to replace brake pads without experience"],"unanswered_questions":["How much does it actually cost to own this car per year?","Is an extended warranty worth it?"],"positive_reactions":["Honest review without ads — rare on YouTube","Explained insurance really clearly without being boring"],"negative_reactions":["Talking too fast — hard to take notes","Would like more specific numbers and prices"],"video_ideas":[{"title":"Real Car Ownership Costs for a Year — Every Dollar Counted","reason":"Many questions about total cost of ownership, audience wants honest numbers","based_on":"Comments about unclear expenses and insurance questions"}],"audience_portrait":"Men 28-45 buying or recently bought their first new car. Looking for honest information without marketing spin. Interested in practical aspects: maintenance, costs, reliability."}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { end with }.`
+IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json blocks. No explanations. Start with { end with }.`
 }
 
 function parseClaudeJson<T>(text: string, label: string): T {

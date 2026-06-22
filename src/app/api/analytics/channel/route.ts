@@ -25,7 +25,7 @@ function getChannelPrompt1(lang: string): string {
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
 {"upload_frequency":"2 видео в неделю","growth_trend":"Растёт","best_topics":["Тест-драйвы новинок","Сравнение моделей","Советы при покупке"],"worst_topics":["Влоги с выставок","Видео о тюнинге"],"strengths":["Стабильный график публикаций — 2 видео в неделю","Высокий CTR на сравнительных видео","Экспертная подача без воды"],"weaknesses":["Слабые миниатюры на роликах о б/у авто","Нет коротких форматов — Shorts отсутствуют"]}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
   : `You are an experienced YouTube channel analyst. Based on channel data (subscribers, videos, views) and top videos, identify key channel characteristics.
 
 ANALYSIS METHODOLOGY:
@@ -41,7 +41,7 @@ IMPORTANT: Base analysis ONLY on actual data provided. Do not invent numbers or 
 RESPONSE FORMAT — strict JSON without markdown:
 {"upload_frequency":"2 videos per week","growth_trend":"Growing","best_topics":["New Model Test Drives","Car Comparisons","Buying Advice"],"worst_topics":["Auto Show Vlogs","Tuning Videos"],"strengths":["Consistent 2-video-per-week schedule","High CTR on comparison videos","Expert delivery without filler"],"weaknesses":["Weak thumbnails on used car videos","No short-form content — Shorts absent"]}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { end with }.`
+IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json blocks. No explanations. Start with { end with }.`
 }
 
 function getChannelPrompt2(lang: string): string {
@@ -77,7 +77,7 @@ IMPORTANT: Do NOT include an "example" field with specific video titles.
 RESPONSE FORMAT — strict JSON without markdown:
 {"best_formats":[{"name":"Test Drives","avg_views":450000},{"name":"Reviews","avg_views":280000}],"worst_formats":[{"name":"Behind-the-Scenes Vlogs","avg_views":5000}],"recommendations":["Focus on test drives — they get 3x more views than other formats on this channel","Add timestamps to descriptions: viewers use them heavily and it improves watch time retention","Film X vs Y comparison videos — they perform well in this niche and the channel has none yet"]}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { end with }.`
+IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json blocks. No explanations. Start with { end with }.`
 }
 
 function parseClaudeJson<T>(text: string, label: string): T {

@@ -22,7 +22,7 @@ function getKeywordsPrompt1(lang: string): string {
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
 {"keywords":[{"keyword":"авто зимой","difficulty":6,"potential":8,"competition":"Средняя","recommendation":"Стоит снять — хороший баланс просмотров и конкуренции"},{"keyword":"купить электромобиль","difficulty":8,"potential":9,"competition":"Высокая","recommendation":"Сложно — нужен сильный канал с хорошей историей просмотров"}]}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
   : `You are an experienced YouTube SEO analyst specializing in keyword evaluation. Based on statistical data (average views of top-5 videos and competing video count), evaluate each keyword.
 
 EVALUATION METHODOLOGY:
@@ -35,7 +35,7 @@ EVALUATION METHODOLOGY:
 RESPONSE FORMAT — strict JSON without markdown:
 {"keywords":[{"keyword":"winter car tips","difficulty":5,"potential":7,"competition":"Medium","recommendation":"Worth filming — good balance of views and competition"},{"keyword":"buy electric car 2026","difficulty":8,"potential":9,"competition":"High","recommendation":"Tough — requires an established channel with strong watch history"}]}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { end with }.`
+IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json. No explanations. Start with { end with }.`
 }
 
 function getKeywordsPrompt2(lang: string): string {
@@ -50,7 +50,7 @@ function getKeywordsPrompt2(lang: string): string {
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
 {"best_keywords":["купить авто 2026","тест-драйв новинки","лучший автомобиль до миллиона"],"low_competition":["авто для семьи советы","как выбрать первый автомобиль"],"insights":"Ниша автомобилей очень конкурентна в топовых запросах, но есть возможности в длинных ключах. Начинайте с запросов о конкретных моделях и сравнениях — там конкуренция ниже а интент покупки выше. Делайте акцент на запросы с годом (2026) — они свежее и менее насыщены контентом."}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
   : `You are an experienced YouTube SEO strategist helping content creators choose the best keywords. Based on the keyword list, select the most promising ones and provide a final niche analysis.
 
 SELECTION METHODOLOGY:
@@ -61,7 +61,7 @@ SELECTION METHODOLOGY:
 RESPONSE FORMAT — strict JSON without markdown:
 {"best_keywords":["buy car 2026","new model test drive","best car under 30000"],"low_competition":["family car advice","how to choose your first car"],"insights":"The auto niche is highly competitive for broad queries, but there are opportunities in long-tail keywords. Start with specific model reviews and comparisons — competition is lower there and purchase intent is higher. Focus on queries with the current year (2026) — they are fresher and less saturated with content."}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { end with }.`
+IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json. No explanations. Start with { end with }.`
 }
 
 function parseClaudeJson<T>(text: string, label: string): T {

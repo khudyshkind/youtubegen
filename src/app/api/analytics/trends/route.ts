@@ -56,7 +56,7 @@ function getTrendsPrompt1(lang: string): string {
 {"trends":[{"topic":"Электромобили в России","urgency":"Срочно","reason":"3 видео из топ-5 набрали >1М просмотров за последние 2 недели"},{"topic":"Тема 2","urgency":"Актуально","reason":"причина"},{"topic":"Тема 3","urgency":"Набирает","reason":"причина"},{"topic":"Тема 4","urgency":"Стабильно","reason":"причина"}]}
 
 ТРЕБОВАНИЯ: ровно 4 тренда | topic — конкретная тема, не абстракция | reason — конкретная причина на основе данных видео
-Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Начни с { и заканчивай с }.`
+Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких \`\`\`json. Начни с { и заканчивай с }.`
   : `You are an experienced YouTube trend analyst. Based on top video data for the specified period, identify 4 key trends in the niche.
 
 TREND METHODOLOGY:
@@ -75,7 +75,7 @@ RESPONSE FORMAT — strict JSON without markdown:
 {"trends":[{"topic":"Electric Vehicles Comparison 2026","urgency":"Urgent","reason":"3 of top 5 videos got >1M views in the last 2 weeks"},{"topic":"Topic 2","urgency":"Active","reason":"reason"},{"topic":"Topic 3","urgency":"Rising","reason":"reason"},{"topic":"Topic 4","urgency":"Evergreen","reason":"reason"}]}
 
 REQUIREMENTS: exactly 4 trends | topic = specific, not abstract | reason = specific evidence from video data
-Return ONLY valid JSON. No \`\`\`json. Start with { end with }.`
+Return ONLY valid JSON. All text values must be in English. No \`\`\`json. Start with { end with }.`
 }
 
 function getTrendsPrompt2(lang: string): string {
@@ -93,7 +93,7 @@ function getTrendsPrompt2(lang: string): string {
 {"video_ideas":[{"trend":"Электромобили в России","ideas":["5 причин купить электромобиль в 2026 — даже при нашей инфраструктуре","Зарядил электромобиль на трассе М4 — честный опыт","Tesla vs отечественные EV: что реально выгоднее?"]}]}
 
 ТРЕБОВАНИЯ: video_ideas — один объект на каждый тренд | 3 идеи на тренд
-Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Начни с { и заканчивай с }.`
+Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких \`\`\`json. Начни с { и заканчивай с }.`
   : `You are an experienced YouTube analyst and content strategist. Based on niche trends, generate specific video ideas you can film right now.
 
 VIDEO IDEA METHODOLOGY:
@@ -107,7 +107,7 @@ RESPONSE FORMAT — strict JSON without markdown:
 {"video_ideas":[{"trend":"Electric Vehicles 2026","ideas":["5 Reasons to Buy an EV in 2026 — Even With Today's Infrastructure","I Charged My EV on a Road Trip — Honest Experience","Tesla vs Budget EVs: Which Is Actually Worth It?"]}]}
 
 REQUIREMENTS: one object per trend | 3 ideas per trend
-Return ONLY valid JSON. No \`\`\`json. Start with { end with }.`
+Return ONLY valid JSON. All text values must be in English. No \`\`\`json. Start with { end with }.`
 }
 
 function cacheKey(topic: string, period: string, lang: string) {

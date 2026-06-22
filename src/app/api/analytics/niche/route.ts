@@ -65,7 +65,7 @@ function getNichePrompt1(lang: string): string {
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
 {"competition_score":7,"competition_level":"Высокая","competition_reason":"коротко почему","trend":"Растёт","growth":"+23%","trend_reason":"коротко почему","rpm_min":1.5,"rpm_max":3.0,"monetization_1_video":"18-24 мес","monetization_2_videos":"10-14 мес","monetization_3_videos":"7-10 мес"}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
   : `You are an experienced YouTube niche analyst. Based on data from top channels and videos, evaluate the niche and return metrics in JSON.
 
 COMPETITION METHODOLOGY:
@@ -91,7 +91,7 @@ MONETIZATION: YouTube requires 1000 subscribers and 4000 watch hours in 12 month
 RESPONSE FORMAT — strict JSON without markdown:
 {"competition_score":7,"competition_level":"High","competition_reason":"brief reason","trend":"Growing","growth":"+23%","trend_reason":"brief reason","rpm_min":1.5,"rpm_max":3.0,"monetization_1_video":"18-24 mo","monetization_2_videos":"10-14 mo","monetization_3_videos":"7-10 mo"}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { end with }.`
+IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json blocks. No explanations. Start with { end with }.`
 }
 
 function getNichePrompt2(lang: string): string {
@@ -117,7 +117,7 @@ function getNichePrompt2(lang: string): string {
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
 {"subniches":["Электромобили","Тюнинг","Покупка авто"],"subniches_competition":["Низкая","Средняя","Высокая"],"top_formats":[{"name":"Тест-драйвы","avg_views":450000},{"name":"Обзоры","avg_views":280000},{"name":"Сравнения","avg_views":150000}],"best_days":["Вторник","Четверг"],"best_hours":"18:00-20:00","recommendations":["Начинайте с коротких видео (Shorts) — этот формат набирает миллионы просмотров в данной нише и помогает быстро найти аудиторию","Снимайте сравнительные обзоры: зрители активно ищут такие видео при выборе товара","Публикуйте стабильно 2 видео в неделю — алгоритм YouTube даёт приоритет каналам с регулярным контентом"]}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
   : `You are an experienced YouTube niche analyst. Based on top channel and video data, identify sub-niches, formats and provide practical recommendations.
 
 SUB-NICHE METHODOLOGY:
@@ -139,11 +139,11 @@ BEST POSTING TIME:
 RESPONSE FORMAT — strict JSON without markdown:
 {"subniches":["Electric Vehicles","Tuning","Car Buying"],"subniches_competition":["Low","Medium","High"],"top_formats":[{"name":"Test Drives","avg_views":450000},{"name":"Reviews","avg_views":280000},{"name":"Comparisons","avg_views":150000}],"best_days":["Tuesday","Thursday"],"best_hours":"18:00-20:00","recommendations":["Start with YouTube Shorts — this format reaches millions of views in this niche and helps grow your audience fast","Create comparison reviews: viewers actively search for these when making a purchase decision","Post consistently 2 videos per week — YouTube's algorithm prioritizes channels with regular uploads"]}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { end with }.`
+IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json blocks. No explanations. Start with { end with }.`
 }
 
 function cacheKey(topic: string, country: string, lang: string) {
-  return `${topic.toLowerCase().trim()}|${country}|${lang}|v4`
+  return `${topic.toLowerCase().trim()}|${country}|${lang}|v5`
 }
 
 export async function POST(req: NextRequest) {
@@ -304,12 +304,10 @@ export async function POST(req: NextRequest) {
 
     // Request 2 — recommendations + formats with real avg_views
     console.log('[niche] step 5b: claude recommendations')
-    const _prompt2 = getNichePrompt2(lang)
-    console.log('[niche] LANG:', lang, '| isRu:', lang !== 'en', '| PROMPT2 first 300:', _prompt2.substring(0, 300))
     const msg2 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 600,
-      system: [{ type: 'text', text: _prompt2, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getNichePrompt2(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Ниша: "${topic}"\n${dataCtx}\n\nОпредели топ форматы на основе РЕАЛЬНЫХ видео выше.` }],
     })
     console.log('[niche] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)

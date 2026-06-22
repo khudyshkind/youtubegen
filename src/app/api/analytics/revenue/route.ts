@@ -41,7 +41,7 @@ function getRevenuePrompt(lang: string): string {
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
 {"rpm_min":1.5,"rpm_max":3.5,"rpm_avg":2.5,"niche_factor":"Средний","explanation":"Автомобильная ниша — умеренный RPM благодаря рекламодателям из сферы автодилеров и страхования. Российская аудитория даёт более низкий RPM чем западная."}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+ВАЖНО: Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
   : `You are a YouTube monetization expert. Based on the niche and audience geography, determine a realistic RPM (revenue per 1000 views after YouTube's 45% cut).
 
 RPM BENCHMARKS BY MARKET:
@@ -58,7 +58,7 @@ NICHE MULTIPLIERS: Finance/business/insurance: 2-3x | Tech/software: 1.5-2x | Au
 RESPONSE FORMAT — strict JSON without markdown:
 {"rpm_min":2.0,"rpm_max":5.0,"rpm_avg":3.5,"niche_factor":"Medium-High","explanation":"Auto niche has moderate-to-good RPM driven by car dealer and insurance advertisers. US/Western audience commands premium rates from automotive brands."}
 
-IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { end with }.`
+IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json. No explanations. Start with { end with }.`
 }
 
 const COUNTRY_LABELS: Record<string, string> = {
