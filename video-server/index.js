@@ -20,8 +20,7 @@ const API_SECRET            = process.env.RAILWAY_API_SECRET
 const SUPABASE_URL          = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-const RENDI_API_KEY = process.env.RENDI_API_KEY
-const RENDI_API_URL = process.env.RENDI_API_URL || 'https://api.rendi.dev/v1/run-ffmpeg-command'
+const VGF_API_KEY = process.env.VGF_API_KEY
 
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN
 
@@ -2087,34 +2086,60 @@ const VF_BASE =
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
-// ── Rendi API wrapper ──────────────────────────────────────────────────────
-// Sends an FFmpeg command to Rendi.dev for remote execution.
-// inputFiles: { in_1: "https://...", in_2: "https://..." }
-// outputFiles: { out_1: "output.mp4" }
+// ── Very Good FFmpeg API wrapper ───────────────────────────────────────────
+// inputFiles:  { in_1: "https://...", in_2: "https://..." }
+// outputFiles: { out_1: "output.mp4" }  ← converted internally to VGF array format
 // ffmpegCommand: "-i {{in_1}} -vf ... {{out_1}}"  (no leading "ffmpeg")
-// Returns: { out_1: "https://rendi-cdn.../output.mp4", ... }
-async function runFFmpegOnRendi(inputFiles, outputFiles, ffmpegCommand, timeoutMs = 600000) {
-  if (!RENDI_API_KEY) throw new Error('RENDI_API_KEY not configured')
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
-  try {
-    console.log(`[rendi] → ${ffmpegCommand.slice(0, 150)}`)
-    const res = await fetch(RENDI_API_URL, {
-      method: 'POST',
-      headers: { 'X-API-KEY': RENDI_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input_files: inputFiles, output_files: outputFiles, ffmpeg_command: ffmpegCommand }),
-      signal: ctrl.signal,
-    })
-    const result = await res.json()
-    if (!res.ok || result.status !== 'SUCCESS') {
-      console.error('[rendi] failure:', JSON.stringify(result).slice(0, 500))
-      throw new Error(`Rendi: ${result.error ?? result.status ?? `HTTP ${res.status}`}`)
-    }
-    console.log('[rendi] ✓ outputs:', Object.keys(result.output_files || {}).join(', '))
-    return result.output_files || {}
-  } finally {
-    clearTimeout(timer)
+// Returns: { out_1: "https://vgf-cdn.../output.mp4", ... }
+async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs = 600000) {
+  if (!VGF_API_KEY) throw new Error('VGF_API_KEY not configured')
+
+  // VGF uses output_files as array of filenames; replace {{out_N}} with filename in command
+  let cmd = ffmpegCommand
+  const outNames = []
+  for (const [key, filename] of Object.entries(outputFiles)) {
+    cmd = cmd.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), filename)
+    outNames.push(filename)
   }
+  console.log(`[vgf] → ${cmd.slice(0, 150)}`)
+
+  const submitRes = await fetch('https://verygoodffmpeg.com/api/ffmpeg', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${VGF_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input_files: inputFiles, output_files: outNames, ffmpeg_commands: [cmd] }),
+    signal: AbortSignal.timeout(30000),
+  })
+  if (!submitRes.ok) {
+    const errBody = await submitRes.text().catch(() => '')
+    throw new Error(`VGF submit HTTP ${submitRes.status}: ${errBody.slice(0, 300)}`)
+  }
+  const { id: jobId } = await submitRes.json()
+  console.log(`[vgf] job submitted: ${jobId}`)
+
+  // Poll until completed or timed out
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 3000))
+    const pollRes = await fetch(
+      `https://verygoodffmpeg.com/api/jobs/${jobId}`,
+      { headers: { 'Authorization': `Bearer ${VGF_API_KEY}` }, signal: AbortSignal.timeout(15000) }
+    ).catch(e => { console.warn('[vgf] poll fetch error:', e.message); return null })
+    if (!pollRes || !pollRes.ok) { console.warn(`[vgf] poll HTTP ${pollRes?.status ?? 'err'}, retrying...`); continue }
+    const status = await pollRes.json()
+    console.log(`[vgf] job ${jobId} status: ${status.status}`)
+    if (status.status === 'completed') {
+      const result = {}
+      for (const [key, filename] of Object.entries(outputFiles)) {
+        result[key] = status.output_files?.[filename]
+      }
+      console.log('[vgf] ✓ outputs:', Object.keys(result).join(', '))
+      return result
+    }
+    if (status.status === 'failed') {
+      throw new Error(`VGF job failed: ${status.error ?? 'unknown error'}`)
+    }
+  }
+  throw new Error(`VGF job ${jobId} timed out after ${timeoutMs}ms`)
 }
 
 // Parse audio duration from public URL via music-metadata (no ffprobe needed).
@@ -2182,16 +2207,16 @@ async function uploadBytesToB2(buffer, key, contentType = 'application/octet-str
   return uploadUrl
 }
 
-// Burn SRT subtitles via Rendi (uploads SRT to B2 first, passes URL to Rendi)
-async function burnSubtitlesRendi(videoUrl, subtitle_blocks, subtitle_style, jobId) {
+// Burn SRT subtitles via VGF (uploads SRT to B2 first, passes URL to VGF)
+async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId) {
   const srtContent = blocksToSrt(subtitle_blocks)
   const srtKey = `temp/subs_${jobId}.srt`
   let srtUrl
   try {
     srtUrl = await uploadBytesToB2(Buffer.from(srtContent, 'utf-8'), srtKey, 'text/plain')
-    console.log('[rendi] SRT uploaded:', srtKey)
+    console.log('[vgf] SRT uploaded:', srtKey)
   } catch (e) {
-    console.warn('[rendi] SRT upload failed, skipping subtitles:', e.message)
+    console.warn('[vgf] SRT upload failed, skipping subtitles:', e.message)
     return videoUrl
   }
   const sizeMap  = { small: 18, medium: 22, large: 28 }
@@ -2200,27 +2225,26 @@ async function burnSubtitlesRendi(videoUrl, subtitle_blocks, subtitle_style, job
   const alignment = alignMap[subtitle_style.position] ?? 2
   const colour    = hexToAss(subtitle_style.color)
   const bg        = subtitle_style.background
-  // Omit FontName to avoid spaces in name causing shell-split issues on Rendi's side
   let forceStyle = `FontSize=${fontSize},PrimaryColour=${colour},OutlineColour=&H000000,Outline=2,Bold=1,Alignment=${alignment}`
   if (bg) forceStyle += ',BorderStyle=3,BackColour=&H80000000'
   try {
-    const result = await runFFmpegOnRendi(
+    const result = await runFFmpegOnVGF(
       { in_1: videoUrl, in_2: srtUrl },
       { out_1: 'output_subs.mp4' },
       `-i {{in_1}} -vf "subtitles={{in_2}}:force_style='${forceStyle}'" -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`
     )
-    console.log('[rendi] subtitle burn-in done')
+    console.log('[vgf] subtitle burn-in done')
     return result.out_1
   } catch (subsErr) {
-    console.warn('[rendi] subtitle burn-in failed, using video without subs:', subsErr.message)
+    console.warn('[vgf] subtitle burn-in failed, using video without subs:', subsErr.message)
     return videoUrl
   }
 }
 
-// ── Batch xfade helper (Rendi) ─────────────────────────────────────────────
-// Process a batch of clip URLs via Rendi filter_complex xfade chain.
-// O(N) per batch — each clip decoded/encoded exactly once on Rendi's servers.
-async function xfadeBatchPassRendi(clipUrls, clipDurations, transition, td, batchId) {
+// ── Batch xfade helper (VGF) ───────────────────────────────────────────────
+// Process a batch of clip URLs via VGF filter_complex xfade chain.
+// O(N) per batch — each clip decoded/encoded exactly once on VGF's servers.
+async function xfadeBatchPassVGF(clipUrls, clipDurations, transition, td, batchId) {
   if (clipUrls.length === 1) {
     return { url: clipUrls[0], contentDuration: clipDurations[0] }
   }
@@ -2239,7 +2263,7 @@ async function xfadeBatchPassRendi(clipUrls, clipDurations, transition, td, batc
     prevLabel = outLabel
   }
   const inputArgs = clipUrls.map((_, i) => `-i {{in_${i + 1}}}`).join(' ')
-  const result = await runFFmpegOnRendi(
+  const result = await runFFmpegOnVGF(
     inputFiles,
     { out_1: `${batchId}.mp4` },
     `${inputArgs} -filter_complex "${filterParts.join(';')}" -map [vout] -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -an {{out_1}}`
@@ -2247,7 +2271,7 @@ async function xfadeBatchPassRendi(clipUrls, clipDurations, transition, td, batc
   return { url: result.out_1, contentDuration: clipDurations.reduce((a, b) => a + b, 0) }
 }
 
-// ── Async video rendering pipeline (Rendi) ────────────────────────────────
+// ── Async video rendering pipeline (VGF) ─────────────────────────────────
 async function processVideoJob(jobId, body) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytgen-'))
   await updateJob(jobId, { status: 'processing', progress: 5 })
@@ -2279,7 +2303,7 @@ async function processVideoJob(jobId, body) {
     const useXfade = transition && transition !== 'cut' && images.length > 1
     const td = Math.max(0.1, Math.min(1.5, Number(transition_duration) || 0.5))
 
-    // ── Stage 1: Normalize audio via Rendi + get duration ────────────────────
+    // ── Stage 1: Normalize audio via VGF + get duration ──────────────────────
     console.time(T('1_audio_norm'))
     // Normalize loudness to -14 LUFS (YouTube standard). Duration is read from
     // the original URL since loudnorm preserves duration exactly.
@@ -2288,13 +2312,13 @@ async function processVideoJob(jobId, body) {
 
     let finalAudioUrl = audio_url
     try {
-      const normResult = await runFFmpegOnRendi(
+      const normResult = await runFFmpegOnVGF(
         { in_1: audio_url },
         { out_1: 'audio_norm.mp3' },
         '-i {{in_1}} -filter:a loudnorm=I=-14:LRA=7:TP=-1 -ar 44100 {{out_1}}'
       )
       finalAudioUrl = normResult.out_1
-      console.log('[audio] loudnorm applied via Rendi')
+      console.log('[audio] loudnorm applied via VGF')
     } catch (normErr) {
       console.warn('[audio] loudnorm failed, using original:', normErr.message)
     }
@@ -2316,20 +2340,20 @@ async function processVideoJob(jobId, body) {
     const outputPath = path.join(tmpDir, 'output.mp4')
 
     if (useXfade) {
-      // ── Stage 2: Encode all clips via Rendi (parallel) ──────────────────────
+      // ── Stage 2: Encode all clips via VGF (parallel) ────────────────────────
       console.time(T('2_clips_encode'))
-      console.log(`[rendi] encoding ${images.length} clips in parallel...`)
+      console.log(`[vgf] encoding ${images.length} clips in parallel...`)
       const clipUrls = await Promise.all(images.map(async (img, i) => {
         const clipDur = (durations[i] + td).toFixed(3)
-        const result = await runFFmpegOnRendi(
+        const result = await runFFmpegOnVGF(
           { in_1: img.url },
           { out_1: `clip_${i}.mp4` },
           `-loop 1 -t ${clipDur} -i {{in_1}} -vf "${VF_BASE}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
         )
-        console.log(`[rendi] clip_${i} done`)
+        console.log(`[vgf] clip_${i} done`)
         return result.out_1
       }))
-      console.log(`[rendi] all ${clipUrls.length} clips encoded`)
+      console.log(`[vgf] all ${clipUrls.length} clips encoded`)
       console.timeEnd(T('2_clips_encode'))
       await updateJob(jobId, { progress: 20 })
 
@@ -2337,24 +2361,24 @@ async function processVideoJob(jobId, body) {
       console.time(T('3_xfade'))
       const XFADE_BATCH_SIZE = 4
 
-      // Phase A: process clips in batches of 4 via Rendi filter_complex
+      // Phase A: process clips in batches of 4 via VGF filter_complex
       const batchResults = []
       for (let b = 0; b < clipUrls.length; b += XFADE_BATCH_SIZE) {
         const bClips = clipUrls.slice(b, b + XFADE_BATCH_SIZE)
         const bDurs  = durations.slice(b, b + XFADE_BATCH_SIZE)
         const bNum   = Math.floor(b / XFADE_BATCH_SIZE)
-        console.log(`[rendi] xfade batch ${bNum}: ${bClips.length} clips, ${bDurs.reduce((a, c) => a + c, 0).toFixed(1)}s`)
-        const result = await xfadeBatchPassRendi(bClips, bDurs, transition, td, `batch_${bNum}`)
+        console.log(`[vgf] xfade batch ${bNum}: ${bClips.length} clips, ${bDurs.reduce((a, c) => a + c, 0).toFixed(1)}s`)
+        const result = await xfadeBatchPassVGF(bClips, bDurs, transition, td, `batch_${bNum}`)
         batchResults.push(result)
       }
-      console.log(`[rendi] ${batchResults.length} batch(es) ready, merging...`)
+      console.log(`[vgf] ${batchResults.length} batch(es) ready, merging...`)
 
       // Phase B: merge batch outputs
       let accUrl = batchResults[0].url
       let accDur = batchResults[0].contentDuration
       for (let i = 1; i < batchResults.length; i++) {
         const offset = Math.max(0, accDur - td)
-        const mergeResult = await runFFmpegOnRendi(
+        const mergeResult = await runFFmpegOnVGF(
           { in_1: accUrl, in_2: batchResults[i].url },
           { out_1: `merge_${i}.mp4` },
           `-i {{in_1}} -i {{in_2}} -filter_complex "[0:v][1:v]xfade=transition=${transition}:duration=${td.toFixed(2)}:offset=${offset.toFixed(3)}[vout]" -map [vout] -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -an {{out_1}}`
@@ -2367,14 +2391,14 @@ async function processVideoJob(jobId, body) {
       const muxVf = effectFilters.length > 0
         ? `format=yuv420p,${effectFilters.join(',')}`
         : 'format=yuv420p'
-      console.log(`[rendi] mux+effects vf: ${muxVf}`)
-      const muxResult = await runFFmpegOnRendi(
+      console.log(`[vgf] mux+effects vf: ${muxVf}`)
+      const muxResult = await runFFmpegOnVGF(
         { in_1: accUrl, in_2: finalAudioUrl },
         { out_1: 'temp_1.mp4' },
         `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf "${muxVf}" -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
       )
       let currentUrl = muxResult.out_1
-      console.log(`[rendi] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
+      console.log(`[vgf] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
       console.timeEnd(T('3_xfade'))
       await updateJob(jobId, { progress: 60 })
 
@@ -2384,27 +2408,27 @@ async function processVideoJob(jobId, body) {
       // ── Stage 5: Burn subtitles ─────────────────────────────────────────────
       if (subtitle_blocks?.length && subtitle_style?.burnIn) {
         console.time(T('5_subtitles'))
-        currentUrl = await burnSubtitlesRendi(currentUrl, subtitle_blocks, subtitle_style, jobId)
+        currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId)
         console.timeEnd(T('5_subtitles'))
         await updateJob(jobId, { progress: 80 })
       } else {
         console.log('[perf] 5_subtitles: skipped (no burn-in)')
       }
 
-      // Download final output from Rendi for B2 upload
+      // Download final output from VGF for B2 upload
       await downloadFile(currentUrl, outputPath)
 
     } else {
-      // ── Stage 2+3 (cut): Encode clips in parallel + concat via Rendi ────────
+      // ── Stage 2+3 (cut): Encode clips in parallel + concat via VGF ──────────
       console.time(T('2_clips_encode'))
-      console.log(`[rendi] encoding ${images.length} clips in parallel (cut)...`)
+      console.log(`[vgf] encoding ${images.length} clips in parallel (cut)...`)
       const clipUrls = await Promise.all(images.map(async (img, i) => {
-        const result = await runFFmpegOnRendi(
+        const result = await runFFmpegOnVGF(
           { in_1: img.url },
           { out_1: `clip_${i}.mp4` },
           `-loop 1 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${VF_BASE}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
         )
-        console.log(`[rendi] clip_${i} done`)
+        console.log(`[vgf] clip_${i} done`)
         return result.out_1
       }))
       console.timeEnd(T('2_clips_encode'))
@@ -2429,13 +2453,13 @@ async function processVideoJob(jobId, body) {
         ` -i {{in_${clipUrls.length + 1}}}`
       const audioIdx = clipUrls.length // 0-based audio input index
 
-      const concatResult = await runFFmpegOnRendi(
+      const concatResult = await runFFmpegOnVGF(
         concatInputFiles,
         { out_1: 'temp_1.mp4' },
         `${inputArgs} -filter_complex "${filterStr}" -map [vout] -map ${audioIdx}:a -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
       )
       let currentUrl = concatResult.out_1
-      console.log(`[rendi] concat+effects done: effects=[${effects.join(', ')}]`)
+      console.log(`[vgf] concat+effects done: effects=[${effects.join(', ')}]`)
       console.timeEnd(T('3_concat'))
       await updateJob(jobId, { progress: 60 })
 
@@ -2445,14 +2469,14 @@ async function processVideoJob(jobId, body) {
       // ── Stage 5: Burn subtitles ─────────────────────────────────────────────
       if (subtitle_blocks?.length && subtitle_style?.burnIn) {
         console.time(T('5_subtitles'))
-        currentUrl = await burnSubtitlesRendi(currentUrl, subtitle_blocks, subtitle_style, jobId)
+        currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId)
         console.timeEnd(T('5_subtitles'))
         await updateJob(jobId, { progress: 80 })
       } else {
         console.log('[perf] 5_subtitles: skipped (no burn-in)')
       }
 
-      // Download final output from Rendi for B2 upload
+      // Download final output from VGF for B2 upload
       await downloadFile(currentUrl, outputPath)
     }
 
