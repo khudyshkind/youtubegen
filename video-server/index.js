@@ -9,6 +9,7 @@ const http = require('http')
 const crypto = require('crypto')
 const AnthropicPkg = require('@anthropic-ai/sdk')
 const Anthropic = AnthropicPkg.default ?? AnthropicPkg
+const { Readable } = require('stream')
 const cron = require('node-cron')
 const RssParser = require('rss-parser')
 // R2 upload uses Node's native https + manual AWS SigV4 (no SDK dependency)
@@ -1937,15 +1938,25 @@ async function uploadVideoToR2(filePath, projectId, userId) {
 
 // Upload final video to Backblaze B2 (S3-compatible).
 // R2 was replaced because Cloudflare R2 rejects TLS handshakes from Railway IPs at WAF level.
+// Streams file to avoid loading large videos into RAM (OOM risk on Railway).
 async function uploadVideoToB2(filePath, projectId, userId) {
-  const fileBuffer = fs.readFileSync(filePath)
   const key = `users/${userId}/${projectId}/output_${Date.now()}.mp4`
   const bucket = (process.env.B2_BUCKET || '').trim()
   const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
   const region = (process.env.B2_REGION || 'us-east-005').trim()
+  const fileSize = fs.statSync(filePath).size
 
   console.log(`[b2] node:${process.version}  endpoint: ${endpoint}  bucket: ${bucket}`)
-  console.log(`[b2] uploading ${key} (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB)`)
+  console.log(`[b2] uploading ${key} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`)
+
+  // Stream SHA256 hash computation — avoids loading full file into RAM
+  const bodyHash = await new Promise((resolve, reject) => {
+    const h = crypto.createHash('sha256')
+    fs.createReadStream(filePath)
+      .on('data', c => h.update(c))
+      .on('end', () => resolve(h.digest('hex')))
+      .on('error', reject)
+  })
 
   const uploadUrl = `${endpoint}/${bucket}/${key}`
   const parsed = new URL(uploadUrl)
@@ -1958,7 +1969,6 @@ async function uploadVideoToB2(filePath, projectId, userId) {
   const dateStamp = amzDate.slice(0, 8)
   const service = 's3'
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
-  const bodyHash = crypto.createHash('sha256').update(fileBuffer).digest('hex')
 
   const canonicalHeaders =
     `content-type:video/mp4\n` +
@@ -1986,11 +1996,14 @@ async function uploadVideoToB2(filePath, projectId, userId) {
     method: 'PUT',
     headers: {
       'Content-Type': 'video/mp4',
+      'Content-Length': String(fileSize),
       'x-amz-content-sha256': bodyHash,
       'x-amz-date': amzDate,
       'Authorization': authorization,
     },
-    body: fileBuffer,
+    body: Readable.toWeb(fs.createReadStream(filePath)),
+    duplex: 'half',
+    signal: AbortSignal.timeout(600000), // 10 min max for large files
   })
 
   if (!res.ok) {
