@@ -2077,7 +2077,7 @@ const EFFECT_FILTERS = {
   vignette: 'vignette=PI/3',
   haze: 'colorbalance=rs=0.05:gs=0.02:bs=0.25',
   grayscale: 'hue=s=0',
-  cinematic: 'curves=r=0/0\\ 1/0.88:b=0/0.05\\ 1/0.95,colorbalance=ss=0.08',
+  cinematic: 'curves=r=0/0\\ 1/0.88:b=0/0.05\\ 1/0.95',
   lens_flare: 'curves=r=0/0.02\\ 0.5/0.55\\ 1/1:g=0/0\\ 0.5/0.5\\ 1/0.97:b=0/0.05\\ 0.5/0.45\\ 1/0.9',
   vhs: 'noise=alls=20:allf=t,hue=s=0.65,colorbalance=rs=0.08:gs=-0.03:bs=-0.05',
 }
@@ -2406,7 +2406,7 @@ async function processVideoJob(jobId, body) {
       const muxResult = await runFFmpegOnVGF(
         { in_1: accUrl, in_2: finalAudioUrl },
         { out_1: 'temp_1.mp4' },
-        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf "${muxVf}" -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
+        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
       )
       let currentUrl = muxResult.out_1
       console.log(`[vgf] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
@@ -2467,7 +2467,7 @@ async function processVideoJob(jobId, body) {
       const concatResult = await runFFmpegOnVGF(
         concatInputFiles,
         { out_1: 'temp_1.mp4' },
-        `${inputArgs} -filter_complex "${filterStr}" -map [vout] -map ${audioIdx}:a -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
+        `${inputArgs} -filter_complex ${filterStr} -map [vout] -map ${audioIdx}:a -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
       )
       let currentUrl = concatResult.out_1
       console.log(`[vgf] concat+effects done: effects=[${effects.join(', ')}]`)
