@@ -8,41 +8,39 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-const COMMENTS_SYSTEM_PROMPT = `Ты опытный аналитик аудитории YouTube, специализирующийся на извлечении ценных инсайтов из комментариев зрителей. Твоя задача — систематически анализировать комментарии, чтобы помочь автору лучше понять свою аудиторию и создавать контент, который резонирует.
+function getCommentsPrompt(lang: string): string {
+  const isRu = lang !== 'en'
+  return isRu ? `Ты опытный аналитик аудитории YouTube, специализирующийся на извлечении ценных инсайтов из комментариев зрителей. Твоя задача — систематически анализировать комментарии, чтобы помочь автору лучше понять свою аудиторию и создавать контент, который резонирует.
 
 МЕТОДОЛОГИЯ АНАЛИЗА КОММЕНТАРИЕВ:
-
-1. ЗАПРОСЫ НА ВИДЕО (video_requests)
-• Что аудитория ЯВНО просит снять — ищи фразы типа "снимите про", "хочется видео о", "расскажите про"
-• count — примерное количество похожих запросов (1 = единичный, 5+ = популярный запрос)
-• Группируй похожие запросы в один
-
-2. БОЛИ И ПРОБЛЕМЫ (pain_points)
-• Проблемы аудитории: что не работает, что непонятно, что раздражает
-• Формулируй как конкретную проблему, а не абстракцию
-
-3. НЕЗАКРЫТЫЕ ВОПРОСЫ (unanswered_questions)
-• Вопросы на которые зрители не нашли ответа в видео
-
-4. ПОЗИТИВНЫЕ РЕАКЦИИ (positive_reactions)
-• Что конкретно понравилось: формат, подача, конкретные моменты
-
-5. НЕГАТИВНЫЕ РЕАКЦИИ (negative_reactions)
-• Что не понравилось, что критикуют, что хотят изменить
-
-6. ИДЕИ ДЛЯ ВИДЕО (video_ideas)
-• title — готовое рабочее название видео
-• reason — почему сработает (аудитория просит / много похожих вопросов)
-• based_on — из каких комментариев родилась идея
-
-7. ПОРТРЕТ АУДИТОРИИ (audience_portrait)
-• Кто смотрит: возраст, уровень экспертизы, интересы
-• 2-3 предложения конкретного описания
+1. ЗАПРОСЫ НА ВИДЕО (video_requests): что аудитория ЯВНО просит снять | count = количество похожих запросов
+2. БОЛИ И ПРОБЛЕМЫ (pain_points): конкретные проблемы аудитории, не абстракции
+3. НЕЗАКРЫТЫЕ ВОПРОСЫ (unanswered_questions): вопросы без ответа в видео
+4. ПОЗИТИВНЫЕ РЕАКЦИИ (positive_reactions): что конкретно понравилось
+5. НЕГАТИВНЫЕ РЕАКЦИИ (negative_reactions): что критикуют, что хотят изменить
+6. ИДЕИ ДЛЯ ВИДЕО (video_ideas): title = готовое название | reason = почему сработает | based_on = из каких комментариев
+7. ПОРТРЕТ АУДИТОРИИ (audience_portrait): кто смотрит, 2-3 конкретных предложения
 
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"video_requests":[{"request":"Снимите про зимние шины","count":5}],"pain_points":["боль 1","боль 2"],"unanswered_questions":["вопрос 1","вопрос 2"],"positive_reactions":["что понравилось 1"],"negative_reactions":["что не понравилось 1"],"video_ideas":[{"title":"Готовое название видео","reason":"почему сработает","based_on":"из какого комментария идея"}],"audience_portrait":"Краткое описание кто смотрит"}
+{"video_requests":[{"request":"Снимите про зимние шины для кроссовера","count":5},{"request":"Сравните масло 5W-30 и 5W-40","count":3}],"pain_points":["Дилеры навязывают дополнительные опции и непонятно как отказаться","Непонятно когда менять тормозные колодки без опыта"],"unanswered_questions":["Сколько реально тратится на содержание такой машины в год?","Есть ли смысл брать расширенную гарантию?"],"positive_reactions":["Честный отзыв без рекламы — редкость на ютубе","Очень понятно объяснили про каско без занудства"],"negative_reactions":["Слишком быстро говоришь — не успеваю записывать","Хотелось бы больше конкретных цифр"],"video_ideas":[{"title":"Реальные расходы на авто за год — считаю до копейки","reason":"Много вопросов про стоимость владения, аудитория хочет честных цифр","based_on":"Комментарии про непонятные расходы и вопросы про страховку"}],"audience_portrait":"Мужчины 28-45 лет, покупают или недавно купили первый новый автомобиль. Ищут честную информацию без рекламного глянца. Интересует практическая сторона: обслуживание, расходы, надёжность."}
 
 ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких блоков \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+  : `You are an experienced YouTube audience analyst specializing in extracting valuable insights from viewer comments. Your task is to systematically analyze comments to help the creator understand their audience and create resonant content.
+
+COMMENT ANALYSIS METHODOLOGY:
+1. VIDEO REQUESTS (video_requests): what the audience EXPLICITLY asks to film | count = number of similar requests
+2. PAIN POINTS (pain_points): specific audience problems, not abstractions
+3. UNANSWERED QUESTIONS (unanswered_questions): questions viewers couldn't find answers to in the video
+4. POSITIVE REACTIONS (positive_reactions): what specifically they liked
+5. NEGATIVE REACTIONS (negative_reactions): what they criticize, what they want changed
+6. VIDEO IDEAS (video_ideas): title = ready-to-use title | reason = why it will work | based_on = which comments inspired it
+7. AUDIENCE PORTRAIT (audience_portrait): who watches, 2-3 specific sentences
+
+RESPONSE FORMAT — strict JSON without markdown:
+{"video_requests":[{"request":"Do a video on winter tires for SUVs","count":5},{"request":"Compare 5W-30 vs 5W-40 oil","count":3}],"pain_points":["Dealerships push add-ons and it's unclear how to refuse","Hard to know when to replace brake pads without experience"],"unanswered_questions":["How much does it actually cost to own this car per year?","Is an extended warranty worth it?"],"positive_reactions":["Honest review without ads — rare on YouTube","Explained insurance really clearly without being boring"],"negative_reactions":["Talking too fast — hard to take notes","Would like more specific numbers and prices"],"video_ideas":[{"title":"Real Car Ownership Costs for a Year — Every Dollar Counted","reason":"Many questions about total cost of ownership, audience wants honest numbers","based_on":"Comments about unclear expenses and insurance questions"}],"audience_portrait":"Men 28-45 buying or recently bought their first new car. Looking for honest information without marketing spin. Interested in practical aspects: maintenance, costs, reliability."}
+
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { end with }.`
+}
 
 function parseClaudeJson<T>(text: string, label: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -188,6 +186,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json() as { url?: string; count?: number; lang?: string }
     const url = body.url?.trim() ?? ''
+    const lang = body.lang ?? 'ru'
     const count = [50, 100, 200].includes(body.count ?? 0) ? (body.count as 50 | 100 | 200) : 100
 
     if (!url) return NextResponse.json({ ok: false, error: 'Введите URL видео или канала' }, { status: 400 })
@@ -267,7 +266,7 @@ export async function POST(req: NextRequest) {
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1200,
-      system: [{ type: 'text', text: COMMENTS_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getCommentsPrompt(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Видео/канал на тему: "${topic}"\n\n${selectedComments.length} комментариев:\n${commentsText}` }],
     })
     const raw = (msg.content[0] as { text: string }).text

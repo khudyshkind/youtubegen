@@ -8,51 +8,61 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-const KEYWORDS_SYSTEM_PROMPT_1 = `Ты опытный YouTube SEO аналитик, специализирующийся на оценке ключевых слов. На основе статистических данных (средние просмотры топ-5 видео и количество конкурирующих видео) оцени каждое ключевое слово.
+function getKeywordsPrompt1(lang: string): string {
+  const isRu = lang !== 'en'
+  return isRu ? `Ты опытный YouTube SEO аналитик, специализирующийся на оценке ключевых слов. На основе статистических данных (средние просмотры топ-5 видео и количество конкурирующих видео) оцени каждое ключевое слово.
 
 МЕТОДОЛОГИЯ ОЦЕНКИ:
-• difficulty (1-10) — сложность ранжирования по этому запросу
-  - 1-3: низкая конкуренция, мало видео, легко войти
-  - 4-6: средняя конкуренция, нужна качественная работа
-  - 7-10: высокая конкуренция, нужен сильный канал
-  - Учитывай: video_count (больше = выше difficulty), avg_views (больше = выше difficulty)
-
-• potential (1-10) — потенциал монетизации и трафика
-  - 1-3: низкий интерес аудитории, мало просмотров
-  - 4-6: средний интерес
-  - 7-10: высокий интерес, много просмотров у топ видео
-  - Учитывай: avg_views топ-5 видео (больше = выше potential)
-
+• difficulty (1-10) — сложность ранжирования: 1-3 = низкая, 4-6 = средняя, 7-10 = высокая
+  Учитывай: video_count (больше = выше difficulty), avg_views (больше = выше difficulty)
+• potential (1-10) — потенциал трафика: 1-3 = мало просмотров, 7-10 = много просмотров у топ видео
 • competition — "Низкая" / "Средняя" / "Высокая"
 • recommendation — конкретный совет: "Стоит снять" / "Сложно, но возможно" / "Слишком высокая конкуренция" + причина
 
-ВАЖНО: Оценки должны быть реалистичными и полезными для контент-мейкера при выборе темы.
-
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"keywords":[{"keyword":"авто зимой","difficulty":6,"potential":8,"competition":"Средняя","recommendation":"Стоит снять — хороший баланс просмотров и конкуренции"}]}
+{"keywords":[{"keyword":"авто зимой","difficulty":6,"potential":8,"competition":"Средняя","recommendation":"Стоит снять — хороший баланс просмотров и конкуренции"},{"keyword":"купить электромобиль","difficulty":8,"potential":9,"competition":"Высокая","recommendation":"Сложно — нужен сильный канал с хорошей историей просмотров"}]}
 
 ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+  : `You are an experienced YouTube SEO analyst specializing in keyword evaluation. Based on statistical data (average views of top-5 videos and competing video count), evaluate each keyword.
 
-const KEYWORDS_SYSTEM_PROMPT_2 = `Ты опытный YouTube SEO стратег, помогающий контент-мейкерам выбирать лучшие ключевые слова. На основе списка ключевых слов выбери наиболее перспективные и дай итоговый анализ ниши.
+EVALUATION METHODOLOGY:
+• difficulty (1-10) — ranking difficulty: 1-3 = low, 4-6 = medium, 7-10 = high
+  Consider: video_count (more = higher difficulty), avg_views (more = higher difficulty)
+• potential (1-10) — traffic potential: 1-3 = few views, 7-10 = high views on top videos
+• competition — "Low" / "Medium" / "High"
+• recommendation — specific advice: "Worth filming" / "Possible but tough" / "Competition too high" + reason
+
+RESPONSE FORMAT — strict JSON without markdown:
+{"keywords":[{"keyword":"winter car tips","difficulty":5,"potential":7,"competition":"Medium","recommendation":"Worth filming — good balance of views and competition"},{"keyword":"buy electric car 2026","difficulty":8,"potential":9,"competition":"High","recommendation":"Tough — requires an established channel with strong watch history"}]}
+
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { end with }.`
+}
+
+function getKeywordsPrompt2(lang: string): string {
+  const isRu = lang !== 'en'
+  return isRu ? `Ты опытный YouTube SEO стратег, помогающий контент-мейкерам выбирать лучшие ключевые слова. На основе списка ключевых слов выбери наиболее перспективные и дай итоговый анализ ниши.
 
 МЕТОДОЛОГИЯ ОТБОРА:
-• best_keywords — 3-5 лучших ключевых слов с оптимальным балансом потенциала и конкуренции
-  - Лучшее = высокий потенциал + низкая/средняя сложность
-  - Это ключевые слова для создания основного контента
-
-• low_competition — 3-5 ключевых слов с минимальной конкуренцией
-  - Даже если у них меньше просмотров — по ним легче ранжироваться
-  - Отлично подходят для новых каналов, которым нужны первые просмотры
-
-• insights — краткий аналитический вывод по нише (2-3 предложения)
-  - Общая оценка ниши
-  - Стратегическая рекомендация
-  - На чём сосредоточиться
+• best_keywords — 3-5 лучших ключевых слов: высокий потенциал + низкая/средняя сложность
+• low_competition — 3-5 ключевых слов с минимальной конкуренцией (отлично для новых каналов)
+• insights — краткий вывод по нише (2-3 конкретных предложения с рекомендациями)
 
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
 {"best_keywords":["купить авто 2026","тест-драйв новинки","лучший автомобиль до миллиона"],"low_competition":["авто для семьи советы","как выбрать первый автомобиль"],"insights":"Ниша автомобилей очень конкурентна в топовых запросах, но есть возможности в длинных ключах. Начинайте с запросов о конкретных моделях и сравнениях — там конкуренция ниже а интент покупки выше. Делайте акцент на запросы с годом (2026) — они свежее и менее насыщены контентом."}
 
 ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+  : `You are an experienced YouTube SEO strategist helping content creators choose the best keywords. Based on the keyword list, select the most promising ones and provide a final niche analysis.
+
+SELECTION METHODOLOGY:
+• best_keywords — 3-5 best keywords: high potential + low/medium difficulty
+• low_competition — 3-5 keywords with minimal competition (great for new channels)
+• insights — brief niche analysis (2-3 specific sentences with recommendations)
+
+RESPONSE FORMAT — strict JSON without markdown:
+{"best_keywords":["buy car 2026","new model test drive","best car under 30000"],"low_competition":["family car advice","how to choose your first car"],"insights":"The auto niche is highly competitive for broad queries, but there are opportunities in long-tail keywords. Start with specific model reviews and comparisons — competition is lower there and purchase intent is higher. Focus on queries with the current year (2026) — they are fresher and less saturated with content."}
+
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { end with }.`
+}
 
 function parseClaudeJson<T>(text: string, label: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -234,13 +244,13 @@ export async function POST(req: NextRequest) {
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 800,
-        system: [{ type: 'text', text: KEYWORDS_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: getKeywordsPrompt1(lang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: `Ниша: "${keyword}"\nДанные (avg_views — среднее топ-5 видео, video_count — конкуренция):\n${keywordsData}` }],
       }),
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 400,
-        system: [{ type: 'text', text: KEYWORDS_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: getKeywordsPrompt2(lang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: `Ниша: "${keyword}"\nКлючевые слова:\n${keywordsList}` }],
       }),
     ])

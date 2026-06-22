@@ -36,7 +36,9 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
-const TRENDS_SYSTEM_PROMPT_1 = `Ты опытный YouTube аналитик, специализирующийся на выявлении трендов и вирусных тем. На основе данных о топ видео за указанный период найди 4 ключевых тренда в нише.
+function getTrendsPrompt1(lang: string): string {
+  const isRu = lang !== 'en'
+  return isRu ? `Ты опытный YouTube аналитик, специализирующийся на выявлении трендов и вирусных тем. На основе данных о топ видео за указанный период найди 4 ключевых тренда в нише.
 
 МЕТОДОЛОГИЯ ВЫЯВЛЕНИЯ ТРЕНДОВ:
 • Тренд — тема или формат, набирающий просмотры быстрее обычного
@@ -51,15 +53,34 @@ const TRENDS_SYSTEM_PROMPT_1 = `Ты опытный YouTube аналитик, с
 • "Стабильно" — вечнозелёная тема со стабильным интересом аудитории
 
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"trends":[{"topic":"Конкретная тема","urgency":"Срочно","reason":"Почему вирусится"},{"topic":"Тема 2","urgency":"Актуально","reason":"Причина"},{"topic":"Тема 3","urgency":"Набирает","reason":"Причина"},{"topic":"Тема 4","urgency":"Стабильно","reason":"Причина"}]}
+{"trends":[{"topic":"Электромобили в России","urgency":"Срочно","reason":"3 видео из топ-5 набрали >1М просмотров за последние 2 недели"},{"topic":"Тема 2","urgency":"Актуально","reason":"причина"},{"topic":"Тема 3","urgency":"Набирает","reason":"причина"},{"topic":"Тема 4","urgency":"Стабильно","reason":"причина"}]}
 
-ТРЕБОВАНИЯ:
-• Ровно 4 тренда в массиве
-• topic — конкретная тема, а не абстракция
-• reason — конкретная причина на основе данных видео
-• Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Начни с { и заканчивай с }.`
+ТРЕБОВАНИЯ: ровно 4 тренда | topic — конкретная тема, не абстракция | reason — конкретная причина на основе данных видео
+Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Начни с { и заканчивай с }.`
+  : `You are an experienced YouTube trend analyst. Based on top video data for the specified period, identify 4 key trends in the niche.
 
-const TRENDS_SYSTEM_PROMPT_2 = `Ты опытный YouTube аналитик и контент-стратег. На основе списка трендов в нише сгенерируй конкретные идеи видео, которые можно снять прямо сейчас.
+TREND METHODOLOGY:
+• Trend = topic or format gaining views faster than usual
+• Analyze: video titles, view counts, publication dates
+• Videos with high views and recent dates = strong trend signal
+• Look for repeating topics and patterns in top video titles
+
+URGENCY LEVELS:
+• "Urgent" — trend is at peak right now, film immediately
+• "Active" — trend has been active for 1-2 weeks
+• "Rising" — trend just starting, good time to enter
+• "Evergreen" — evergreen topic with stable audience interest
+
+RESPONSE FORMAT — strict JSON without markdown:
+{"trends":[{"topic":"Electric Vehicles Comparison 2026","urgency":"Urgent","reason":"3 of top 5 videos got >1M views in the last 2 weeks"},{"topic":"Topic 2","urgency":"Active","reason":"reason"},{"topic":"Topic 3","urgency":"Rising","reason":"reason"},{"topic":"Topic 4","urgency":"Evergreen","reason":"reason"}]}
+
+REQUIREMENTS: exactly 4 trends | topic = specific, not abstract | reason = specific evidence from video data
+Return ONLY valid JSON. No \`\`\`json. Start with { end with }.`
+}
+
+function getTrendsPrompt2(lang: string): string {
+  const isRu = lang !== 'en'
+  return isRu ? `Ты опытный YouTube аналитик и контент-стратег. На основе списка трендов в нише сгенерируй конкретные идеи видео, которые можно снять прямо сейчас.
 
 МЕТОДОЛОГИЯ ГЕНЕРАЦИИ ИДЕЙ:
 • Для каждого тренда предложи 3 разные идеи видео
@@ -69,12 +90,25 @@ const TRENDS_SYSTEM_PROMPT_2 = `Ты опытный YouTube аналитик и 
 • Заголовки должны быть кликабельными и конкретными
 
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"video_ideas":[{"trend":"название тренда","ideas":["Конкретная идея/заголовок 1","Конкретная идея/заголовок 2","Конкретная идея/заголовок 3"]}]}
+{"video_ideas":[{"trend":"Электромобили в России","ideas":["5 причин купить электромобиль в 2026 — даже при нашей инфраструктуре","Зарядил электромобиль на трассе М4 — честный опыт","Tesla vs отечественные EV: что реально выгоднее?"]}]}
 
-ТРЕБОВАНИЯ:
-• video_ideas содержит один объект на каждый тренд из запроса
-• 3 идеи на тренд
-• Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Начни с { и заканчивай с }.`
+ТРЕБОВАНИЯ: video_ideas — один объект на каждый тренд | 3 идеи на тренд
+Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Начни с { и заканчивай с }.`
+  : `You are an experienced YouTube analyst and content strategist. Based on niche trends, generate specific video ideas you can film right now.
+
+VIDEO IDEA METHODOLOGY:
+• Propose 3 different video ideas per trend
+• Ideas must be specific — not "topic overview" but "5 reasons why X beats Y in 2026"
+• Vary formats: top list, breakdown, comparison, story, how-to, reaction
+• Assume viewers already know the trend — give them a fresh angle
+• Titles must be clickable and specific
+
+RESPONSE FORMAT — strict JSON without markdown:
+{"video_ideas":[{"trend":"Electric Vehicles 2026","ideas":["5 Reasons to Buy an EV in 2026 — Even With Today's Infrastructure","I Charged My EV on a Road Trip — Honest Experience","Tesla vs Budget EVs: Which Is Actually Worth It?"]}]}
+
+REQUIREMENTS: one object per trend | 3 ideas per trend
+Return ONLY valid JSON. No \`\`\`json. Start with { end with }.`
+}
 
 function cacheKey(topic: string, period: string, lang: string) {
   const day = new Date().toISOString().slice(0, 10)
@@ -197,7 +231,7 @@ export async function POST(req: NextRequest) {
     const msg1 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 500,
-      system: [{ type: 'text', text: TRENDS_SYSTEM_PROMPT_1, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getTrendsPrompt1(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: dataCtx }],
     })
     console.log('[trends] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
@@ -214,7 +248,7 @@ export async function POST(req: NextRequest) {
     const msg2 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 600,
-      system: [{ type: 'text', text: TRENDS_SYSTEM_PROMPT_2, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getTrendsPrompt2(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Ниша: "${topic}". Тренды: ${JSON.stringify(trendNames)}\n\nДля каждого тренда — 3 идеи для видео.` }],
     })
     console.log('[trends] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)

@@ -23,7 +23,9 @@ function parseClaudeJson<T>(text: string, label: string): T {
   throw new Error(`${label}: unbalanced braces`)
 }
 
-const REVENUE_SYSTEM_PROMPT = `Ты эксперт по монетизации YouTube. На основе ниши и географии аудитории определи реалистичный RPM (доход на 1000 просмотров после вычета 45% YouTube).
+function getRevenuePrompt(lang: string): string {
+  const isRu = lang !== 'en'
+  return isRu ? `Ты эксперт по монетизации YouTube. На основе ниши и географии аудитории определи реалистичный RPM (доход на 1000 просмотров после вычета 45% YouTube).
 
 ОРИЕНТИРЫ RPM ПО РЫНКАМ:
 - США / Канада / Австралия / Великобритания: $4-15 (премиум рекламодатели)
@@ -34,17 +36,30 @@ const REVENUE_SYSTEM_PROMPT = `Ты эксперт по монетизации Y
 - Индия: $0.2-1
 - Смешанная / глобальная аудитория: $1.5-5
 
-МНОЖИТЕЛИ ПО НИШАМ:
-- Финансы / бизнес / недвижимость / страхование: 2-3x
-- Технологии / ПО / SaaS: 1.5-2x
-- Авто / здоровье / юриспруденция: 1.2-1.8x
-- Образование / наука / история: 1x
-- Развлечения / юмор / игры / лайфстайл: 0.5-0.8x
+МНОЖИТЕЛИ ПО НИШАМ: Финансы/бизнес/страхование: 2-3x | Технологии/ПО: 1.5-2x | Авто/здоровье: 1.2-1.8x | Образование: 1x | Развлечения/игры: 0.5-0.8x
 
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"rpm_min":1.5,"rpm_max":3.5,"rpm_avg":2.5,"niche_factor":"Средний","explanation":"Автомобильная ниша — умеренный RPM благодаря рекламодателям из сферы автодилеров и страхования"}
+{"rpm_min":1.5,"rpm_max":3.5,"rpm_avg":2.5,"niche_factor":"Средний","explanation":"Автомобильная ниша — умеренный RPM благодаря рекламодателям из сферы автодилеров и страхования. Российская аудитория даёт более низкий RPM чем западная."}
 
 ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+  : `You are a YouTube monetization expert. Based on the niche and audience geography, determine a realistic RPM (revenue per 1000 views after YouTube's 45% cut).
+
+RPM BENCHMARKS BY MARKET:
+- US / Canada / Australia / UK: $4-15 (premium advertisers)
+- Western Europe (DE/FR/NL/SE/CH): $3-10
+- Eastern Europe / CIS / Russia: $0.5-3
+- LATAM (BR/MX/AR): $0.5-2
+- SE Asia (TH/PH/ID/MY): $0.3-1.5
+- India: $0.2-1
+- Mixed / global audience: $1.5-5
+
+NICHE MULTIPLIERS: Finance/business/insurance: 2-3x | Tech/software: 1.5-2x | Auto/health: 1.2-1.8x | Education: 1x | Entertainment/gaming: 0.5-0.8x
+
+RESPONSE FORMAT — strict JSON without markdown:
+{"rpm_min":2.0,"rpm_max":5.0,"rpm_avg":3.5,"niche_factor":"Medium-High","explanation":"Auto niche has moderate-to-good RPM driven by car dealer and insurance advertisers. US/Western audience commands premium rates from automotive brands."}
+
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { end with }.`
+}
 
 const COUNTRY_LABELS: Record<string, string> = {
   ru: 'Россия / СНГ',
@@ -67,6 +82,7 @@ export async function POST(req: NextRequest) {
     const niche = body.niche?.trim() ?? ''
     const views = Math.max(0, Math.round(body.views ?? 0))
     const country = body.country ?? 'mix'
+    const lang = body.lang ?? 'ru'
 
     if (!niche) return NextResponse.json({ ok: false, error: 'Введите нишу' }, { status: 400 })
     if (views <= 0) return NextResponse.json({ ok: false, error: 'Введите количество просмотров' }, { status: 400 })
@@ -80,7 +96,7 @@ export async function POST(req: NextRequest) {
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 300,
-      system: [{ type: 'text', text: REVENUE_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getRevenuePrompt(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Ниша: ${niche}\nРынок аудитории: ${countryLabel}` }],
     })
     const raw = (msg.content[0] as { text: string }).text

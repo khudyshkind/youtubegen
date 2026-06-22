@@ -9,35 +9,55 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-const RISING_STARS_SYSTEM_PROMPT = `Ты эксперт по анализу роста YouTube каналов, специализирующийся на выявлении восходящих звёзд — новых каналов, которые стремительно набирают аудиторию. Ты умеешь точно определять причины вирусного роста и конкретные стратегии, работающие в данной нише.
+function getRisingStarsPrompt(lang: string): string {
+  const isRu = lang !== 'en'
+  return isRu ? `Ты эксперт по анализу роста YouTube каналов, специализирующийся на выявлении восходящих звёзд — новых каналов, которые стремительно набирают аудиторию. Ты умеешь точно определять причины вирусного роста и конкретные стратегии, работающие в данной нише.
 
 МЕТОДОЛОГИЯ АНАЛИЗА КАНАЛОВ:
 
 ОПРЕДЕЛЕНИЕ ПРИЧИНЫ РОСТА (growth_reason):
 • Анализируй РЕАЛЬНЫЕ названия топ видео канала — они напрямую показывают что сработало
 • Ищи паттерны: "скандальные" заголовки, эксклюзивная информация, уникальный формат, первые в нише
-• Не давай общих ответов типа "регулярные публикации" или "качественный контент"
-• Хороший пример: "Первым протестировал новый iPhone 16 Pro за неделю до релиза — 2.1М просмотров"
-• Плохой пример: "Активно публикует контент по теме"
+• Не давай общих ответов. Хороший пример: "Первым протестировал новый iPhone 16 Pro за неделю до релиза — 2.1М просмотров"
 
 ОПРЕДЕЛЕНИЕ СТРАТЕГИИ (strategy):
-• Конкретный подход к созданию контента на основе реальных видео
-• Формат видео (длина, структура, подача), стиль заголовков, тематические углы
+• Конкретный подход: формат видео, стиль заголовков, тематические углы
 • Пример: "Сравнительные обзоры в формате 60 секунд с провокационными заголовками-вопросами"
 
 КЛЮЧЕВОЙ ВЫВОД (key_takeaway):
 • Одно конкретное действие которое можно повторить — с примером реального видео канала
 • Пример: "Скопируй формат 'Честный обзор [продукта] через 6 месяцев' — это видео набрало 890К просмотров"
-• Не "изучай успешные каналы" а конкретная техника
 
-ОБЩИЕ ПАТТЕРНЫ (common_patterns):
-• Что объединяет несколько каналов из списка
-• Конкретный паттерн с примерами
+ОБЩИЕ ПАТТЕРНЫ (common_patterns): что объединяет несколько каналов из списка — конкретный паттерн с примерами
 
 ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"channels":[{"name":"АвтоОбзор","growth_reason":"Первыми сделали тест-драйв нового Lada Vesta NG — видео набрало 2.1М просмотров за неделю","strategy":"Публикуют обзоры в день официального выхода модели — опережают конкурентов на 1-2 дня","key_takeaway":"Снимай видео в день анонса новой модели — видео '5 причин купить' набирают в 3-5 раз больше просмотров чем запоздалые обзоры"}],"common_patterns":["Все растущие каналы используют провокационные заголовки-вопросы типа 'Стоит ли покупать X в 2026?' — это увеличивает CTR до 8-12%"]}
+{"channels":[{"name":"АвтоОбзор","growth_reason":"Первыми сделали тест-драйв нового Lada Vesta NG — видео набрало 2.1М просмотров за неделю","strategy":"Публикуют обзоры в день официального выхода модели — опережают конкурентов на 1-2 дня","key_takeaway":"Снимай видео в день анонса новой модели — видео с первым обзором набирают в 3-5 раз больше просмотров чем запоздалые"}],"common_patterns":["Все растущие каналы используют заголовки-вопросы типа 'Стоит ли покупать X в 2026?' — это увеличивает CTR до 8-12%"]}
 
 ВАЖНО: Верни ТОЛЬКО валидный JSON. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
+  : `You are an expert in YouTube channel growth analysis, specializing in identifying rising stars — new channels rapidly gaining audience. You pinpoint exact reasons for viral growth and specific strategies that work in a given niche.
+
+CHANNEL ANALYSIS METHODOLOGY:
+
+GROWTH REASON (growth_reason):
+• Analyze REAL top video titles — they show directly what worked
+• Look for patterns: provocative headlines, exclusive info, unique format, first in niche
+• No generic answers. Good example: "First to test the new iPhone 16 Pro a week before launch — 2.1M views"
+
+STRATEGY (strategy):
+• Specific content approach: video format, title style, topic angles
+• Example: "60-second comparison reviews with provocative question-style titles"
+
+KEY TAKEAWAY (key_takeaway):
+• One specific repeatable action — with a real example video from the channel
+• Example: "Copy the 'Honest review of [product] after 6 months' format — that video hit 890K views"
+
+COMMON PATTERNS (common_patterns): what unites several channels on the list — specific pattern with examples
+
+RESPONSE FORMAT — strict JSON without markdown:
+{"channels":[{"name":"AutoReview","growth_reason":"First to test-drive the new model on launch day — video hit 2.1M views in one week","strategy":"Publish reviews on official release day — beats competitors by 1-2 days","key_takeaway":"Film on announcement day — first-review videos get 3-5x more views than delayed ones"}],"common_patterns":["All growing channels use question-style titles like 'Is X worth buying in 2026?' — this drives CTR to 8-12%"]}
+
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { end with }.`
+}
 
 function parseClaudeJson<T>(text: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -83,8 +103,8 @@ export async function POST(req: NextRequest) {
     const topic = body.topic?.trim() ?? ''
     const subMin = body.sub_min ?? 1000
     const subMax = body.sub_max ?? 100000
-    // months_max=0 means no age restriction; undefined falls back to 0 (no restriction)
     const monthsMax = body.months_max ?? 0
+    const lang = body.lang ?? 'ru'
 
     console.log(`[rising] start topic="${topic}" sub_min=${subMin} sub_max=${subMax} months_max=${monthsMax}`)
 
@@ -298,7 +318,7 @@ ${videoLines}`
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2500,
-      system: [{ type: 'text', text: RISING_STARS_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: getRisingStarsPrompt(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{
         role: 'user',
         content: `Ниша: "${topic}". Проанализируй ${enriched.length} восходящих каналов.\n\n${channelsSummary}\n\nВерни JSON ровно с ${enriched.length} элементами в channels.`,
