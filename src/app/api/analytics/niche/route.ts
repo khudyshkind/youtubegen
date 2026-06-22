@@ -304,10 +304,12 @@ export async function POST(req: NextRequest) {
 
     // Request 2 — recommendations + formats with real avg_views
     console.log('[niche] step 5b: claude recommendations')
+    const _prompt2 = getNichePrompt2(lang)
+    console.log('[niche] LANG:', lang, '| isRu:', lang !== 'en', '| PROMPT2 first 300:', _prompt2.substring(0, 300))
     const msg2 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 600,
-      system: [{ type: 'text', text: getNichePrompt2(lang), cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: _prompt2, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Ниша: "${topic}"\n${dataCtx}\n\nОпредели топ форматы на основе РЕАЛЬНЫХ видео выше.` }],
     })
     console.log('[niche] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
