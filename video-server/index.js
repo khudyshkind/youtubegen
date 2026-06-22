@@ -2094,11 +2094,11 @@ app.get('/health', (_req, res) => res.json({ ok: true }))
 async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs = 600000) {
   if (!VGF_API_KEY) throw new Error('VGF_API_KEY not configured')
 
-  // VGF uses output_files as array of filenames; replace {{out_N}} with filename in command
+  // VGF uses output_files as array of filenames; replace {{out_N}} with {{filename}} in command
   let cmd = ffmpegCommand
   const outNames = []
   for (const [key, filename] of Object.entries(outputFiles)) {
-    cmd = cmd.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), filename)
+    cmd = cmd.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), `{{${filename}}}`)
     outNames.push(filename)
   }
   console.log(`[vgf] → ${cmd.slice(0, 150)}`)
@@ -2114,8 +2114,8 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
     throw new Error(`VGF submit HTTP ${submitRes.status}: ${errBody.slice(0, 300)}`)
   }
   const submitBody = await submitRes.json()
-  console.log('[vgf] submit response:', JSON.stringify(submitBody).slice(0, 300))
-  const jobId = submitBody.id ?? submitBody.job_id ?? submitBody.jobId ?? submitBody.data?.id
+  const jobId = submitBody.data?.id
+  if (!jobId) throw new Error(`VGF: no job id in submit response: ${JSON.stringify(submitBody).slice(0, 200)}`)
   console.log(`[vgf] job submitted: ${jobId}`)
 
   // Poll until completed or timed out
@@ -2131,10 +2131,10 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
       console.warn(`[vgf] poll HTTP ${pollRes?.status ?? 'err'}: ${errTxt.slice(0, 200)}`)
       continue
     }
-    const status = await pollRes.json()
-    if (!status.status) console.log('[vgf] poll raw:', JSON.stringify(status).slice(0, 300))
+    const pollBody = await pollRes.json()
+    const status = pollBody.data ?? pollBody
     console.log(`[vgf] job ${jobId} status: ${status.status}`)
-    if (status.status === 'completed') {
+    if (status.status === 'succeeded') {
       const result = {}
       for (const [key, filename] of Object.entries(outputFiles)) {
         result[key] = status.output_files?.[filename]
@@ -2143,7 +2143,7 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
       return result
     }
     if (status.status === 'failed') {
-      throw new Error(`VGF job failed: ${status.error ?? 'unknown error'}`)
+      throw new Error(`VGF job failed: ${status.error_message ?? 'unknown error'}`)
     }
   }
   throw new Error(`VGF job ${jobId} timed out after ${timeoutMs}ms`)
