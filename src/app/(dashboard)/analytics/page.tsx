@@ -569,7 +569,7 @@ function TrendsTab({ externalResult, onClearExternal }: {
   externalResult?: TrendResult | null
   onClearExternal?: () => void
 }) {
-  const { t } = useLang()
+  const { t, lang } = useLang()
   const router = useRouter()
   const { setScriptParams, setStep } = useStudioStore()
 
@@ -597,7 +597,7 @@ function TrendsTab({ externalResult, onClearExternal }: {
       const res = await fetch('/api/analytics/trends', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, period }),
+        body: JSON.stringify({ topic, period, lang }),
       })
       const json = await res.json() as { ok: boolean; data?: TrendResult; cached?: boolean; error?: string; code?: string }
       if (!json.ok) {
@@ -762,7 +762,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
   cameFromRisingStars?: boolean
   onBackToRisingStars?: () => void
 }) {
-  const { t } = useLang()
+  const { t, lang } = useLang()
   const router = useRouter()
   const { setScriptParams, setStep } = useStudioStore()
 
@@ -789,7 +789,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
       const res = await fetch('/api/analytics/channel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel }),
+        body: JSON.stringify({ channel, lang }),
       })
       const json = await res.json() as { ok: boolean; data?: ChannelResult; cached?: boolean; error?: string; code?: string }
       if (!json.ok) {
@@ -1014,6 +1014,7 @@ function RevenueTab({
   externalResult: RevenueResult | null
   onClearExternal: () => void
 }) {
+  const { lang } = useLang()
   const [niche, setNiche] = useState('')
   const [views, setViews] = useState('')
   const [country, setCountry] = useState('mix')
@@ -1031,7 +1032,7 @@ function RevenueTab({
       const res = await fetch('/api/analytics/revenue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ niche, views: Number(views), country }),
+        body: JSON.stringify({ niche, views: Number(views), country, lang }),
       })
       const json = await res.json() as { ok: boolean; data?: RevenueResult; error?: string }
       if (!json.ok) { setError(json.error ?? 'Ошибка'); return }
@@ -1197,6 +1198,7 @@ function CommentsTab({
   externalResult: CommentsResult | null
   onClearExternal: () => void
 }) {
+  const { lang } = useLang()
   const router = useRouter()
   const { setScriptParams, setStep } = useStudioStore()
   const [url, setUrl] = useState('')
@@ -1221,7 +1223,7 @@ function CommentsTab({
       const res = await fetch('/api/analytics/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, count }),
+        body: JSON.stringify({ url, count, lang }),
       })
       const json = await res.json() as { ok: boolean; data?: CommentsResult; error?: string }
       if (!json.ok) { setError(json.error ?? 'Ошибка'); return }
@@ -2000,6 +2002,7 @@ function RisingStarsTab({
   savedResult?: RisingStarsResult | null
   onResult?: (r: RisingStarsResult | null) => void
 }) {
+  const { lang } = useLang()
   const router = useRouter()
   const { setScriptParams, setStep } = useStudioStore()
 
@@ -2030,6 +2033,7 @@ function RisingStarsTab({
           sub_min: parseInt(subMin) || 1000,
           sub_max: parseInt(subMax) || 100000,
           months_max: anyAge ? 0 : monthsMax,
+          lang,
         }),
       })
       const json = await res.json() as { ok: boolean; data?: RisingStarsResult; error?: string; code?: string }

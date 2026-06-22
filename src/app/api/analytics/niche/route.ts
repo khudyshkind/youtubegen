@@ -111,7 +111,7 @@ IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start 
 OUTPUT LANGUAGE: Write sub-niche names, format names, recommendations, and best_days in the same language as the niche topic provided.`
 
 function cacheKey(topic: string, country: string, lang: string) {
-  return `${topic.toLowerCase().trim()}|${country}|${lang}`
+  return `${topic.toLowerCase().trim()}|${country}|${lang}|v2`
 }
 
 export async function POST(req: NextRequest) {
@@ -240,6 +240,8 @@ export async function POST(req: NextRequest) {
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const userLang = resolveUserLang(req, lang)
+    console.log('[niche] userLang:', userLang)
+    console.log('[niche] langNote preview:', langNote(userLang).slice(0, 80))
 
     const dataCtx = `Топ каналы: ${JSON.stringify(channelsData.slice(0, 5))}
 Топ видео: ${JSON.stringify(videosData.slice(0, 5))}

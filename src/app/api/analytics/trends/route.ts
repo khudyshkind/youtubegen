@@ -84,9 +84,9 @@ REQUIREMENTS:
 • Write ideas in the same language as the trend topics provided
 • Return ONLY valid JSON. No \`\`\`json. Start with { and end with }.`
 
-function cacheKey(topic: string, period: string) {
+function cacheKey(topic: string, period: string, lang: string) {
   const day = new Date().toISOString().slice(0, 10)
-  return `${topic.toLowerCase().trim()}|${period}|${day}`
+  return `${topic.toLowerCase().trim()}|${period}|${day}|${lang}`
 }
 
 export async function POST(req: NextRequest) {
@@ -98,13 +98,14 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as { topic?: string; period?: string; lang?: string }
     const topic = body.topic?.trim() ?? ''
     const period = body.period ?? 'week'
-    const userLang = resolveUserLang(req, body.lang)
+    const lang = body.lang ?? 'ru'
+    const userLang = resolveUserLang(req, lang)
 
-    console.log(`[trends] start topic="${topic}" period=${period}`)
+    console.log(`[trends] start topic="${topic}" period=${period} lang=${lang} userLang=${userLang}`)
     if (!topic) return NextResponse.json({ ok: false, error: 'Введите тему' }, { status: 400 })
 
     const svc = createServiceClient()
-    const key = cacheKey(topic, period)
+    const key = cacheKey(topic, period, lang)
 
     // Cache check — non-fatal
     try {
