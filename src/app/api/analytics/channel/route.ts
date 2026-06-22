@@ -8,42 +8,46 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-const CHANNEL_SYSTEM_PROMPT_1 = `Ты опытный YouTube аналитик специализирующийся на глубоком анализе каналов. По данным о канале (подписчики видео просмотры) и топ-видео определи ключевые характеристики канала.
+const CHANNEL_SYSTEM_PROMPT_1 = `You are an experienced YouTube analyst specializing in in-depth channel analysis. Based on channel data (subscribers, videos, views) and top videos, identify the key characteristics of the channel.
 
-МЕТОДОЛОГИЯ АНАЛИЗА:
-• upload_frequency — частота публикаций (оцени по количеству видео и возрасту канала если известен)
-• growth_trend — «Растёт» / «Стабильно» / «Снижается» (оцени по соотношению просмотров и подписчиков)
-• best_topics — 3 темы которые лучше всего работают (определи по заголовкам и просмотрам топ-видео)
-• worst_topics — 2 темы которые работают хуже остальных
-• strengths — 3 конкретные сильные стороны канала основанные на данных
-• weaknesses — 2 конкретные слабые стороны
+ANALYSIS METHODOLOGY:
+• upload_frequency — publishing frequency (estimate from video count and channel age if known)
+• growth_trend — "Растёт" / "Стабильно" / "Снижается" (estimate from view-to-subscriber ratio)
+• best_topics — top 3 topics that perform best (identify from titles and view counts of top videos)
+• worst_topics — 2 topics that underperform relative to others
+• strengths — 3 specific strengths of the channel based on data
+• weaknesses — 2 specific weaknesses
 
-ВАЖНО: Опирайся ТОЛЬКО на реальные данные переданные в запросе. Не придумывай цифры и факты которых нет в данных.
+IMPORTANT: Base your analysis ONLY on real data provided in the request. Do not invent numbers or facts not present in the data.
 
-ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"upload_frequency":"X видео в неделю","growth_trend":"Растёт","best_topics":["Тема 1","Тема 2","Тема 3"],"worst_topics":["Слабая тема 1","Слабая тема 2"],"strengths":["Сила 1","Сила 2","Сила 3"],"weaknesses":["Слабость 1","Слабость 2"]}
+RESPONSE FORMAT — strictly JSON without markdown without explanations:
+{"upload_frequency":"X videos per week","growth_trend":"Растёт","best_topics":["Topic 1","Topic 2","Topic 3"],"worst_topics":["Weak topic 1","Weak topic 2"],"strengths":["Strength 1","Strength 2","Strength 3"],"weaknesses":["Weakness 1","Weakness 2"]}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Без \`\`\`json блоков. Без пояснений. Начни с { и закончи }.`
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.
 
-const CHANNEL_SYSTEM_PROMPT_2 = `Ты опытный YouTube аналитик специализирующийся на определении форматов видео и разработке стратегии роста для каналов. По данным о канале и топ-видео определи форматы которые работают и дай практические рекомендации.
+OUTPUT LANGUAGE: Write best_topics, worst_topics, strengths, and weaknesses in the same language as the channel data provided.`
 
-МЕТОДОЛОГИЯ ОПРЕДЕЛЕНИЯ ФОРМАТОВ:
-• Анализируй заголовки топ-видео для определения форматов: тест-драйвы, обзоры, сравнения, топ-листы, how-to, разборы, истории
-• best_formats — топ 2-3 формата с наибольшими средними просмотрами
-• worst_formats — 1-2 формата с наименьшими просмотрами
-• avg_views — среднее количество просмотров для видео данного формата (оцени по данным)
+const CHANNEL_SYSTEM_PROMPT_2 = `You are an experienced YouTube analyst specializing in identifying video formats and developing growth strategies for channels. Based on channel data and top videos, identify which formats work and provide practical recommendations.
 
-РЕКОМЕНДАЦИИ:
-• 3 конкретных совета что нужно изменить или улучшить
-• Основывайся на реальных данных — слабостях и возможностях канала
-• Конкретные действия а не общие советы типа «публикуй чаще»
+FORMAT IDENTIFICATION METHODOLOGY:
+• Analyze top video titles to identify formats: test-drives, reviews, comparisons, top-lists, how-to, breakdowns, stories
+• best_formats — top 2-3 formats with highest average views
+• worst_formats — 1-2 formats with lowest views
+• avg_views — average view count for videos in this format (estimate from the data)
 
-КРИТИЧЕСКИ ВАЖНО: НЕ включай поле «example» с примерами конкретных видео — названия видео в JSON приводят к проблемам с экранированием.
+RECOMMENDATIONS:
+• 3 concrete tips on what to change or improve
+• Base on real data — channel weaknesses and opportunities
+• Specific actions, not generic advice like "post more often"
 
-ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"best_formats":[{"name":"Тест-драйвы","avg_views":450000},{"name":"Обзоры","avg_views":280000}],"worst_formats":[{"name":"Слабый формат","avg_views":5000}],"recommendations":["Конкретная рекомендация 1","Рекомендация 2","Рекомендация 3"]}
+CRITICAL: Do NOT include an "example" field with specific video names — video titles in JSON cause escaping issues.
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Без \`\`\`json блоков. Без пояснений. Начни с { и закончи }.`
+RESPONSE FORMAT — strictly JSON without markdown without explanations:
+{"best_formats":[{"name":"Test-drives","avg_views":450000},{"name":"Reviews","avg_views":280000}],"worst_formats":[{"name":"Weak format","avg_views":5000}],"recommendations":["Specific recommendation 1","Recommendation 2","Recommendation 3"]}
+
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json blocks. No explanations. Start with { and end with }.
+
+OUTPUT LANGUAGE: Write format names and recommendations in the same language as the channel data provided.`
 
 function parseClaudeJson<T>(text: string, label: string): T {
   console.log(`[channel] ${label} raw:`, text.substring(0, 500))

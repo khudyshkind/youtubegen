@@ -36,50 +36,52 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
-const TRENDS_SYSTEM_PROMPT_1 = `Ты опытный YouTube аналитик специализирующийся на выявлении трендов и вирусных тем. По данным о топ-видео за указанный период определи 4 ключевых тренда в нише.
+const TRENDS_SYSTEM_PROMPT_1 = `You are an experienced YouTube analyst specializing in identifying trends and viral topics. Based on data about top videos for the specified period, identify 4 key trends in the niche.
 
-МЕТОДОЛОГИЯ ОПРЕДЕЛЕНИЯ ТРЕНДОВ:
-• Тренд — это тема или формат который набирает просмотры быстрее обычного
-• Анализируй: заголовки видео, количество просмотров, дату публикации
-• Видео с высокими просмотрами и недавней датой — сильный сигнал тренда
-• Ищи повторяющиеся темы и паттерны в заголовках топ-видео
+TREND IDENTIFICATION METHODOLOGY:
+• A trend is a topic or format gaining views faster than usual
+• Analyze: video titles, view counts, publication dates
+• Videos with high views and recent dates are strong trend signals
+• Look for recurring topics and patterns in top video titles
 
-УРОВНИ СРОЧНОСТИ:
-• «Срочно» — тренд на пике прямо сейчас, нужно снимать немедленно
-• «Актуально» — тренд активен последние 1-2 недели
-• «Набирает» — тренд только начинается, хорошее время войти
-• «Стабильно» — вечнозелёная тема с постоянным интересом
+URGENCY LEVELS:
+• "Срочно" — trend is at its peak right now, must film immediately
+• "Актуально" — trend has been active for the past 1-2 weeks
+• "Набирает" — trend is just beginning, good time to enter
+• "Стабильно" — evergreen topic with steady audience interest
 
-ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"trends":[{"topic":"Конкретная тема","urgency":"Срочно","reason":"Почему вирусится"},{"topic":"Тема 2","urgency":"Актуально","reason":"Причина"},{"topic":"Тема 3","urgency":"Набирает","reason":"Причина"},{"topic":"Тема 4","urgency":"Стабильно","reason":"Причина"}]}
+RESPONSE FORMAT — strictly JSON without markdown without explanations:
+{"trends":[{"topic":"Specific topic","urgency":"Срочно","reason":"Why it's going viral"},{"topic":"Topic 2","urgency":"Актуально","reason":"Reason"},{"topic":"Topic 3","urgency":"Набирает","reason":"Reason"},{"topic":"Topic 4","urgency":"Стабильно","reason":"Reason"}]}
 
-ТРЕБОВАНИЯ:
-• Ровно 4 тренда в массиве
-• topic — конкретная тема не абстракция
-• reason — конкретная причина основанная на данных видео
-• Верни ТОЛЬКО валидный JSON. Без \`\`\`json. Начни с { и закончи }.`
+REQUIREMENTS:
+• Exactly 4 trends in the array
+• topic — specific topic, not an abstraction
+• reason — specific reason based on the video data
+• Write topic and reason in the same language as the video titles provided
+• Return ONLY valid JSON. No \`\`\`json. Start with { and end with }.`
 
-const TRENDS_SYSTEM_PROMPT_2 = `Ты опытный YouTube аналитик и контент-стратег. По списку трендов в нише генерируй конкретные идеи для видео которые можно снять прямо сейчас.
+const TRENDS_SYSTEM_PROMPT_2 = `You are an experienced YouTube analyst and content strategist. Based on a list of niche trends, generate concrete video ideas that can be filmed right now.
 
-МЕТОДОЛОГИЯ ГЕНЕРАЦИИ ИДЕЙ:
-• Для каждого тренда предложи 3 разные идеи видео
-• Идеи должны быть конкретными — не «обзор темы» а «5 причин почему X лучше Y в 2026»
-• Разнообразь форматы: топ-лист, разбор, сравнение, история, how-to, реакция
-• Учитывай что зрители уже знают о тренде — дай им новый угол зрения
-• Заголовки должны быть кликабельными и конкретными
+VIDEO IDEA GENERATION METHODOLOGY:
+• For each trend, suggest 3 different video ideas
+• Ideas must be specific — not "topic overview" but "5 reasons why X is better than Y in 2026"
+• Vary formats: top-list, breakdown, comparison, story, how-to, reaction
+• Consider that viewers already know about the trend — give them a new angle
+• Titles must be clickable and specific
 
-ФОРМАТ ИДЕЙ:
-• Идея — это готовый рабочий заголовок видео или его концепция
-• Каждая идея должна отличаться форматом от других двух
-• Используй цифры в заголовках когда возможно
+IDEA FORMAT:
+• An idea is a ready working video title or concept
+• Each idea must differ in format from the other two
+• Use numbers in titles when possible
 
-ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"video_ideas":[{"trend":"название тренда","ideas":["Конкретная идея/заголовок 1","Конкретная идея/заголовок 2","Конкретная идея/заголовок 3"]}]}
+RESPONSE FORMAT — strictly JSON without markdown without explanations:
+{"video_ideas":[{"trend":"trend name","ideas":["Specific idea/title 1","Specific idea/title 2","Specific idea/title 3"]}]}
 
-ТРЕБОВАНИЯ:
-• Массив video_ideas содержит объект для каждого тренда из запроса
-• 3 идеи на каждый тренд
-• Верни ТОЛЬКО валидный JSON. Без \`\`\`json. Начни с { и закончи }.`
+REQUIREMENTS:
+• video_ideas array contains one object per trend from the request
+• 3 ideas per trend
+• Write ideas in the same language as the trend topics provided
+• Return ONLY valid JSON. No \`\`\`json. Start with { and end with }.`
 
 function cacheKey(topic: string, period: string) {
   const day = new Date().toISOString().slice(0, 10)

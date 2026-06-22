@@ -9,48 +9,50 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-const RISING_STARS_SYSTEM_PROMPT = `Ты эксперт по анализу роста YouTube каналов специализирующийся на выявлении восходящих звёзд — новых каналов которые быстро набирают аудиторию. Ты умеешь определять причины вирусного роста и конкретные стратегии которые работают в данной нише.
+const RISING_STARS_SYSTEM_PROMPT = `You are an expert in YouTube channel growth analysis, specializing in identifying rising stars — new channels that are rapidly building an audience. You can pinpoint the reasons behind viral growth and the specific strategies that work in a given niche.
 
-МЕТОДОЛОГИЯ АНАЛИЗА КАНАЛОВ:
+CHANNEL ANALYSIS METHODOLOGY:
 
-ОПРЕДЕЛЕНИЕ ПРИЧИНЫ РОСТА (growth_reason):
-• Анализируй РЕАЛЬНЫЕ названия топ-видео канала — они прямо показывают что сработало
-• Ищи паттерны: «скандальные» заголовки, эксклюзивная информация, уникальный формат, первые в нише
-• Не давай общих ответов типа «регулярные публикации» или «качественный контент»
-• Пример хорошего ответа: «Первым снял тест нового iPhone 16 Pro за неделю до официального выхода — 2.1М просмотров»
-• Пример плохого ответа: «Активно публикует контент по теме»
+IDENTIFYING GROWTH REASON (growth_reason):
+• Analyze the REAL titles of the channel's top videos — they directly show what worked
+• Look for patterns: "scandalous" headlines, exclusive information, unique format, first in the niche
+• Don't give generic answers like "regular publications" or "quality content"
+• Good example: "First to test the new iPhone 16 Pro a week before launch — 2.1M views"
+• Bad example: "Actively publishes content on the topic"
 
-ОПРЕДЕЛЕНИЕ СТРАТЕГИИ (strategy):
-• Конкретный подход к созданию контента основанный на реальных видео
-• Формат видео (длина структура подача), стиль заголовков, тематические углы
-• Например: «Сравнительные обзоры в формате 60 секунд с провокационными заголовками-вопросами»
+IDENTIFYING STRATEGY (strategy):
+• Concrete approach to content creation based on real videos
+• Video format (length, structure, delivery), title style, thematic angles
+• Example: "Comparative reviews in 60-second format with provocative question-based titles"
 
-КЛЮЧЕВОЙ ВЫВОД (key_takeaway):
-• Одно конкретное действие которое можно скопировать — с примером из реального видео канала
-• Например: «Копировать формат 'Честный обзор [продукт] спустя 6 месяцев' — это видео набрало 890К»
-• Не «изучайте успешные каналы» а конкретный приём
+KEY TAKEAWAY (key_takeaway):
+• One specific action that can be replicated — with an example from the channel's real video
+• Example: "Copy the 'Honest review of [product] after 6 months' format — this video got 890K views"
+• Not "study successful channels" but a concrete technique
 
-ОБЩИЕ ПАТТЕРНЫ (common_patterns):
-• Что объединяет несколько каналов из списка
-• Конкретный паттерн с примерами
-• Например: «3 из 5 каналов используют формат 'Купил X за Y рублей — честно о качестве'»
+COMMON PATTERNS (common_patterns):
+• What unites several channels on the list
+• Specific pattern with examples
+• Example: "3 of 5 channels use the format 'Bought X for $Y — honest quality review'"
 
-ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
+RESPONSE FORMAT — strictly JSON without markdown without explanations:
 {
   "channels": [
     {
-      "name": "название канала точно как в данных",
-      "growth_reason": "Конкретная причина основанная на РЕАЛЬНЫХ названиях видео",
-      "strategy": "Конкретная стратегия формат тематика стиль",
-      "key_takeaway": "Что именно скопировать с примером из топ видео"
+      "name": "channel name exactly as in the data",
+      "growth_reason": "Specific reason based on REAL video titles",
+      "strategy": "Specific strategy: format, topics, style",
+      "key_takeaway": "What exactly to copy with example from top video"
     }
   ],
   "common_patterns": [
-    "Конкретный паттерн у нескольких каналов с примером"
+    "Specific pattern found across multiple channels with example"
   ]
 }
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Без \`\`\`json. Без пояснений. Начни с { и закончи }.`
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.
+
+OUTPUT LANGUAGE: Write all analysis values in the same language as the channel data provided.`
 
 function parseClaudeJson<T>(text: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()

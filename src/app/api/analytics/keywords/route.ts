@@ -8,51 +8,53 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-const KEYWORDS_SYSTEM_PROMPT_1 = `Ты опытный YouTube SEO-аналитик специализирующийся на оценке ключевых слов для русскоязычного YouTube. По статистическим данным о ключевых словах (средние просмотры топ-5 видео и количество конкурирующих видео) оцени каждое слово.
+const KEYWORDS_SYSTEM_PROMPT_1 = `You are an experienced YouTube SEO analyst specializing in keyword evaluation. Based on statistical data about keywords (average views of top-5 videos and number of competing videos), assess each keyword.
 
-МЕТОДОЛОГИЯ ОЦЕНКИ:
-• difficulty (1-10) — сложность продвижения по этому запросу
-  - 1-3: низкая конкуренция, мало видео, можно легко войти
-  - 4-6: средняя конкуренция, нужна качественная работа
-  - 7-10: высокая конкуренция, нужен сильный канал
-  - Учитывай: video_count (чем больше тем выше difficulty), avg_views (чем выше тем выше difficulty)
+SCORING METHODOLOGY:
+• difficulty (1-10) — how hard it is to rank for this query
+  - 1-3: low competition, few videos, easy to enter
+  - 4-6: medium competition, quality work needed
+  - 7-10: high competition, strong channel required
+  - Consider: video_count (higher = higher difficulty), avg_views (higher = higher difficulty)
 
-• potential (1-10) — потенциал монетизации и трафика
-  - 1-3: низкий интерес аудитории, мало просмотров
-  - 4-6: средний интерес
-  - 7-10: высокий интерес, много просмотров у топ видео
-  - Учитывай: avg_views топ-5 видео (чем выше тем выше potential)
+• potential (1-10) — monetization and traffic potential
+  - 1-3: low audience interest, few views
+  - 4-6: medium interest
+  - 7-10: high interest, many views on top videos
+  - Consider: avg_views of top-5 videos (higher = higher potential)
 
-• competition — описание конкуренции: «Низкая» / «Средняя» / «Высокая»
-• recommendation — конкретный совет: «Стоит снять» / «Сложно, но возможно» / «Слишком высокая конкуренция» + причина
+• competition — competition description: "Низкая" / "Средняя" / "Высокая"
+• recommendation — concrete advice: "Стоит снять" / "Сложно, но возможно" / "Слишком высокая конкуренция" + reason
 
-ВАЖНО: Оценки должны быть реалистичными и полезными для создателя контента который выбирает тему.
+IMPORTANT: Scores must be realistic and useful for a content creator choosing a topic.
 
-ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"keywords":[{"keyword":"ключевое слово","difficulty":6,"potential":8,"competition":"Средняя","recommendation":"Стоит снять — хороший баланс просмотров и конкуренции"}]}
+RESPONSE FORMAT — strictly JSON without markdown without explanations:
+{"keywords":[{"keyword":"keyword phrase","difficulty":6,"potential":8,"competition":"Средняя","recommendation":"Стоит снять — хороший баланс просмотров и конкуренции"}]}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Без \`\`\`json. Без пояснений. Начни с { и закончи }.`
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.`
 
-const KEYWORDS_SYSTEM_PROMPT_2 = `Ты опытный YouTube SEO-стратег помогающий создателям контента выбрать лучшие ключевые слова для максимального охвата. По списку ключевых слов выбери самые перспективные и дай итоговый анализ ниши.
+const KEYWORDS_SYSTEM_PROMPT_2 = `You are an experienced YouTube SEO strategist helping content creators choose the best keywords for maximum reach. Based on the keyword list, select the most promising ones and provide a final niche analysis.
 
-МЕТОДОЛОГИЯ ОТБОРА:
-• best_keywords — 3-5 лучших ключевых слов с оптимальным балансом потенциала и конкуренции
-  - Лучшие = высокий potential + низкая/средняя difficulty
-  - Это слова на которые нужно делать основной контент
+SELECTION METHODOLOGY:
+• best_keywords — 3-5 best keywords with optimal balance of potential and competition
+  - Best = high potential + low/medium difficulty
+  - These are the keywords to build primary content around
 
-• low_competition — 3-5 ключевых слов с минимальной конкуренцией
-  - Даже если у них меньше просмотров — их проще продвигать
-  - Хороши для новых каналов которым нужны первые просмотры
+• low_competition — 3-5 keywords with minimum competition
+  - Even if they have fewer views — they're easier to rank for
+  - Great for new channels that need their first views
 
-• insights — краткий аналитический вывод по нише (2-3 предложения)
-  - Общая оценка ниши
-  - Стратегическая рекомендация
-  - На что делать акцент
+• insights — brief analytical conclusion about the niche (2-3 sentences)
+  - Overall niche assessment
+  - Strategic recommendation
+  - What to focus on
 
-ФОРМАТ ОТВЕТА — строго JSON без markdown без пояснений:
-{"best_keywords":["ключевое слово 1","ключевое слово 2","ключевое слово 3"],"low_competition":["слово с низкой конкуренцией 1","слово с низкой конкуренцией 2"],"insights":"Краткий вывод по нише в 2-3 предложениях с конкретными рекомендациями"}
+RESPONSE FORMAT — strictly JSON without markdown without explanations:
+{"best_keywords":["keyword 1","keyword 2","keyword 3"],"low_competition":["low competition word 1","low competition word 2"],"insights":"Brief 2-3 sentence niche conclusion with specific recommendations"}
 
-ВАЖНО: Верни ТОЛЬКО валидный JSON. Без \`\`\`json. Без пояснений. Начни с { и закончи }.`
+IMPORTANT: Return ONLY valid JSON. No \`\`\`json. No explanations. Start with { and end with }.
+
+OUTPUT LANGUAGE: Write keyword values and insights in the same language as the niche topic provided.`
 
 function parseClaudeJson<T>(text: string, label: string): T {
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()

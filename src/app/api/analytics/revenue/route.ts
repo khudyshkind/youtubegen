@@ -24,11 +24,14 @@ function parseClaudeJson<T>(text: string, label: string): T {
 }
 
 const COUNTRY_LABELS: Record<string, string> = {
-  ru: 'Россия',
-  us: 'США',
-  eu: 'Европа',
-  cis: 'СНГ',
-  mix: 'Смешанная аудитория',
+  ru: 'Russia',
+  us: 'US / Canada / Australia',
+  eu: 'Western Europe',
+  cis: 'CIS / Eastern Europe',
+  latam: 'LATAM (Brazil / Mexico / Argentina)',
+  sea: 'SE Asia (Thailand / Philippines / Indonesia)',
+  india: 'India',
+  mix: 'Mixed / Global Audience',
 }
 
 export async function POST(req: NextRequest) {
@@ -48,24 +51,32 @@ export async function POST(req: NextRequest) {
     const check = await requireCredits(user.id, 'revenue_calc', supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
-    const countryLabel = COUNTRY_LABELS[country] ?? 'Смешанная аудитория'
+    const countryLabel = COUNTRY_LABELS[country] ?? 'Mixed / Global Audience'
 
-    const prompt = `Ты эксперт по монетизации YouTube.
-Ниша: ${niche}
-Страна аудитории: ${countryLabel}
+    const prompt = `You are a YouTube monetization expert.
+Niche: ${niche}
+Audience market: ${countryLabel}
 
-Определи реалистичный RPM (доход за 1000 просмотров после доли YouTube 45%).
+Determine a realistic RPM (revenue per 1000 views after YouTube's 45% cut).
 
-Учитывай:
-- США/Европа: RPM выше ($3-15, англоязычная аудитория)
-- Россия/СНГ: RPM ниже ($0.5-3)
-- Смешанная: RPM средний ($1.5-5)
-- Финансы/бизнес/технологии: RPM выше
-- Развлечения/юмор/игры: RPM ниже
-- Авто/недвижимость/здоровье: RPM средний-высокий
+Market RPM benchmarks:
+- US / CA / AU / UK: $4-15 (premium advertisers)
+- Western Europe (DE/FR/NL/SE/CH): $3-10
+- Eastern Europe / CIS / Russia: $0.5-3
+- LATAM (BR/MX/AR): $0.5-2
+- SE Asia (TH/PH/ID/MY): $0.3-1.5
+- India: $0.2-1
+- Mixed / global audience: $1.5-5
 
-Верни JSON СТРОГО в этом формате, только JSON, никакого текста до или после:
-{"rpm_min":1.5,"rpm_max":3.5,"rpm_avg":2.5,"niche_factor":"Средний","explanation":"Авто-ниша в России имеет умеренный RPM из-за рекламодателей автодилеров и страховых компаний"}`
+Niche multipliers:
+- Finance / business / real estate / insurance: 2-3x base
+- Technology / software / SaaS: 1.5-2x base
+- Auto / health / legal: 1.2-1.8x base
+- Education / science / history: 1x base
+- Entertainment / humor / gaming / lifestyle: 0.5-0.8x base
+
+Return JSON STRICTLY in this format, only JSON, no text before or after:
+{"rpm_min":1.5,"rpm_max":3.5,"rpm_avg":2.5,"niche_factor":"Medium","explanation":"Auto niche in Russia has moderate RPM due to auto dealer and insurance advertisers"}`
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const msg = await anthropic.messages.create({
