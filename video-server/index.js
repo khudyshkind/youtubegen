@@ -2068,16 +2068,18 @@ function blocksToSrt(blocks) {
     .join('\n\n')
 }
 
-// FFmpeg -vf filter string for each named effect
+// FFmpeg -vf filter string for each named effect.
+// Single quotes are avoided — VGF shell interprets them inside double-quoted -vf args.
+// Spaces in curve points use backslash-escape (\\ in JS → \ at runtime → FFmpeg unescapes).
 const EFFECT_FILTERS = {
-  film_grain: 'noise=alls=25:allf=t+u',           // 25 survives H.264 compression better than 15
-  ken_burns: "zoompan=z='min(1.3,1+0.0004*in)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1280x720:fps=25",
-  vignette: 'vignette=PI/3',                       // PI/3 (~60°) more visible than PI/4 (~45°)
-  haze: 'colorbalance=rs=0.05:gs=0.02:bs=0.25',   // stronger blue shift for visible cool haze
+  film_grain: 'noise=alls=25:allf=t+u',
+  ken_burns: 'zoompan=z=min(1.3\\,1+0.0004*in):x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):d=1:s=1280x720:fps=25',
+  vignette: 'vignette=PI/3',
+  haze: 'colorbalance=rs=0.05:gs=0.02:bs=0.25',
   grayscale: 'hue=s=0',
-  cinematic: "curves=r='0/0 1/0.88':b='0/0.05 1/0.95',colorbalance=ss=0.08",
-  lens_flare: "curves=r='0/0.02 0.5/0.55 1/1':g='0/0 0.5/0.5 1/0.97':b='0/0.05 0.5/0.45 1/0.9'",
-  vhs: "noise=alls=20:allf=t,hue=s=0.65,colorbalance=rs=0.08:gs=-0.03:bs=-0.05",
+  cinematic: 'curves=r=0/0\\ 1/0.88:b=0/0.05\\ 1/0.95,colorbalance=ss=0.08',
+  lens_flare: 'curves=r=0/0.02\\ 0.5/0.55\\ 1/1:g=0/0\\ 0.5/0.5\\ 1/0.97:b=0/0.05\\ 0.5/0.45\\ 1/0.9',
+  vhs: 'noise=alls=20:allf=t,hue=s=0.65,colorbalance=rs=0.08:gs=-0.03:bs=-0.05',
 }
 
 const VF_BASE =
@@ -2240,7 +2242,7 @@ async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId
     const result = await runFFmpegOnVGF(
       { in_1: videoUrl, in_2: srtUrl },
       { out_1: 'output_subs.mp4' },
-      `-i {{in_1}} -vf "subtitles={{in_2}}:force_style='${forceStyle}'" -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`
+      `-i {{in_1}} -vf subtitles={{in_2}}:force_style='${forceStyle}' -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`
     )
     console.log('[vgf] subtitle burn-in done')
     return result.out_1
