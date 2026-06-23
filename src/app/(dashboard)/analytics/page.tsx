@@ -639,6 +639,8 @@ function TrendsTab({ externalResult, onClearExternal }: {
 
   const [topic, setTopic] = useState('')
   const [period, setPeriod] = useState('week')
+  const [country, setCountry] = useState('RU')
+  const [contentLang, setContentLang] = useState('ru')
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(-1)
   const [error, setError] = useState('')
@@ -661,7 +663,7 @@ function TrendsTab({ externalResult, onClearExternal }: {
       const res = await fetch('/api/analytics/trends', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, period, ui_lang: lang }),
+        body: JSON.stringify({ topic, period, country, content_lang: contentLang, ui_lang: lang }),
       })
       const json = await res.json() as { ok: boolean; data?: TrendResult; cached?: boolean; error?: string; code?: string }
       if (!json.ok) {
@@ -725,6 +727,59 @@ function TrendsTab({ externalResult, onClearExternal }: {
                     {p === 'week' ? t('analytics.period_week') : t('analytics.period_month')}
                   </button>
                 ))}
+              </div>
+            </div>
+            <div className="flex gap-3 flex-wrap">
+              <div className="flex-1 min-w-36">
+                <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.country_label')}</label>
+                <select value={country} onChange={e => setCountry(e.target.value)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <option value="worldwide">🌍 Весь мир</option>
+                  <option value="US">🇺🇸 США</option>
+                  <option value="GB">🇬🇧 Великобритания</option>
+                  <option value="CA">🇨🇦 Канада</option>
+                  <option value="AU">🇦🇺 Австралия</option>
+                  <option value="DE">🇩🇪 Германия</option>
+                  <option value="FR">🇫🇷 Франция</option>
+                  <option value="ES">🇪🇸 Испания</option>
+                  <option value="IT">🇮🇹 Италия</option>
+                  <option value="BR">🇧🇷 Бразилия</option>
+                  <option value="MX">🇲🇽 Мексика</option>
+                  <option value="IN">🇮🇳 Индия</option>
+                  <option value="JP">🇯🇵 Япония</option>
+                  <option value="KR">🇰🇷 Южная Корея</option>
+                  <option value="RU">🇷🇺 Россия</option>
+                  <option value="UA">🇺🇦 Украина</option>
+                  <option value="KZ">🇰🇿 Казахстан</option>
+                  <option value="PL">🇵🇱 Польша</option>
+                  <option value="NL">🇳🇱 Нидерланды</option>
+                  <option value="TR">🇹🇷 Турция</option>
+                  <option value="AE">🇦🇪 ОАЭ</option>
+                  <option value="SA">🇸🇦 Саудовская Аравия</option>
+                </select>
+              </div>
+              <div className="flex-1 min-w-36">
+                <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.lang_label')}</label>
+                <select value={contentLang} onChange={e => setContentLang(e.target.value)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <option value="en">Английский</option>
+                  <option value="ru">Русский</option>
+                  <option value="de">Немецкий</option>
+                  <option value="fr">Французский</option>
+                  <option value="es">Испанский</option>
+                  <option value="it">Итальянский</option>
+                  <option value="pt">Португальский</option>
+                  <option value="ja">Японский</option>
+                  <option value="ko">Корейский</option>
+                  <option value="hi">Хинди</option>
+                  <option value="tr">Турецкий</option>
+                  <option value="ar">Арабский</option>
+                  <option value="pl">Польский</option>
+                  <option value="nl">Нидерландский</option>
+                  <option value="uk">Украинский</option>
+                </select>
               </div>
             </div>
             {error && <p className="text-sm text-red-400">{error}</p>}

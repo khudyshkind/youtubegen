@@ -110,9 +110,9 @@ REQUIREMENTS: one object per trend | 3 ideas per trend
 Return ONLY valid JSON. All text values must be in English. No \`\`\`json. Start with { end with }.`
 }
 
-function cacheKey(topic: string, period: string, lang: string) {
+function cacheKey(topic: string, period: string, country: string, contentLang: string) {
   const day = new Date().toISOString().slice(0, 10)
-  return `${topic.toLowerCase().trim()}|${period}|${day}|${lang}`
+  return `${topic.toLowerCase().trim()}|${period}|${country}|${contentLang}|${day}|v2`
 }
 
 export async function POST(req: NextRequest) {
@@ -121,16 +121,18 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
-    const body = await req.json() as { topic?: string; period?: string; lang?: string }
+    const body = await req.json() as { topic?: string; period?: string; lang?: string; ui_lang?: string; country?: string; content_lang?: string }
     const topic = body.topic?.trim() ?? ''
     const period = body.period ?? 'week'
-    const lang = body.lang ?? 'ru'
+    const lang = body.ui_lang ?? body.lang ?? 'ru'
+    const country = body.country ?? 'RU'
+    const contentLang = body.content_lang ?? body.lang ?? 'ru'
 
-    console.log(`[trends] start topic="${topic}" period=${period} lang=${lang}`)
+    console.log(`[trends] start topic="${topic}" period=${period} lang=${lang} country=${country} contentLang=${contentLang}`)
     if (!topic) return NextResponse.json({ ok: false, error: 'Введите тему' }, { status: 400 })
 
     const svc = createServiceClient()
-    const key = cacheKey(topic, period, lang)
+    const key = cacheKey(topic, period, country, contentLang)
 
     // Cache check — non-fatal
     try {
@@ -140,7 +142,7 @@ export async function POST(req: NextRequest) {
         .eq('cache_type', 'trends')
         .eq('cache_key', key)
         .gt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-        .single()
+        .maybeSingle()
       if (cached) {
         console.log('[trends] cache hit, saving report for user:', user.id)
         try {
@@ -188,15 +190,18 @@ export async function POST(req: NextRequest) {
 
     const days = period === 'month' ? 30 : 7
     const publishedAfter = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+    const regionCode = country === 'worldwide' ? undefined : country
 
     // ── YouTube data ──────────────────────────────────────────────────────────
 
-    console.log('[trends] step 1: search trending videos')
-    const videoSearch = await ytFetch('/search', {
+    console.log(`[trends] step 1: search trending videos | regionCode=${regionCode ?? 'omitted'} relevanceLanguage=${contentLang}`)
+    const videoSearchParams: Record<string, string> = {
       part: 'snippet', type: 'video', q: topic,
       order: 'viewCount', publishedAfter,
-      maxResults: '20',
-    }) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; channelTitle: string; publishedAt: string } }> }
+      maxResults: '20', relevanceLanguage: contentLang,
+    }
+    if (regionCode) videoSearchParams.regionCode = regionCode
+    const videoSearch = await ytFetch('/search', videoSearchParams) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; channelTitle: string; publishedAt: string } }> }
 
     const videoItems = videoSearch.items ?? []
     console.log(`[trends] videos count: ${videoItems.length}`)
