@@ -43,15 +43,23 @@ export default function ToolsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ script: inputText, mode }),
       })
-      const json = await res.json()
+      if (res.status === 504 || res.status === 524) {
+        throw new Error(t('tools.err_timeout'))
+      }
+      let json: { ok: boolean; data?: { script: string }; error?: string; code?: string }
+      try {
+        json = await res.json()
+      } catch {
+        throw new Error(t('tools.err_gen'))
+      }
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') {
           setError(t('tools.err_credits'))
           return
         }
-        throw new Error(json.error)
+        throw new Error(json.error ?? t('tools.err_gen'))
       }
-      setResultText(json.data.script)
+      setResultText(json.data!.script)
       setSuccess(true)
       void refreshCredits()
       setTimeout(() => setSuccess(false), 3000)

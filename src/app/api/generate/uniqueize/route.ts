@@ -163,7 +163,7 @@ Return only the rewritten text. No preamble, no "Here is the rewritten version:"
 async function callClaude(client: Anthropic, systemPrompt: string, text: string, tag: string): Promise<string> {
   const message = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
+    max_tokens: 4096,
     system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: `ТЕКСТ:\n${text}` }],
   })
