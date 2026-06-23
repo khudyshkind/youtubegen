@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
         .select('result, created_at')
         .eq('cache_type', 'niche')
         .eq('cache_key', key)
-        .gt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .gt('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
         .maybeSingle()
       if (cacheErr) console.warn('[niche] cache query error:', cacheErr.message)
       if (cached) {
@@ -185,7 +185,7 @@ export async function POST(req: NextRequest) {
             .eq('user_id', user.id)
             .eq('report_type', 'niche')
             .eq('query', topic)
-            .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+            .gte('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
             .maybeSingle()
           if (!existing) {
             const { data: old } = await svc
@@ -432,7 +432,7 @@ export async function POST(req: NextRequest) {
     try {
       await svc.from('analytics_cache')
         .delete()
-        .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .lt('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
     } catch (e) {
       console.warn('[niche] cache cleanup failed:', e instanceof Error ? e.message : String(e))
     }

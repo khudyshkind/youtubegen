@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
         .select('result, created_at')
         .eq('cache_type', 'trends')
         .eq('cache_key', key)
-        .gt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .gt('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
         .maybeSingle()
       if (cached) {
         console.log('[trends] cache hit, saving report for user:', user.id)
@@ -152,7 +152,7 @@ export async function POST(req: NextRequest) {
             .eq('user_id', user.id)
             .eq('report_type', 'trends')
             .eq('query', `${topic}|${period}`)
-            .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+            .gte('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
             .maybeSingle()
           if (!existing) {
             const days = period === 'month' ? 30 : 7
@@ -326,7 +326,7 @@ export async function POST(req: NextRequest) {
     try {
       await svc.from('analytics_cache')
         .delete()
-        .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .lt('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
     } catch (e) {
       console.warn('[trends] cache cleanup failed:', e instanceof Error ? e.message : String(e))
     }

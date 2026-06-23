@@ -108,12 +108,18 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
-function extractChannelQuery(input: string): string {
-  const handleMatch = input.match(/@([\w-]+)/)
-  if (handleMatch) return handleMatch[1]
-  const urlMatch = input.match(/youtube\.com\/(?:channel\/|c\/|user\/)([\w-]+)/)
-  if (urlMatch) return urlMatch[1]
-  return input.trim()
+type ChannelRef =
+  | { type: 'handle'; handle: string }
+  | { type: 'id'; channelId: string }
+  | { type: 'search'; query: string }
+
+function detectChannelInput(input: string): ChannelRef {
+  const handleMatch = input.match(/youtube\.com\/@([\w.-]+)|^@([\w.-]+)/)
+  if (handleMatch) return { type: 'handle', handle: handleMatch[1] ?? handleMatch[2] }
+  const idMatch = input.match(/youtube\.com\/channel\/(UC[\w-]+)/)
+  if (idMatch) return { type: 'id', channelId: idMatch[1] }
+  if (/^UC[\w-]{20,}$/.test(input.trim())) return { type: 'id', channelId: input.trim() }
+  return { type: 'search', query: input.trim() }
 }
 
 export async function POST(req: NextRequest) {
@@ -139,8 +145,8 @@ export async function POST(req: NextRequest) {
         .select('result, created_at')
         .eq('cache_type', 'channel')
         .eq('cache_key', cacheKey)
-        .gt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-        .single()
+        .gt('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
+        .maybeSingle()
       if (cached) {
         console.log('[channel] cache hit, saving report for user:', user.id)
         try {
@@ -150,7 +156,7 @@ export async function POST(req: NextRequest) {
             .eq('user_id', user.id)
             .eq('report_type', 'channel')
             .eq('query', channelInput)
-            .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+            .gte('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
             .maybeSingle()
           if (!existing) {
             const { data: old } = await svc
@@ -187,26 +193,53 @@ export async function POST(req: NextRequest) {
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
     // ── YouTube data ──────────────────────────────────────────────────────────
+    let quotaUsed = 0
 
-    console.log('[channel] step 1: find channel')
-    const query = extractChannelQuery(channelInput)
-    const channelSearch = await ytFetch('/search', {
-      part: 'snippet', type: 'channel', q: query, maxResults: '1',
-    }) as { items?: Array<{ id: { channelId: string }; snippet: { title: string } }> }
+    type ChItem = { id: string; snippet: { title: string; description: string; publishedAt: string }; statistics: { subscriberCount?: string; videoCount?: string; viewCount?: string } }
+    let channelId: string
+    let ch: ChItem | undefined
 
-    const channelId = channelSearch.items?.[0]?.id?.channelId
-    if (!channelId) return NextResponse.json({ ok: false, error: 'Канал не найден' }, { status: 404 })
+    const ref = detectChannelInput(channelInput)
+
+    if (ref.type === 'handle') {
+      console.log(`[channel] step 1: handle @${ref.handle} → /channels?forHandle (1 quota unit)`)
+      const res = await ytFetch('/channels', {
+        part: 'statistics,snippet', forHandle: ref.handle,
+      }) as { items?: ChItem[] }
+      quotaUsed += 1
+      ch = res.items?.[0]
+      if (!ch) return NextResponse.json({ ok: false, error: 'Канал не найден' }, { status: 404 })
+      channelId = ch.id
+
+    } else if (ref.type === 'id') {
+      console.log(`[channel] step 1: direct id ${ref.channelId} → /channels?id (1 quota unit)`)
+      const res = await ytFetch('/channels', {
+        part: 'statistics,snippet', id: ref.channelId,
+      }) as { items?: ChItem[] }
+      quotaUsed += 1
+      ch = res.items?.[0]
+      if (!ch) return NextResponse.json({ ok: false, error: 'Канал не найден' }, { status: 404 })
+      channelId = ch.id
+
+    } else {
+      console.log(`[channel] step 1: text search "${ref.query}" → /search (100 quota units)`)
+      const channelSearch = await ytFetch('/search', {
+        part: 'snippet', type: 'channel', q: ref.query, maxResults: '1',
+      }) as { items?: Array<{ id: { channelId: string }; snippet: { title: string } }> }
+      quotaUsed += 100
+      channelId = channelSearch.items?.[0]?.id?.channelId ?? ''
+      if (!channelId) return NextResponse.json({ ok: false, error: 'Канал не найден' }, { status: 404 })
+
+      console.log(`[channel] channel id: ${channelId} | step 2: channel stats (1 quota unit)`)
+      const channelStats = await ytFetch('/channels', {
+        part: 'statistics,snippet', id: channelId,
+      }) as { items?: ChItem[] }
+      quotaUsed += 1
+      ch = channelStats.items?.[0]
+      if (!ch) return NextResponse.json({ ok: false, error: 'Данные канала не найдены' }, { status: 404 })
+    }
 
     console.log(`[channel] channel id: ${channelId}`)
-
-    console.log('[channel] step 2: channel stats')
-    const channelStats = await ytFetch('/channels', {
-      part: 'statistics,snippet,brandingSettings',
-      id: channelId,
-    }) as { items?: Array<{ snippet: { title: string; description: string; publishedAt: string }; statistics: { subscriberCount?: string; videoCount?: string; viewCount?: string } }> }
-
-    const ch = channelStats.items?.[0]
-    if (!ch) return NextResponse.json({ ok: false, error: 'Данные канала не найдены' }, { status: 404 })
 
     const channelData = {
       name: ch.snippet.title,
@@ -218,11 +251,12 @@ export async function POST(req: NextRequest) {
     }
     console.log(`[channel] name="${channelData.name}" subs=${channelData.subscribers}`)
 
-    console.log('[channel] step 3: last 50 videos')
+    console.log('[channel] step 3: last 50 videos (100 quota units)')
     const videoSearch = await ytFetch('/search', {
       part: 'snippet', channelId,
       order: 'date', maxResults: '50', type: 'video',
     }) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; publishedAt: string } }> }
+    quotaUsed += 100
 
     const videoItems = videoSearch.items ?? []
     const videoIds = videoItems.map(v => v.id.videoId).filter(Boolean).join(',')
@@ -230,10 +264,11 @@ export async function POST(req: NextRequest) {
 
     let videosData: Array<{ title: string; views: number; url: string; publishedAt: string }> = []
     if (videoIds) {
-      console.log('[channel] step 4: video stats')
+      console.log('[channel] step 4: video stats (1 quota unit)')
       const vStats = await ytFetch('/videos', {
         part: 'statistics,snippet', id: videoIds,
       }) as { items?: Array<{ id: string; snippet: { title: string; publishedAt: string }; statistics: { viewCount?: string; likeCount?: string } }> }
+      quotaUsed += 1
 
       videosData = (vStats.items ?? []).map(v => ({
         title: v.snippet.title,
@@ -243,6 +278,8 @@ export async function POST(req: NextRequest) {
       })).sort((a, b) => b.views - a.views)
       console.log(`[channel] video stats count: ${videosData.length}`)
     }
+
+    console.log(`[channel] total quota used: ${quotaUsed} units`)
 
     const avgViews = videosData.length > 0
       ? Math.round(videosData.reduce((s, v) => s + v.views, 0) / videosData.length)
@@ -365,7 +402,7 @@ export async function POST(req: NextRequest) {
     try {
       await svc.from('analytics_cache')
         .delete()
-        .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .lt('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
     } catch (e) {
       console.warn('[channel] cache cleanup failed:', e instanceof Error ? e.message : String(e))
     }
