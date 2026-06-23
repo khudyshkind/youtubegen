@@ -353,7 +353,7 @@ export async function POST(request: NextRequest) {
   }
 
   const count = Math.max(1, Math.min(200, image_count ?? 1))
-  const interval = Math.max(3, Math.min(30, image_interval ?? 10))
+  const interval = Math.max(3, Math.min(300, image_interval ?? 10))
   const costPerImage = engine === 'gpt_mini' ? CREDIT_COSTS.image_gpt_mini : CREDIT_COSTS.image_flux
   const totalCost = costPerImage * count
 
@@ -397,7 +397,10 @@ export async function POST(request: NextRequest) {
         let successCount = 0
         let failCount = 0
 
-        const CONCURRENCY = parseInt(process.env.FAL_CONCURRENCY_LIMIT ?? '40')
+        const CONCURRENCY = engine === 'gpt_mini'
+          ? scenes.length
+          : parseInt(process.env.FAL_CONCURRENCY_LIMIT ?? '40')
+        console.log(`[images] engine: ${engine}, concurrency: ${CONCURRENCY}, total: ${scenes.length}`)
         for (let batchStart = 0; batchStart < scenes.length; batchStart += CONCURRENCY) {
           const batchEnd = Math.min(batchStart + CONCURRENCY, scenes.length)
           const batchNewImages: SceneImage[] = []
