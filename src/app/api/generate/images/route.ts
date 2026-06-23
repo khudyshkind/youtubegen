@@ -397,7 +397,7 @@ export async function POST(request: NextRequest) {
         let successCount = 0
         let failCount = 0
 
-        const CONCURRENCY = 5
+        const CONCURRENCY = parseInt(process.env.FAL_CONCURRENCY_LIMIT ?? '40')
         for (let batchStart = 0; batchStart < scenes.length; batchStart += CONCURRENCY) {
           const batchEnd = Math.min(batchStart + CONCURRENCY, scenes.length)
           const batchNewImages: SceneImage[] = []
