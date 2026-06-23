@@ -143,7 +143,7 @@ IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`
 }
 
 function cacheKey(topic: string, country: string, contentLang: string) {
-  return `${topic.toLowerCase().trim()}|${country}|${contentLang}|v8`
+  return `${topic.toLowerCase().trim()}|${country}|${contentLang}|v9`
 }
 
 export async function POST(req: NextRequest) {
@@ -163,18 +163,20 @@ export async function POST(req: NextRequest) {
 
     const svc = createServiceClient()
     const key = cacheKey(topic, country, contentLang)
+    console.log(`[niche] cache_key: "${key}" | topic="${topic}" country=${country} contentLang=${contentLang} uiLang=${uiLang}`)
 
     // Cache check — non-fatal
     try {
-      const { data: cached } = await svc
+      const { data: cached, error: cacheErr } = await svc
         .from('analytics_cache')
         .select('result, created_at')
         .eq('cache_type', 'niche')
         .eq('cache_key', key)
         .gt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-        .single()
+        .maybeSingle()
+      if (cacheErr) console.warn('[niche] cache query error:', cacheErr.message)
       if (cached) {
-        console.log('[niche] cache hit, saving report for user:', user.id)
+        console.log('[niche] cache HIT — returning cached result, NO YouTube API call')
         try {
           const { data: existing } = await svc
             .from('analytics_reports')
@@ -211,9 +213,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, data: cached.result, cached: true })
       }
     } catch (e) {
-      console.warn('[niche] cache check skipped:', e instanceof Error ? e.message : String(e))
+      console.warn('[niche] cache check threw:', e instanceof Error ? e.message : String(e))
     }
 
+    console.log('[niche] cache MISS — calling YouTube API + Claude')
     const check = await requireCredits(user.id, 'niche_analysis', supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
