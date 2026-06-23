@@ -560,7 +560,7 @@ function NicheTab({ externalResult, onClearExternal, onAnalyzeChannel, initialTo
   function goToStudio() {
     setScriptParams({ topic })
     setStep(1)
-    router.push('/studio')
+    router.push('/studio?from=plan')
   }
 
   return (
@@ -1085,7 +1085,7 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
   function goToStudio(videoTitle: string) {
     setScriptParams({ topic: videoTitle })
     setStep(1)
-    router.push('/studio')
+    router.push('/studio?from=plan')
   }
 
   function priorityBadge(priority: string): { dot: string; bg: string; color: string } {
@@ -1531,7 +1531,7 @@ function TrendsTab({ externalResult, onClearExternal }: {
   function goToStudio(ideaTopic: string) {
     setScriptParams({ topic: ideaTopic })
     setStep(1)
-    router.push('/studio')
+    router.push('/studio?from=plan')
   }
 
   return (
@@ -1776,7 +1776,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
   function goToStudio(topic: string) {
     setScriptParams({ topic })
     setStep(1)
-    router.push('/studio')
+    router.push('/studio?from=plan')
   }
 
   return (
@@ -2177,7 +2177,7 @@ function CommentsTab({
   function goToStudio(topic: string) {
     setScriptParams({ topic })
     setStep(1)
-    router.push('/studio')
+    router.push('/studio?from=plan')
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -2422,7 +2422,7 @@ function KeywordsTab({
   function goToStudio(topic: string) {
     setScriptParams({ topic })
     setStep(1)
-    router.push('/studio')
+    router.push('/studio?from=plan')
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -2936,7 +2936,7 @@ function CompareTab({
                           onClick={() => {
                             setScriptParams({ topic: idea.idea })
                             setStep(1)
-                            router.push('/studio')
+                            router.push('/studio?from=plan')
                           }}
                           className="no-print self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-300 hover:text-white transition-colors"
                           style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.25)' }}>
@@ -3024,7 +3024,7 @@ function RisingStarsTab({
   function goToStudio() {
     setScriptParams({ topic: topic || (displayResult?.topic ?? '') })
     setStep(1)
-    router.push('/studio')
+    router.push('/studio?from=plan')
   }
 
   return (

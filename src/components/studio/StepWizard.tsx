@@ -39,11 +39,12 @@ function StepWizardInner() {
   const [restoring, setRestoring] = useState(!!projectParam)
   const [restoreError, setRestoreError] = useState('')
 
-  const fromTools = searchParams.get('from') === 'tools'
+  const fromParam = searchParams.get('from')
+  const skipReset = fromParam === 'tools' || fromParam === 'plan'
 
   useEffect(() => {
     if (!projectParam) {
-      if (!fromTools) reset()
+      if (!skipReset) reset()
       setRestoring(false)
       setRestoreError('')
       return

@@ -16,6 +16,12 @@ function countWords(text: string) {
   return text.trim().split(/\s+/).filter(Boolean).length
 }
 
+function detectLang(text: string): string {
+  const cyr = (text.match(/[а-яёА-ЯЁ]/g) || []).length
+  const lat = (text.match(/[a-zA-Z]/g) || []).length
+  return cyr > lat ? 'ru' : 'en'
+}
+
 function SpinnerIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24">
@@ -108,7 +114,7 @@ export default function Step2Script() {
       const res = await fetch('/api/generate/uniqueize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script, project_id: projectId, mode }),
+        body: JSON.stringify({ script, project_id: projectId, mode, output_lang: detectLang(script) }),
       })
       const json = await res.json()
       if (!json.ok) {
