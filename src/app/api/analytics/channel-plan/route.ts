@@ -75,31 +75,46 @@ Return EXACTLY 20 video_ideas and EXACTLY 5 title_formulas.
 JSON only. Start with { end with }.`
 }
 
-function getPlanPrompt(lang: string): string {
+function getMonthsPlanPrompt(lang: string): string {
   const isRu = lang !== 'en'
   return isRu
-    ? `Ты стратег по YouTube контенту. Составь контент-план и стратегию роста для канала.
+    ? `Ты стратег по YouTube контенту. Составь контент-план на 3 месяца (по неделям).
 
-На основе ниши и актуальных YouTube данных составь:
-1. Контент-план на 3 месяца (по неделям)
-2. Стиль обложек
-3. Growth hacks — нестандартные способы роста
-4. Путь к монетизации
+Для каждого месяца: цель, 4 видео (по одному в неделю), 3 конкретных действия.
 
 ФОРМАТ — строго JSON без markdown:
-{"month_1":{"goal":"Цель первого месяца в 1 предложении","videos":[{"week":1,"title":"Название видео","format":"Shorts/Длинное","day":"Вторник"},{"week":2,"title":"...","format":"...","day":"..."},{"week":3,"title":"...","format":"...","day":"..."},{"week":4,"title":"...","format":"...","day":"..."}],"actions":["Действие 1","Действие 2","Действие 3"]},"month_2":{"goal":"...","videos":[{"week":5,"title":"...","format":"...","day":"..."},{"week":6,"title":"...","format":"...","day":"..."},{"week":7,"title":"...","format":"...","day":"..."},{"week":8,"title":"...","format":"...","day":"..."}],"actions":["...","...","..."]},"month_3":{"goal":"...","videos":[{"week":9,"title":"...","format":"...","day":"..."},{"week":10,"title":"...","format":"...","day":"..."},{"week":11,"title":"...","format":"...","day":"..."},{"week":12,"title":"...","format":"...","day":"..."}],"actions":["...","...","..."]},"thumbnail_style":"Детальное описание стиля обложек: цвета, шрифты, элементы, примеры","growth_hacks":["Лайфхак 1","Лайфхак 2","Лайфхак 3","Лайфхак 4","Лайфхак 5"],"monetization_path":"Поэтапный путь к монетизации: от первого видео до стабильного дохода"}
+{"month_1":{"goal":"Цель первого месяца","videos":[{"week":1,"title":"Название видео","format":"Shorts/Длинное","day":"Вторник"},{"week":2,"title":"...","format":"...","day":"..."},{"week":3,"title":"...","format":"...","day":"..."},{"week":4,"title":"...","format":"...","day":"..."}],"actions":["Действие 1","Действие 2","Действие 3"]},"month_2":{"goal":"...","videos":[{"week":5,"title":"...","format":"...","day":"..."},{"week":6,"title":"...","format":"...","day":"..."},{"week":7,"title":"...","format":"...","day":"..."},{"week":8,"title":"...","format":"...","day":"..."}],"actions":["...","...","..."]},"month_3":{"goal":"...","videos":[{"week":9,"title":"...","format":"...","day":"..."},{"week":10,"title":"...","format":"...","day":"..."},{"week":11,"title":"...","format":"...","day":"..."},{"week":12,"title":"...","format":"...","day":"..."}],"actions":["...","...","..."]}}
 
 Только JSON. Начни с { заканчивай с }.`
-    : `You are a YouTube content strategist. Create a content plan and growth strategy for a channel.
+    : `You are a YouTube content strategist. Create a 3-month content plan (week by week).
 
-Based on the niche and current YouTube data, create:
-1. A 3-month content plan (week by week)
-2. Thumbnail style
-3. Growth hacks — unconventional ways to grow
-4. Path to monetization
+For each month: goal, 4 videos (one per week), 3 concrete actions.
 
 FORMAT — strict JSON without markdown:
-{"month_1":{"goal":"Month one goal in 1 sentence","videos":[{"week":1,"title":"Video title","format":"Shorts/Long","day":"Tuesday"},{"week":2,"title":"...","format":"...","day":"..."},{"week":3,"title":"...","format":"...","day":"..."},{"week":4,"title":"...","format":"...","day":"..."}],"actions":["Action 1","Action 2","Action 3"]},"month_2":{"goal":"...","videos":[{"week":5,"title":"...","format":"...","day":"..."},{"week":6,"title":"...","format":"...","day":"..."},{"week":7,"title":"...","format":"...","day":"..."},{"week":8,"title":"...","format":"...","day":"..."}],"actions":["...","...","..."]},"month_3":{"goal":"...","videos":[{"week":9,"title":"...","format":"...","day":"..."},{"week":10,"title":"...","format":"...","day":"..."},{"week":11,"title":"...","format":"...","day":"..."},{"week":12,"title":"...","format":"...","day":"..."}],"actions":["...","...","..."]},"thumbnail_style":"Detailed description of thumbnail style: colors, fonts, elements, examples","growth_hacks":["Hack 1","Hack 2","Hack 3","Hack 4","Hack 5"],"monetization_path":"Step-by-step path to monetization: from first video to stable income"}
+{"month_1":{"goal":"Month one goal","videos":[{"week":1,"title":"Video title","format":"Shorts/Long","day":"Tuesday"},{"week":2,"title":"...","format":"...","day":"..."},{"week":3,"title":"...","format":"...","day":"..."},{"week":4,"title":"...","format":"...","day":"..."}],"actions":["Action 1","Action 2","Action 3"]},"month_2":{"goal":"...","videos":[{"week":5,"title":"...","format":"...","day":"..."},{"week":6,"title":"...","format":"...","day":"..."},{"week":7,"title":"...","format":"...","day":"..."},{"week":8,"title":"...","format":"...","day":"..."}],"actions":["...","...","..."]},"month_3":{"goal":"...","videos":[{"week":9,"title":"...","format":"...","day":"..."},{"week":10,"title":"...","format":"...","day":"..."},{"week":11,"title":"...","format":"...","day":"..."},{"week":12,"title":"...","format":"...","day":"..."}],"actions":["...","...","..."]}}
+
+JSON only. Start with { end with }.`
+}
+
+function getStylePrompt(lang: string): string {
+  const isRu = lang !== 'en'
+  return isRu
+    ? `Ты стратег по YouTube контенту. На основе ниши и YouTube данных дай:
+1. Стиль обложек (thumbnail)
+2. 5 growth hacks — нестандартные способы роста канала
+3. Путь к монетизации — поэтапно
+
+ФОРМАТ — строго JSON без markdown:
+{"thumbnail_style":"Детальное описание стиля: цвета, шрифты, элементы, композиция, примеры у успешных каналов в нише","growth_hacks":["Лайфхак 1","Лайфхак 2","Лайфхак 3","Лайфхак 4","Лайфхак 5"],"monetization_path":"Поэтапный путь от первого видео до стабильного дохода — конкретные шаги и сроки"}
+
+Только JSON. Начни с { заканчивай с }.`
+    : `You are a YouTube content strategist. Based on the niche and YouTube data, provide:
+1. Thumbnail style
+2. 5 growth hacks — unconventional channel growth methods
+3. Monetization path — step by step
+
+FORMAT — strict JSON without markdown:
+{"thumbnail_style":"Detailed style description: colors, fonts, elements, composition, examples from successful channels in this niche","growth_hacks":["Hack 1","Hack 2","Hack 3","Hack 4","Hack 5"],"monetization_path":"Step-by-step path from first video to stable income — concrete steps and timelines"}
 
 JSON only. Start with { end with }.`
 }
@@ -131,10 +146,13 @@ interface IdeasResult {
   content_pillars: string[]
 }
 
-interface PlanResult {
+interface MonthsPlanResult {
   month_1: MonthPlan
   month_2: MonthPlan
   month_3: MonthPlan
+}
+
+interface StyleResult {
   thumbnail_style: string
   growth_hacks: string[]
   monetization_path: string
@@ -197,10 +215,10 @@ export async function POST(req: NextRequest) {
       ? `Niche: "${topic}"\nMarket: ${country}, content language: ${content_lang}\n\nTop videos in this niche (last 30 days):\n${ytSummary || 'No data available'}`
       : `Ниша: "${topic}"\nРынок: ${country}, язык контента: ${content_lang}\n\nТоп видео в этой нише за последние 30 дней:\n${ytSummary || 'Данные недоступны'}`
 
-    console.log('[channel-plan] running Claude 1 + 2 in parallel')
+    console.log('[channel-plan] running Claude 1 + 2a + 2b in parallel')
     const ctxWithLang = userCtx + langNote(uiLangFull)
 
-    const [msg1, msg2] = await Promise.all([
+    const [msg1, msg2a, msg2b] = await Promise.all([
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 4000,
@@ -210,18 +228,29 @@ export async function POST(req: NextRequest) {
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 2500,
-        system: [{ type: 'text', text: getPlanPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: getMonthsPlanPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: ctxWithLang }],
+      }),
+      anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1500,
+        system: [{ type: 'text', text: getStylePrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: ctxWithLang }],
       }),
     ])
 
-    const text1 = (msg1.content[0] as { text: string }).text
-    const text2 = (msg2.content[0] as { text: string }).text
-    console.log('[channel-plan] claude1 tokens:', msg1.usage.input_tokens, 'out:', msg1.usage.output_tokens)
-    console.log('[channel-plan] claude2 tokens:', msg2.usage.input_tokens, 'out:', msg2.usage.output_tokens)
+    const text1  = (msg1.content[0]  as { text: string }).text
+    const text2a = (msg2a.content[0] as { text: string }).text
+    const text2b = (msg2b.content[0] as { text: string }).text
+    console.log('[channel-plan] claude1  tokens:', msg1.usage.input_tokens,  'out:', msg1.usage.output_tokens)
+    console.log('[channel-plan] claude2a tokens:', msg2a.usage.input_tokens, 'out:', msg2a.usage.output_tokens)
+    console.log('[channel-plan] claude2b tokens:', msg2b.usage.input_tokens, 'out:', msg2b.usage.output_tokens)
+    console.log('[channel-plan] claude2a raw:', text2a.substring(0, 500))
+    console.log('[channel-plan] claude2b raw:', text2b.substring(0, 500))
 
-    const ideas = parseClaudeJson<IdeasResult>(text1, 'claude1')
-    const plan = parseClaudeJson<PlanResult>(text2, 'claude2')
+    const ideas      = parseClaudeJson<IdeasResult>(text1,  'claude1')
+    const monthsPlan = parseClaudeJson<MonthsPlanResult>(text2a, 'claude2a')
+    const style      = parseClaudeJson<StyleResult>(text2b, 'claude2b')
 
     const result = {
       channel_name_ideas: ideas.channel_name_ideas ?? [],
@@ -229,12 +258,12 @@ export async function POST(req: NextRequest) {
       video_ideas: ideas.video_ideas ?? [],
       title_formulas: ideas.title_formulas ?? [],
       content_pillars: ideas.content_pillars ?? [],
-      month_1: plan.month_1,
-      month_2: plan.month_2,
-      month_3: plan.month_3,
-      thumbnail_style: plan.thumbnail_style ?? '',
-      growth_hacks: plan.growth_hacks ?? [],
-      monetization_path: plan.monetization_path ?? '',
+      month_1: monthsPlan.month_1,
+      month_2: monthsPlan.month_2,
+      month_3: monthsPlan.month_3,
+      thumbnail_style: style.thumbnail_style ?? '',
+      growth_hacks: style.growth_hacks ?? [],
+      monetization_path: style.monetization_path ?? '',
     }
 
     await spendCredits(user.id, 8, 'channel_plan')
