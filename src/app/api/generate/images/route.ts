@@ -408,8 +408,9 @@ export async function POST(request: NextRequest) {
         let successCount = 0
         let failCount = 0
 
+        const GPT_BATCH_SIZE = parseInt(process.env.GPT_BATCH_SIZE ?? '20')
         const CONCURRENCY = engine === 'gpt_mini'
-          ? scenes.length
+          ? GPT_BATCH_SIZE
           : parseInt(process.env.FAL_CONCURRENCY_LIMIT ?? '40')
         console.log(`[images] engine: ${engine}, concurrency: ${CONCURRENCY}, total: ${scenes.length}`)
         for (let batchStart = 0; batchStart < scenes.length; batchStart += CONCURRENCY) {
