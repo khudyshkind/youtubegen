@@ -194,11 +194,9 @@ export async function POST(req: NextRequest) {
     // Collect autocomplete suggestions from multiple seed queries
     const seeds = [
       keyword,
-      `${keyword} review`,
       `${keyword} 2026`,
       `best ${keyword}`,
-      `${keyword} tutorial`,
-      `${keyword} comparison`,
+      `${keyword} review`,
       `${keyword} vs`,
       `how to ${keyword}`,
     ]
@@ -238,12 +236,14 @@ export async function POST(req: NextRequest) {
       batch.forEach((s, j) => statsMap.set(s, results[j]))
     }
 
-    // Filter out clearly irrelevant keywords (zero views AND near-zero competition)
-    const filteredSuggestions = suggestions.filter(s => {
+    // Filter out truly dead keywords (zero views AND zero competition)
+    const strictFiltered = suggestions.filter(s => {
       const stats = statsMap.get(s) ?? { avg_views: 0, video_count: 0 }
-      return !(stats.avg_views === 0 && stats.video_count < 100)
+      return !(stats.avg_views === 0 && stats.video_count === 0)
     })
-    console.log(`[keywords] after relevance filter: ${filteredSuggestions.length}/${suggestions.length}`)
+    // Fall back to unfiltered if too few results remain
+    const filteredSuggestions = strictFiltered.length >= 5 ? strictFiltered : suggestions
+    console.log(`[keywords] after filter: ${filteredSuggestions.length}/${suggestions.length} (strict: ${strictFiltered.length})`)
 
     // Build input strings for Claude
     const keywordsData = filteredSuggestions.map(s => {
