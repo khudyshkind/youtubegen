@@ -94,6 +94,10 @@ function splitSubtitlesIntoGroups(blocks: SubtitleBlock[], n: number): SubtitleB
   return groups
 }
 
+// Max scenes per Claude call to stay within 8192-token output limit.
+// 75 scenes × ~80 tokens ≈ 6000 tokens — safe headroom.
+const CLAUDE_CHUNK = 75
+
 async function generateScenesFromSubtitles(
   topic: string,
   imageCount: number,
@@ -102,10 +106,8 @@ async function generateScenesFromSubtitles(
   styleConfig: StyleConfig,
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
-  const maxTokens = Math.min(8192, Math.max(2500, imageCount * 80))
 
   const groups = splitSubtitlesIntoGroups(subtitleBlocks, imageCount)
-
   const scenesWithText = groups.map((group, i) => {
     const start = group.length > 0 ? group[0].start : (durationSec / imageCount) * i
     const end = group.length > 0 ? group[group.length - 1].end : (durationSec / imageCount) * (i + 1)
@@ -114,31 +116,41 @@ async function generateScenesFromSubtitles(
   })
 
   console.log(`[images/subtitles] claude style instruction: "${styleConfig.claudeInstruction}"`)
+  console.log(`[images/subtitles] scenes: ${scenesWithText.length}, chunks: ${Math.ceil(scenesWithText.length / CLAUDE_CHUNK)}`)
 
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: maxTokens,
-    system: [{ type: 'text', text: SCENES_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-    messages: [{
-      role: 'user',
-      content: `Видео на тему: "${topic}". Ниже — ${imageCount} сцен из реальной расшифровки аудио (Whisper).
+  const allPromptResults: Array<{ scene: string; prompt: string }> = []
+  for (let chunkStart = 0; chunkStart < scenesWithText.length; chunkStart += CLAUDE_CHUNK) {
+    const chunk = scenesWithText.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
+    const chunkSize = chunk.length
+    const maxTokens = Math.max(2500, chunkSize * 80)
+    const chunkNum = Math.floor(chunkStart / CLAUDE_CHUNK) + 1
+
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: maxTokens,
+      system: [{ type: 'text', text: SCENES_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{
+        role: 'user',
+        content: `Видео на тему: "${topic}". Ниже — ${chunkSize} сцен из реальной расшифровки аудио (Whisper).
 
 СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
 ${styleConfig.claudeInstruction}
 
 СЦЕНЫ:
-${scenesWithText.map((s, i) => `Сцена ${i + 1} [${fmtSec(s.start)}–${fmtSec(s.end)}]: "${s.text}"`).join('\n')}
+${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${fmtSec(s.end)}]: "${s.text}"`).join('\n')}
 
-Ответь JSON массивом ровно ${imageCount} элементов.`,
-    }],
-  })
-  console.log('[images/subtitles] cache input:', message.usage.input_tokens, 'cache_read:', message.usage.cache_read_input_tokens ?? 0, 'cache_write:', message.usage.cache_creation_input_tokens ?? 0)
+Ответь JSON массивом ровно ${chunkSize} элементов.`,
+      }],
+    })
+    console.log(`[images/subtitles] chunk ${chunkNum} tokens — input:${message.usage.input_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
 
-  const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
-  console.log(`[images/subtitles] claude raw response (first 600): ${rawText.slice(0, 600)}`)
-  const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
+    const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
+    const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
+    const chunkResults: Array<{ scene: string; prompt: string }> = JSON.parse(cleaned)
+    allPromptResults.push(...chunkResults)
+  }
 
-  let promptResults: Array<{ scene: string; prompt: string }> = JSON.parse(cleaned)
+  let promptResults = allPromptResults
   if (promptResults.length > imageCount) promptResults = promptResults.slice(0, imageCount)
   while (promptResults.length < imageCount) {
     promptResults.push({
@@ -209,39 +221,47 @@ async function generateScenesFromScript(
   styleConfig: StyleConfig,
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
-  const maxTokens = Math.min(8192, Math.max(2500, imageCount * 80))
 
   const blocks = splitScriptByWords(script, imageCount)
   const blocksWithTimecodes = calculateTimecodes(blocks, durationSec)
 
   console.log(`[images/script] claude style instruction: "${styleConfig.claudeInstruction}"`)
+  console.log(`[images/script] scenes: ${blocksWithTimecodes.length}, chunks: ${Math.ceil(blocksWithTimecodes.length / CLAUDE_CHUNK)}`)
 
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: maxTokens,
-    system: [{ type: 'text', text: SCENES_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-    messages: [{
-      role: 'user',
-      content: `Видео на тему: "${topic}". Ниже — ${imageCount} отрывков сценария с тайм-кодами.
+  const allPromptResults: Array<{ scene: string; prompt: string }> = []
+  for (let chunkStart = 0; chunkStart < blocksWithTimecodes.length; chunkStart += CLAUDE_CHUNK) {
+    const chunk = blocksWithTimecodes.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
+    const chunkSize = chunk.length
+    const maxTokens = Math.max(2500, chunkSize * 80)
+    const chunkNum = Math.floor(chunkStart / CLAUDE_CHUNK) + 1
+
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: maxTokens,
+      system: [{ type: 'text', text: SCENES_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{
+        role: 'user',
+        content: `Видео на тему: "${topic}". Ниже — ${chunkSize} отрывков сценария с тайм-кодами.
 
 СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
 ${styleConfig.claudeInstruction}
 
 ОТРЫВКИ:
-${blocksWithTimecodes.map((b, i) => `Сцена ${i + 1} [${fmtSec(b.start)}–${fmtSec(b.end)}]:\n"${b.text.slice(0, 400)}"`).join('\n\n')}
+${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${fmtSec(b.end)}]:\n"${b.text.slice(0, 400)}"`).join('\n\n')}
 
-Ответь JSON массивом ровно ${imageCount} элементов.`,
-    }],
-  })
-  console.log('[images/script] cache input:', message.usage.input_tokens, 'cache_read:', message.usage.cache_read_input_tokens ?? 0, 'cache_write:', message.usage.cache_creation_input_tokens ?? 0)
+Ответь JSON массивом ровно ${chunkSize} элементов.`,
+      }],
+    })
+    console.log(`[images/script] chunk ${chunkNum} tokens — input:${message.usage.input_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
 
-  const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
-  console.log(`[images/script] claude raw response (first 600): ${rawText.slice(0, 600)}`)
-  const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
+    const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
+    const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
+    const chunkResults: Array<{ scene: string; prompt: string }> = JSON.parse(cleaned)
+    allPromptResults.push(...chunkResults)
+  }
 
-  let promptResults: Array<{ scene: string; prompt: string }> = JSON.parse(cleaned)
+  let promptResults = allPromptResults
   if (promptResults.length > imageCount) promptResults = promptResults.slice(0, imageCount)
-
   while (promptResults.length < imageCount) {
     const i = promptResults.length
     promptResults.push({
