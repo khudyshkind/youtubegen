@@ -96,7 +96,7 @@ async function generateGptMini(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-image-1',
+      model: 'gpt-image-2',
       prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
       size: '1536x1024',
       quality: 'medium',
@@ -105,12 +105,18 @@ async function generateGptMini(
   })
 
   const data = await res.json()
-  if (!res.ok) throw new Error(`GPT Image: ${data.error?.message ?? res.status}`)
+  if (!res.ok) {
+    const msg = data.error?.message ?? String(res.status)
+    if (msg.toLowerCase().includes('verif')) {
+      throw new Error('GPT Image: требуется верификация организации OpenAI (platform.openai.com/settings/organization/general → Verify Organization)')
+    }
+    throw new Error(`GPT Image: ${msg}`)
+  }
   const base64 = data.data?.[0]?.b64_json
   if (!base64) throw new Error('GPT Image: no image data')
 
   const buffer = Buffer.from(base64, 'base64')
-  const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.png`
+  const storagePath = `${userId}/${projectId}/scene_gpt_${sceneIndex}.png`
 
   const { error: uploadError } = await serviceClient.storage
     .from('images')
@@ -195,7 +201,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, data: { image: newImage } })
   } catch (error) {
-    console.error('[image-single]', error)
+    const msg = error instanceof Error ? error.message : String(error)
+    console.error('[image-single]', msg)
+    if (msg.includes('верификация') || msg.toLowerCase().includes('verif')) {
+      return NextResponse.json({ ok: false, error: msg }, { status: 403 })
+    }
     return NextResponse.json({ ok: false, error: 'Ошибка генерации иллюстрации' }, { status: 500 })
   }
 }

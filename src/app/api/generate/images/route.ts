@@ -310,7 +310,7 @@ async function generateImageGptMini(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-image-1',
+      model: 'gpt-image-2',
       prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
       size: '1536x1024',
       quality: 'medium',
@@ -319,7 +319,13 @@ async function generateImageGptMini(
   })
 
   const data = await res.json()
-  if (!res.ok) throw new Error(`GPT Image: ${data.error?.message ?? res.status}`)
+  if (!res.ok) {
+    const msg = data.error?.message ?? String(res.status)
+    if (msg.toLowerCase().includes('verif')) {
+      throw new Error('GPT Image: требуется верификация организации OpenAI (platform.openai.com/settings/organization/general → Verify Organization)')
+    }
+    throw new Error(`GPT Image: ${msg}`)
+  }
   const base64 = data.data?.[0]?.b64_json
   if (!base64) throw new Error('GPT Image: no image data')
 
@@ -332,7 +338,7 @@ async function generateImageGptMini(
 
   if (!projectId) return null
 
-  const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.png`
+  const storagePath = `${userId}/${projectId}/scene_gpt_${sceneIndex}.png`
   const { error: uploadError } = await serviceClient.storage
     .from('images')
     .upload(storagePath, buffer, { contentType: 'image/png', upsert: true })
