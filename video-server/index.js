@@ -2099,13 +2099,15 @@ const VF_BASE =
   'scale=1280:720:force_original_aspect_ratio=decrease,' +
   'pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1'
 
-// GPT Image 1 Mini outputs 1536×1024 (3:2); crop to 16:9 instead of letterboxing
+// Universal filter: scale to fill, crop to 16:9 — safe for both 1280x720 (Flux) and 1536x1024 (GPT)
+// For 1280x720: increase won't change size, crop won't cut anything
+// For 1536x1024 (3:2): scales to 1280x853, crop removes 133px top+bottom
 const VF_CROP =
   'scale=1280:720:force_original_aspect_ratio=increase,' +
   'crop=1280:720,setsar=1'
 
 function getVfFilter(img) {
-  return img.engine === 'gpt_mini' ? VF_CROP : VF_BASE
+  return VF_CROP
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
@@ -2384,6 +2386,7 @@ async function processVideoJob(jobId, body) {
       console.log(`[vgf] encoding ${images.length} clips in parallel...`)
       const clipUrls = await Promise.all(images.map(async (img, i) => {
         const clipDur = (durations[i] + td).toFixed(3)
+        console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} vf=${getVfFilter(img)}`)
         const result = await runFFmpegOnVGF(
           { in_1: img.url },
           { out_1: `clip_${i}.mp4` },
@@ -2462,6 +2465,7 @@ async function processVideoJob(jobId, body) {
       console.time(T('2_clips_encode'))
       console.log(`[vgf] encoding ${images.length} clips in parallel (cut)...`)
       const clipUrls = await Promise.all(images.map(async (img, i) => {
+        console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} vf=${getVfFilter(img)}`)
         const result = await runFFmpegOnVGF(
           { in_1: img.url },
           { out_1: `clip_${i}.mp4` },
