@@ -7,7 +7,29 @@ import { env } from '@/lib/env'
 
 export const maxDuration = 60
 
-function buildHumanizePrompt(): string {
+const LANG_NAMES: Record<string, string> = {
+  ru: 'Russian (русский)',
+  en: 'English',
+  de: 'German (Deutsch)',
+  fr: 'French (Français)',
+  es: 'Spanish (Español)',
+  it: 'Italian (Italiano)',
+  pt: 'Portuguese (Português)',
+  zh: 'Chinese (中文)',
+  ja: 'Japanese (日本語)',
+  ko: 'Korean (한국어)',
+  ar: 'Arabic (العربية)',
+  tr: 'Turkish (Türkçe)',
+}
+
+function langInstruction(outputLang: string): string {
+  if (outputLang === 'auto') {
+    return `OUTPUT LANGUAGE: Detect the language of the input text and respond in that exact same language. If the input is in Russian, write in Russian. If in English, write in English. Never translate, never switch languages under any circumstances.`
+  }
+  return `OUTPUT LANGUAGE: Write the entire output in ${LANG_NAMES[outputLang] ?? outputLang}. Translate the content to this language as part of processing. All output text must be in this language only.`
+}
+
+function buildHumanizePrompt(outputLang: string): string {
   return `You are an expert text editor and voice coach with years of experience making AI-generated content sound genuinely human for YouTube creators. You understand deeply how real people speak, the rhythms of authentic narration, and the subtle patterns that betray AI authorship.
 
 Your mission: Transform the provided script so that a listener would never suspect it was AI-generated. It should sound like a real, personable human being speaking — with all the natural imperfections, personality, and flow that entails.
@@ -83,7 +105,7 @@ The ideal output sounds like a knowledgeable friend explaining something fascina
 — Maintain every scene marker [SCENE N] in its exact original position
 — Keep approximately the same word count and topic coverage
 — Never add invented information or change factual content
-— OUTPUT LANGUAGE: Strictly preserve the source language of the input text. If the text is in Russian, respond in Russian. If in English, respond in English. If in any other language, preserve that language. Never translate under any circumstances.
+— ${langInstruction(outputLang)}
 
 Return only the rewritten text. No preamble, no "Here is the rewritten version:", no explanations.`
 }
@@ -97,8 +119,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
 
-    const body = await request.json() as { script?: string; project_id?: string }
-    const { script, project_id } = body
+    const body = await request.json() as { script?: string; project_id?: string; output_lang?: string }
+    const { script, project_id, output_lang = 'auto' } = body
+    const outputLang = Object.keys(LANG_NAMES).includes(output_lang) || output_lang === 'auto' ? output_lang : 'auto'
 
     if (!script?.trim()) {
       return NextResponse.json({ ok: false, error: 'Сценарий не может быть пустым' }, { status: 400 })
@@ -109,12 +132,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(check, { status: 402 })
     }
 
+    console.log(`[humanize] output_lang=${outputLang}`)
     const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
 
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
-      system: [{ type: 'text', text: buildHumanizePrompt(), cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: buildHumanizePrompt(outputLang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `ТЕКСТ:\n${script}` }],
     })
 

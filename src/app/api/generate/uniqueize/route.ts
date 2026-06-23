@@ -7,7 +7,29 @@ import { env } from '@/lib/env'
 
 export const maxDuration = 120
 
-function buildUniqueizePrompt(): string {
+const LANG_NAMES: Record<string, string> = {
+  ru: 'Russian (русский)',
+  en: 'English',
+  de: 'German (Deutsch)',
+  fr: 'French (Français)',
+  es: 'Spanish (Español)',
+  it: 'Italian (Italiano)',
+  pt: 'Portuguese (Português)',
+  zh: 'Chinese (中文)',
+  ja: 'Japanese (日本語)',
+  ko: 'Korean (한국어)',
+  ar: 'Arabic (العربية)',
+  tr: 'Turkish (Türkçe)',
+}
+
+function langInstruction(outputLang: string): string {
+  if (outputLang === 'auto') {
+    return `OUTPUT LANGUAGE: Detect the language of the input text and respond in that exact same language. If the input is in Russian, write in Russian. If in English, write in English. Never translate, never switch languages under any circumstances.`
+  }
+  return `OUTPUT LANGUAGE: Write the entire output in ${LANG_NAMES[outputLang] ?? outputLang}. Translate the content to this language as part of processing. All output text must be in this language only.`
+}
+
+function buildUniqueizePrompt(outputLang: string): string {
   return `You are a professional text editor specializing in content uniqueness optimization for YouTube creators. Your expertise lies in restructuring text at the sentence, paragraph, and logical levels to create fully original content that passes plagiarism detection tools while preserving complete factual accuracy.
 
 Your mission: Rewrite the provided text so that it registers as unique and original across anti-plagiarism systems, while keeping every piece of factual information, every statistic, and every key idea intact.
@@ -74,12 +96,12 @@ Neutral, clean, professional. No conversational phrases, no personality injected
 — Introducing grammatical errors in an attempt to vary structure
 — Reducing readability in pursuit of uniqueness — the output must still read well and make sense
 
-OUTPUT LANGUAGE: Strictly preserve the source language of the input text. Never translate under any circumstances.
+${langInstruction(outputLang)}
 
 Return only the rewritten text. No preamble, no "Here is the rewritten version:", no explanations.`
 }
 
-function buildHumanizePrompt(): string {
+function buildHumanizePrompt(outputLang: string): string {
   return `You are an expert text editor and voice coach with years of experience making AI-generated content sound genuinely human for YouTube creators. You understand deeply how real people speak, the rhythms of authentic narration, and the subtle patterns that betray AI authorship.
 
 Your mission: Transform the provided script so that a listener would never suspect it was AI-generated. It should sound like a real, personable human being speaking — with all the natural imperfections, personality, and flow that entails.
@@ -155,7 +177,7 @@ The ideal output sounds like a knowledgeable friend explaining something fascina
 — Maintain every scene marker [SCENE N] in its exact original position
 — Keep approximately the same word count and topic coverage
 — Never add invented information or change factual content
-— OUTPUT LANGUAGE: Strictly preserve the source language of the input text. Never translate under any circumstances.
+— ${langInstruction(outputLang)}
 
 Return only the rewritten text. No preamble, no "Here is the rewritten version:", no explanations.`
 }
@@ -184,8 +206,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
 
-    const body = await request.json() as { script?: string; project_id?: string; mode?: string }
-    const { script, project_id, mode = 'unique' } = body
+    const body = await request.json() as { script?: string; project_id?: string; mode?: string; output_lang?: string }
+    const { script, project_id, mode = 'unique', output_lang = 'auto' } = body
+    const outputLang = Object.keys(LANG_NAMES).includes(output_lang) || output_lang === 'auto' ? output_lang : 'auto'
 
     if (!script?.trim()) {
       return NextResponse.json({ ok: false, error: 'Текст не может быть пустым' }, { status: 400 })
@@ -201,17 +224,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
     }
 
+    console.log(`[uniqueize] mode=${mode} output_lang=${outputLang}`)
     const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     let result: string
 
     if (mode === 'unique') {
-      result = await callClaude(client, buildUniqueizePrompt(), script, 'unique')
+      result = await callClaude(client, buildUniqueizePrompt(outputLang), script, 'unique')
     } else if (mode === 'human') {
-      result = await callClaude(client, buildHumanizePrompt(), script, 'human')
+      result = await callClaude(client, buildHumanizePrompt(outputLang), script, 'human')
     } else {
       // both: uniqueize first, then humanize
-      const uniqueized = await callClaude(client, buildUniqueizePrompt(), script, 'unique')
-      result = await callClaude(client, buildHumanizePrompt(), uniqueized, 'human')
+      const uniqueized = await callClaude(client, buildUniqueizePrompt(outputLang), script, 'unique')
+      result = await callClaude(client, buildHumanizePrompt(outputLang), uniqueized, 'human')
     }
 
     if (!result) {
