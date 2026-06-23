@@ -176,7 +176,8 @@ export async function POST(req: NextRequest) {
         .maybeSingle()
       if (cacheErr) console.warn('[niche] cache query error:', cacheErr.message)
       if (cached) {
-        console.log('[niche] cache HIT — returning cached result, NO YouTube API call')
+        const cachedResult = cached.result as { top_channels?: unknown[] }
+        console.log(`[niche] cache HIT — returning cached result, NO YouTube API call | channels: ${cachedResult.top_channels?.length ?? 'unknown'}`)
         try {
           const { data: existing } = await svc
             .from('analytics_reports')

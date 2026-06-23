@@ -468,6 +468,9 @@ function NicheTab({ externalResult, onClearExternal, onAnalyzeChannel }: {
   const [error, setError] = useState('')
   const [result, setResult] = useState<NicheResult | null>(null)
   const [cached, setCached] = useState(false)
+  const [hydrated, setHydrated] = useState(false)
+
+  useEffect(() => { setHydrated(true) }, [])
 
   const displayResult = externalResult ?? result
 
@@ -589,10 +592,12 @@ function NicheTab({ externalResult, onClearExternal, onAnalyzeChannel }: {
                 </select>
               </div>
             </div>
-            <p className="text-xs text-slate-500 flex gap-1.5 items-start">
-              <span className="shrink-0 mt-0.5">ℹ️</span>
-              <span>{t('analytics.niche_lang_note')}</span>
-            </p>
+            {hydrated && (
+              <p className="text-xs text-slate-500 flex gap-1.5 items-start">
+                <span className="shrink-0 mt-0.5">ℹ️</span>
+                <span>{t('analytics.niche_lang_note')}</span>
+              </p>
+            )}
             {error && <p className="text-sm text-red-400">{error}</p>}
             <button onClick={() => void handleAnalyze()} disabled={loading}
               className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
