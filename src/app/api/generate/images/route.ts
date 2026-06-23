@@ -415,7 +415,7 @@ export async function POST(request: NextRequest) {
                 const url = engine === 'gpt_mini'
                   ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
                   : await generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient)
-                const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end }
+                const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine }
                 sceneImages[i] = img
                 successCount++
                 if (url) batchNewImages.push(img)
@@ -425,7 +425,7 @@ export async function POST(request: NextRequest) {
                 failCount++
                 const msg = err instanceof Error ? err.message : String(err)
                 console.error(`[images] scene ${i + 1} FAILED:`, msg)
-                sceneImages[i] = { scene_index: i, prompt: styledPrompt, url: null, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end }
+                sceneImages[i] = { scene_index: i, prompt: styledPrompt, url: null, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine }
               }
             })
           )

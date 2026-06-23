@@ -10,7 +10,7 @@ interface RenderRequest {
   project_id: string
   audio_url: string
   image_interval: number
-  images: Pick<SceneImage, 'url' | 'timecode_start' | 'timecode_end'>[]
+  images: Pick<SceneImage, 'url' | 'timecode_start' | 'timecode_end' | 'engine'>[]
   subtitle_blocks?: SubtitleBlock[]
   subtitle_style?: Pick<SubtitleStyle, 'size' | 'color' | 'position' | 'background' | 'burnIn'>
   transition?: string

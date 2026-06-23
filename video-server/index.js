@@ -2099,6 +2099,15 @@ const VF_BASE =
   'scale=1280:720:force_original_aspect_ratio=decrease,' +
   'pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1'
 
+// GPT Image 1 Mini outputs 1536×1024 (3:2); crop to 16:9 instead of letterboxing
+const VF_CROP =
+  'scale=1280:720:force_original_aspect_ratio=increase,' +
+  'crop=1280:720,setsar=1'
+
+function getVfFilter(img) {
+  return img.engine === 'gpt_mini' ? VF_CROP : VF_BASE
+}
+
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
 // ── Very Good FFmpeg API wrapper ───────────────────────────────────────────
@@ -2372,9 +2381,9 @@ async function processVideoJob(jobId, body) {
         const result = await runFFmpegOnVGF(
           { in_1: img.url },
           { out_1: `clip_${i}.mp4` },
-          `-loop 1 -t ${clipDur} -i {{in_1}} -vf "${VF_BASE}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
+          `-loop 1 -t ${clipDur} -i {{in_1}} -vf "${getVfFilter(img)}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
         )
-        console.log(`[vgf] clip_${i} done`)
+        console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
         return result.out_1
       }))
       console.log(`[vgf] all ${clipUrls.length} clips encoded`)
@@ -2450,9 +2459,9 @@ async function processVideoJob(jobId, body) {
         const result = await runFFmpegOnVGF(
           { in_1: img.url },
           { out_1: `clip_${i}.mp4` },
-          `-loop 1 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${VF_BASE}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
+          `-loop 1 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${getVfFilter(img)}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
         )
-        console.log(`[vgf] clip_${i} done`)
+        console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
         return result.out_1
       }))
       console.timeEnd(T('2_clips_encode'))

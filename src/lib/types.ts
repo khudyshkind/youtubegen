@@ -228,6 +228,7 @@ export interface SceneImage {
   scene?: string
   timecode_start?: string
   timecode_end?: string
+  engine?: 'flux' | 'gpt_mini'
 }
 
 export interface SeoData {

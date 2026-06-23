@@ -208,7 +208,7 @@ export default function Step6Video() {
     try {
       const images = sceneImages
         .filter((img) => img.url)
-        .map((img) => ({ url: img.url!, timecode_start: img.timecode_start, timecode_end: img.timecode_end }))
+        .map((img) => ({ url: img.url!, timecode_start: img.timecode_start, timecode_end: img.timecode_end, engine: img.engine }))
 
       const res = await fetch('/api/generate/video/render', {
         method: 'POST',

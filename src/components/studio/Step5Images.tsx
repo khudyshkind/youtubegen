@@ -232,7 +232,7 @@ export default function Step5Images() {
   function handleCustomIntervalChange(raw: string) {
     setCustomInterval(raw)
     const n = parseInt(raw, 10)
-    if (!isNaN(n) && n >= 3 && n <= 30) setImageInterval(n)
+    if (!isNaN(n) && n >= 3 && n <= 300) setImageInterval(n)
   }
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -492,7 +492,7 @@ export default function Step5Images() {
             <input
               type="number"
               min={3}
-              max={30}
+              max={300}
               value={customInterval}
               onChange={(e) => handleCustomIntervalChange(e.target.value)}
               placeholder="..."

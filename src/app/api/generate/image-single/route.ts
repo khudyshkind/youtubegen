@@ -178,6 +178,7 @@ export async function POST(request: NextRequest) {
       scene_index,
       prompt: enhancedPrompt,
       url: storedUrl,
+      engine,
     }
 
     const updated = existing.some((img) => img.scene_index === scene_index)
