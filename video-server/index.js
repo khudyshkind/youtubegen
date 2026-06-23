@@ -2242,6 +2242,47 @@ async function uploadBytesToB2(buffer, key, contentType = 'application/octet-str
   return uploadUrl
 }
 
+// Delete temp files from B2 by key list
+async function deleteTempImagesFromB2(keys) {
+  if (!keys.length) return
+  const bucket   = (process.env.B2_BUCKET || '').trim()
+  const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
+  const region   = (process.env.B2_REGION || 'us-east-005').trim()
+  const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
+  const emptyHash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+  await Promise.all(keys.map(async (key) => {
+    try {
+      const deleteUrl = `${endpoint}/${bucket}/${key}`
+      const parsed = new URL(deleteUrl)
+      const now = new Date()
+      const amzDate   = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
+      const dateStamp = amzDate.slice(0, 8)
+      const service   = 's3'
+      const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
+      const canonicalHeaders =
+        `host:${parsed.hostname}\n` +
+        `x-amz-content-sha256:${emptyHash}\n` +
+        `x-amz-date:${amzDate}\n`
+      const signedHeaders = 'host;x-amz-content-sha256;x-amz-date'
+      const canonicalRequest = ['DELETE', parsed.pathname, '', canonicalHeaders, signedHeaders, emptyHash].join('\n')
+      const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope,
+        crypto.createHash('sha256').update(canonicalRequest).digest('hex')].join('\n')
+      const signingKey = hmac(hmac(hmac(hmac(`AWS4${process.env.B2_APPLICATION_KEY}`, dateStamp), region), service), 'aws4_request')
+      const signature  = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex')
+      const authorization =
+        `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credentialScope}, ` +
+        `SignedHeaders=${signedHeaders}, Signature=${signature}`
+      const res = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { 'x-amz-content-sha256': emptyHash, 'x-amz-date': amzDate, Authorization: authorization },
+      })
+      console.log(`[b2-cleanup] deleted ${key}: ${res.status}`)
+    } catch (err) {
+      console.warn(`[b2-cleanup] failed to delete ${key}:`, err.message)
+    }
+  }))
+}
+
 // Burn SRT subtitles via VGF (uploads SRT to B2 first, passes URL to VGF)
 async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId) {
   const srtContent = blocksToSrt(subtitle_blocks)
@@ -2378,15 +2419,36 @@ async function processVideoJob(jobId, body) {
     }
     console.log(`[job:${jobId}] durations (${durations.length}): [${durations.map(d => d.toFixed(2)).join(', ')}]`)
 
+    // ── Proxy gpt_mini images through B2 so VGF can download them ────────────
+    // VGF cannot resolve Supabase's domain; Flux images use fal.ai CDN directly.
+    const tempImageB2Keys = []
+    const resolvedImages = await Promise.all(images.map(async (img, i) => {
+      if (img.engine !== 'gpt_mini' || !img.url) return img
+      console.log(`[render] proxying gpt_mini image ${i} to B2:`, img.url?.slice(0, 80))
+      try {
+        const resp = await fetch(img.url)
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+        const buf = Buffer.from(await resp.arrayBuffer())
+        const key = `temp/img_${jobId}_${i}.png`
+        const b2Url = await uploadBytesToB2(buf, key, 'image/png')
+        tempImageB2Keys.push(key)
+        console.log(`[render] gpt_mini image ${i} → B2:`, b2Url.slice(0, 80))
+        return { ...img, url: b2Url }
+      } catch (err) {
+        console.error(`[render] proxy failed for image ${i}:`, err.message)
+        return img
+      }
+    }))
+
     const outputPath = path.join(tmpDir, 'output.mp4')
 
     if (useXfade) {
       // ── Stage 2: Encode all clips via VGF (parallel) ────────────────────────
       console.time(T('2_clips_encode'))
-      console.log(`[vgf] encoding ${images.length} clips in parallel...`)
-      const clipUrls = await Promise.all(images.map(async (img, i) => {
+      console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel...`)
+      const clipUrls = await Promise.all(resolvedImages.map(async (img, i) => {
         const clipDur = (durations[i] + td).toFixed(3)
-        console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} vf=${getVfFilter(img)}`)
+        console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${getVfFilter(img)}`)
         const result = await runFFmpegOnVGF(
           { in_1: img.url },
           { out_1: `clip_${i}.mp4` },
@@ -2463,9 +2525,9 @@ async function processVideoJob(jobId, body) {
     } else {
       // ── Stage 2+3 (cut): Encode clips in parallel + concat via VGF ──────────
       console.time(T('2_clips_encode'))
-      console.log(`[vgf] encoding ${images.length} clips in parallel (cut)...`)
-      const clipUrls = await Promise.all(images.map(async (img, i) => {
-        console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} vf=${getVfFilter(img)}`)
+      console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel (cut)...`)
+      const clipUrls = await Promise.all(resolvedImages.map(async (img, i) => {
+        console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${getVfFilter(img)}`)
         const result = await runFFmpegOnVGF(
           { in_1: img.url },
           { out_1: `clip_${i}.mp4` },
@@ -2549,6 +2611,9 @@ async function processVideoJob(jobId, body) {
       fs.rmSync(tmpDir, { recursive: true, force: true })
     } catch (e) {
       console.warn('[cleanup] rmSync failed:', e.message)
+    }
+    if (typeof tempImageB2Keys !== 'undefined' && tempImageB2Keys.length) {
+      await deleteTempImagesFromB2(tempImageB2Keys).catch(e => console.warn('[b2-cleanup] images:', e.message))
     }
   }
 }
