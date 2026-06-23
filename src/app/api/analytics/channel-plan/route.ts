@@ -54,9 +54,10 @@ function getIdeasPrompt(lang: string): string {
 Учитывай что реально набирает просмотры в данной нише на основе YouTube данных.
 
 ФОРМАТ — строго JSON без markdown:
-{"channel_name_ideas":["Название 1","Название 2","Название 3"],"positioning":"Уникальное позиционирование: чем этот канал отличается от конкурентов — 2-3 предложения","video_ideas":[{"title":"Готовое название видео","format":"Shorts/Длинное/Серия","why_works":"Почему сработает — 1 предложение","best_time":"Вторник 18:00","priority":"Срочно"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Скоро"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Можно подождать"}],"title_formulas":[{"formula":"Как [действие] за [срок] без [препятствие]","example":"Как закрыть сделку за 5 минут без давления на клиента"},{"formula":"...","example":"..."}],"content_pillars":["Столп 1","Столп 2","Столп 3"]}
+{"channel_name_ideas":["Название 1","Название 2","Название 3"],"positioning":"Уникальное позиционирование: чем этот канал отличается от конкурентов — 2-3 предложения","video_ideas":[{"title":"Готовое название видео","format":"Shorts/Длинное/Серия","why_works":"Почему сработает — 1 предложение","best_time":"Вторник 18:00","priority":"Срочно"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Скоро"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Можно подождать"}],"title_formulas":[{"formula":"Как [действие] за [срок] без [препятствие]","example":"Как закрыть сделку за 5 минут без давления на клиента"},{"formula":"...","example":"..."}],"content_pillars":["Столп 1","Столп 2","Столп 3"],"reference_channels":[{"name":"Название реального канала на YouTube","why_follow":"Одно предложение — чему стоит у него поучиться"},{"name":"...","why_follow":"..."},{"name":"...","why_follow":"..."}]}
 
 priority: только "Срочно", "Скоро" или "Можно подождать"
+reference_channels — 3 реальных YouTube канала в этой нише.
 Верни РОВНО 20 видео_ideas и РОВНО 5 title_formulas.
 Только JSON. Начни с { заканчивай с }.`
     : `You are a YouTube content strategist with 10 years of experience launching successful channels.
@@ -68,9 +69,10 @@ IMPORTANT: Video ideas must be specific and ready to film — not abstract topic
 Take into account what actually gets views in this niche based on the YouTube data.
 
 FORMAT — strict JSON without markdown:
-{"channel_name_ideas":["Name 1","Name 2","Name 3"],"positioning":"Unique positioning: what makes this channel different from competitors — 2-3 sentences","video_ideas":[{"title":"Ready-to-film video title","format":"Shorts/Long/Series","why_works":"Why it will work — 1 sentence","best_time":"Tuesday 6PM","priority":"Urgent"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Soon"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Later"}],"title_formulas":[{"formula":"How to [action] in [time] without [obstacle]","example":"How to close a deal in 5 minutes without pressuring the client"},{"formula":"...","example":"..."}],"content_pillars":["Pillar 1","Pillar 2","Pillar 3"]}
+{"channel_name_ideas":["Name 1","Name 2","Name 3"],"positioning":"Unique positioning: what makes this channel different from competitors — 2-3 sentences","video_ideas":[{"title":"Ready-to-film video title","format":"Shorts/Long/Series","why_works":"Why it will work — 1 sentence","best_time":"Tuesday 6PM","priority":"Urgent"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Soon"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Later"}],"title_formulas":[{"formula":"How to [action] in [time] without [obstacle]","example":"How to close a deal in 5 minutes without pressuring the client"},{"formula":"...","example":"..."}],"content_pillars":["Pillar 1","Pillar 2","Pillar 3"],"reference_channels":[{"name":"Real YouTube channel name","why_follow":"One sentence — what to learn from this channel"},{"name":"...","why_follow":"..."},{"name":"...","why_follow":"..."}]}
 
 priority: only "Urgent", "Soon", or "Later"
+reference_channels — 3 real YouTube channels in this niche.
 Return EXACTLY 20 video_ideas and EXACTLY 5 title_formulas.
 JSON only. Start with { end with }.`
 }
@@ -99,26 +101,32 @@ JSON only. Start with { end with }.`
 function getStylePrompt(lang: string): string {
   const isRu = lang !== 'en'
   return isRu
-    ? `Ты стратег по YouTube контенту. На основе ниши дай стиль обложек, growth hacks и путь к монетизации.
+    ? `Ты стратег по YouTube контенту. На основе ниши дай стиль обложек, growth hacks, путь к монетизации и SEO ключевые слова.
 
 ПРАВИЛА:
-• Каждое значение — максимум одно предложение
+• thumbnail_style, monetization_path — максимум одно предложение каждый
 • growth_hacks — ровно 3 элемента, каждый одним предложением
+• seo_keywords.channel_description — 7 ключевых фраз для описания канала
+• seo_keywords.video_tags — 10 коротких тегов (1-3 слова)
+• seo_keywords.hashtags — 7 хештегов с # в начале
 • Только JSON без пояснений
 
 ФОРМАТ — строго JSON:
-{"thumbnail_style":"Одно предложение о стиле обложек: цвета, шрифт, главный элемент","growth_hacks":["Лайфхак 1 — одно предложение","Лайфхак 2 — одно предложение","Лайфхак 3 — одно предложение"],"monetization_path":"Одно предложение о пути к монетизации"}
+{"thumbnail_style":"Одно предложение о стиле обложек","growth_hacks":["Лайфхак 1","Лайфхак 2","Лайфхак 3"],"monetization_path":"Одно предложение о пути к монетизации","seo_keywords":{"channel_description":["ключевая фраза 1","ключевая фраза 2","ключевая фраза 3","ключевая фраза 4","ключевая фраза 5","ключевая фраза 6","ключевая фраза 7"],"video_tags":["тег1","тег2","тег3","тег4","тег5","тег6","тег7","тег8","тег9","тег10"],"hashtags":["#хештег1","#хештег2","#хештег3","#хештег4","#хештег5","#хештег6","#хештег7"]}}
 
 Только JSON. Начни с { заканчивай с }.`
-    : `You are a YouTube content strategist. Based on the niche, provide thumbnail style, growth hacks, and monetization path.
+    : `You are a YouTube content strategist. Based on the niche, provide thumbnail style, growth hacks, monetization path, and SEO keywords.
 
 RULES:
-• Each value must be maximum one sentence
+• thumbnail_style, monetization_path — max one sentence each
 • growth_hacks — exactly 3 items, each one sentence
+• seo_keywords.channel_description — 7 key phrases for channel description
+• seo_keywords.video_tags — 10 short tags (1-3 words)
+• seo_keywords.hashtags — 7 hashtags starting with #
 • JSON only, no explanations
 
 FORMAT — strict JSON:
-{"thumbnail_style":"One sentence about thumbnail style: colors, font, main element","growth_hacks":["Hack 1 — one sentence","Hack 2 — one sentence","Hack 3 — one sentence"],"monetization_path":"One sentence about the monetization path"}
+{"thumbnail_style":"One sentence about thumbnail style","growth_hacks":["Hack 1","Hack 2","Hack 3"],"monetization_path":"One sentence about monetization path","seo_keywords":{"channel_description":["key phrase 1","key phrase 2","key phrase 3","key phrase 4","key phrase 5","key phrase 6","key phrase 7"],"video_tags":["tag1","tag2","tag3","tag4","tag5","tag6","tag7","tag8","tag9","tag10"],"hashtags":["#hashtag1","#hashtag2","#hashtag3","#hashtag4","#hashtag5","#hashtag6","#hashtag7"]}}
 
 JSON only. Start with { end with }.`
 }
@@ -148,6 +156,7 @@ interface IdeasResult {
   video_ideas: VideoIdea[]
   title_formulas: TitleFormula[]
   content_pillars: string[]
+  reference_channels: Array<{ name: string; why_follow: string }>
 }
 
 interface MonthsPlanResult {
@@ -160,6 +169,7 @@ interface StyleResult {
   thumbnail_style: string
   growth_hacks: string[]
   monetization_path: string
+  seo_keywords: { channel_description: string[]; video_tags: string[]; hashtags: string[] }
 }
 
 export async function POST(req: NextRequest) {
@@ -262,12 +272,14 @@ export async function POST(req: NextRequest) {
       video_ideas: ideas.video_ideas ?? [],
       title_formulas: ideas.title_formulas ?? [],
       content_pillars: ideas.content_pillars ?? [],
+      reference_channels: ideas.reference_channels ?? [],
       month_1: monthsPlan.month_1,
       month_2: monthsPlan.month_2,
       month_3: monthsPlan.month_3,
       thumbnail_style: style.thumbnail_style ?? '',
       growth_hacks: style.growth_hacks ?? [],
       monetization_path: style.monetization_path ?? '',
+      seo_keywords: style.seo_keywords ?? { channel_description: [], video_tags: [], hashtags: [] },
     }
 
     await spendCredits(user.id, 8, 'channel_plan')

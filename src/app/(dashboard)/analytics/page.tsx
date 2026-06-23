@@ -184,12 +184,14 @@ interface ChannelPlanResult {
   video_ideas: Array<{ title: string; format: string; why_works: string; best_time: string; priority: string }>
   title_formulas: Array<{ formula: string; example: string }>
   content_pillars: string[]
+  reference_channels?: Array<{ name: string; why_follow: string }>
   month_1: MonthPlan
   month_2: MonthPlan
   month_3: MonthPlan
   thumbnail_style: string
   growth_hacks: string[]
   monetization_path: string
+  seo_keywords?: { channel_description: string[]; video_tags: string[]; hashtags: string[] }
 }
 
 interface AnalyticsReport {
@@ -1026,10 +1028,12 @@ function NicheFinderTab({ onGoToNiche, onGoToPlan, externalResult, onClearExtern
 
 // ─── Channel Plan Tab ─────────────────────────────────────────────────────────
 
-function ChannelPlanTab({ initialTopic, externalResult, onClearExternal }: {
+function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToNiche, onGoToKeywords }: {
   initialTopic?: string
   externalResult?: ChannelPlanResult | null
   onClearExternal?: () => void
+  onGoToNiche?: (topic: string) => void
+  onGoToKeywords?: (topic: string) => void
 }) {
   const { t, lang: uiLang } = useLang()
   const router = useRouter()
@@ -1042,9 +1046,17 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal }: {
   const [step, setStepN] = useState(0)
   const [error, setError] = useState('')
   const [result, setResult] = useState<ChannelPlanResult | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
 
   useEffect(() => { if (initialTopic) setTopic(initialTopic) }, [initialTopic])
   useEffect(() => { if (externalResult) setResult(externalResult) }, [externalResult])
+
+  function copyChip(text: string) {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(text)
+      setTimeout(() => setCopied(null), 1500)
+    })
+  }
 
   const CP_STEPS = ['progress_videos', 'progress_stats', 'progress_ai', 'progress_ai', 'progress_report']
 
@@ -1088,13 +1100,29 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal }: {
 
   if (result) return (
     <div className="flex flex-col gap-5">
-      <button onClick={() => { setResult(null); onClearExternal?.() }}
-        className="no-print flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors self-start">
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
-        {uiLang === 'en' ? 'New plan' : 'Новый план'}
-      </button>
+      <div className="no-print flex flex-wrap items-center gap-2">
+        <button onClick={() => { setResult(null); onClearExternal?.() }}
+          className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          {uiLang === 'en' ? 'New plan' : 'Новый план'}
+        </button>
+        {onGoToNiche && (
+          <button onClick={() => onGoToNiche(topic || (result.channel_name_ideas?.[0] ?? ''))}
+            className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+            style={{ background: 'rgba(124,58,237,0.15)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.3)' }}>
+            📊 {uiLang === 'en' ? 'Niche Analysis' : 'Анализ ниши'}
+          </button>
+        )}
+        {onGoToKeywords && (
+          <button onClick={() => onGoToKeywords(topic)}
+            className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+            style={{ background: 'rgba(16,185,129,0.12)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)' }}>
+            🔑 {uiLang === 'en' ? 'Keywords' : 'Ключевые слова'}
+          </button>
+        )}
+      </div>
 
       {/* Channel names + positioning */}
       {result.channel_name_ideas?.length > 0 && (
@@ -1271,6 +1299,82 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal }: {
               <p className="text-xs text-slate-500 mb-1.5">{uiLang === 'en' ? '💰 Path to Monetization' : '💰 Путь к монетизации'}</p>
               <p className="text-sm text-slate-300 leading-relaxed">{result.monetization_path}</p>
             </>
+          )}
+        </Card>
+      )}
+
+      {/* Reference channels */}
+      {result.reference_channels && result.reference_channels.length > 0 && (
+        <Card>
+          <SectionTitle>{uiLang === 'en' ? '📺 Reference Channels' : '📺 Каналы для вдохновения'}</SectionTitle>
+          <div className="flex flex-col gap-3">
+            {result.reference_channels.map((ch, i) => (
+              <div key={i} className="flex gap-3">
+                <span className="text-violet-400 shrink-0 mt-0.5">▶</span>
+                <div>
+                  <p className="text-sm font-semibold text-white">{ch.name}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{ch.why_follow}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* SEO keywords */}
+      {result.seo_keywords && (
+        <Card>
+          <SectionTitle>{uiLang === 'en' ? '🔍 Channel SEO' : '🔍 SEO для канала'}</SectionTitle>
+          {copied && (
+            <p className="text-xs text-green-400 mb-3 transition-all">✓ {uiLang === 'en' ? 'Copied!' : 'Скопировано!'}</p>
+          )}
+          {result.seo_keywords.channel_description?.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs text-slate-500 mb-2">📝 {uiLang === 'en' ? 'Channel description keywords' : 'Ключевые слова для описания канала'}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {result.seo_keywords.channel_description.map((kw, i) => (
+                  <button key={i} onClick={() => copyChip(kw)}
+                    className="text-xs px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                    style={copied === kw
+                      ? { background: 'rgba(74,222,128,0.2)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.4)' }
+                      : { background: 'rgba(124,58,237,0.12)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.2)' }}>
+                    {kw}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {result.seo_keywords.video_tags?.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs text-slate-500 mb-2">🏷️ {uiLang === 'en' ? 'Video tags' : 'Теги для видео'}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {result.seo_keywords.video_tags.map((tag, i) => (
+                  <button key={i} onClick={() => copyChip(tag)}
+                    className="text-xs px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                    style={copied === tag
+                      ? { background: 'rgba(74,222,128,0.2)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.4)' }
+                      : { background: 'rgba(255,255,255,0.06)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {result.seo_keywords.hashtags?.length > 0 && (
+            <div>
+              <p className="text-xs text-slate-500 mb-2"># {uiLang === 'en' ? 'Hashtags' : 'Хештеги'}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {result.seo_keywords.hashtags.map((ht, i) => (
+                  <button key={i} onClick={() => copyChip(ht)}
+                    className="text-xs px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                    style={copied === ht
+                      ? { background: 'rgba(74,222,128,0.2)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.4)' }
+                      : { background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.2)' }}>
+                    {ht}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </Card>
       )}
@@ -2296,14 +2400,18 @@ function MiniBar({ value, color }: { value: number; color: string }) {
 function KeywordsTab({
   externalResult,
   onClearExternal,
+  initialKeyword,
 }: {
   externalResult: KeywordsResult | null
   onClearExternal: () => void
+  initialKeyword?: string
 }) {
   const router = useRouter()
   const { lang: uiLang } = useLang()
   const { setScriptParams, setStep } = useStudioStore()
-  const [keyword, setKeyword] = useState('')
+  const [keyword, setKeyword] = useState(initialKeyword ?? '')
+
+  useEffect(() => { if (initialKeyword) setKeyword(initialKeyword) }, [initialKeyword])
   const [contentLang, setContentLang] = useState<'ru' | 'en'>('ru')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -3257,6 +3365,7 @@ export default function AnalyticsPage() {
   const [cameFromRisingStars, setCameFromRisingStars] = useState(false)
   const [nicheInitialTopic, setNicheInitialTopic] = useState<string | null>(null)
   const [channelPlanInitialTopic, setChannelPlanInitialTopic] = useState<string | null>(null)
+  const [keywordsInitialTopic, setKeywordsInitialTopic] = useState<string | null>(null)
   const [tabOpen, setTabOpen] = useState(false)
   const tabRef = useRef<HTMLDivElement>(null)
 
@@ -3303,6 +3412,13 @@ export default function AnalyticsPage() {
   function handleGoToNicheFromFinder(topic: string) {
     setNicheInitialTopic(topic)
     setTab('niche')
+    clearOpenedReport()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function handleGoToKeywordsFromPlan(topic: string) {
+    setKeywordsInitialTopic(topic)
+    setTab('keywords')
     clearOpenedReport()
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -3410,6 +3526,8 @@ export default function AnalyticsPage() {
             initialTopic={channelPlanInitialTopic ?? undefined}
             externalResult={openedReport?.report_type === 'channel_plan' ? openedReport.result as ChannelPlanResult : null}
             onClearExternal={clearOpenedReport}
+            onGoToNiche={handleGoToNicheFromFinder}
+            onGoToKeywords={handleGoToKeywordsFromPlan}
           />
         )}
         {tab === 'trends' && (
@@ -3443,6 +3561,7 @@ export default function AnalyticsPage() {
           <KeywordsTab
             externalResult={openedReport?.report_type === 'keywords' ? openedReport.result as KeywordsResult : null}
             onClearExternal={clearOpenedReport}
+            initialKeyword={keywordsInitialTopic ?? undefined}
           />
         )}
         {tab === 'compare' && (
