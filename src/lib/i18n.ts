@@ -754,6 +754,7 @@ export const translations = {
     'analytics.subtitle':          'Анализ ниши, трендов и конкурентов с помощью AI',
     'analytics.tab_niche':         '🔍 Анализ ниши',
     'analytics.tab_niche_finder':  '🎯 Поиск ниши',
+    'analytics.tab_channel_plan':  '🚀 План запуска',
     'analytics.tab_trends':        '🔥 Тренды',
     'analytics.tab_channel':       '📊 Анализ канала',
     'analytics.tab_revenue':       '💰 Калькулятор',
@@ -777,6 +778,8 @@ export const translations = {
     'analytics.analyze_btn':       'Анализировать',
     'analytics.niche_cost':        '−4 кр.',
     'analytics.niche_finder_cost': '−6 кр.',
+    'analytics.channel_plan_cost': '−8 кр.',
+    'analytics.cp_go_plan':        '🚀 План запуска',
     'analytics.trends_cost':       '−3 кр.',
     'analytics.channel_cost':      '−6 кр.',
 
@@ -1628,6 +1631,7 @@ export const translations = {
     'analytics.subtitle':          'AI-powered niche, trends and competitor analysis',
     'analytics.tab_niche':         '🔍 Niche Analysis',
     'analytics.tab_niche_finder':  '🎯 Find Niche',
+    'analytics.tab_channel_plan':  '🚀 Launch Plan',
     'analytics.tab_trends':        '🔥 Trends',
     'analytics.tab_channel':       '📊 Channel Analysis',
     'analytics.tab_revenue':       '💰 Calculator',
@@ -1650,6 +1654,8 @@ export const translations = {
     'analytics.analyze_btn':       'Analyze',
     'analytics.niche_cost':        '−4 cr.',
     'analytics.niche_finder_cost': '−6 cr.',
+    'analytics.channel_plan_cost': '−8 cr.',
+    'analytics.cp_go_plan':        '🚀 Launch Plan',
     'analytics.trends_cost':       '−3 cr.',
     'analytics.channel_cost':      '−6 cr.',
 

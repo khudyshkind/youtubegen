@@ -172,12 +172,32 @@ interface NicheFinderResult {
   user_profile: { interests: string; skills: string; time_per_week: string; goal: string }
 }
 
+interface MonthPlan {
+  goal: string
+  videos: Array<{ week: number; title: string; format: string; day: string }>
+  actions: string[]
+}
+
+interface ChannelPlanResult {
+  channel_name_ideas: string[]
+  positioning: string
+  video_ideas: Array<{ title: string; format: string; why_works: string; best_time: string; priority: string }>
+  title_formulas: Array<{ formula: string; example: string }>
+  content_pillars: string[]
+  month_1: MonthPlan
+  month_2: MonthPlan
+  month_3: MonthPlan
+  thumbnail_style: string
+  growth_hacks: string[]
+  monetization_path: string
+}
+
 interface AnalyticsReport {
   id: string
-  report_type: 'niche' | 'niche_finder' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars'
+  report_type: 'niche' | 'niche_finder' | 'channel_plan' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars'
   title: string
   query: string
-  result: NicheResult | NicheFinderResult | TrendResult | ChannelResult | RevenueResult | CommentsResult | KeywordsResult | CompareResult | RisingStarsResult
+  result: NicheResult | NicheFinderResult | ChannelPlanResult | TrendResult | ChannelResult | RevenueResult | CommentsResult | KeywordsResult | CompareResult | RisingStarsResult
   created_at: string
 }
 
@@ -656,8 +676,9 @@ function NicheTab({ externalResult, onClearExternal, onAnalyzeChannel, initialTo
 
 // ─── Niche Finder Tab ─────────────────────────────────────────────────────────
 
-function NicheFinderTab({ onGoToNiche, externalResult, onClearExternal }: {
+function NicheFinderTab({ onGoToNiche, onGoToPlan, externalResult, onClearExternal }: {
   onGoToNiche: (topic: string) => void
+  onGoToPlan?: (topic: string) => void
   externalResult?: NicheFinderResult | null
   onClearExternal?: () => void
 }) {
@@ -816,12 +837,22 @@ function NicheFinderTab({ onGoToNiche, externalResult, onClearExternal }: {
                   {t('analytics.nf_examples')}: {niche.example_channels.join(', ')}
                 </p>
               )}
-              <button
-                onClick={() => onGoToNiche(niche.name)}
-                className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
-                style={{ background: 'rgba(124,58,237,0.15)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.3)' }}>
-                {t('analytics.nf_go_analyze')}
-              </button>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => onGoToNiche(niche.name)}
+                  className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                  style={{ background: 'rgba(124,58,237,0.15)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.3)' }}>
+                  {t('analytics.nf_go_analyze')}
+                </button>
+                {onGoToPlan && (
+                  <button
+                    onClick={() => onGoToPlan(niche.name)}
+                    className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                    style={{ background: 'rgba(16,185,129,0.12)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)' }}>
+                    {t('analytics.cp_go_plan')}
+                  </button>
+                )}
+              </div>
             </Card>
           ))}
         </div>
@@ -987,6 +1018,351 @@ function NicheFinderTab({ onGoToNiche, externalResult, onClearExternal }: {
       {loading && (
         <Card className="no-print">
           <ProgressSteps steps={NF_STEPS} current={step} t={t} />
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ─── Channel Plan Tab ─────────────────────────────────────────────────────────
+
+function ChannelPlanTab({ initialTopic, externalResult, onClearExternal }: {
+  initialTopic?: string
+  externalResult?: ChannelPlanResult | null
+  onClearExternal?: () => void
+}) {
+  const { t, lang: uiLang } = useLang()
+  const router = useRouter()
+  const { setScriptParams, setStep } = useStudioStore()
+
+  const [topic, setTopic] = useState(initialTopic ?? '')
+  const [country, setCountry] = useState('RU')
+  const [contentLang, setContentLang] = useState('ru')
+  const [loading, setLoading] = useState(false)
+  const [step, setStepN] = useState(0)
+  const [error, setError] = useState('')
+  const [result, setResult] = useState<ChannelPlanResult | null>(null)
+
+  useEffect(() => { if (initialTopic) setTopic(initialTopic) }, [initialTopic])
+  useEffect(() => { if (externalResult) setResult(externalResult) }, [externalResult])
+
+  const CP_STEPS = ['progress_videos', 'progress_stats', 'progress_ai', 'progress_ai', 'progress_report']
+
+  async function handleGenerate() {
+    if (!topic.trim()) { setError(uiLang === 'en' ? 'Enter channel niche/topic' : 'Введите нишу/тему канала'); return }
+    setError(''); setResult(null); setLoading(true); setStepN(0)
+    let s = 0
+    const timer = setInterval(() => { s = Math.min(s + 1, CP_STEPS.length - 1); setStepN(s) }, 6000)
+    try {
+      const res = await fetch('/api/analytics/channel-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic, country, content_lang: contentLang, ui_lang: uiLang }),
+      })
+      const json = await res.json() as { ok: boolean; data?: ChannelPlanResult; error?: string; code?: string }
+      if (!json.ok) {
+        setError(json.code === 'NO_CREDITS' ? t('analytics.err_credits') : (json.error ?? t('analytics.err_general')))
+      } else {
+        setResult(json.data ?? null)
+        void refreshCredits()
+      }
+    } catch { setError(t('analytics.err_general')) }
+    finally { clearInterval(timer); setLoading(false); setStepN(-1) }
+  }
+
+  function goToStudio(videoTitle: string) {
+    setScriptParams({ topic: videoTitle })
+    setStep(1)
+    router.push('/studio')
+  }
+
+  function priorityBadge(priority: string): { dot: string; bg: string; color: string } {
+    const p = priority.toLowerCase()
+    if (p.includes('срочно') || p.includes('urgent')) return { dot: '🔴', bg: 'rgba(239,68,68,0.1)', color: '#f87171' }
+    if (p.includes('скоро') || p.includes('soon'))   return { dot: '🟡', bg: 'rgba(234,179,8,0.1)',  color: '#facc15' }
+    return { dot: '🟢', bg: 'rgba(74,222,128,0.1)', color: '#4ade80' }
+  }
+
+  const selectStyle = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }
+  const inputCls = 'w-full rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-violet-500/50'
+
+  if (result) return (
+    <div className="flex flex-col gap-5">
+      <button onClick={() => { setResult(null); onClearExternal?.() }}
+        className="no-print flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors self-start">
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+        </svg>
+        {uiLang === 'en' ? 'New plan' : 'Новый план'}
+      </button>
+
+      {/* Channel names + positioning */}
+      {result.channel_name_ideas?.length > 0 && (
+        <Card>
+          <SectionTitle>{uiLang === 'en' ? '💡 Channel Name Ideas' : '💡 Идеи названий канала'}</SectionTitle>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {result.channel_name_ideas.map((name, i) => (
+              <span key={i} className="text-sm px-3 py-1.5 rounded-full font-medium"
+                style={{ background: 'rgba(124,58,237,0.15)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.25)' }}>
+                {name}
+              </span>
+            ))}
+          </div>
+          {result.positioning && (
+            <>
+              <p className="text-xs text-slate-500 mb-1.5">{uiLang === 'en' ? '🎯 Positioning' : '🎯 Позиционирование'}</p>
+              <p className="text-sm text-slate-300 leading-relaxed">{result.positioning}</p>
+            </>
+          )}
+        </Card>
+      )}
+
+      {/* Content pillars */}
+      {result.content_pillars?.length > 0 && (
+        <Card>
+          <SectionTitle>{uiLang === 'en' ? '🏛️ Content Pillars' : '🏛️ Столпы контента'}</SectionTitle>
+          <div className="flex flex-wrap gap-2">
+            {result.content_pillars.map((p, i) => (
+              <span key={i} className="text-sm px-3 py-1.5 rounded-lg"
+                style={{ background: 'rgba(255,255,255,0.06)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {p}
+              </span>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Video ideas */}
+      {result.video_ideas?.length > 0 && (
+        <div>
+          <SectionTitle>{uiLang === 'en' ? `🔥 ${result.video_ideas.length} Video Ideas` : `🔥 ${result.video_ideas.length} идей для видео`}</SectionTitle>
+          <div className="flex flex-col gap-3">
+            {result.video_ideas.map((idea, i) => {
+              const badge = priorityBadge(idea.priority)
+              return (
+                <Card key={i}>
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <p className="text-sm font-semibold text-white flex-1">{idea.title}</p>
+                    <span className="shrink-0 text-xs px-2 py-0.5 rounded-full font-medium"
+                      style={{ background: badge.bg, color: badge.color }}>
+                      {badge.dot} {idea.priority}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    <span className="text-xs px-2 py-0.5 rounded-full"
+                      style={{ background: 'rgba(255,255,255,0.06)', color: '#94a3b8' }}>
+                      📹 {idea.format}
+                    </span>
+                    {idea.best_time && (
+                      <span className="text-xs px-2 py-0.5 rounded-full"
+                        style={{ background: 'rgba(255,255,255,0.06)', color: '#94a3b8' }}>
+                        🕐 {idea.best_time}
+                      </span>
+                    )}
+                  </div>
+                  {idea.why_works && (
+                    <p className="text-xs text-slate-500 mb-3">{idea.why_works}</p>
+                  )}
+                  <button onClick={() => goToStudio(idea.title)}
+                    className="no-print text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                    style={{ background: 'rgba(124,58,237,0.15)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.3)' }}>
+                    {uiLang === 'en' ? '🎬 Create this video →' : '🎬 Создать это видео →'}
+                  </button>
+                </Card>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Title formulas */}
+      {result.title_formulas?.length > 0 && (
+        <Card>
+          <SectionTitle>{uiLang === 'en' ? '✍️ Title Formulas' : '✍️ Формулы заголовков'}</SectionTitle>
+          <div className="flex flex-col gap-4">
+            {result.title_formulas.map((f, i) => (
+              <div key={i} className="pl-3" style={{ borderLeft: '2px solid rgba(124,58,237,0.4)' }}>
+                <p className="text-sm font-medium text-violet-300 mb-1">{f.formula}</p>
+                <p className="text-xs text-slate-500">{uiLang === 'en' ? 'Example: ' : 'Пример: '}{f.example}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* 3-month content plan */}
+      {(result.month_1 || result.month_2 || result.month_3) && (
+        <Card>
+          <SectionTitle>{uiLang === 'en' ? '📅 3-Month Content Plan' : '📅 Контент-план на 3 месяца'}</SectionTitle>
+          <div className="flex flex-col gap-5">
+            {([result.month_1, result.month_2, result.month_3] as MonthPlan[]).map((month, mi) => month && (
+              <div key={mi}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{ background: 'rgba(124,58,237,0.25)', color: '#c4b5fd' }}>
+                    {uiLang === 'en' ? `Month ${mi + 1}` : `Месяц ${mi + 1}`}
+                  </span>
+                  <p className="text-xs text-slate-400">{month.goal}</p>
+                </div>
+                <div className="rounded-xl overflow-hidden mb-3" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr style={{ background: 'rgba(255,255,255,0.04)' }}>
+                        <th className="text-left px-3 py-2 text-slate-500 font-medium">{uiLang === 'en' ? 'Week' : 'Неделя'}</th>
+                        <th className="text-left px-3 py-2 text-slate-500 font-medium">{uiLang === 'en' ? 'Video' : 'Видео'}</th>
+                        <th className="text-left px-3 py-2 text-slate-500 font-medium">{uiLang === 'en' ? 'Format' : 'Формат'}</th>
+                        <th className="text-left px-3 py-2 text-slate-500 font-medium">{uiLang === 'en' ? 'Day' : 'День'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {month.videos?.map((v, vi) => (
+                        <tr key={vi} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                          <td className="px-3 py-2 text-slate-500">#{v.week}</td>
+                          <td className="px-3 py-2 text-slate-300">{v.title}</td>
+                          <td className="px-3 py-2 text-slate-400">{v.format}</td>
+                          <td className="px-3 py-2 text-slate-400">{v.day}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {month.actions?.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {month.actions.map((a, ai) => (
+                      <span key={ai} className="text-xs px-2 py-1 rounded-lg"
+                        style={{ background: 'rgba(255,255,255,0.05)', color: '#64748b' }}>
+                        ✓ {a}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Thumbnail style */}
+      {result.thumbnail_style && (
+        <Card>
+          <SectionTitle>{uiLang === 'en' ? '🖼️ Thumbnail Style' : '🖼️ Стиль обложек'}</SectionTitle>
+          <p className="text-sm text-slate-300 leading-relaxed">{result.thumbnail_style}</p>
+        </Card>
+      )}
+
+      {/* Growth hacks + monetization */}
+      {(result.growth_hacks?.length > 0 || result.monetization_path) && (
+        <Card>
+          {result.growth_hacks?.length > 0 && (
+            <>
+              <SectionTitle>{uiLang === 'en' ? '📈 Growth Hacks' : '📈 Стратегия роста'}</SectionTitle>
+              <ul className="flex flex-col gap-2 mb-4">
+                {result.growth_hacks.map((h, i) => (
+                  <li key={i} className="flex gap-2 text-sm text-slate-300">
+                    <span className="text-violet-400 shrink-0">◆</span>
+                    {h}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {result.monetization_path && (
+            <>
+              <p className="text-xs text-slate-500 mb-1.5">{uiLang === 'en' ? '💰 Path to Monetization' : '💰 Путь к монетизации'}</p>
+              <p className="text-sm text-slate-300 leading-relaxed">{result.monetization_path}</p>
+            </>
+          )}
+        </Card>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="flex flex-col gap-5">
+      <Card className="no-print">
+        <h2 className="text-sm font-semibold text-slate-300 mb-4">
+          {uiLang === 'en' ? 'Channel topic / niche' : 'Тема канала / ниша'}
+        </h2>
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1.5">
+              {uiLang === 'en' ? 'Niche or topic' : 'Ниша или тема'}
+            </label>
+            <input
+              type="text"
+              value={topic}
+              onChange={e => setTopic(e.target.value)}
+              placeholder={uiLang === 'en' ? 'e.g., Sales psychology, Cooking for fitness...' : 'Например: Психология продаж, Кулинария для фитнеса...'}
+              className={inputCls}
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+              onKeyDown={e => e.key === 'Enter' && void handleGenerate()}
+            />
+          </div>
+          <div className="flex gap-3 flex-wrap">
+            <div className="flex-1 min-w-36">
+              <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.country_label')}</label>
+              <select value={country} onChange={e => setCountry(e.target.value)}
+                className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none" style={selectStyle}>
+                <option value="worldwide">🌍 {uiLang === 'en' ? 'Worldwide' : 'Весь мир'}</option>
+                <option value="US">🇺🇸 США / USA</option>
+                <option value="GB">🇬🇧 Великобритания / UK</option>
+                <option value="CA">🇨🇦 Канада / Canada</option>
+                <option value="AU">🇦🇺 Австралия / Australia</option>
+                <option value="DE">🇩🇪 Германия / Germany</option>
+                <option value="FR">🇫🇷 Франция / France</option>
+                <option value="ES">🇪🇸 Испания / Spain</option>
+                <option value="IT">🇮🇹 Италия / Italy</option>
+                <option value="BR">🇧🇷 Бразилия / Brazil</option>
+                <option value="MX">🇲🇽 Мексика / Mexico</option>
+                <option value="IN">🇮🇳 Индия / India</option>
+                <option value="JP">🇯🇵 Япония / Japan</option>
+                <option value="KR">🇰🇷 Южная Корея / S. Korea</option>
+                <option value="RU">🇷🇺 Россия / Russia</option>
+                <option value="UA">🇺🇦 Украина / Ukraine</option>
+                <option value="KZ">🇰🇿 Казахстан / Kazakhstan</option>
+                <option value="PL">🇵🇱 Польша / Poland</option>
+                <option value="NL">🇳🇱 Нидерланды / Netherlands</option>
+                <option value="TR">🇹🇷 Турция / Turkey</option>
+                <option value="AE">🇦🇪 ОАЭ / UAE</option>
+                <option value="SA">🇸🇦 Саудовская Аравия / Saudi Arabia</option>
+              </select>
+            </div>
+            <div className="flex-1 min-w-36">
+              <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.lang_label')}</label>
+              <select value={contentLang} onChange={e => setContentLang(e.target.value)}
+                className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none" style={selectStyle}>
+                <option value="en">{t('analytics.lang_en')}</option>
+                <option value="ru">{t('analytics.lang_ru')}</option>
+                <option value="de">Немецкий / German</option>
+                <option value="fr">Французский / French</option>
+                <option value="es">Испанский / Spanish</option>
+                <option value="it">Итальянский / Italian</option>
+                <option value="pt">Португальский / Portuguese</option>
+                <option value="ja">Японский / Japanese</option>
+                <option value="ko">Корейский / Korean</option>
+                <option value="hi">Хинди / Hindi</option>
+                <option value="tr">Турецкий / Turkish</option>
+                <option value="ar">Арабский / Arabic</option>
+                <option value="pl">Польский / Polish</option>
+                <option value="nl">Нидерландский / Dutch</option>
+                <option value="uk">Украинский / Ukrainian</option>
+              </select>
+            </div>
+          </div>
+
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
+          <button onClick={() => void handleGenerate()} disabled={loading}
+            className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
+            {loading ? <Spinner /> : null}
+            {uiLang === 'en' ? '🚀 Create Launch Plan' : '🚀 Составить план запуска'} · {t('analytics.channel_plan_cost')}
+          </button>
+        </div>
+      </Card>
+
+      {loading && (
+        <Card className="no-print">
+          <ProgressSteps steps={CP_STEPS} current={step} t={t} />
         </Card>
       )}
     </div>
@@ -2771,6 +3147,7 @@ function RisingStarsTab({
 const REPORT_ICONS: Record<string, string> = {
   niche: '🔍',
   niche_finder: '🎯',
+  channel_plan: '🚀',
   trends: '🔥',
   channel: '📊',
   revenue: '💰',
@@ -2869,7 +3246,7 @@ function HistoryTab({ onOpen }: { onOpen: (report: AnalyticsReport) => void }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type Tab = 'niche' | 'niche_finder' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars' | 'history'
+type Tab = 'niche' | 'niche_finder' | 'channel_plan' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars' | 'history'
 
 export default function AnalyticsPage() {
   const { t } = useLang()
@@ -2879,6 +3256,7 @@ export default function AnalyticsPage() {
   const [risingStarsResult, setRisingStarsResult] = useState<RisingStarsResult | null>(null)
   const [cameFromRisingStars, setCameFromRisingStars] = useState(false)
   const [nicheInitialTopic, setNicheInitialTopic] = useState<string | null>(null)
+  const [channelPlanInitialTopic, setChannelPlanInitialTopic] = useState<string | null>(null)
   const [tabOpen, setTabOpen] = useState(false)
   const tabRef = useRef<HTMLDivElement>(null)
 
@@ -2929,9 +3307,17 @@ export default function AnalyticsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  function handleGoToPlan(topic: string) {
+    setChannelPlanInitialTopic(topic)
+    setTab('channel_plan')
+    clearOpenedReport()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const TABS: Array<{ id: Tab; label: string }> = [
     { id: 'niche',         label: t('analytics.tab_niche') },
     { id: 'niche_finder',  label: t('analytics.tab_niche_finder') },
+    { id: 'channel_plan',  label: t('analytics.tab_channel_plan') },
     { id: 'trends',        label: t('analytics.tab_trends') },
     { id: 'channel',       label: t('analytics.tab_channel') },
     { id: 'revenue',       label: t('analytics.tab_revenue') },
@@ -3014,7 +3400,15 @@ export default function AnalyticsPage() {
         {tab === 'niche_finder' && (
           <NicheFinderTab
             onGoToNiche={handleGoToNicheFromFinder}
+            onGoToPlan={handleGoToPlan}
             externalResult={openedReport?.report_type === 'niche_finder' ? openedReport.result as NicheFinderResult : null}
+            onClearExternal={clearOpenedReport}
+          />
+        )}
+        {tab === 'channel_plan' && (
+          <ChannelPlanTab
+            initialTopic={channelPlanInitialTopic ?? undefined}
+            externalResult={openedReport?.report_type === 'channel_plan' ? openedReport.result as ChannelPlanResult : null}
             onClearExternal={clearOpenedReport}
           />
         )}

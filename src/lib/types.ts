@@ -37,6 +37,7 @@ export const CREDIT_COSTS = {
   // YouTube analytics
   niche_analysis:    4,
   niche_finder:      6,
+  channel_plan:      8,
   trends:            3,
   channel_analysis:  6,
   revenue_calc:      2,
