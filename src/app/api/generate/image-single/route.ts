@@ -96,7 +96,7 @@ async function generateGptMini(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-image-1-mini',
+      model: 'gpt-image-1',
       prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
       size: '1536x1024',
       quality: 'medium',
@@ -110,7 +110,7 @@ async function generateGptMini(
   if (!base64) throw new Error('GPT Image: no image data')
 
   const buffer = Buffer.from(base64, 'base64')
-  const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.jpg`
+  const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.png`
 
   const { error: uploadError } = await serviceClient.storage
     .from('images')

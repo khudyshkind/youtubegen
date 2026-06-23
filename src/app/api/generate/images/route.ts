@@ -310,7 +310,7 @@ async function generateImageGptMini(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-image-1-mini',
+      model: 'gpt-image-1',
       prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
       size: '1536x1024',
       quality: 'medium',
@@ -325,9 +325,14 @@ async function generateImageGptMini(
 
   const buffer = Buffer.from(base64, 'base64')
 
+  // Log actual PNG dimensions from header (bytes 16-19 = width, 20-23 = height)
+  const pngWidth  = buffer.length > 24 ? buffer.readUInt32BE(16) : 0
+  const pngHeight = buffer.length > 24 ? buffer.readUInt32BE(20) : 0
+  console.log(`[gpt_mini] scene ${sceneIndex} | requested size: 1536x1024 | actual: ${pngWidth}x${pngHeight} | buffer: ${buffer.byteLength} bytes`)
+
   if (!projectId) return null
 
-  const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.jpg`
+  const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.png`
   const { error: uploadError } = await serviceClient.storage
     .from('images')
     .upload(storagePath, buffer, { contentType: 'image/png', upsert: true })
