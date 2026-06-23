@@ -303,49 +303,66 @@ async function generateImageGptMini(
   sceneIndex: number,
   serviceClient: ReturnType<typeof createServiceClient>,
 ): Promise<string | null> {
-  const res = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${env('OPENAI_API_KEY')}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'gpt-image-2',
-      prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
-      size: '1536x1024',
-      quality: 'medium',
-      n: 1,
-    }),
-  })
+  const MAX_RETRIES = 4
+  let lastError = ''
 
-  const data = await res.json()
-  if (!res.ok) {
-    const msg = data.error?.message ?? String(res.status)
-    if (msg.toLowerCase().includes('verif')) {
-      throw new Error('GPT Image: требуется верификация организации OpenAI (platform.openai.com/settings/organization/general → Verify Organization)')
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = Math.min(2000 * 2 ** (attempt - 1), 30000) // 2s, 4s, 8s, 16s
+      console.log(`[gpt_mini] scene ${sceneIndex} retry ${attempt}/${MAX_RETRIES} after ${delay}ms (${lastError})`)
+      await new Promise(r => setTimeout(r, delay))
     }
-    throw new Error(`GPT Image: ${msg}`)
+
+    const res = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env('OPENAI_API_KEY')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-image-2',
+        prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
+        size: '1536x1024',
+        quality: 'medium',
+        n: 1,
+      }),
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      const msg = data.error?.message ?? String(res.status)
+      lastError = msg
+      if (msg.toLowerCase().includes('verif')) {
+        throw new Error('GPT Image: требуется верификация организации OpenAI (platform.openai.com/settings/organization/general → Verify Organization)')
+      }
+      // Retry on rate limit (429) or server errors (5xx)
+      if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) continue
+      throw new Error(`GPT Image: ${msg}`)
+    }
+
+    const base64 = data.data?.[0]?.b64_json
+    if (!base64) throw new Error('GPT Image: no image data')
+
+    const buffer = Buffer.from(base64, 'base64')
+
+    // Log actual PNG dimensions from header (bytes 16-19 = width, 20-23 = height)
+    const pngWidth  = buffer.length > 24 ? buffer.readUInt32BE(16) : 0
+    const pngHeight = buffer.length > 24 ? buffer.readUInt32BE(20) : 0
+    console.log(`[gpt_mini] scene ${sceneIndex} | requested size: 1536x1024 | actual: ${pngWidth}x${pngHeight} | buffer: ${buffer.byteLength} bytes`)
+
+    if (!projectId) return null
+
+    const storagePath = `${userId}/${projectId}/scene_gpt_${sceneIndex}.png`
+    const { error: uploadError } = await serviceClient.storage
+      .from('images')
+      .upload(storagePath, buffer, { contentType: 'image/png', upsert: true })
+
+    if (uploadError) throw new Error(`Storage upload error: ${uploadError.message}`)
+    const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
+    return publicUrl
   }
-  const base64 = data.data?.[0]?.b64_json
-  if (!base64) throw new Error('GPT Image: no image data')
 
-  const buffer = Buffer.from(base64, 'base64')
-
-  // Log actual PNG dimensions from header (bytes 16-19 = width, 20-23 = height)
-  const pngWidth  = buffer.length > 24 ? buffer.readUInt32BE(16) : 0
-  const pngHeight = buffer.length > 24 ? buffer.readUInt32BE(20) : 0
-  console.log(`[gpt_mini] scene ${sceneIndex} | requested size: 1536x1024 | actual: ${pngWidth}x${pngHeight} | buffer: ${buffer.byteLength} bytes`)
-
-  if (!projectId) return null
-
-  const storagePath = `${userId}/${projectId}/scene_gpt_${sceneIndex}.png`
-  const { error: uploadError } = await serviceClient.storage
-    .from('images')
-    .upload(storagePath, buffer, { contentType: 'image/png', upsert: true })
-
-  if (uploadError) throw new Error(`Storage upload error: ${uploadError.message}`)
-  const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
-  return publicUrl
+  throw new Error(`GPT Image: max retries exceeded (${lastError})`)
 }
 
 export async function POST(request: NextRequest) {
