@@ -76,37 +76,52 @@ difficulty: "Easy" / "Medium" / "Hard"
 Return EXACTLY 5 niches. JSON only. Start with { end with }.`
 }
 
-function getFinalPrompt(lang: string): string {
+function getWinnerPrompt(lang: string): string {
   const isRu = lang !== 'en'
   return isRu
-    ? `Ты эксперт по YouTube стратегии. Ты получишь данные о 5 потенциальных YouTube нишах с реальной статистикой YouTube API.
+    ? `Ты эксперт по YouTube стратегии. Ты получишь данные о 5 нишах с реальной статистикой YouTube.
 
-Задача:
-1. Выбери ЛУЧШУЮ нишу для старта
-2. Дай конкретный план действий (5 шагов)
-3. Напиши реалистичный прогноз роста
-4. Выбери 2 альтернативы для рассмотрения позже
-5. Укажи 1-2 ниши которых стоит ИЗБЕГАТЬ именно этому человеку
+Задача: выбери ЛУЧШУЮ нишу для старта и дай план действий.
 
-ВАЖНО: Учитывай данные YouTube API. Ниша с более высокими средними просмотрами и большим числом видео — значит есть спрос. Низкие просмотры + мало видео — ниша слишком узкая или не интересна зрителям.
+ВАЖНО: Ниша с высокими средними просмотрами и большим числом видео = есть спрос. Низкие просмотры + мало видео = ниша слишком узкая.
 
-ФОРМАТ — строго JSON:
-{"winner":{"name":"Лучшая ниша","why_best":"3-4 предложения: почему именно эта ниша лучшая для данного человека с учётом его профиля И данных YouTube","action_plan":["Шаг 1: ...","Шаг 2: ...","Шаг 3: ...","Шаг 4: ...","Шаг 5: ..."],"realistic_timeline":"Реалистичный прогноз: 3 месяца — ..., 6 месяцев — ..., год — ...","potential_income":"Оценка дохода через год при регулярной публикации"},"alternatives":[{"name":"Альтернатива 1","when_to_consider":"Когда стоит переключиться"},{"name":"Альтернатива 2","when_to_consider":"Когда стоит переключиться"}],"avoid":[{"name":"Ниша для избегания","reason":"Почему НЕ подходит именно этому человеку"}]}
+ФОРМАТ — строго JSON без markdown:
+{"winner":{"name":"Лучшая ниша","why_best":"3-4 предложения: почему именно эта ниша лучшая с учётом профиля И данных YouTube","action_plan":["Шаг 1: ...","Шаг 2: ...","Шаг 3: ...","Шаг 4: ...","Шаг 5: ..."],"realistic_timeline":"3 месяца — ..., 6 месяцев — ..., год — ...","potential_income":"Оценка дохода через год при регулярной публикации"}}
 
 Только JSON. Начни с { и заканчивай с }.`
-    : `You are a YouTube strategy expert. You will receive data about 5 potential YouTube niches with real YouTube API statistics.
+    : `You are a YouTube strategy expert. You will receive data about 5 niches with real YouTube statistics.
+
+Task: choose the BEST niche to start with and give an action plan.
+
+IMPORTANT: Niche with high avg views and many videos = there is demand. Low views + few videos = too narrow.
+
+FORMAT — strict JSON without markdown:
+{"winner":{"name":"Best Niche","why_best":"3-4 sentences: why this is the best niche given the profile AND YouTube data","action_plan":["Step 1: ...","Step 2: ...","Step 3: ...","Step 4: ...","Step 5: ..."],"realistic_timeline":"3 months — ..., 6 months — ..., 1 year — ...","potential_income":"Estimated income after one year of consistent posting"}}
+
+JSON only. Start with { end with }.`
+}
+
+function getAvoidAltsPrompt(lang: string): string {
+  const isRu = lang !== 'en'
+  return isRu
+    ? `Ты эксперт по YouTube стратегии. Ты получишь профиль пользователя и 5 потенциальных ниш.
+
+Задача:
+1. Укажи 1-2 ниши которых стоит ИЗБЕГАТЬ именно этому человеку (не подходят по навыкам, времени или целям)
+2. Предложи 2 альтернативные ниши для рассмотрения в будущем (не из списка основных)
+
+ФОРМАТ — строго JSON без markdown:
+{"avoid":[{"name":"Ниша","reason":"Почему не подходит именно этому человеку — 1-2 предложения"}],"alternatives":[{"name":"Альтернативная ниша 1","when_to_consider":"Когда стоит рассмотреть"},{"name":"Альтернативная ниша 2","when_to_consider":"Когда стоит рассмотреть"}]}
+
+Только JSON. Начни с { и заканчивай с }.`
+    : `You are a YouTube strategy expert. You will receive a user profile and 5 potential niches.
 
 Task:
-1. Choose the BEST niche to start with
-2. Give a concrete action plan (5 steps)
-3. Write a realistic growth timeline
-4. Choose 2 alternatives worth considering later
-5. Identify 1-2 niches this person should AVOID
+1. Identify 1-2 niches this person should AVOID (don't fit their skills, time, or goals)
+2. Suggest 2 alternative niches worth considering in the future (not from the main list)
 
-IMPORTANT: Consider YouTube API data. A niche with higher average views and more videos = there is demand. Low views + few videos = too narrow or not interesting to viewers.
-
-FORMAT — strict JSON:
-{"winner":{"name":"Best Niche","why_best":"3-4 sentences: why this is the best niche for this person given their profile AND YouTube data","action_plan":["Step 1: ...","Step 2: ...","Step 3: ...","Step 4: ...","Step 5: ..."],"realistic_timeline":"Realistic forecast: 3 months — ..., 6 months — ..., 1 year — ...","potential_income":"Estimated income after one year of consistent posting"},"alternatives":[{"name":"Alternative 1","when_to_consider":"When to consider switching"},{"name":"Alternative 2","when_to_consider":"When to consider switching"}],"avoid":[{"name":"Niche to Avoid","reason":"Why this niche specifically doesn't suit this person"}]}
+FORMAT — strict JSON without markdown:
+{"avoid":[{"name":"Niche","reason":"Why it doesn't suit this person specifically — 1-2 sentences"}],"alternatives":[{"name":"Alternative Niche 1","when_to_consider":"When to consider"},{"name":"Alternative Niche 2","when_to_consider":"When to consider"}]}
 
 JSON only. Start with { end with }.`
 }
@@ -203,27 +218,42 @@ export async function POST(req: NextRequest) {
       youtube_data: idx < 3 ? (ytResults.find(r => r.name === niche.name) ?? { video_count: 0, avg_views: 0 }) : null,
     }))
 
-    // Step 3: Claude finalizes recommendation
-    console.log('[niche-finder] step 3: finalizing recommendation')
+    // Step 3: Claude finalizes recommendation (2 parallel: winner + avoid/alts)
+    console.log('[niche-finder] step 3: finalizing recommendation (parallel)')
     const finalCtx = ui_lang === 'en'
       ? `User profile:\n${userCtx}\n\nNiches with YouTube data:\n${JSON.stringify(enrichedNiches, null, 2)}`
       : `Профиль пользователя:\n${userCtx}\n\nНиши с данными YouTube:\n${JSON.stringify(enrichedNiches, null, 2)}`
 
-    const msg2 = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2500,
-      system: [{ type: 'text', text: getFinalPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: finalCtx }],
-    })
-    console.log('[niche-finder] claude2 tokens:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0)
-    const text2 = (msg2.content[0] as { text: string }).text
-    const rec = parseClaudeJson<RecommendationResult>(text2, 'claude2')
+    const [msg2a, msg2b] = await Promise.all([
+      anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2000,
+        system: [{ type: 'text', text: getWinnerPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: finalCtx }],
+      }),
+      anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1500,
+        system: [{ type: 'text', text: getAvoidAltsPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: finalCtx }],
+      }),
+    ])
+
+    const text2a = (msg2a.content[0] as { text: string }).text
+    const text2b = (msg2b.content[0] as { text: string }).text
+    console.log('[niche-finder] claude2a raw:', text2a.substring(0, 500))
+    console.log('[niche-finder] claude2b raw:', text2b.substring(0, 500))
+    console.log('[niche-finder] claude2a tokens:', msg2a.usage.input_tokens, 'out:', msg2a.usage.output_tokens)
+    console.log('[niche-finder] claude2b tokens:', msg2b.usage.input_tokens, 'out:', msg2b.usage.output_tokens)
+
+    const winner = parseClaudeJson<{ winner: RecommendationResult['winner'] }>(text2a, 'claude2a').winner
+    const { avoid, alternatives } = parseClaudeJson<Pick<RecommendationResult, 'avoid' | 'alternatives'>>(text2b, 'claude2b')
 
     const result = {
       niches: enrichedNiches,
-      winner: rec.winner,
-      alternatives: rec.alternatives ?? [],
-      avoid: rec.avoid ?? [],
+      winner,
+      alternatives: alternatives ?? [],
+      avoid: avoid ?? [],
       user_profile: { interests, skills, time_per_week, goal },
     }
 
@@ -238,7 +268,7 @@ export async function POST(req: NextRequest) {
       if ((old?.length ?? 0) >= 20) await svc.from('analytics_reports').delete().eq('id', old![0].id)
       await svc.from('analytics_reports').insert({
         user_id: user.id, report_type: 'niche_finder',
-        title: `Поиск ниши: ${rec.winner.name}`,
+        title: `Поиск ниши: ${winner.name}`,
         query: interests.slice(0, 80),
         result,
       })
