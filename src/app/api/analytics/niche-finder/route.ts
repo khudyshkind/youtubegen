@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { resolveUserLang, langNote } from '@/lib/user-lang'
 
 export const maxDuration = 120
 
@@ -166,6 +167,7 @@ export async function POST(req: NextRequest) {
     const check = await requireCredits(user.id, 'niche_finder', supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
+    const uiLangFull = resolveUserLang(req, ui_lang)
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
 
     const userCtx = ui_lang === 'en'
@@ -173,12 +175,12 @@ export async function POST(req: NextRequest) {
       : `Интересы: ${interests}\nНавыки: ${skills}\nВремя в неделю: ${time_per_week} часов\nЦель: ${goal}\nЦелевой рынок: ${country}, язык контента: ${content_lang}`
 
     // Step 1: Claude generates 5 niches
-    console.log('[niche-finder] step 1: generating niches')
+    console.log(`[niche-finder] step 1: generating niches | ui_lang=${ui_lang} uiLangFull=${uiLangFull}`)
     const msg1 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2500,
       system: [{ type: 'text', text: getNicheGenPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: userCtx }],
+      messages: [{ role: 'user', content: userCtx + langNote(uiLangFull) }],
     })
     console.log('[niche-finder] claude1 tokens:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0)
     const text1 = (msg1.content[0] as { text: string }).text
@@ -223,19 +225,20 @@ export async function POST(req: NextRequest) {
     const finalCtx = ui_lang === 'en'
       ? `User profile:\n${userCtx}\n\nNiches with YouTube data:\n${JSON.stringify(enrichedNiches, null, 2)}`
       : `Профиль пользователя:\n${userCtx}\n\nНиши с данными YouTube:\n${JSON.stringify(enrichedNiches, null, 2)}`
+    const finalCtxWithLang = finalCtx + langNote(uiLangFull)
 
     const [msg2a, msg2b] = await Promise.all([
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 2000,
         system: [{ type: 'text', text: getWinnerPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: finalCtx }],
+        messages: [{ role: 'user', content: finalCtxWithLang }],
       }),
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 1500,
         system: [{ type: 'text', text: getAvoidAltsPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: finalCtx }],
+        messages: [{ role: 'user', content: finalCtxWithLang }],
       }),
     ])
 
