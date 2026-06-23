@@ -656,7 +656,11 @@ function NicheTab({ externalResult, onClearExternal, onAnalyzeChannel, initialTo
 
 // ─── Niche Finder Tab ─────────────────────────────────────────────────────────
 
-function NicheFinderTab({ onGoToNiche }: { onGoToNiche: (topic: string) => void }) {
+function NicheFinderTab({ onGoToNiche, externalResult, onClearExternal }: {
+  onGoToNiche: (topic: string) => void
+  externalResult?: NicheFinderResult | null
+  onClearExternal?: () => void
+}) {
   const { t, lang: uiLang } = useLang()
 
   const [interests, setInterests] = useState('')
@@ -669,6 +673,10 @@ function NicheFinderTab({ onGoToNiche }: { onGoToNiche: (topic: string) => void 
   const [step, setStep] = useState(0)
   const [error, setError] = useState('')
   const [result, setResult] = useState<NicheFinderResult | null>(null)
+
+  useEffect(() => {
+    if (externalResult) { setResult(externalResult) }
+  }, [externalResult])
 
   const NF_STEPS = ['progress_ai', 'progress_channels', 'progress_stats', 'progress_ai', 'progress_report']
 
@@ -721,7 +729,7 @@ function NicheFinderTab({ onGoToNiche }: { onGoToNiche: (topic: string) => void 
 
   if (result) return (
     <div className="flex flex-col gap-5">
-      <button onClick={() => setResult(null)}
+      <button onClick={() => { setResult(null); onClearExternal?.() }}
         className="no-print flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors self-start">
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -2762,6 +2770,7 @@ function RisingStarsTab({
 
 const REPORT_ICONS: Record<string, string> = {
   niche: '🔍',
+  niche_finder: '🎯',
   trends: '🔥',
   channel: '📊',
   revenue: '💰',
@@ -3003,7 +3012,11 @@ export default function AnalyticsPage() {
           />
         )}
         {tab === 'niche_finder' && (
-          <NicheFinderTab onGoToNiche={handleGoToNicheFromFinder} />
+          <NicheFinderTab
+            onGoToNiche={handleGoToNicheFromFinder}
+            externalResult={openedReport?.report_type === 'niche_finder' ? openedReport.result as NicheFinderResult : null}
+            onClearExternal={clearOpenedReport}
+          />
         )}
         {tab === 'trends' && (
           <TrendsTab

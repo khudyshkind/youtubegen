@@ -260,20 +260,28 @@ export async function POST(req: NextRequest) {
     await spendCredits(user.id, 6, 'niche_finder')
 
     // Save to reports (non-fatal)
+    console.log('[niche-finder] saving report...')
     try {
       const svc = createServiceClient()
       const { data: old } = await svc.from('analytics_reports').select('id')
         .eq('user_id', user.id).eq('report_type', 'niche_finder')
         .order('created_at', { ascending: true })
-      if ((old?.length ?? 0) >= 20) await svc.from('analytics_reports').delete().eq('id', old![0].id)
-      await svc.from('analytics_reports').insert({
+      if ((old?.length ?? 0) >= 20) {
+        await svc.from('analytics_reports').delete().eq('id', old![0].id)
+      }
+      const { error: saveErr } = await svc.from('analytics_reports').insert({
         user_id: user.id, report_type: 'niche_finder',
         title: `Поиск ниши: ${winner.name}`,
         query: interests.slice(0, 80),
         result,
       })
+      if (saveErr) {
+        console.warn('[niche-finder] save error:', JSON.stringify(saveErr))
+      } else {
+        console.log('[niche-finder] report saved OK')
+      }
     } catch (e) {
-      console.warn('[niche-finder] report save failed:', e instanceof Error ? e.message : String(e))
+      console.warn('[niche-finder] report save exception:', e instanceof Error ? e.message : String(e))
     }
 
     return NextResponse.json({ ok: true, data: result })
