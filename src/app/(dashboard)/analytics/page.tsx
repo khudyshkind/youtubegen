@@ -396,7 +396,7 @@ function NicheResultView({ result, cached, t, onCreateVideo, onAnalyzeChannel }:
                             onClick={() => onAnalyzeChannel(channelUrl)}
                             className="text-xs px-2 py-1 rounded-lg transition-colors whitespace-nowrap"
                             style={{ background: 'rgba(124,58,237,0.2)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.3)' }}>
-                            📊 Анализ
+                            {t('analytics.analyze_channel_btn')}
                           </button>
                         </td>
                       )}
@@ -591,7 +591,7 @@ function NicheTab({ externalResult, onClearExternal, onAnalyzeChannel }: {
             </div>
             <p className="text-xs text-slate-500 flex gap-1.5 items-start">
               <span className="shrink-0 mt-0.5">ℹ️</span>
-              <span>Результаты зависят от выбранного рынка и языка контента — анализ английского YouTube даст другие каналы и тренды чем анализ русского рынка.</span>
+              <span>{t('analytics.niche_lang_note')}</span>
             </p>
             {error && <p className="text-sm text-red-400">{error}</p>}
             <button onClick={() => void handleAnalyze()} disabled={loading}

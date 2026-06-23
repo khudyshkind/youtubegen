@@ -785,7 +785,7 @@ export const translations = {
     // Channel tab
     'analytics.channel_input_label': 'URL или название канала',
     'analytics.channel_input_ph':    'https://youtube.com/@channel или название',
-    'analytics.analyze_channel_btn': 'Анализировать канал',
+    'analytics.analyze_channel_btn': '📊 Анализ',
 
     // Progress steps
     'analytics.progress_channels':  'Ищем каналы...',
@@ -817,6 +817,7 @@ export const translations = {
     'analytics.per_week_3':         '3 видео/нед',
     'analytics.create_video_btn':   '🎬 Создать видео на эту тему →',
     'analytics.cached_note':        'Результаты из кэша (24 ч)',
+    'analytics.niche_lang_note':    'Результаты зависят от выбранного рынка и языка контента — анализ английского YouTube даст другие каналы и тренды чем анализ русского рынка.',
     'analytics.err_credits':        'Недостаточно кредитов',
     'analytics.err_general':        'Ошибка анализа. Попробуйте снова.',
     'analytics.err_topic':          'Введите тему для анализа',
@@ -1624,7 +1625,7 @@ export const translations = {
 
     'analytics.channel_input_label': 'URL or channel name',
     'analytics.channel_input_ph':    'https://youtube.com/@channel or name',
-    'analytics.analyze_channel_btn': 'Analyze channel',
+    'analytics.analyze_channel_btn': '📊 Analyze',
 
     'analytics.progress_channels':  'Searching channels...',
     'analytics.progress_stats':     'Collecting stats...',
@@ -1654,6 +1655,7 @@ export const translations = {
     'analytics.per_week_3':         '3 videos/wk',
     'analytics.create_video_btn':   '🎬 Create video on this topic →',
     'analytics.cached_note':        'Results from cache (24h)',
+    'analytics.niche_lang_note':    'Results depend on the selected market and content language — analyzing English YouTube will give different channels and trends than the Russian market.',
     'analytics.err_credits':        'Not enough credits',
     'analytics.err_general':        'Analysis error. Please try again.',
     'analytics.err_topic':          'Enter a topic to analyze',

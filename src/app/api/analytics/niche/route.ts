@@ -142,8 +142,8 @@ RESPONSE FORMAT — strict JSON without markdown:
 IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json blocks. No explanations. Start with { end with }.`
 }
 
-function cacheKey(topic: string, country: string, contentLang: string, uiLang: string) {
-  return `${topic.toLowerCase().trim()}|${country}|${contentLang}|${uiLang}|v7`
+function cacheKey(topic: string, country: string, contentLang: string) {
+  return `${topic.toLowerCase().trim()}|${country}|${contentLang}|v8`
 }
 
 export async function POST(req: NextRequest) {
@@ -162,7 +162,7 @@ export async function POST(req: NextRequest) {
     if (!topic) return NextResponse.json({ ok: false, error: 'Введите тему' }, { status: 400 })
 
     const svc = createServiceClient()
-    const key = cacheKey(topic, country, contentLang, uiLang)
+    const key = cacheKey(topic, country, contentLang)
 
     // Cache check — non-fatal
     try {
