@@ -8,11 +8,13 @@ export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-function getKeywordsPrompt1(lang: string): string {
+function getKeywordsPrompt1(lang: string, keyword: string): string {
   const isRu = lang !== 'en'
-  return isRu ? `Ты опытный YouTube SEO аналитик, специализирующийся на оценке ключевых слов. На основе статистических данных (средние просмотры топ-5 видео и количество конкурирующих видео) оцени каждое ключевое слово.
+  return isRu ? `Ты опытный YouTube SEO аналитик, специализирующийся на оценке ключевых слов. Тема: "${keyword}" (контекст: YouTube видео).
 
-МЕТОДОЛОГИЯ ОЦЕНКИ:
+ФИЛЬТРАЦИЯ: Сначала отсей нерелевантные запросы. Если тема "${keyword}" — например "автомобили" или "cars" — исключи запросы про волосы, похудение, API, программирование, еду и прочие темы не связанные с исходной. Оставь только те ключевые слова, которые реально могут быть темой YouTube видео по запросу "${keyword}".
+
+МЕТОДОЛОГИЯ ОЦЕНКИ (только для релевантных):
 • difficulty (1-10) — сложность ранжирования: 1-3 = низкая, 4-6 = средняя, 7-10 = высокая
   Учитывай: video_count (больше = выше difficulty), avg_views (больше = выше difficulty)
 • potential (1-10) — потенциал трафика: 1-3 = мало просмотров, 7-10 = много просмотров у топ видео
@@ -23,9 +25,11 @@ function getKeywordsPrompt1(lang: string): string {
 {"keywords":[{"keyword":"авто зимой","difficulty":6,"potential":8,"competition":"Средняя","recommendation":"Стоит снять — хороший баланс просмотров и конкуренции"},{"keyword":"купить электромобиль","difficulty":8,"potential":9,"competition":"Высокая","recommendation":"Сложно — нужен сильный канал с хорошей историей просмотров"}]}
 
 ВАЖНО: Верни ТОЛЬКО валидный JSON. Все текстовые значения — строго на русском языке. Никаких \`\`\`json. Никаких пояснений. Начни с { и заканчивай с }.`
-  : `You are an experienced YouTube SEO analyst specializing in keyword evaluation. Based on statistical data (average views of top-5 videos and competing video count), evaluate each keyword.
+  : `You are an experienced YouTube SEO analyst specializing in keyword evaluation. Topic: "${keyword}" (context: YouTube videos).
 
-EVALUATION METHODOLOGY:
+FILTERING: First remove irrelevant queries. If the topic is "${keyword}" — e.g. "cars" — exclude queries about hair, weight loss, APIs, programming, food, or any subject unrelated to the original topic. Keep only keywords that could realistically be a YouTube video about "${keyword}".
+
+EVALUATION METHODOLOGY (relevant keywords only):
 • difficulty (1-10) — ranking difficulty: 1-3 = low, 4-6 = medium, 7-10 = high
   Consider: video_count (more = higher difficulty), avg_views (more = higher difficulty)
 • potential (1-10) — traffic potential: 1-3 = few views, 7-10 = high views on top videos
@@ -33,7 +37,7 @@ EVALUATION METHODOLOGY:
 • recommendation — specific advice: "Worth filming" / "Possible but tough" / "Competition too high" + reason
 
 RESPONSE FORMAT — strict JSON without markdown:
-{"keywords":[{"keyword":"winter car tips","difficulty":5,"potential":7,"competition":"Medium","recommendation":"Worth filming — good balance of views and competition"},{"keyword":"buy electric car 2026","difficulty":8,"potential":9,"competition":"High","recommendation":"Tough — requires an established channel with strong watch history"}]}
+{"keywords":[{"keyword":"car review 2026","difficulty":5,"potential":7,"competition":"Medium","recommendation":"Worth filming — good balance of views and competition"},{"keyword":"best electric car","difficulty":8,"potential":9,"competition":"High","recommendation":"Tough — requires an established channel with strong watch history"}]}
 
 IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json. No explanations. Start with { end with }.`
 }
@@ -190,10 +194,13 @@ export async function POST(req: NextRequest) {
     // Collect autocomplete suggestions from multiple seed queries
     const seeds = [
       keyword,
-      `${keyword} как`,
-      `${keyword} для`,
-      `${keyword} лучший`,
+      `${keyword} review`,
       `${keyword} 2026`,
+      `best ${keyword}`,
+      `${keyword} tutorial`,
+      `${keyword} comparison`,
+      `${keyword} vs`,
+      `how to ${keyword}`,
     ]
 
     console.log(`[keywords] fetching suggestions for: ${keyword} (content: ${contentLang}, ui: ${uiLang})`)
@@ -231,13 +238,20 @@ export async function POST(req: NextRequest) {
       batch.forEach((s, j) => statsMap.set(s, results[j]))
     }
 
+    // Filter out clearly irrelevant keywords (zero views AND near-zero competition)
+    const filteredSuggestions = suggestions.filter(s => {
+      const stats = statsMap.get(s) ?? { avg_views: 0, video_count: 0 }
+      return !(stats.avg_views === 0 && stats.video_count < 100)
+    })
+    console.log(`[keywords] after relevance filter: ${filteredSuggestions.length}/${suggestions.length}`)
+
     // Build input strings for Claude
-    const keywordsData = suggestions.map(s => {
+    const keywordsData = filteredSuggestions.map(s => {
       const stats = statsMap.get(s) ?? { avg_views: 0, video_count: 0 }
       return `- "${s}": avg_views=${fmtViews(stats.avg_views)}, video_count=${stats.video_count}`
     }).join('\n')
 
-    const keywordsList = suggestions.map(s => `- "${s}"`).join('\n')
+    const keywordsList = filteredSuggestions.map(s => `- "${s}"`).join('\n')
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
 
@@ -245,7 +259,7 @@ export async function POST(req: NextRequest) {
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 2000,
-        system: [{ type: 'text', text: getKeywordsPrompt1(uiLang), cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: getKeywordsPrompt1(uiLang, keyword), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: `Ниша: "${keyword}"\nДанные (avg_views — среднее топ-5 видео, video_count — конкуренция):\n${keywordsData}` }],
       }),
       anthropic.messages.create({
