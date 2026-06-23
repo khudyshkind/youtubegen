@@ -244,13 +244,13 @@ export async function POST(req: NextRequest) {
     const [msg1, msg2] = await Promise.all([
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 800,
+        max_tokens: 2000,
         system: [{ type: 'text', text: getKeywordsPrompt1(uiLang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: `Ниша: "${keyword}"\nДанные (avg_views — среднее топ-5 видео, video_count — конкуренция):\n${keywordsData}` }],
       }),
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 400,
+        max_tokens: 600,
         system: [{ type: 'text', text: getKeywordsPrompt2(uiLang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: `Ниша: "${keyword}"\nКлючевые слова:\n${keywordsList}` }],
       }),
