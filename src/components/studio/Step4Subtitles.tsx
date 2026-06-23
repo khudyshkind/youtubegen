@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
-import type { SubtitleBlock, SubtitleFont, SubtitleSize, SubtitlePosition, SubtitleAnimation } from '@/lib/types'
+import type { SubtitleBlock } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { useLang } from '@/hooks/useLang'
 
@@ -11,74 +11,6 @@ function formatTime(sec: number) {
   const s = Math.floor(sec % 60)
   const ms = Math.round((sec % 1) * 100)
   return `${m}:${String(s).padStart(2, '0')}.${String(ms).padStart(2, '0')}`
-}
-
-function Toggle({
-  checked,
-  onChange,
-  label,
-  hint,
-}: {
-  checked: boolean
-  onChange: (v: boolean) => void
-  label: string
-  hint?: string
-}) {
-  return (
-    <div className="flex items-center justify-between py-2.5">
-      <div>
-        <p className="text-sm font-medium text-slate-300">{label}</p>
-        {hint && <p className="text-xs text-slate-500 mt-0.5">{hint}</p>}
-      </div>
-      <button
-        type="button"
-        onClick={() => onChange(!checked)}
-        className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0"
-        style={{ background: checked ? '#7C3AED' : 'rgba(255,255,255,0.1)' }}
-      >
-        <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-            checked ? 'translate-x-6' : 'translate-x-1'
-          }`}
-        />
-      </button>
-    </div>
-  )
-}
-
-function ChipSelector<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string
-  value: T
-  options: { value: T; label: string }[]
-  onChange: (v: T) => void
-}) {
-  return (
-    <div>
-      <p className="text-sm font-medium text-slate-300 mb-2">{label}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((o) => (
-          <button
-            key={o.value}
-            type="button"
-            onClick={() => onChange(o.value)}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg transition-all"
-            style={
-              value === o.value
-                ? { border: '2px solid #7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA' }
-                : { border: '2px solid rgba(255,255,255,0.08)', color: '#94A3B8' }
-            }
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
 }
 
 function toSrt(blocks: SubtitleBlock[]): string {
@@ -115,8 +47,8 @@ function parseSrt(text: string): SubtitleBlock[] {
 
 export default function Step4Subtitles() {
   const {
-    audioUrl, projectId, scriptParams, subtitleBlocks, subtitleStyle,
-    setSubtitleBlocks, setSubtitleStyle, setStep,
+    audioUrl, projectId, scriptParams, subtitleBlocks,
+    setSubtitleBlocks, setStep,
   } = useStudioStore()
 
   const { t } = useLang()
@@ -187,11 +119,6 @@ export default function Step4Subtitles() {
     a.href = url; a.download = 'subtitles.srt'; a.click()
     URL.revokeObjectURL(url)
   }
-
-  const fontLabels: Record<SubtitleFont, string> = { sans: t('font.sans'), serif: t('font.serif'), mono: t('font.mono') }
-  const sizeLabels: Record<SubtitleSize, string> = { small: t('size.small'), medium: t('size.medium'), large: t('size.large') }
-  const posLabels: Record<SubtitlePosition, string> = { top: t('pos.top'), center: t('pos.center'), bottom: t('pos.bottom') }
-  const animLabels: Record<SubtitleAnimation, string> = { none: t('anim.none'), fade: t('anim.fade'), slide: t('anim.slide') }
 
   return (
     <div className="flex flex-col gap-6">
@@ -328,65 +255,6 @@ export default function Step4Subtitles() {
             </div>
           </div>
 
-          {/* Style settings */}
-          <div
-            className="rounded-xl p-4 flex flex-col gap-4"
-            style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
-          >
-            <p className="text-sm font-semibold text-slate-200">{t('step4.style_settings')}</p>
-
-            <div className="grid grid-cols-2 gap-4">
-              <ChipSelector
-                label={t('step4.font')}
-                value={subtitleStyle.font}
-                options={(Object.keys(fontLabels) as SubtitleFont[]).map((k) => ({ value: k, label: fontLabels[k] }))}
-                onChange={(v) => setSubtitleStyle({ font: v })}
-              />
-              <ChipSelector
-                label={t('step4.size')}
-                value={subtitleStyle.size}
-                options={(Object.keys(sizeLabels) as SubtitleSize[]).map((k) => ({ value: k, label: sizeLabels[k] }))}
-                onChange={(v) => setSubtitleStyle({ size: v })}
-              />
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-slate-300 mb-2">{t('step4.color')}</p>
-              <div className="flex items-center gap-3">
-                <input
-                  type="color"
-                  value={subtitleStyle.color}
-                  onChange={(e) => setSubtitleStyle({ color: e.target.value })}
-                  className="w-10 h-10 rounded-lg cursor-pointer"
-                  style={{ border: '1px solid rgba(255,255,255,0.1)' }}
-                />
-                <span className="text-sm text-slate-400 font-mono">{subtitleStyle.color}</span>
-              </div>
-            </div>
-
-            <ChipSelector
-              label={t('step4.position')}
-              value={subtitleStyle.position}
-              options={(Object.keys(posLabels) as SubtitlePosition[]).map((k) => ({ value: k, label: posLabels[k] }))}
-              onChange={(v) => setSubtitleStyle({ position: v })}
-            />
-
-            <ChipSelector
-              label={t('step4.animation')}
-              value={subtitleStyle.animation}
-              options={(Object.keys(animLabels) as SubtitleAnimation[]).map((k) => ({ value: k, label: animLabels[k] }))}
-              onChange={(v) => setSubtitleStyle({ animation: v })}
-            />
-
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <Toggle
-                checked={subtitleStyle.background}
-                onChange={(v) => setSubtitleStyle({ background: v })}
-                label={t('step4.bg_label')}
-                hint={t('step4.bg_hint')}
-              />
-            </div>
-          </div>
         </>
       )}
 

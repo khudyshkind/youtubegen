@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
-import type { SubtitleBlock } from '@/lib/types'
+import type { SubtitleBlock, SubtitleSize, SubtitleFont, SubtitlePosition } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { useLang } from '@/hooks/useLang'
 
@@ -64,6 +64,41 @@ function Toggle({
   )
 }
 
+function ChipSelector<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (v: T) => void
+}) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-slate-400 mb-1.5">{label}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onChange(o.value)}
+            className="px-2.5 py-1 text-xs font-medium rounded-lg transition-all"
+            style={
+              value === o.value
+                ? { border: '2px solid #7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA' }
+                : { border: '2px solid rgba(255,255,255,0.08)', color: '#94A3B8' }
+            }
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function toSrt(blocks: SubtitleBlock[]): string {
   function srtTime(sec: number) {
     const h = Math.floor(sec / 3600)
@@ -79,7 +114,7 @@ export default function Step6Video() {
   const {
     audioUrl, sceneImages, subtitleBlocks, subtitleStyle,
     scriptParams, imageInterval, projectId, videoUrl,
-    setVideoUrl, setStep,
+    setVideoUrl, setStep, setSubtitleStyle,
   } = useStudioStore()
 
   const { t } = useLang()
@@ -329,29 +364,87 @@ export default function Step6Video() {
       {/* Subtitle settings */}
       {hasSubs ? (
         <div
-          className="rounded-xl p-4 flex flex-col gap-1"
+          className="rounded-xl p-4 flex flex-col gap-3"
           style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
         >
-          <p className="text-sm font-semibold text-slate-200 mb-1">{t('step6.subs_settings')}</p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-slate-200">{t('step6.subs_settings')}</p>
+            <button
+              type="button"
+              onClick={downloadSrt}
+              className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              SRT
+            </button>
+          </div>
+
           <Toggle
             checked={burnIn}
             onChange={setBurnIn}
             label={t('step6.burn_subs')}
             hint={t('step6.burn_hint')}
           />
-          <div className="pt-3 mt-1" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-            <button
-              type="button"
-              onClick={downloadSrt}
-              className="flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              {t('step6.download_srt')}
-            </button>
-          </div>
+
+          {burnIn && (
+            <div className="flex flex-col gap-3 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+              <div className="grid grid-cols-2 gap-3">
+                <ChipSelector<SubtitleSize>
+                  label={t('step4.size')}
+                  value={subtitleStyle.size}
+                  options={[
+                    { value: 'small',  label: t('size.small')  },
+                    { value: 'medium', label: t('size.medium') },
+                    { value: 'large',  label: t('size.large')  },
+                  ]}
+                  onChange={(v) => setSubtitleStyle({ size: v })}
+                />
+                <ChipSelector<SubtitleFont>
+                  label={t('step4.font')}
+                  value={subtitleStyle.font}
+                  options={[
+                    { value: 'sans',  label: t('font.sans')  },
+                    { value: 'serif', label: t('font.serif') },
+                  ]}
+                  onChange={(v) => setSubtitleStyle({ font: v })}
+                />
+              </div>
+
+              <ChipSelector<string>
+                label={t('step4.color')}
+                value={subtitleStyle.color}
+                options={[
+                  { value: '#FFFFFF', label: t('subs.color_white')  },
+                  { value: '#FFFF00', label: t('subs.color_yellow') },
+                  { value: '#000000', label: t('subs.color_black')  },
+                ]}
+                onChange={(v) => setSubtitleStyle({ color: v })}
+              />
+
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <Toggle
+                  checked={subtitleStyle.background}
+                  onChange={(v) => setSubtitleStyle({ background: v })}
+                  label={t('step4.bg_label')}
+                  hint={t('step4.bg_hint')}
+                />
+              </div>
+
+              <ChipSelector<SubtitlePosition>
+                label={t('step4.position')}
+                value={subtitleStyle.position}
+                options={[
+                  { value: 'bottom', label: t('pos.bottom') },
+                  { value: 'center', label: t('pos.center') },
+                  { value: 'top',    label: t('pos.top')    },
+                ]}
+                onChange={(v) => setSubtitleStyle({ position: v })}
+              />
+            </div>
+          )}
         </div>
       ) : (
         <div className="rounded-xl p-4 flex items-start gap-3" style={cardStyle}>

@@ -2258,8 +2258,14 @@ async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId
   const alignment = alignMap[subtitle_style.position] ?? 2
   const colour    = hexToAss(subtitle_style.color)
   const bg        = subtitle_style.background
-  let forceStyle = `FontSize=${fontSize},PrimaryColour=${colour},OutlineColour=&H000000,Outline=2,Bold=1,Alignment=${alignment}`
-  if (bg) forceStyle += ',BorderStyle=3,BackColour=&H80000000'
+  let forceStyle = `FontSize=${fontSize},PrimaryColour=${colour},Bold=1,Alignment=${alignment}`
+  if (bg) {
+    // Opaque box background — no outline needed
+    forceStyle += ',BorderStyle=3,BackColour=&H80000000,Outline=0,Shadow=0'
+  } else {
+    // No background — use outline + drop shadow so text is always readable
+    forceStyle += ',BorderStyle=1,Outline=2,OutlineColour=&H00000000,Shadow=1,ShadowColour=&H40000000'
+  }
   try {
     const result = await runFFmpegOnVGF(
       { in_1: videoUrl, in_2: srtUrl },

@@ -552,6 +552,9 @@ export const translations = {
     'anim.none':  'Нет',
     'anim.fade':  'Плавно',
     'anim.slide': 'Скольжение',
+    'subs.color_white':  'Белый',
+    'subs.color_yellow': 'Жёлтый',
+    'subs.color_black':  'Чёрный',
 
     // ── Step 5 ────────────────────────────────────────────────────────────────────
     'step5.title':       'Шаг 5: Иллюстрации',
@@ -1429,6 +1432,9 @@ export const translations = {
     'anim.none':  'None',
     'anim.fade':  'Fade',
     'anim.slide': 'Slide',
+    'subs.color_white':  'White',
+    'subs.color_yellow': 'Yellow',
+    'subs.color_black':  'Black',
 
     // ── Step 5 ────────────────────────────────────────────────────────────────────
     'step5.title':       'Step 5: Illustrations',
