@@ -23,16 +23,6 @@ const LANG_NAMES: Record<string, string> = {
 }
 
 function langInstruction(outputLang: string): string {
-  if (outputLang === 'auto') {
-    return `CRITICAL LANGUAGE RULE — READ THIS FIRST:
-Detect the language of the INPUT text and write your ENTIRE response in that SAME language.
-- If input is in English → respond in English ONLY
-- If input is in Russian → respond in Russian ONLY
-- If input is in German → respond in German ONLY
-- If input is in any other language → respond in that same language
-NEVER translate to a different language. NEVER respond in Russian if the input is in English.
-The output language MUST match the input language exactly. This rule overrides everything else.`
-  }
   return `CRITICAL LANGUAGE RULE — READ THIS FIRST:
 Write your ENTIRE response in ${LANG_NAMES[outputLang] ?? outputLang}. Translate the content to this language as part of your processing. ALL output text must be in this language only. This rule overrides everything else.`
 }
@@ -216,8 +206,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json() as { script?: string; project_id?: string; mode?: string; output_lang?: string }
-    const { script, project_id, mode = 'unique', output_lang = 'auto' } = body
-    const outputLang = Object.keys(LANG_NAMES).includes(output_lang) || output_lang === 'auto' ? output_lang : 'auto'
+    const { script, project_id, mode = 'unique', output_lang = 'ru' } = body
+    const outputLang = Object.keys(LANG_NAMES).includes(output_lang) ? output_lang : 'ru'
 
     if (!script?.trim()) {
       return NextResponse.json({ ok: false, error: 'Текст не может быть пустым' }, { status: 400 })

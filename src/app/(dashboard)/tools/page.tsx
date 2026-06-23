@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useLang } from '@/hooks/useLang'
 import { useStudioStore } from '@/lib/studio-store'
@@ -16,22 +16,26 @@ function SpinnerIcon({ className }: { className?: string }) {
 }
 
 export default function ToolsPage() {
-  const { t } = useLang()
+  const { t, lang } = useLang()
   const router = useRouter()
   const { setScript, setStep } = useStudioStore()
 
   const [inputText, setInputText] = useState('')
-  const [outputLang, setOutputLang] = useState('auto')
+  const [outputLang, setOutputLang] = useState('ru')
   const [resultText, setResultText] = useState('')
   const [processingMode, setProcessingMode] = useState<'unique' | 'human' | 'both' | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  // Sync outputLang to UI language on first mount (after Zustand persist hydrates)
+  useEffect(() => {
+    setOutputLang(lang === 'en' ? 'en' : 'ru')
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const charCount = inputText.length
 
   const OUTPUT_LANGS = [
-    { value: 'auto', label: t('tools.lang_auto') },
     { value: 'ru',   label: 'Русский' },
     { value: 'en',   label: 'English' },
     { value: 'de',   label: 'Deutsch' },
