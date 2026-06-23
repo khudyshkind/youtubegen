@@ -99,22 +99,26 @@ JSON only. Start with { end with }.`
 function getStylePrompt(lang: string): string {
   const isRu = lang !== 'en'
   return isRu
-    ? `Ты стратег по YouTube контенту. На основе ниши и YouTube данных дай:
-1. Стиль обложек (thumbnail)
-2. 5 growth hacks — нестандартные способы роста канала
-3. Путь к монетизации — поэтапно
+    ? `Ты стратег по YouTube контенту. На основе ниши дай стиль обложек, growth hacks и путь к монетизации.
 
-ФОРМАТ — строго JSON без markdown:
-{"thumbnail_style":"Детальное описание стиля: цвета, шрифты, элементы, композиция, примеры у успешных каналов в нише","growth_hacks":["Лайфхак 1","Лайфхак 2","Лайфхак 3","Лайфхак 4","Лайфхак 5"],"monetization_path":"Поэтапный путь от первого видео до стабильного дохода — конкретные шаги и сроки"}
+ПРАВИЛА:
+• Каждое значение — максимум одно предложение
+• growth_hacks — ровно 3 элемента, каждый одним предложением
+• Только JSON без пояснений
+
+ФОРМАТ — строго JSON:
+{"thumbnail_style":"Одно предложение о стиле обложек: цвета, шрифт, главный элемент","growth_hacks":["Лайфхак 1 — одно предложение","Лайфхак 2 — одно предложение","Лайфхак 3 — одно предложение"],"monetization_path":"Одно предложение о пути к монетизации"}
 
 Только JSON. Начни с { заканчивай с }.`
-    : `You are a YouTube content strategist. Based on the niche and YouTube data, provide:
-1. Thumbnail style
-2. 5 growth hacks — unconventional channel growth methods
-3. Monetization path — step by step
+    : `You are a YouTube content strategist. Based on the niche, provide thumbnail style, growth hacks, and monetization path.
 
-FORMAT — strict JSON without markdown:
-{"thumbnail_style":"Detailed style description: colors, fonts, elements, composition, examples from successful channels in this niche","growth_hacks":["Hack 1","Hack 2","Hack 3","Hack 4","Hack 5"],"monetization_path":"Step-by-step path from first video to stable income — concrete steps and timelines"}
+RULES:
+• Each value must be maximum one sentence
+• growth_hacks — exactly 3 items, each one sentence
+• JSON only, no explanations
+
+FORMAT — strict JSON:
+{"thumbnail_style":"One sentence about thumbnail style: colors, font, main element","growth_hacks":["Hack 1 — one sentence","Hack 2 — one sentence","Hack 3 — one sentence"],"monetization_path":"One sentence about the monetization path"}
 
 JSON only. Start with { end with }.`
 }
@@ -233,7 +237,7 @@ export async function POST(req: NextRequest) {
       }),
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 1500,
+        max_tokens: 2000,
         system: [{ type: 'text', text: getStylePrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: ctxWithLang }],
       }),
