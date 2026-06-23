@@ -2099,15 +2099,13 @@ const VF_BASE =
   'scale=1280:720:force_original_aspect_ratio=decrease,' +
   'pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1'
 
-// Universal filter: scale to fill, crop to 16:9 — safe for both 1280x720 (Flux) and 1536x1024 (GPT)
-// For 1280x720: increase won't change size, crop won't cut anything
-// For 1536x1024 (3:2): scales to 1280x853, crop removes 133px top+bottom
-const VF_CROP =
-  'scale=1280:720:force_original_aspect_ratio=increase,' +
-  'crop=1280:720,setsar=1'
+// Force-scale to exact 1280x720 — no AR preservation, no letterbox/pillarbox ever.
+// Flux images are already 1280x720 (no change). GPT images (1536x1024) get slight
+// horizontal compression (~17%) which is acceptable for AI-generated content.
+const VF_SCALE = 'scale=1280:720,setsar=1'
 
-function getVfFilter(img) {
-  return VF_CROP
+function getVfFilter(_img) {
+  return VF_SCALE
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
