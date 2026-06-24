@@ -2169,10 +2169,31 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
     }
     if (status.status === 'failed') {
       console.error('[vgf] error details:', JSON.stringify(status))
-      throw new Error(`VGF job failed: ${status.error_message ?? 'unknown error'}`)
+      const errParts = [
+        status.error_message,
+        status.error,
+        status.stderr ? `stderr:${String(status.stderr).slice(0, 300)}` : null,
+        status.logs  ? `logs:${String(status.logs).slice(0, 300)}`   : null,
+      ].filter(Boolean)
+      throw new Error(`VGF job ${jobId} failed: ${errParts.join(' | ') || 'unknown error'}`)
     }
   }
   throw new Error(`VGF job ${jobId} timed out after ${timeoutMs}ms`)
+}
+
+// Concurrency pool: limits how many async tasks run simultaneously.
+// Returns a `run(fn)` function — call it instead of fn() to queue with the limit.
+function makePool(concurrency) {
+  let running = 0
+  const pending = []
+  function next() {
+    while (running < concurrency && pending.length) {
+      running++
+      const { fn, resolve, reject } = pending.shift()
+      fn().then(v => { running--; resolve(v); next() }, e => { running--; reject(e); next() })
+    }
+  }
+  return fn => new Promise((resolve, reject) => { pending.push({ fn, resolve, reject }); next() })
 }
 
 // Parse audio duration from public URL via music-metadata (no ffprobe needed).
@@ -2351,6 +2372,22 @@ async function xfadeBatchPassVGF(clipUrls, clipDurations, transition, td, batchI
   return { url: result.out_1, contentDuration: clipDurations.reduce((a, b) => a + b, 0) }
 }
 
+// Concat a batch of pre-encoded clip URLs into one MP4 (no audio, no effects).
+// Used for hierarchical cut-concat to stay within VGF's per-job input limit.
+async function concatBatchVGF(clipUrls, batchId) {
+  if (clipUrls.length === 1) return clipUrls[0]
+  const inputFiles = {}
+  for (let i = 0; i < clipUrls.length; i++) inputFiles[`in_${i + 1}`] = clipUrls[i]
+  const filterStr = clipUrls.map((_, i) => `[${i}:v]`).join('') + `concat=n=${clipUrls.length}:v=1[vout]`
+  const inputArgs = clipUrls.map((_, i) => `-i {{in_${i + 1}}}`).join(' ')
+  const result = await runFFmpegOnVGF(
+    inputFiles,
+    { out_1: `${batchId}.mp4` },
+    `${inputArgs} -filter_complex "${filterStr}" -map [vout] -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -an {{out_1}}`
+  )
+  return result.out_1
+}
+
 // ── Async video rendering pipeline (VGF) ─────────────────────────────────
 async function processVideoJob(jobId, body) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytgen-'))
@@ -2417,20 +2454,27 @@ async function processVideoJob(jobId, body) {
     }
     console.log(`[job:${jobId}] durations (${durations.length}): [${durations.map(d => d.toFixed(2)).join(', ')}]`)
 
-    // ── Proxy gpt_mini images through B2 so VGF can download them ────────────
-    // VGF cannot resolve Supabase's domain; Flux images use fal.ai CDN directly.
+    // ── Proxy gpt_mini and fal.ai CDN images through B2 so VGF can download them ─
+    // gpt_mini images are stored in a non-public Supabase path — must proxy.
+    // flux_schnell may fall back to fal.ai CDN URLs when Supabase upload fails;
+    // VGF hitting 155 fal.ai URLs simultaneously can cause rate-limit failures.
+    const isFalCdnUrl = url => typeof url === 'string' && /\bfal\.(media|run|ai)\b|cdn\.fal\.ai/i.test(url)
     const tempImageB2Keys = []
     const resolvedImages = await Promise.all(images.map(async (img, i) => {
-      if (img.engine !== 'gpt_mini' || !img.url) return img
-      console.log(`[render] proxying gpt_mini image ${i} to B2:`, img.url?.slice(0, 80))
+      const needsProxy = img.url && (img.engine === 'gpt_mini' || isFalCdnUrl(img.url))
+      if (!needsProxy) return img
+      const engineTag = img.engine ?? 'unknown'
+      console.log(`[render] proxying ${engineTag} image ${i} to B2:`, img.url?.slice(0, 80))
       try {
         const resp = await fetch(img.url)
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
         const buf = Buffer.from(await resp.arrayBuffer())
-        const key = `temp/img_${jobId}_${i}.png`
-        const b2Url = await uploadBytesToB2(buf, key, 'image/png')
+        const ext = img.engine === 'gpt_mini' ? 'png' : 'jpg'
+        const mime = img.engine === 'gpt_mini' ? 'image/png' : 'image/jpeg'
+        const key = `temp/img_${jobId}_${i}.${ext}`
+        const b2Url = await uploadBytesToB2(buf, key, mime)
         tempImageB2Keys.push(key)
-        console.log(`[render] gpt_mini image ${i} → B2:`, b2Url.slice(0, 80))
+        console.log(`[render] ${engineTag} image ${i} → B2:`, b2Url.slice(0, 80))
         return { ...img, url: b2Url }
       } catch (err) {
         console.error(`[render] proxy failed for image ${i}:`, err.message)
@@ -2439,22 +2483,30 @@ async function processVideoJob(jobId, body) {
     }))
 
     const outputPath = path.join(tmpDir, 'output.mp4')
+    // Limit concurrent VGF clip-encode jobs to avoid rate limits with large scenes counts.
+    const clipPool = makePool(20)
 
     if (useXfade) {
-      // ── Stage 2: Encode all clips via VGF (parallel) ────────────────────────
+      // ── Stage 2: Encode all clips via VGF (parallel, max 20 concurrent) ─────
       console.time(T('2_clips_encode'))
-      console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel...`)
-      const clipUrls = await Promise.all(resolvedImages.map(async (img, i) => {
-        const clipDur = (durations[i] + td).toFixed(3)
-        console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${getVfFilter(img)}`)
-        const result = await runFFmpegOnVGF(
-          { in_1: img.url },
-          { out_1: `clip_${i}.mp4` },
-          `-loop 1 -t ${clipDur} -i {{in_1}} -vf "${getVfFilter(img)}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
-        )
-        console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
-        return result.out_1
-      }))
+      console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel (pool=20)...`)
+      const clipUrls = await Promise.all(resolvedImages.map((img, i) =>
+        clipPool(async () => {
+          const clipDur = (durations[i] + td).toFixed(3)
+          console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${getVfFilter(img)}`)
+          try {
+            const result = await runFFmpegOnVGF(
+              { in_1: img.url },
+              { out_1: `clip_${i}.mp4` },
+              `-loop 1 -r 25 -t ${clipDur} -i {{in_1}} -vf "${getVfFilter(img)}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
+            )
+            console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
+            return result.out_1
+          } catch (err) {
+            throw new Error(`clip_${i}(engine=${img.engine ?? 'flux'},url=${img.url?.slice(-50) ?? 'null'}): ${err.message}`)
+          }
+        })
+      ))
       console.log(`[vgf] all ${clipUrls.length} clips encoded`)
       console.timeEnd(T('2_clips_encode'))
       await updateJob(jobId, { progress: 20 })
@@ -2497,7 +2549,7 @@ async function processVideoJob(jobId, body) {
       const muxResult = await runFFmpegOnVGF(
         { in_1: accUrl, in_2: finalAudioUrl },
         { out_1: 'temp_1.mp4' },
-        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
+        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -shortest {{out_1}}`
       )
       let currentUrl = muxResult.out_1
       console.log(`[vgf] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
@@ -2521,47 +2573,62 @@ async function processVideoJob(jobId, body) {
       await downloadFile(currentUrl, outputPath)
 
     } else {
-      // ── Stage 2+3 (cut): Encode clips in parallel + concat via VGF ──────────
+      // ── Stage 2+3 (cut): Encode clips in parallel (max 20 concurrent) + concat ─
       console.time(T('2_clips_encode'))
-      console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel (cut)...`)
-      const clipUrls = await Promise.all(resolvedImages.map(async (img, i) => {
-        console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${getVfFilter(img)}`)
-        const result = await runFFmpegOnVGF(
-          { in_1: img.url },
-          { out_1: `clip_${i}.mp4` },
-          `-loop 1 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${getVfFilter(img)}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
-        )
-        console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
-        return result.out_1
-      }))
+      console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel (cut, pool=20)...`)
+      const clipUrls = await Promise.all(resolvedImages.map((img, i) =>
+        clipPool(async () => {
+          console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${getVfFilter(img)}`)
+          try {
+            const result = await runFFmpegOnVGF(
+              { in_1: img.url },
+              { out_1: `clip_${i}.mp4` },
+              `-loop 1 -r 25 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${getVfFilter(img)}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
+            )
+            console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
+            return result.out_1
+          } catch (err) {
+            throw new Error(`clip_${i}(engine=${img.engine ?? 'flux'},url=${img.url?.slice(-50) ?? 'null'}): ${err.message}`)
+          }
+        })
+      ))
       console.timeEnd(T('2_clips_encode'))
       await updateJob(jobId, { progress: 20 })
 
       console.time(T('3_concat'))
-      // Build filter_complex concat + effects chain
-      const concatInputFiles = {}
-      for (let i = 0; i < clipUrls.length; i++) {
-        concatInputFiles[`in_${i + 1}`] = clipUrls[i]
+      // Hierarchical concat: batch clips to stay within VGF's per-job input limit.
+      // A single VGF job with 155+ inputs triggers FFmpeg resource exhaustion.
+      const CUT_CONCAT_BATCH = 25
+      console.log(`[vgf] concat ${clipUrls.length} clips in batches of ${CUT_CONCAT_BATCH}...`)
+
+      // Phase A: concat clips in batches
+      const concatBatches = []
+      for (let b = 0; b < clipUrls.length; b += CUT_CONCAT_BATCH) {
+        const bClips = clipUrls.slice(b, b + CUT_CONCAT_BATCH)
+        const bNum   = Math.floor(b / CUT_CONCAT_BATCH)
+        console.log(`[vgf] concat batch ${bNum}: ${bClips.length} clips`)
+        concatBatches.push(await concatBatchVGF(bClips, `cutbatch_${bNum}`))
       }
-      concatInputFiles[`in_${clipUrls.length + 1}`] = finalAudioUrl
 
-      const effectsChain = effectFilters.length > 0
-        ? `,format=yuv420p,${effectFilters.join(',')}`
-        : ',format=yuv420p'
-      const filterStr =
-        clipUrls.map((_, i) => `[${i}:v]`).join('') +
-        `concat=n=${clipUrls.length}:v=1${effectsChain}[vout]`
-      const inputArgs =
-        clipUrls.map((_, i) => `-i {{in_${i + 1}}}`).join(' ') +
-        ` -i {{in_${clipUrls.length + 1}}}`
-      const audioIdx = clipUrls.length // 0-based audio input index
+      // Phase B: merge batches (single concat if ≤1 batch)
+      let mergedVideoUrl
+      if (concatBatches.length === 1) {
+        mergedVideoUrl = concatBatches[0]
+      } else {
+        console.log(`[vgf] merging ${concatBatches.length} batches...`)
+        mergedVideoUrl = await concatBatchVGF(concatBatches, 'cutmerge')
+      }
 
-      const concatResult = await runFFmpegOnVGF(
-        concatInputFiles,
+      // Phase C: mux audio + bake effects in one pass
+      const muxVf = effectFilters.length > 0
+        ? `format=yuv420p,${effectFilters.join(',')}`
+        : 'format=yuv420p'
+      const cutMuxResult = await runFFmpegOnVGF(
+        { in_1: mergedVideoUrl, in_2: finalAudioUrl },
         { out_1: 'temp_1.mp4' },
-        `${inputArgs} -filter_complex ${filterStr} -map [vout] -map ${audioIdx}:a -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -t ${audioDuration.toFixed(3)} {{out_1}}`
+        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -shortest {{out_1}}`
       )
-      let currentUrl = concatResult.out_1
+      let currentUrl = cutMuxResult.out_1
       console.log(`[vgf] concat+effects done: effects=[${effects.join(', ')}]`)
       console.timeEnd(T('3_concat'))
       await updateJob(jobId, { progress: 60 })
