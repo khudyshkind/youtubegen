@@ -182,6 +182,8 @@ export default function Step5Images() {
   const { t } = useLang()
   const [imageEngine, setImageEngine] = useState<'flux' | 'flux_schnell' | 'gpt_mini'>('flux')
   const [showGptLimitModal, setShowGptLimitModal] = useState(false)
+  // Overrides imageCount for display/cost when user picks "Reduce to 20" from modal
+  const [gptCountOverride, setGptCountOverride] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [customInterval, setCustomInterval] = useState('')
@@ -227,17 +229,20 @@ export default function Step5Images() {
     imageEngine === 'gpt_mini'     ? CREDIT_COSTS.image_gpt_mini :
     imageEngine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell :
     CREDIT_COSTS.image_flux
-  const creditCost = imageCount * costPerImage
+  // displayCount respects the "reduce to 20" override; actual imageCount is unaffected
+  const displayCount = gptCountOverride ?? imageCount
+  const creditCost = displayCount * costPerImage
 
   function handleIntervalPreset(sec: number) {
     setImageInterval(sec)
     setCustomInterval('')
+    setGptCountOverride(null)
   }
 
   function handleCustomIntervalChange(raw: string) {
     setCustomInterval(raw)
     const n = parseInt(raw, 10)
-    if (!isNaN(n) && n >= 3 && n <= 300) setImageInterval(n)
+    if (!isNaN(n) && n >= 3 && n <= 300) { setImageInterval(n); setGptCountOverride(null) }
   }
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -338,6 +343,7 @@ export default function Step5Images() {
       if (!res.ok) {
         const json = await res.json()
         if (json.code === 'NO_CREDITS') { setError(`${t('step5.err_gen')} (${creditCost} ${t('nav.credits_suffix')})`); return }
+        if (json.code === 'TOO_MANY_FOR_GPT_MINI') { setShowGptLimitModal(true); return }
         throw new Error(json.error ?? t('step5.err_gen'))
       }
 
@@ -534,7 +540,10 @@ export default function Step5Images() {
           <p className="text-xs text-slate-400 leading-relaxed">
             −{costPerImage} {t('nav.credits_suffix')}/шт
             <span className="mx-1.5 text-slate-600">·</span>
-            <strong className="text-slate-200">{imageCount}</strong> илл.
+            <strong className="text-slate-200">{displayCount}</strong> илл.
+            {gptCountOverride !== null && (
+              <span className="ml-1 text-amber-500/70 text-xs">(сокращено)</span>
+            )}
             <span className="mx-1.5 text-slate-600">·</span>
             Итого: <strong className="text-violet-400">{creditCost} {t('nav.credits_suffix')}</strong>
           </p>
@@ -555,7 +564,7 @@ export default function Step5Images() {
               <button
                 key={eng.id}
                 type="button"
-                onClick={() => setImageEngine(eng.id)}
+                onClick={() => { setImageEngine(eng.id); setGptCountOverride(null) }}
                 className="text-left rounded-xl p-3 transition-all"
                 style={active
                   ? { border: '2px solid #7C3AED', background: 'rgba(124,58,237,0.12)' }
@@ -593,7 +602,7 @@ export default function Step5Images() {
           <div className="flex flex-col gap-2">
             <button
               type="button"
-              onClick={() => handleGenerate(undefined, MAX_GPT_MINI_SAFE)}
+              onClick={() => { setGptCountOverride(MAX_GPT_MINI_SAFE); void handleGenerate(undefined, MAX_GPT_MINI_SAFE) }}
               className="w-full py-2.5 text-sm font-semibold rounded-xl transition-all"
               style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.4)', color: '#FCD34D' }}
             >
@@ -601,7 +610,7 @@ export default function Step5Images() {
             </button>
             <button
               type="button"
-              onClick={() => { setImageEngine('flux_schnell'); handleGenerate('flux_schnell') }}
+              onClick={() => { setImageEngine('flux_schnell'); setGptCountOverride(null); void handleGenerate('flux_schnell') }}
               className="w-full py-2.5 text-sm font-semibold rounded-xl transition-all"
               style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)', color: '#A78BFA' }}
             >
@@ -609,7 +618,7 @@ export default function Step5Images() {
             </button>
             <button
               type="button"
-              onClick={() => { setImageEngine('flux'); handleGenerate('flux') }}
+              onClick={() => { setImageEngine('flux'); setGptCountOverride(null); void handleGenerate('flux') }}
               className="w-full py-2.5 text-sm font-semibold rounded-xl transition-all"
               style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', color: '#93C5FD' }}
             >
@@ -735,7 +744,7 @@ export default function Step5Images() {
         ) : sceneImages.length > 0 ? (
           `↺ ${t('step2.regenerate')} (−${creditCost} ${t('nav.credits_suffix')})`
         ) : (
-          `🎨 ${t('btn.generate')} ${imageCount} (−${creditCost} ${t('nav.credits_suffix')})`
+          `🎨 ${t('btn.generate')} ${displayCount} (−${creditCost} ${t('nav.credits_suffix')})`
         )}
       </button>
 
