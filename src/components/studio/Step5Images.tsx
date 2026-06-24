@@ -277,14 +277,14 @@ export default function Step5Images() {
   }
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []).slice(0, 20)
+    const files = Array.from(e.target.files ?? [])
     if (files.length === 0) return
     if (!projectId) { setUploadError(t('step5.err_no_project')); return }
     setUploadError('')
     setUploading(true)
     setUploadProgress(0)
     try {
-      const results: SceneImage[] = []
+      const uploaded: SceneImage[] = []
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
         const signRes = await fetch('/api/upload/sign', {
@@ -297,10 +297,19 @@ export default function Step5Images() {
         const { signed_url, access_url } = signJson.data
         const uploadRes = await fetch(signed_url, { method: 'PUT', headers: { 'Content-Type': file.type || 'image/jpeg' }, body: file })
         if (!uploadRes.ok) throw new Error(`${t('step5.err_upload')} ${i + 1}`)
-        results.push({ scene_index: i + 1, url: access_url, prompt: '' })
+        // Add ?t= so React re-renders if the same scene is re-uploaded
+        uploaded.push({ scene_index: i + 1, url: `${access_url}?t=${Date.now()}`, prompt: '' })
         setUploadProgress(Math.round(((i + 1) / files.length) * 100))
       }
-      setSceneImages(results)
+      // Merge: keep existing scenes, overwrite/add uploaded ones by scene_index
+      const current = useStudioStore.getState().sceneImages
+      const merged = [...current]
+      for (const img of uploaded) {
+        const idx = merged.findIndex(p => p.scene_index === img.scene_index)
+        if (idx >= 0) merged[idx] = img
+        else merged.push(img)
+      }
+      setSceneImages(merged.sort((a, b) => a.scene_index - b.scene_index))
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : t('step5.err_upload'))
     } finally {
