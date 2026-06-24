@@ -273,7 +273,9 @@ export async function POST(request: NextRequest) {
     }
 
     void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id })
-    return NextResponse.json({ ok: true, data: { audio_url: publicUrl } })
+    // DB stores the clean URL (publicUrl). The response adds ?v= so the browser
+    // treats each generation as a distinct resource and doesn't replay cached audio.
+    return NextResponse.json({ ok: true, data: { audio_url: `${publicUrl}?v=${Date.now()}` } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/audio] unexpected error:', msg)
