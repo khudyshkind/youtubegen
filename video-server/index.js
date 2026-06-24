@@ -23,6 +23,11 @@ const SUPABASE_SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 const VGF_API_KEY = process.env.VGF_API_KEY
 
+// Max parallel clip-encode submissions to VGF. Too high causes 504s on VGF's edge proxy.
+const VGF_CLIP_CONCURRENCY = 12
+// Retry count for transient HTTP 5xx errors on VGF submit (not job execution).
+const VGF_SUBMIT_RETRIES = 3
+
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN
 
 // ── Russia payment config ─────────────────────────────────────────────────────
@@ -2128,15 +2133,33 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
   console.log('[vgf] input_files:', JSON.stringify(inputFiles))
   console.log('[vgf] ffmpeg_command:', cmd)
 
-  const submitRes = await fetch('https://verygoodffmpeg.com/api/ffmpeg', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${VGF_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ input_files: inputFiles, output_files: outNames, ffmpeg_commands: [cmd] }),
-    signal: AbortSignal.timeout(30000),
-  })
-  if (!submitRes.ok) {
+  // Submit with retry for transient 5xx / network errors.
+  let submitRes = null
+  for (let attempt = 1; attempt <= VGF_SUBMIT_RETRIES + 1; attempt++) {
+    const ts = new Date().toISOString()
+    try {
+      submitRes = await fetch('https://verygoodffmpeg.com/api/ffmpeg', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${VGF_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input_files: inputFiles, output_files: outNames, ffmpeg_commands: [cmd] }),
+        signal: AbortSignal.timeout(30000),
+      })
+    } catch (fetchErr) {
+      if (attempt > VGF_SUBMIT_RETRIES) throw new Error(`VGF submit network error after ${VGF_SUBMIT_RETRIES} retries: ${fetchErr.message}`)
+      const delay = attempt * 3000
+      console.warn(`[vgf] submit network error (attempt ${attempt}/${VGF_SUBMIT_RETRIES}, ${ts}), retry in ${delay}ms: ${fetchErr.message}`)
+      await new Promise(r => setTimeout(r, delay))
+      continue
+    }
+    if (submitRes.ok) break
     const errBody = await submitRes.text().catch(() => '')
-    throw new Error(`VGF submit HTTP ${submitRes.status}: ${errBody.slice(0, 300)}`)
+    const status  = submitRes.status
+    // Only retry on 5xx (transient infra errors); 4xx are client errors — throw immediately.
+    if (status < 500) throw new Error(`VGF submit HTTP ${status}: ${errBody.slice(0, 300)}`)
+    if (attempt > VGF_SUBMIT_RETRIES) throw new Error(`VGF submit HTTP ${status} after ${VGF_SUBMIT_RETRIES} retries: ${errBody.slice(0, 100)}`)
+    const delay = attempt * 3000
+    console.warn(`[vgf] submit HTTP ${status} (attempt ${attempt}/${VGF_SUBMIT_RETRIES}, ${ts}), retry in ${delay}ms`)
+    await new Promise(r => setTimeout(r, delay))
   }
   const submitBody = await submitRes.json()
   const jobId = submitBody.data?.id
@@ -2483,13 +2506,12 @@ async function processVideoJob(jobId, body) {
     }))
 
     const outputPath = path.join(tmpDir, 'output.mp4')
-    // Limit concurrent VGF clip-encode jobs to avoid rate limits with large scenes counts.
-    const clipPool = makePool(20)
+    const clipPool = makePool(VGF_CLIP_CONCURRENCY)
 
     if (useXfade) {
       // ── Stage 2: Encode all clips via VGF (parallel, max 20 concurrent) ─────
       console.time(T('2_clips_encode'))
-      console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel (pool=20)...`)
+      console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel (pool=${VGF_CLIP_CONCURRENCY})...`)
       const clipUrls = await Promise.all(resolvedImages.map((img, i) =>
         clipPool(async () => {
           const clipDur = (durations[i] + td).toFixed(3)
@@ -2575,7 +2597,7 @@ async function processVideoJob(jobId, body) {
     } else {
       // ── Stage 2+3 (cut): Encode clips in parallel (max 20 concurrent) + concat ─
       console.time(T('2_clips_encode'))
-      console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel (cut, pool=20)...`)
+      console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel (cut, pool=${VGF_CLIP_CONCURRENCY})...`)
       const clipUrls = await Promise.all(resolvedImages.map((img, i) =>
         clipPool(async () => {
           console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${getVfFilter(img)}`)
