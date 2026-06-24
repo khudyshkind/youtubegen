@@ -456,6 +456,16 @@ export default function Step3Voice() {
     ? audioCost(scriptChars, 'apihost', apihostVoiceType)
     : Math.max(1, audioCost(scriptChars, engine))
 
+  // APIHOST voice-language mismatch detection.
+  // Script is considered Russian if >15% of non-space chars are Cyrillic.
+  const apihostSelectedVoice = engine === 'apihost'
+    ? apihostVoices.find((v) => v.voice_id === apihostVoiceId) ?? null
+    : null
+  const scriptIsRu = engine === 'apihost' && !!script &&
+    ((script.match(/[Ѐ-ӿ]/g) ?? []).length / Math.max(1, script.replace(/\s/g, '').length)) > 0.15
+  const voiceIsRu = apihostSelectedVoice?.lang.toLowerCase().startsWith('ru') ?? false
+  const apihostLangMismatch = !!apihostSelectedVoice && scriptIsRu !== voiceIsRu
+
   // Load ElevenLabs voices
   function loadVoices(lang: string) {
     setVoicesLoading(true)
@@ -897,7 +907,15 @@ export default function Step3Voice() {
             <div className="flex flex-wrap gap-2">
               {APIHOST_LANG_OPTIONS.map((opt) => (
                 <button key={opt.value} type="button"
-                  onClick={() => setApihostLang(opt.value)}
+                  onClick={() => {
+                    setApihostLang(opt.value)
+                    // If the current voice won't appear under the new filter, clear it so
+                    // the UI doesn't show "Select voice" while a stale voice_id is still set.
+                    const notInNewFilter = apihostVoiceId && !apihostVoices.some(
+                      (v) => v.voice_id === apihostVoiceId && v.lang.toLowerCase().startsWith(opt.value.toLowerCase())
+                    )
+                    if (notInNewFilter) setApihostVoiceId('')
+                  }}
                   className="px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all"
                   style={apihostLang === opt.value
                     ? { borderColor: '#7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA' }
@@ -1065,6 +1083,34 @@ export default function Step3Voice() {
               Google WaveNet — {t('voice.google_quality')}. Standard — base voices. {CREDIT_COSTS.audio_openai_per_1000} {t('step3.cr_per_k')}.
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Voice-language mismatch warning (APIHOST only) */}
+      {apihostLangMismatch && apihostSelectedVoice && (
+        <div className="rounded-xl px-4 py-3 flex flex-col gap-2"
+          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}>
+          <p className="text-xs font-semibold text-amber-400">
+            ⚠️ Несоответствие языка голоса и текста
+          </p>
+          <p className="text-xs text-amber-300/80">
+            Голос <span className="font-medium text-amber-300">{apihostSelectedVoice.name}</span>{' '}
+            ({apihostSelectedVoice.lang}) выбран для{' '}
+            {voiceIsRu ? 'русского' : 'другого'} языка, но сценарий{' '}
+            {scriptIsRu ? 'на русском' : 'не на русском'}.{' '}
+            Озвучка может звучать некорректно.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              const targetLang = scriptIsRu ? 'ru-RU' : apihostSelectedVoice.lang
+              setApihostLang(targetLang)
+              setApihostVoiceId('')
+            }}
+            className="self-start text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+            style={{ background: 'rgba(245,158,11,0.15)', color: '#FBB04D', border: '1px solid rgba(245,158,11,0.4)' }}>
+            {scriptIsRu ? '🇷🇺 Выбрать русский голос' : '🌐 Выбрать подходящий голос'}
+          </button>
         </div>
       )}
 
