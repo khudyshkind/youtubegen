@@ -9,6 +9,8 @@ import { useLang } from '@/hooks/useLang'
 
 const INTERVAL_PRESETS = [5, 8, 10, 15, 20] as const
 const MAX_GPT_MINI_SAFE = 20
+// Styles where Schnell (4 inference steps) produces visible artifacts on faces/hands
+const RISKY_STYLES_FOR_SCHNELL = ['realistic', 'cinematic'] as const
 
 // Parse timecode "M:SS.mm" → seconds. Returns -1 if invalid.
 function parseTimecode(tc: string | undefined): number {
@@ -579,6 +581,19 @@ export default function Step5Images() {
             )
           })}
         </div>
+
+        {/* Contextual warning: Schnell + risky style */}
+        {imageEngine === 'flux_schnell' && (RISKY_STYLES_FOR_SCHNELL as readonly string[]).includes(selectedStyleKey) && (
+          <div
+            className="flex items-start gap-2 rounded-xl px-3 py-2.5 mt-1"
+            style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)' }}
+          >
+            <span className="text-amber-400 text-sm shrink-0 mt-px">⚠️</span>
+            <p className="text-xs leading-relaxed" style={{ color: 'rgba(253,211,77,0.8)' }}>
+              {t('step5.schnell_risk_warning').replace('{style}', t(`step5.style_${selectedStyleKey}` as Parameters<typeof t>[0]))}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* GPT Image limit modal */}
