@@ -2086,6 +2086,65 @@ function blocksToSrt(blocks) {
     .join('\n\n')
 }
 
+// Build an ASS subtitle file with the style embedded.
+// Keeps all &H color codes inside the file — not in the FFmpeg command string —
+// so VGF's shell execution context never sees bare & characters.
+function blocksToAss(blocks, subtitle_style) {
+  const sizeMap  = { small: 18, medium: 22, large: 28 }
+  const alignMap = { top: 8, center: 5, bottom: 2 }
+  const fontSize   = sizeMap[subtitle_style.size] ?? 22
+  const alignment  = alignMap[subtitle_style.position] ?? 2
+  const primColour = hexToAss(subtitle_style.color)
+  const bg = subtitle_style.background
+
+  let borderStyle, outline, shadow, outlineColour, backColour
+  if (bg) {
+    borderStyle = 3; outline = 0; shadow = 0
+    outlineColour = '&H00000000'
+    backColour    = '&H80000000'
+  } else {
+    borderStyle = 1; outline = 2; shadow = 1
+    outlineColour = '&H00000000'
+    backColour    = '&H00000000'
+  }
+
+  function fmtAss(s) {
+    const h  = Math.floor(s / 3600)
+    const m  = Math.floor((s % 3600) / 60)
+    const sc = Math.floor(s % 60)
+    const cs = Math.round((s % 1) * 100)
+    return `${h}:${String(m).padStart(2,'0')}:${String(sc).padStart(2,'0')}.${String(cs).padStart(2,'0')}`
+  }
+
+  const styleLine = [
+    'Default', 'Arial', fontSize,
+    primColour, '&H000000FF', outlineColour, backColour,
+    -1, 0, 0, 0,        // Bold, Italic, Underline, Strikeout
+    100, 100, 0, 0,     // ScaleX, ScaleY, Spacing, Angle
+    borderStyle, outline, shadow, alignment,
+    10, 10, 10, 0,      // MarginL, MarginR, MarginV, Encoding
+  ].join(',')
+
+  const events = blocks.map(b =>
+    `Dialogue: 0,${fmtAss(b.start)},${fmtAss(b.end)},Default,,0,0,0,,${b.text.replace(/\n/g, '\\N')}`
+  )
+
+  return [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    'Collisions: Normal',
+    'WrapStyle: 0',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, Strikeout, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: ${styleLine}`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    ...events,
+  ].join('\n') + '\n'
+}
+
 // FFmpeg -vf filter string for each named effect.
 // Single quotes are avoided — VGF shell interprets them inside double-quoted -vf args.
 // Spaces in curve points use backslash-escape (\\ in JS → \ at runtime → FFmpeg unescapes).
@@ -2325,37 +2384,25 @@ async function deleteTempImagesFromB2(keys) {
   }))
 }
 
-// Burn SRT subtitles via VGF (uploads SRT to B2 first, passes URL to VGF)
+// Burn subtitles via VGF — generates an ASS file with embedded style and uploads to B2.
+// Using ASS (not SRT + force_style) avoids passing &H color codes and single quotes
+// in the FFmpeg command string, which break in VGF's shell execution context.
 async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId) {
-  const srtContent = blocksToSrt(subtitle_blocks)
-  const srtKey = `temp/subs_${jobId}.srt`
-  let srtUrl
+  const assContent = blocksToAss(subtitle_blocks, subtitle_style)
+  const assKey = `temp/subs_${jobId}.ass`
+  let assUrl
   try {
-    srtUrl = await uploadBytesToB2(Buffer.from(srtContent, 'utf-8'), srtKey, 'text/plain')
-    console.log('[vgf] SRT uploaded:', srtKey)
+    assUrl = await uploadBytesToB2(Buffer.from(assContent, 'utf-8'), assKey, 'text/plain')
+    console.log('[vgf] ASS uploaded:', assKey, '| size=%s bg=%s', subtitle_style.size, subtitle_style.background)
   } catch (e) {
-    console.warn('[vgf] SRT upload failed, skipping subtitles:', e.message)
+    console.warn('[vgf] ASS upload failed, skipping subtitles:', e.message)
     return videoUrl
-  }
-  const sizeMap  = { small: 18, medium: 22, large: 28 }
-  const alignMap = { top: 8, center: 5, bottom: 2 }
-  const fontSize  = sizeMap[subtitle_style.size] ?? 22
-  const alignment = alignMap[subtitle_style.position] ?? 2
-  const colour    = hexToAss(subtitle_style.color)
-  const bg        = subtitle_style.background
-  let forceStyle = `FontSize=${fontSize},PrimaryColour=${colour},Bold=1,Alignment=${alignment}`
-  if (bg) {
-    // Opaque box background — no outline needed
-    forceStyle += ',BorderStyle=3,BackColour=&H80000000,Outline=0,Shadow=0'
-  } else {
-    // No background — use outline + drop shadow so text is always readable
-    forceStyle += ',BorderStyle=1,Outline=2,OutlineColour=&H00000000,Shadow=1,ShadowColour=&H40000000'
   }
   try {
     const result = await runFFmpegOnVGF(
-      { in_1: videoUrl, in_2: srtUrl },
+      { in_1: videoUrl, in_2: assUrl },
       { out_1: 'output_subs.mp4' },
-      `-i {{in_1}} -vf subtitles={{in_2}}:force_style='${forceStyle}' -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`
+      `-i {{in_1}} -vf subtitles={{in_2}} -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`
     )
     console.log('[vgf] subtitle burn-in done')
     return result.out_1
