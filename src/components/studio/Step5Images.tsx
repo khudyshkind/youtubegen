@@ -8,6 +8,7 @@ import { refreshCredits } from '@/lib/refresh-credits'
 import { useLang } from '@/hooks/useLang'
 
 const INTERVAL_PRESETS = [5, 8, 10, 15, 20] as const
+const MAX_GPT_MINI_SAFE = 20
 
 // Parse timecode "M:SS.mm" → seconds. Returns -1 if invalid.
 function parseTimecode(tc: string | undefined): number {
@@ -179,7 +180,8 @@ export default function Step5Images() {
   } = useStudioStore()
 
   const { t } = useLang()
-  const [imageEngine, setImageEngine] = useState<'flux' | 'gpt_mini'>('flux')
+  const [imageEngine, setImageEngine] = useState<'flux' | 'flux_schnell' | 'gpt_mini'>('flux')
+  const [showGptLimitModal, setShowGptLimitModal] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [customInterval, setCustomInterval] = useState('')
@@ -221,7 +223,10 @@ export default function Step5Images() {
       : scriptParams.duration_minutes * 60
 
   const imageCount = Math.max(1, Math.ceil(audioDurationSec / imageInterval))
-  const costPerImage = imageEngine === 'gpt_mini' ? CREDIT_COSTS.image_gpt_mini : CREDIT_COSTS.image_flux
+  const costPerImage =
+    imageEngine === 'gpt_mini'     ? CREDIT_COSTS.image_gpt_mini :
+    imageEngine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell :
+    CREDIT_COSTS.image_flux
   const creditCost = imageCount * costPerImage
 
   function handleIntervalPreset(sec: number) {
@@ -298,8 +303,19 @@ export default function Step5Images() {
     }
   }
 
-  async function handleGenerate() {
+  async function handleGenerate(overrideEngine?: 'flux' | 'flux_schnell', overrideCount?: number) {
     if (!script?.trim()) { setError(t('step5.err_no_script')); return }
+
+    const effectiveEngine = overrideEngine ?? imageEngine
+    const effectiveCount = overrideCount ?? imageCount
+
+    // Pre-check: show modal if GPT Mini with too many images
+    if (!overrideEngine && effectiveEngine === 'gpt_mini' && effectiveCount > MAX_GPT_MINI_SAFE) {
+      setShowGptLimitModal(true)
+      return
+    }
+
+    setShowGptLimitModal(false)
     setError('')
     setLoading(true)
     setProgress(null)
@@ -311,9 +327,9 @@ export default function Step5Images() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           script, topic: scriptParams.topic, duration_sec: audioDurationSec,
-          image_count: imageCount, project_id: projectId, image_interval: imageInterval,
+          image_count: effectiveCount, project_id: projectId, image_interval: imageInterval,
           subtitle_blocks: subtitleBlocks.length > 0 ? subtitleBlocks : undefined,
-          engine: imageEngine,
+          engine: effectiveEngine,
           image_style: imageStyle ?? undefined,
         }),
       })
@@ -528,10 +544,11 @@ export default function Step5Images() {
       {/* Engine selector */}
       <div className="flex flex-col gap-2">
         <p className="text-sm font-semibold text-slate-300">{t('step5.engine_label')}</p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-2">
           {([
-            { id: 'flux',     name: t('step5.engine_flux_name'), desc: t('step5.engine_flux_desc') },
-            { id: 'gpt_mini', name: t('step5.engine_gpt_name'),  desc: t('step5.engine_gpt_desc')  },
+            { id: 'flux',         name: t('step5.engine_flux_name'),     desc: t('step5.engine_flux_desc')     },
+            { id: 'flux_schnell', name: t('step5.engine_schnell_name'),   desc: t('step5.engine_schnell_desc')  },
+            { id: 'gpt_mini',     name: t('step5.engine_gpt_name'),       desc: t('step5.engine_gpt_desc')      },
           ] as const).map((eng) => {
             const active = imageEngine === eng.id
             return (
@@ -545,7 +562,7 @@ export default function Step5Images() {
                   : { border: '2px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }
                 }
               >
-                <p className={`text-sm font-semibold mb-0.5 ${active ? 'text-violet-300' : 'text-slate-300'}`}>
+                <p className={`text-xs font-semibold mb-0.5 ${active ? 'text-violet-300' : 'text-slate-300'}`}>
                   {eng.name}
                 </p>
                 <p className="text-xs text-slate-500 leading-relaxed">{eng.desc}</p>
@@ -554,6 +571,60 @@ export default function Step5Images() {
           })}
         </div>
       </div>
+
+      {/* GPT Image limit modal */}
+      {showGptLimitModal && (
+        <div
+          className="rounded-xl p-4 flex flex-col gap-3"
+          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}
+        >
+          <div className="flex items-start gap-2">
+            <svg className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <div>
+              <p className="text-sm font-semibold text-amber-300 mb-1">{t('step5.gpt_limit_title')}</p>
+              <p className="text-xs text-amber-200/70 leading-relaxed">
+                {t('step5.gpt_limit_body').replace('{N}', String(imageCount))}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => handleGenerate(undefined, MAX_GPT_MINI_SAFE)}
+              className="w-full py-2.5 text-sm font-semibold rounded-xl transition-all"
+              style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.4)', color: '#FCD34D' }}
+            >
+              {t('step5.gpt_limit_reduce')}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setImageEngine('flux_schnell'); handleGenerate('flux_schnell') }}
+              className="w-full py-2.5 text-sm font-semibold rounded-xl transition-all"
+              style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)', color: '#A78BFA' }}
+            >
+              {t('step5.gpt_limit_schnell').replace('{N}', String(imageCount))}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setImageEngine('flux'); handleGenerate('flux') }}
+              className="w-full py-2.5 text-sm font-semibold rounded-xl transition-all"
+              style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', color: '#93C5FD' }}
+            >
+              {t('step5.gpt_limit_flux').replace('{N}', String(imageCount))}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowGptLimitModal(false)}
+              className="text-xs text-slate-500 hover:text-slate-400 text-center transition-colors"
+            >
+              {t('btn.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Style selector */}
       <div
@@ -649,7 +720,7 @@ export default function Step5Images() {
 
       <button
         type="button"
-        onClick={handleGenerate}
+        onClick={() => void handleGenerate()}
         disabled={loading || !script?.trim()}
         className="w-full py-3 btn-gradient disabled:opacity-40 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2"
       >

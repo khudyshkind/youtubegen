@@ -50,7 +50,7 @@ Respond ONLY with a valid JSON array without markdown wrappers.
 The number of elements must exactly match the number of scenes in the request.
 Format of each element: {"scene": "Description in content language", "prompt": "English prompt"}`
 
-type ImageEngine = 'flux' | 'gpt_mini'
+type ImageEngine = 'flux' | 'flux_schnell' | 'gpt_mini'
 
 interface ImagesRequest {
   script: string
@@ -277,6 +277,41 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
   }))
 }
 
+async function generateImageFluxSchnell(
+  prompt: string,
+  userId: string,
+  projectId: string | undefined,
+  sceneIndex: number,
+  serviceClient: ReturnType<typeof createServiceClient>,
+): Promise<string | null> {
+  fal.config({ credentials: env('FAL_KEY') })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = await (fal.subscribe as any)('fal-ai/flux/schnell', {
+    input: {
+      prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
+      image_size: { width: 1280, height: 720 },
+      num_images: 1,
+    },
+  }) as { data: FalImageResult }
+
+  const falUrl = result.data?.images?.[0]?.url ?? null
+  if (!falUrl) throw new Error('Flux Schnell: no image returned')
+  if (!projectId) return falUrl
+
+  const storagePath = `${userId}/${projectId}/scene_schnell_${sceneIndex}.jpg`
+  const imgResponse = await fetch(falUrl)
+  if (imgResponse.ok) {
+    const { error: uploadError } = await serviceClient.storage
+      .from('images')
+      .upload(storagePath, await imgResponse.arrayBuffer(), { contentType: 'image/jpeg', upsert: true })
+    if (!uploadError) {
+      const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
+      return publicUrl
+    }
+  }
+  return falUrl
+}
+
 async function generateImageFlux(
   prompt: string,
   negativePrompt: string,
@@ -410,8 +445,21 @@ export async function POST(request: NextRequest) {
 
   const count = Math.max(1, Math.min(200, image_count ?? 1))
   const interval = Math.max(3, Math.min(300, image_interval ?? 10))
-  const costPerImage = engine === 'gpt_mini' ? CREDIT_COSTS.image_gpt_mini : CREDIT_COSTS.image_flux
+  const costPerImage =
+    engine === 'gpt_mini'     ? CREDIT_COSTS.image_gpt_mini :
+    engine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell :
+    CREDIT_COSTS.image_flux
   const totalCost = costPerImage * count
+
+  if (engine === 'gpt_mini' && count > 20) {
+    return NextResponse.json({
+      ok: false,
+      code: 'TOO_MANY_FOR_GPT_MINI',
+      error: 'GPT Image поддерживает максимум 20 иллюстраций за запуск',
+      maxAllowed: 20,
+      requested: count,
+    }, { status: 400 })
+  }
 
   const enough = await hasCredits(user.id, totalCost, supabase)
   if (!enough) {
@@ -474,6 +522,8 @@ export async function POST(request: NextRequest) {
               try {
                 const url = engine === 'gpt_mini'
                   ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
+                  : engine === 'flux_schnell'
+                  ? await generateImageFluxSchnell(styledPrompt, user.id, project_id, i, serviceClient)
                   : await generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient)
                 const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine }
                 sceneImages[i] = img

@@ -20,6 +20,7 @@ export const CREDIT_COSTS = {
   // Images
   image: 7,           // legacy alias → Flux
   image_flux: 7,
+  image_flux_schnell: 4,
   image_gpt_mini: 2,
   style_analysis: 2,
 
@@ -228,7 +229,7 @@ export interface SceneImage {
   scene?: string
   timecode_start?: string
   timecode_end?: string
-  engine?: 'flux' | 'gpt_mini'
+  engine?: 'flux' | 'flux_schnell' | 'gpt_mini'
 }
 
 export interface SeoData {
