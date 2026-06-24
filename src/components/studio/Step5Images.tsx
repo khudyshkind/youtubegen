@@ -235,6 +235,35 @@ export default function Step5Images() {
   const displayCount = gptCountOverride ?? imageCount
   const creditCost = displayCount * costPerImage
 
+  function handleExportPrompts() {
+    // Read CURRENT store state at click time — avoids stale closure
+    const { sceneImages: scenes, scriptParams: params } = useStudioStore.getState()
+    if (scenes.length === 0) return
+
+    const sorted = [...scenes].sort((a, b) => a.scene_index - b.scene_index)
+    const padLen = Math.max(2, String(sorted.length).length)
+    const pad = (n: number) => String(n + 1).padStart(padLen, '0')
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
+
+    const header = ['Scene', 'Start Time', 'End Time', 'Prompt', 'Suggested Filename']
+    const rows = sorted.map((img) => {
+      const num = pad(img.scene_index)
+      return [num, img.timecode_start ?? '', img.timecode_end ?? '', img.prompt ?? '', `scene_${num}.jpg`]
+    })
+    const csv = [header, ...rows].map(row => row.map(esc).join(',')).join('\r\n')
+
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    const safeTopic = params.topic.replace(/[^\wа-яА-ЯёЁ\s-]/g, '').replace(/\s+/g, '_').slice(0, 50)
+    a.download = `${safeTopic}_image_prompts.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(blobUrl)
+  }
+
   function handleIntervalPreset(sec: number) {
     setImageInterval(sec)
     setCustomInterval('')
@@ -594,6 +623,31 @@ export default function Step5Images() {
             </p>
           </div>
         )}
+
+        {/* Export prompts */}
+        <div className="flex items-center justify-between mt-1">
+          {sceneImages.length > 0 ? (
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={handleExportPrompts}
+                className="flex items-center gap-1.5 text-xs font-medium transition-colors"
+                style={{ color: '#64748B' }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = '#94A3B8')}
+                onMouseLeave={(e) => (e.currentTarget.style.color = '#64748B')}
+              >
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                {t('step5.export_prompts_btn')}
+              </button>
+              <p className="text-xs" style={{ color: '#334155' }}>{t('step5.export_prompts_note')}</p>
+            </div>
+          ) : (
+            <p className="text-xs" style={{ color: '#334155' }}>{t('step5.export_prompts_disabled')}</p>
+          )}
+        </div>
       </div>
 
       {/* GPT Image limit modal */}
