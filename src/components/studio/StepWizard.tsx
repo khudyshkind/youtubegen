@@ -40,11 +40,22 @@ function StepWizardInner() {
   const [restoreError, setRestoreError] = useState('')
 
   const fromParam = searchParams.get('from')
-  const skipReset = fromParam === 'tools' || fromParam === 'plan'
 
   useEffect(() => {
     if (!projectParam) {
-      if (!skipReset) reset()
+      if (fromParam === 'plan') {
+        // Analytics → new project: always reset stale state from any previous
+        // project, but preserve the topic that analytics injected into the store
+        // before navigation (goToStudio calls setScriptParams({ topic }) first).
+        const injectedTopic = useStudioStore.getState().scriptParams.topic
+        reset()
+        if (injectedTopic) setScriptParams({ topic: injectedTopic })
+      } else if (fromParam !== 'tools') {
+        // Normal new project (dashboard, etc.): full reset.
+        // from=tools is intentionally kept as-is: the tools page sets the
+        // processed script into the store and continues the same project.
+        reset()
+      }
       setRestoring(false)
       setRestoreError('')
       return
