@@ -316,6 +316,12 @@ async function generateImageFlux(
   return publicUrl
 }
 
+// Parse "Please try again in Xs" from OpenAI 429 error message
+function parseRetryAfterMs(msg: string): number {
+  const match = msg.match(/try again in (\d+(?:\.\d+)?)s/i)
+  return match ? Math.ceil(parseFloat(match[1])) * 1000 + 3000 : 0
+}
+
 async function generateImageGptMini(
   prompt: string,
   userId: string,
@@ -323,13 +329,15 @@ async function generateImageGptMini(
   sceneIndex: number,
   serviceClient: ReturnType<typeof createServiceClient>,
 ): Promise<string | null> {
-  const MAX_RETRIES = 4
+  const MAX_RETRIES = 6
   let lastError = ''
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
-      const delay = Math.min(2000 * 2 ** (attempt - 1), 30000) // 2s, 4s, 8s, 16s
-      console.log(`[gpt_mini] scene ${sceneIndex} retry ${attempt}/${MAX_RETRIES} after ${delay}ms (${lastError})`)
+      const retryAfterMs = parseRetryAfterMs(lastError)
+      const expDelay = Math.min(2000 * 2 ** (attempt - 1), 60000)
+      const delay = Math.max(retryAfterMs, expDelay)
+      console.log(`[gpt_mini] scene ${sceneIndex} retry ${attempt}/${MAX_RETRIES} after ${delay}ms (${lastError.slice(0, 80)})`)
       await new Promise(r => setTimeout(r, delay))
     }
 
@@ -445,7 +453,7 @@ export async function POST(request: NextRequest) {
         let successCount = 0
         let failCount = 0
 
-        const GPT_BATCH_SIZE = parseInt(process.env.GPT_BATCH_SIZE ?? '20')
+        const GPT_BATCH_SIZE = parseInt(process.env.GPT_BATCH_SIZE ?? '3')
         const CONCURRENCY = engine === 'gpt_mini'
           ? GPT_BATCH_SIZE
           : parseInt(process.env.FAL_CONCURRENCY_LIMIT ?? '40')
