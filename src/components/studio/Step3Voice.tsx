@@ -537,6 +537,17 @@ export default function Step3Voice() {
 
   function handleELLanguageChange(lang: string) {
     setVoiceLanguage(lang)
+    // If switching to a specific language, clear voice_id if the selected voice's
+    // language doesn't match — prevents stale voice_id showing as "Select voice"
+    // while still being used on Generate. (ElevenLabs is multilingual so no audio
+    // quality impact, but the UI desync is confusing.)
+    if (lang && voiceSettings.voiceId) {
+      const currentVoice = voices.find((v) => v.voice_id === voiceSettings.voiceId)
+      if (currentVoice?.language &&
+          !currentVoice.language.toLowerCase().startsWith(lang.toLowerCase())) {
+        setVoiceSettings({ voiceId: '' })
+      }
+    }
     loadVoices(lang)
   }
 
