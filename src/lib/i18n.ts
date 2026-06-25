@@ -741,8 +741,10 @@ export const translations = {
     'thumb.mode_overlay':  '✏️ Наложить текст',
     'thumb.mode_ai':       '🎨 AI рисует текст',
     'thumb.mode_none':     '🚫 Без текста',
+    'thumb.mode_recommended': 'Рекомендуем',
     'thumb.mode_ai_hint':  '⚠️ Качество рендеринга текста зависит от стиля изображения и модели.',
     'thumb.mode_ai_hint_cyrillic': '⚠️ AI-движки практически не умеют рендерить кириллический текст — для русских названий текст скорее всего будет нечитаемым или отсутствовать. Рекомендуем режим «Наложить текст» для русскоязычных проектов.',
+    'thumb.mode_ai_hint_ref_style': '⚠️ AI создаёт изображение по текстовому описанию вашего референса — стиль может заметно отличаться от оригинала (особенно палитра, фон и оформление текста). Для точного соответствия стилю рекомендуем режим «Наложить текст», где текст накладывается отдельно с полным контролем над шрифтом и цветом.',
     'copy.copied': 'Скопировано',
     'copy.copy':   'Копировать',
 
@@ -1644,8 +1646,10 @@ export const translations = {
     'thumb.mode_overlay':  '✏️ Overlay text',
     'thumb.mode_ai':       '🎨 AI draws text',
     'thumb.mode_none':     '🚫 No text',
+    'thumb.mode_recommended': 'Recommended',
     'thumb.mode_ai_hint':  '⚠️ Text rendering quality depends on image style and model.',
     'thumb.mode_ai_hint_cyrillic': '⚠️ AI image models almost cannot render Cyrillic text — for Russian titles the text will likely be unreadable or absent. We recommend "Overlay text" mode for Russian-language projects.',
+    'thumb.mode_ai_hint_ref_style': '⚠️ AI generates the image from a text description of your reference — the style may differ noticeably from the original (especially palette, background, and text styling). For accurate style matching, use "Overlay text" mode, where text is applied separately with full control over font and color.',
     'copy.copied': 'Copied',
     'copy.copy':   'Copy',
 

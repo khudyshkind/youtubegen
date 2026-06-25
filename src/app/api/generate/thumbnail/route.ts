@@ -142,7 +142,8 @@ Rules:
 - Decide how to style and position the title text based on the image style and scene mood
 - Describe the text styling organically as part of the scene description (e.g. "bold neon lettering", "hand-painted wooden sign with the title", "carved stone inscription", "comic book text bubble with the title", "retro painted billboard sign")
 - The scene composition should frame and complement the text
-- 35–45 words. English only. Return only the prompt text.`,
+- CRITICAL: include the title text EXACTLY as given — never translate it, never rephrase it, preserve original language and spelling
+- 35–45 words. Prompt in English only (except the title itself). Return only the prompt text.`,
       messages: [{
         role: 'user',
         content: (() => {

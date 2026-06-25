@@ -269,22 +269,39 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               key={mode}
               type="button"
               onClick={() => setThumbnailTextMode(mode)}
-              className="flex-1 px-2 py-1.5 rounded-xl text-xs font-medium transition-all"
+              className="flex-1 px-2 py-1.5 rounded-xl text-xs font-medium transition-all flex flex-col items-center gap-0.5"
               style={thumbnailTextMode === mode
                 ? { background: 'rgba(124,58,237,0.25)', border: '1px solid rgba(124,58,237,0.5)', color: '#A78BFA' }
                 : { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#64748B' }
               }
             >
-              {mode === 'overlay' ? t('thumb.mode_overlay') : mode === 'ai' ? t('thumb.mode_ai') : t('thumb.mode_none')}
+              <span>{mode === 'overlay' ? t('thumb.mode_overlay') : mode === 'ai' ? t('thumb.mode_ai') : t('thumb.mode_none')}</span>
+              {mode === 'overlay' && thumbnailTextMode !== 'overlay' && (
+                <span className="text-[9px] px-1 rounded-sm font-semibold" style={{ background: 'rgba(16,185,129,0.15)', color: '#10B981' }}>
+                  {t('thumb.mode_recommended')}
+                </span>
+              )}
             </button>
           ))}
         </div>
         {thumbnailTextMode === 'ai' && (
-          <p className="text-xs mt-1.5" style={{ color: '#F59E0B' }}>
-            {/[а-яёА-ЯЁ]/.test(customTitle || seoTitle)
-              ? t('thumb.mode_ai_hint_cyrillic')
-              : t('thumb.mode_ai_hint')}
-          </p>
+          <div className="flex flex-col gap-1 mt-1.5">
+            {refStyle && (
+              <p className="text-xs" style={{ color: '#F97316' }}>
+                {t('thumb.mode_ai_hint_ref_style')}
+              </p>
+            )}
+            {/[а-яёА-ЯЁ]/.test(customTitle || seoTitle) && (
+              <p className="text-xs" style={{ color: '#F59E0B' }}>
+                {t('thumb.mode_ai_hint_cyrillic')}
+              </p>
+            )}
+            {!refStyle && !/[а-яёА-ЯЁ]/.test(customTitle || seoTitle) && (
+              <p className="text-xs" style={{ color: '#F59E0B' }}>
+                {t('thumb.mode_ai_hint')}
+              </p>
+            )}
+          </div>
         )}
       </div>
 
