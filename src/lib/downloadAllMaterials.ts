@@ -57,10 +57,6 @@ export async function downloadAllMaterials(opts: { seo?: SeoData | null } = {}):
   }
 
   if (sceneImages.length > 0) {
-    zip.file('image_prompts.csv', buildCsv(sceneImages))
-  }
-
-  if (sceneImages.length > 0) {
     const sorted = [...sceneImages].sort((a, b) => a.scene_index - b.scene_index)
     const padLen = Math.max(2, String(sorted.length).length)
     const pad = (n: number) => String(n + 1).padStart(padLen, '0')
