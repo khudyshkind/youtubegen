@@ -7,6 +7,7 @@ import { refreshCredits } from '@/lib/refresh-credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SeoData } from '@/lib/types'
 import { useLang } from '@/hooks/useLang'
+import { downloadAllMaterials } from '@/lib/downloadAllMaterials'
 
 // ─── Copy button ───────────────────────────────────────────────────────────────
 
@@ -452,13 +453,28 @@ function appendHashtags(body: string, tags: string[]): string {
 
 export default function Step7Seo() {
   const { t } = useLang()
-  const { script, scriptParams, subtitleBlocks, projectId, seo, setSeo, setStep, reset } = useStudioStore()
+  const { script, scriptParams, subtitleBlocks, sceneImages, audioUrl, projectId, seo, setSeo, setStep, reset } = useStudioStore()
   const [localSeo, setLocalSeo] = useState<SeoData | null>(seo)
   const [newTag, setNewTag] = useState('')
   const [newHashtag, setNewHashtag] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+  const [dlState, setDlState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+
+  async function handleDownloadAll() {
+    setDlState('loading')
+    try {
+      await downloadAllMaterials({ seo: localSeo })
+      setDlState('done')
+      setTimeout(() => setDlState('idle'), 3000)
+    } catch {
+      setDlState('error')
+      setTimeout(() => setDlState('idle'), 3000)
+    }
+  }
+
+  const hasMaterials = sceneImages.length > 0 || !!audioUrl || !!script
 
   const hashtags: string[] = localSeo?.hashtags ?? []
 
@@ -799,6 +815,56 @@ export default function Step7Seo() {
 
           {/* Thumbnail section */}
           <ThumbnailSection seoTitle={localSeo.title} topic={scriptParams.topic} />
+        </div>
+      )}
+
+      {hasMaterials && (
+        <div
+          className="rounded-xl p-4"
+          style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-300">{t('step7.download_all')}</p>
+              <p className="text-xs text-slate-600 mt-0.5">{t('step7.download_all_hint')}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleDownloadAll}
+              disabled={dlState === 'loading'}
+              className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-50"
+              style={dlState === 'done'
+                ? { background: 'rgba(16,185,129,0.12)', color: '#34D399', border: '1px solid rgba(16,185,129,0.25)' }
+                : dlState === 'error'
+                ? { background: 'rgba(239,68,68,0.1)', color: '#F87171', border: '1px solid rgba(239,68,68,0.2)' }
+                : { background: 'rgba(255,255,255,0.06)', color: '#94A3B8', border: '1px solid rgba(255,255,255,0.1)' }
+              }
+              onMouseEnter={(e) => { if (dlState === 'idle') { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#e2e8f0' } }}
+              onMouseLeave={(e) => { if (dlState === 'idle') { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = '#94A3B8' } }}
+            >
+              {dlState === 'loading' ? (
+                <>
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  {t('step7.download_all_loading')}
+                </>
+              ) : dlState === 'done' ? (
+                t('step7.download_all_done')
+              ) : dlState === 'error' ? (
+                t('step7.download_all_error')
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  ZIP
+                </>
+              )}
+            </button>
+          </div>
         </div>
       )}
 
