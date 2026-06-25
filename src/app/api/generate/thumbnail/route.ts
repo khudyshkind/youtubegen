@@ -241,7 +241,7 @@ async function generateGptThumbnail(prompt: string): Promise<string> {
       model: 'gpt-image-2',
       prompt: sanitized,
       size: '1536x1024',
-      quality: 'high',
+      quality: 'medium',
       n: 1,
     }),
   })

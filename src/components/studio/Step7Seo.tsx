@@ -168,6 +168,9 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
           image_style: imageStyle ?? undefined,
         }),
       })
+      if (!res.headers.get('content-type')?.includes('application/json')) {
+        throw new Error(t('thumb.err_gen'))
+      }
       const json = await res.json()
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') {
