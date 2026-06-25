@@ -200,6 +200,99 @@ Rules:
   }
 }
 
+// ─── Mode B engine: GPT Image ─────────────────────────────────────────────────
+//
+// gpt-image-2 supports text rendering in multiple scripts including Cyrillic.
+// Closest landscape size: 1536×1024 (3:2 ratio; YouTube thumbnail is 16:9).
+//
+// IMPORTANT: gpt-image-2 moderation blocks Cyrillic characters in the prompt text
+// (output stage), but correctly renders Cyrillic glyphs when asked to display
+// transliterated text "in Cyrillic script". We pre-process the prompt here.
+
+const CYRILLIC_MAP: Record<string, string> = {
+  'а':'a','б':'b','в':'v','г':'g','д':'d','е':'ye','ё':'yo','ж':'zh','з':'z',
+  'и':'i','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r',
+  'с':'s','т':'t','у':'u','ф':'f','х':'kh','ц':'ts','ч':'ch','ш':'sh',
+  'щ':'shch','ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya',
+  'А':'A','Б':'B','В':'V','Г':'G','Д':'D','Е':'Ye','Ё':'Yo','Ж':'Zh','З':'Z',
+  'И':'I','Й':'Y','К':'K','Л':'L','М':'M','Н':'N','О':'O','П':'P','Р':'R',
+  'С':'S','Т':'T','У':'U','Ф':'F','Х':'Kh','Ц':'Ts','Ч':'Ch','Ш':'Sh',
+  'Щ':'Shch','Ъ':'','Ы':'Y','Ь':'','Э':'E','Ю':'Yu','Я':'Ya',
+}
+
+function sanitizePromptForGptImage(prompt: string): string {
+  return prompt.replace(/[а-яёА-ЯЁ]+/g, (word) => {
+    const latin = word.split('').map((c) => CYRILLIC_MAP[c] ?? c).join('')
+    return `${latin} (in Cyrillic)`
+  })
+}
+
+async function generateGptThumbnail(prompt: string): Promise<string> {
+  const sanitized = sanitizePromptForGptImage(prompt)
+  console.log('[thumbnail] gpt-image-2 sanitized prompt:', sanitized.slice(0, 200))
+
+  const res = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env('OPENAI_API_KEY')}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-image-2',
+      prompt: sanitized,
+      size: '1536x1024',
+      quality: 'high',
+      n: 1,
+    }),
+  })
+  const data = await res.json() as { data?: Array<{ b64_json?: string }>; error?: { message?: string } }
+  if (!res.ok) {
+    const msg = data.error?.message ?? String(res.status)
+    if (msg.toLowerCase().includes('verif')) {
+      throw new Error('GPT Image: требуется верификация организации OpenAI')
+    }
+    throw new Error(`GPT Image: ${msg}`)
+  }
+  const base64 = data.data?.[0]?.b64_json
+  if (!base64) throw new Error('GPT Image: no image data in response')
+  return `data:image/png;base64,${base64}`
+}
+
+// ─── Mode B engine: Gemini Image ──────────────────────────────────────────────
+//
+// Uses Google AI Studio API (not Google Cloud — simpler, no billing needed for testing).
+// Model ID is configurable via GEMINI_IMAGE_MODEL env var.
+// Set GEMINI_API_KEY from https://ai.google.dev/ to activate.
+
+async function generateGeminiThumbnail(prompt: string): Promise<string> {
+  const key = env('GEMINI_API_KEY')
+  const model = process.env.GEMINI_IMAGE_MODEL ?? 'gemini-3-pro-image-preview'
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      }),
+    },
+  )
+  type GeminiPart = { inlineData?: { data: string; mimeType: string }; text?: string }
+  const data = await res.json() as {
+    candidates?: Array<{ content?: { parts?: GeminiPart[] } }>
+    error?: { message?: string }
+  }
+  if (!res.ok) {
+    throw new Error(`Gemini Image: ${data.error?.message ?? res.status}`)
+  }
+  const parts = data.candidates?.[0]?.content?.parts ?? []
+  const imgPart = parts.find((p) => p.inlineData?.mimeType?.startsWith('image/'))
+  if (!imgPart?.inlineData) throw new Error('Gemini Image: no image in response')
+  return `data:${imgPart.inlineData.mimeType};base64,${imgPart.inlineData.data}`
+}
+
 // ─── Text wrap ─────────────────────────────────────────────────────────────────
 
 function wrapText(text: string, maxChars = 20): string[] {
@@ -411,37 +504,47 @@ export async function POST(request: NextRequest) {
         .getPublicUrl(`${user.id}/${project_id}/thumbnail_bg.jpg`)
       storedBgUrl = publicUrl
     } else {
-      // Generate new background via Flux
       const prompt = custom_prompt?.trim() || (
         text_mode === 'ai'
           ? await generateFluxPromptWithText(title, topic, image_style, ref_style)
           : await generateFluxPromptBackground(title, topic, ref_style, image_style)
       )
-      const fluxPrompt = text_mode === 'ai'
-        ? prompt
-        : `${prompt}, NO TEXT, NO WATERMARKS`
 
-      console.log(`[thumbnail] mode=${text_mode} flux prompt: ${fluxPrompt}`)
+      // Mode B: route to configured AI text engine; Mode A/C: always Flux
+      const AI_TEXT_ENGINE = (process.env.THUMBNAIL_AI_TEXT_ENGINE ?? 'gpt') as 'flux' | 'gpt' | 'gemini'
+      const usesExternalEngine = text_mode === 'ai' && AI_TEXT_ENGINE !== 'flux'
 
-      fal.config({ credentials: env('FAL_KEY') })
-      const result = await fal.subscribe('fal-ai/flux/dev', {
-        input: {
-          prompt: fluxPrompt,
-          image_size: { width: 1280, height: 720 },
-          num_images: 1,
-          num_inference_steps: 35,
-        },
-      }) as { data: FalImageResult }
+      if (usesExternalEngine) {
+        console.log(`[thumbnail] mode=ai engine=${AI_TEXT_ENGINE} prompt: ${prompt}`)
+        bgDataUrl = AI_TEXT_ENGINE === 'gemini'
+          ? await generateGeminiThumbnail(prompt)
+          : await generateGptThumbnail(prompt)
+      } else {
+        const fluxPrompt = text_mode === 'ai' ? prompt : `${prompt}, NO TEXT, NO WATERMARKS`
+        console.log(`[thumbnail] mode=${text_mode} engine=flux prompt: ${fluxPrompt}`)
 
-      const falUrl = result.data?.images?.[0]?.url
-      if (!falUrl) throw new Error('Flux не вернул изображение')
+        fal.config({ credentials: env('FAL_KEY') })
+        const result = await fal.subscribe('fal-ai/flux/dev', {
+          input: {
+            prompt: fluxPrompt,
+            image_size: { width: 1280, height: 720 },
+            num_images: 1,
+            num_inference_steps: 35,
+          },
+        }) as { data: FalImageResult }
 
-      bgDataUrl = await fetchAsBase64(falUrl)
+        const falUrl = result.data?.images?.[0]?.url
+        if (!falUrl) throw new Error('Flux не вернул изображение')
+        bgDataUrl = await fetchAsBase64(falUrl)
+      }
 
-      const bgPath = `${user.id}/${project_id}/thumbnail_bg.jpg`
+      // Detect actual format to set correct content-type (GPT/Gemini return PNG, Flux JPEG)
+      const bgMime = bgDataUrl.split(';')[0].split(':')[1] ?? 'image/jpeg'
+      const bgExt = bgMime.includes('png') ? 'png' : 'jpg'
+      const bgPath = `${user.id}/${project_id}/thumbnail_bg.${bgExt}`
       const rawBuf = Buffer.from(bgDataUrl.split(',')[1], 'base64')
       await serviceClient.storage.from('images').upload(bgPath, rawBuf, {
-        contentType: 'image/jpeg',
+        contentType: bgMime,
         upsert: true,
       })
       const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(bgPath)
