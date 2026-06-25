@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
+import { exportPrompts } from '@/lib/exportPrompts'
 import type { SubtitleBlock, SubtitleSize, SubtitleFont, SubtitlePosition } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { useLang } from '@/hooks/useLang'
@@ -341,9 +342,25 @@ export default function Step6Video() {
           className="rounded-xl p-4"
           style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
         >
-          <p className="text-sm font-semibold text-slate-200 mb-3">
-            {t('step6.images_label')} ({sceneImages.length})
-          </p>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-semibold text-slate-200">
+              {t('step6.images_label')} ({sceneImages.length})
+            </p>
+            <button
+              type="button"
+              onClick={exportPrompts}
+              className="flex items-center gap-1 text-xs font-medium transition-colors"
+              style={{ color: '#64748B' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = '#94A3B8')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = '#64748B')}
+            >
+              <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              {t('step5.export_prompts_btn')}
+            </button>
+          </div>
           <div className="grid grid-cols-3 gap-2">
             {sceneImages.map((img) =>
               img.url ? (

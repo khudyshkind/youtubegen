@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
+import { exportPrompts } from '@/lib/exportPrompts'
 import { CREDIT_COSTS, IMAGE_STYLES } from '@/lib/types'
 import type { SceneImage, ImageStyleKey } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
@@ -234,35 +235,6 @@ export default function Step5Images() {
   // displayCount respects the "reduce to 20" override; actual imageCount is unaffected
   const displayCount = gptCountOverride ?? imageCount
   const creditCost = displayCount * costPerImage
-
-  function handleExportPrompts() {
-    // Read CURRENT store state at click time — avoids stale closure
-    const { sceneImages: scenes, scriptParams: params } = useStudioStore.getState()
-    if (scenes.length === 0) return
-
-    const sorted = [...scenes].sort((a, b) => a.scene_index - b.scene_index)
-    const padLen = Math.max(2, String(sorted.length).length)
-    const pad = (n: number) => String(n + 1).padStart(padLen, '0')
-    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
-
-    const header = ['Scene', 'Start Time', 'End Time', 'Prompt', 'Suggested Filename']
-    const rows = sorted.map((img) => {
-      const num = pad(img.scene_index)
-      return [num, img.timecode_start ?? '', img.timecode_end ?? '', img.prompt ?? '', `scene_${num}.jpg`]
-    })
-    const csv = [header, ...rows].map(row => row.map(esc).join(',')).join('\r\n')
-
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    const safeTopic = params.topic.replace(/[^\wа-яА-ЯёЁ\s-]/g, '').replace(/\s+/g, '_').slice(0, 50)
-    a.download = `${safeTopic}_image_prompts.csv`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(blobUrl)
-  }
 
   function handleIntervalPreset(sec: number) {
     setImageInterval(sec)
@@ -639,7 +611,7 @@ export default function Step5Images() {
             <div className="flex flex-col gap-1">
               <button
                 type="button"
-                onClick={handleExportPrompts}
+                onClick={exportPrompts}
                 className="flex items-center gap-1.5 text-xs font-medium transition-colors"
                 style={{ color: '#64748B' }}
                 onMouseEnter={(e) => (e.currentTarget.style.color = '#94A3B8')}
