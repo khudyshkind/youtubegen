@@ -37,16 +37,24 @@ export async function GET(request: NextRequest) {
     if (job.status === 'completed' && job.video_url && job.project_id) {
       const { data: project } = await svc
         .from('projects')
-        .select('video_url')
+        .select('video_url, status')
         .eq('id', job.project_id)
         .single()
 
       if (!project?.video_url) {
-        // First time we see this completion — do post-completion actions
-        await svc
+        // Don't downgrade status if SEO already ran (projects.status is 'completed' or 'generating_seo')
+        const keepStatus = project?.status === 'completed' || project?.status === 'generating_seo'
+        const newStatus = keepStatus ? project!.status : 'generating_seo'
+
+        const { error: projectUpdateError } = await svc
           .from('projects')
-          .update({ video_url: job.video_url, status: 'generating_seo' })
+          .update({ video_url: job.video_url, status: newStatus })
           .eq('id', job.project_id)
+
+        if (projectUpdateError) {
+          // Throw → outer catch returns 500 → frontend retries polling on next tick
+          throw new Error(`projects update failed: ${projectUpdateError.message}`)
+        }
 
         await spendCredits(user.id, 2, 'video', job.project_id)
         void trackEvent(user.id, 'step_completed', { step: 'video', project_id: job.project_id })
