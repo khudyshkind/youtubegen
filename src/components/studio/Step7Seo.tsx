@@ -278,7 +278,9 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
         </div>
         {thumbnailTextMode === 'ai' && (
           <p className="text-xs mt-1.5" style={{ color: '#F59E0B' }}>
-            {t('thumb.mode_ai_hint')}
+            {/[а-яёА-ЯЁ]/.test(customTitle || seoTitle)
+              ? t('thumb.mode_ai_hint_cyrillic')
+              : t('thumb.mode_ai_hint')}
           </p>
         )}
       </div>

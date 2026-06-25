@@ -58,6 +58,7 @@ create table if not exists public.projects (
   subtitle_blocks jsonb,
   scene_images    jsonb,
   image_interval  integer     not null default 10,
+  image_style     text,
   thumbnail_url   text,
   thumbnail_text_mode text not null default 'overlay',
   video_url       text,
@@ -415,6 +416,9 @@ create table if not exists public.support_tickets (
 
 grant all on public.support_tickets to service_role;
 grant usage, select on sequence public.support_tickets_ticket_number_seq to service_role;
+
+-- Migration: image_style (was used in-memory only, now persisted)
+alter table public.projects add column if not exists image_style text;
 
 -- Migration: thumbnail text mode
 alter table public.projects add column if not exists thumbnail_text_mode text not null default 'overlay';

@@ -145,12 +145,15 @@ Rules:
 - 35–45 words. English only. Return only the prompt text.`,
       messages: [{
         role: 'user',
-        content: `Video title: "${title}"
+        content: (() => {
+          // refStyle (uploaded reference) wins unconditionally — single unambiguous style source
+          const effectiveStyle = refStyle || imageStyle || 'cinematic photography'
+          return `Video title: "${title}"
 Topic: "${topic}"
-Visual style: "${imageStyle || 'cinematic photography'}"
-${refStyle ? `Style reference: "${refStyle}"` : ''}
+Visual style: "${effectiveStyle}"
 
-Write a thumbnail image prompt where the title "${title}" is naturally integrated as a visual element, with text styling that matches the ${imageStyle || 'cinematic'} aesthetic.`,
+Write a thumbnail image prompt where the title "${title}" is naturally integrated as a visual element, with text styling that matches the ${effectiveStyle} aesthetic.`
+        })(),
       }],
     })
     const block = msg.content[0]
@@ -167,6 +170,7 @@ async function generateFluxPromptBackground(
   title: string,
   topic: string,
   refStyle?: string,
+  imageStyle?: string,
 ): Promise<string> {
   try {
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
@@ -181,7 +185,11 @@ Rules:
 - 25–35 words. English only. Return only the prompt text.`,
       messages: [{
         role: 'user',
-        content: `Video title: "${title}"\nTopic: "${topic}"${refStyle ? `\nVisual style reference: ${refStyle}` : ''}\nWrite a dramatic thumbnail background image prompt.`,
+        content: (() => {
+          const effectiveStyle = refStyle || imageStyle || null
+          const styleHint = effectiveStyle ? `\nVisual style: ${effectiveStyle}` : ''
+          return `Video title: "${title}"\nTopic: "${topic}"${styleHint}\nWrite a dramatic thumbnail background image prompt.`
+        })(),
       }],
     })
     const block = msg.content[0]
@@ -382,7 +390,7 @@ export async function POST(request: NextRequest) {
       const prompt = custom_prompt?.trim() || (
         text_mode === 'ai'
           ? await generateFluxPromptWithText(title, topic, image_style, ref_style)
-          : await generateFluxPromptBackground(title, topic, ref_style)
+          : await generateFluxPromptBackground(title, topic, ref_style, image_style)
       )
       return NextResponse.json({ ok: true, data: { prompt } })
     }
@@ -407,7 +415,7 @@ export async function POST(request: NextRequest) {
       const prompt = custom_prompt?.trim() || (
         text_mode === 'ai'
           ? await generateFluxPromptWithText(title, topic, image_style, ref_style)
-          : await generateFluxPromptBackground(title, topic, ref_style)
+          : await generateFluxPromptBackground(title, topic, ref_style, image_style)
       )
       const fluxPrompt = text_mode === 'ai'
         ? prompt

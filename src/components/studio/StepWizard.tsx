@@ -33,7 +33,7 @@ function StepWizardInner() {
 
   const { currentStep, reset, setStep, setProjectId, setScriptParams, setScript,
     setVoiceId, setAudioUrl, setSubtitleBlocks, setSceneImages, setVideoUrl, setSeo,
-    setImageInterval, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode } = useStudioStore()
+    setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode } = useStudioStore()
 
   const { t } = useLang()
   const [restoring, setRestoring] = useState(!!projectParam)
@@ -88,6 +88,7 @@ function StepWizardInner() {
         if (p.subtitle_blocks) setSubtitleBlocks(p.subtitle_blocks)
         if (p.scene_images) setSceneImages(p.scene_images)
         if (p.image_interval) setImageInterval(p.image_interval)
+        setImageStyle(p.image_style ?? null)
         if (p.video_url) setVideoUrl(p.video_url)
         if (p.seo) setSeo(p.seo)
         setThumbnailUrl(p.thumbnail_url ?? null)

@@ -741,7 +741,8 @@ export const translations = {
     'thumb.mode_overlay':  '✏️ Наложить текст',
     'thumb.mode_ai':       '🎨 AI рисует текст',
     'thumb.mode_none':     '🚫 Без текста',
-    'thumb.mode_ai_hint':  '⚠️ Flux плохо рисует кириллицу — возможны ошибки в буквах',
+    'thumb.mode_ai_hint':  '⚠️ Качество рендеринга текста зависит от стиля изображения и модели.',
+    'thumb.mode_ai_hint_cyrillic': '⚠️ AI-движки практически не умеют рендерить кириллический текст — для русских названий текст скорее всего будет нечитаемым или отсутствовать. Рекомендуем режим «Наложить текст» для русскоязычных проектов.',
     'copy.copied': 'Скопировано',
     'copy.copy':   'Копировать',
 
@@ -1643,7 +1644,8 @@ export const translations = {
     'thumb.mode_overlay':  '✏️ Overlay text',
     'thumb.mode_ai':       '🎨 AI draws text',
     'thumb.mode_none':     '🚫 No text',
-    'thumb.mode_ai_hint':  '⚠️ Flux struggles with Cyrillic text — letters may be inaccurate',
+    'thumb.mode_ai_hint':  '⚠️ Text rendering quality depends on image style and model.',
+    'thumb.mode_ai_hint_cyrillic': '⚠️ AI image models almost cannot render Cyrillic text — for Russian titles the text will likely be unreadable or absent. We recommend "Overlay text" mode for Russian-language projects.',
     'copy.copied': 'Copied',
     'copy.copy':   'Copy',
 
