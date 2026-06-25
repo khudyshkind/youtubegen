@@ -19,10 +19,11 @@ const STATUS_COLORS: Record<ProjectStatus, string> = {
 }
 
 function formatDate(iso: string, lang: string) {
-  return new Date(iso).toLocaleDateString(lang === 'en' ? 'en-US' : 'ru-RU', {
+  return new Date(iso).toLocaleString(lang === 'en' ? 'en-US' : 'ru-RU', {
     day: 'numeric',
     month: 'short',
-    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 }
 
@@ -176,8 +177,8 @@ export default function DashboardClient({ profile, projects }: Props) {
                   </p>
                   <div className="flex items-center gap-2 mt-0.5">
                     <p className="text-xs text-slate-500 truncate">{project.topic}</p>
-                    <span className="text-slate-700 hidden sm:block">·</span>
-                    <span className="text-xs text-slate-600 hidden sm:block whitespace-nowrap">
+                    <span className="text-slate-700">·</span>
+                    <span className="text-xs text-slate-600 whitespace-nowrap">
                       {formatDate(project.created_at, lang)}
                     </span>
                     {project.credits_spent > 0 && (

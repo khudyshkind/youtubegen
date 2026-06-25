@@ -69,12 +69,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const rawTopic = topic.trim()
+    const autoTitle = rawTopic.length > 60 ? rawTopic.slice(0, 57) + '…' : rawTopic
     const { data: project, error } = await supabase
       .from('projects')
       .insert({
         user_id: user.id,
-        topic: topic.trim(),
-        title: title?.trim() ?? 'Новый проект',
+        topic: rawTopic,
+        title: title?.trim() || autoTitle,
         duration_minutes,
         status: 'draft',
       })
