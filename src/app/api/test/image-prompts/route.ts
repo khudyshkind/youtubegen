@@ -85,11 +85,17 @@ async function extractCharacters(fullText: string, topic: string, anthropic: Ant
     max_tokens: 500,
     messages: [{
       role: 'user',
-      content: `Analyze this video script about "${topic}". Identify ALL recurring visual characters (animals, creatures, people, beings) that PHYSICALLY APPEAR across multiple scenes — not just mentioned abstractly.
+      content: `Analyze this video script about "${topic}". Identify all visual characters (animals, creatures, people, beings) that will be DEPICTED or SHOWN in at least 2 different scene illustrations.
+
+IMPORTANT: If the video is about a specific animal, creature, or person — even in an educational or factual format — that subject IS a recurring visual character. Include it.
 
 For each recurring character, write a concise 15–25 word ENGLISH visual description: species/type, distinctive color, key physical features, size/scale.
 
-Rules: only characters appearing in 2+ scenes, max 4, purely visual descriptions, return [] if none.
+Rules:
+- Include ANY creature/animal/person that appears visually in 2+ scenes, even as the sole subject of narration
+- Return [] ONLY if each scene depicts COMPLETELY DIFFERENT subjects with no visual repeats
+- Maximum 4 characters, purely visual descriptions only
+
 Respond ONLY with valid JSON: [{"name": "...", "description": "..."}]
 
 Script: ${fullText.slice(0, 3000)}`,

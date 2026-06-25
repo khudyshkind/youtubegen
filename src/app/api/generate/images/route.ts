@@ -105,20 +105,20 @@ async function extractCharacters(
       max_tokens: 500,
       messages: [{
         role: 'user',
-        content: `Analyze this video script about "${topic}".
+        content: `Analyze this video script about "${topic}". Identify all visual characters (animals, creatures, people, beings) that will be DEPICTED or SHOWN in at least 2 different scene illustrations.
 
-Identify ALL recurring visual characters (animals, creatures, people, beings) that PHYSICALLY APPEAR across multiple scenes — not just mentioned abstractly as concepts or ideas.
+IMPORTANT: If the video is about a specific animal, creature, or person — even in an educational or factual format — that subject IS a recurring visual character. Include it.
 
 For each recurring character, write a concise 15–25 word ENGLISH visual description: species/type, distinctive color, key physical features, size/scale.
 
 Rules:
-- Only include characters that visually appear in at least 2 different scenes
-- If no such characters exist (e.g. scenery-only documentary, different animals each scene) — return []
+- Include ANY creature/animal/person that appears visually in 2+ scenes, even as the sole subject of narration
+- Return [] ONLY if each scene depicts COMPLETELY DIFFERENT subjects with no visual repeats (e.g. a nature documentary showing a different unrelated species every scene)
 - Maximum 4 characters
 - Descriptions must be purely visual — no personality, behavior, or story context
 
 Respond ONLY with valid JSON, no markdown:
-[{"name": "name as used in script", "description": "english visual description"}]
+[{"name": "name or species as used in script", "description": "english visual description"}]
 
 Script (first 3000 chars):
 ${fullText.slice(0, 3000)}`,
