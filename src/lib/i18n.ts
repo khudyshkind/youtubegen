@@ -737,6 +737,11 @@ export const translations = {
     'thumb.prompt_btn':    'Редактировать промт',
     'thumb.prompt_label':  'Промт для Flux',
     'thumb.gen_custom':    'Сгенерировать с этим промтом',
+    'thumb.text_mode_label': 'Режим отображения названия',
+    'thumb.mode_overlay':  '✏️ Наложить текст',
+    'thumb.mode_ai':       '🎨 AI рисует текст',
+    'thumb.mode_none':     '🚫 Без текста',
+    'thumb.mode_ai_hint':  '⚠️ Flux плохо рисует кириллицу — возможны ошибки в буквах',
     'copy.copied': 'Скопировано',
     'copy.copy':   'Копировать',
 
@@ -1634,6 +1639,11 @@ export const translations = {
     'thumb.prompt_btn':    'Edit prompt',
     'thumb.prompt_label':  'Flux prompt',
     'thumb.gen_custom':    'Generate with this prompt',
+    'thumb.text_mode_label': 'Title display mode',
+    'thumb.mode_overlay':  '✏️ Overlay text',
+    'thumb.mode_ai':       '🎨 AI draws text',
+    'thumb.mode_none':     '🚫 No text',
+    'thumb.mode_ai_hint':  '⚠️ Flux struggles with Cyrillic text — letters may be inaccurate',
     'copy.copied': 'Copied',
     'copy.copy':   'Copy',
 

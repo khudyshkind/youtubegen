@@ -209,6 +209,7 @@ export interface Project {
   image_interval: number
   image_style: string | null
   thumbnail_url: string | null
+  thumbnail_text_mode: string | null
   video_url: string | null
   seo: SeoData | null
   credits_spent: number

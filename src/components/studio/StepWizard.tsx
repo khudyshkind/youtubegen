@@ -33,7 +33,7 @@ function StepWizardInner() {
 
   const { currentStep, reset, setStep, setProjectId, setScriptParams, setScript,
     setVoiceId, setAudioUrl, setSubtitleBlocks, setSceneImages, setVideoUrl, setSeo,
-    setImageInterval, setThumbnailUrl, setThumbnailBgUrl } = useStudioStore()
+    setImageInterval, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode } = useStudioStore()
 
   const { t } = useLang()
   const [restoring, setRestoring] = useState(!!projectParam)
@@ -92,6 +92,9 @@ function StepWizardInner() {
         if (p.seo) setSeo(p.seo)
         setThumbnailUrl(p.thumbnail_url ?? null)
         setThumbnailBgUrl(null)
+        if (p.thumbnail_text_mode === 'ai' || p.thumbnail_text_mode === 'none') {
+          setThumbnailTextMode(p.thumbnail_text_mode)
+        }
         setStep(inferStep(p))
       } catch {
         if (!cancelled) setRestoreError('Ошибка загрузки проекта')

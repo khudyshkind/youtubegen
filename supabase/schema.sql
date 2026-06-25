@@ -59,6 +59,7 @@ create table if not exists public.projects (
   scene_images    jsonb,
   image_interval  integer     not null default 10,
   thumbnail_url   text,
+  thumbnail_text_mode text not null default 'overlay',
   video_url       text,
   seo             jsonb,
   credits_spent   integer     not null default 0,
@@ -414,6 +415,9 @@ create table if not exists public.support_tickets (
 
 grant all on public.support_tickets to service_role;
 grant usage, select on sequence public.support_tickets_ticket_number_seq to service_role;
+
+-- Migration: thumbnail text mode
+alter table public.projects add column if not exists thumbnail_text_mode text not null default 'overlay';
 
 -- Migration: free plan default credits 20 → 30
 alter table public.profiles alter column credits set default 30;

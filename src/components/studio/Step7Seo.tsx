@@ -66,7 +66,8 @@ function SpinnerIcon({ className }: { className?: string }) {
 
 function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string }) {
   const { t } = useLang()
-  const { projectId, thumbnailUrl, setThumbnailUrl, thumbnailBgUrl, setThumbnailBgUrl } = useStudioStore()
+  const { projectId, thumbnailUrl, setThumbnailUrl, thumbnailBgUrl, setThumbnailBgUrl,
+    thumbnailTextMode, setThumbnailTextMode, imageStyle } = useStudioStore()
 
   const [customTitle, setCustomTitle] = useState(seoTitle)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -104,6 +105,8 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
           topic,
           dry_run: true,
           ref_style: refStyleOverride ?? refStyle ?? undefined,
+          text_mode: thumbnailTextMode,
+          image_style: imageStyle ?? undefined,
         }),
       })
       const json = await res.json()
@@ -161,6 +164,8 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
           bg_url: opts.regenBg ? undefined : (thumbnailBgUrl ?? undefined),
           custom_prompt: opts.useCustomPrompt && promptText.trim() ? promptText.trim() : undefined,
           ref_style: refStyle ?? undefined,
+          text_mode: thumbnailTextMode,
+          image_style: imageStyle ?? undefined,
         }),
       })
       const json = await res.json()
@@ -249,6 +254,32 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
                 d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
           </div>
+        )}
+      </div>
+
+      {/* Text mode selector */}
+      <div>
+        <p className="text-xs font-medium text-slate-400 mb-1.5">{t('thumb.text_mode_label')}</p>
+        <div className="flex gap-1.5">
+          {(['overlay', 'ai', 'none'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setThumbnailTextMode(mode)}
+              className="flex-1 px-2 py-1.5 rounded-xl text-xs font-medium transition-all"
+              style={thumbnailTextMode === mode
+                ? { background: 'rgba(124,58,237,0.25)', border: '1px solid rgba(124,58,237,0.5)', color: '#A78BFA' }
+                : { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#64748B' }
+              }
+            >
+              {mode === 'overlay' ? t('thumb.mode_overlay') : mode === 'ai' ? t('thumb.mode_ai') : t('thumb.mode_none')}
+            </button>
+          ))}
+        </div>
+        {thumbnailTextMode === 'ai' && (
+          <p className="text-xs mt-1.5" style={{ color: '#F59E0B' }}>
+            {t('thumb.mode_ai_hint')}
+          </p>
         )}
       </div>
 
@@ -398,20 +429,22 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={() => generate({ regenBg: false })}
-              disabled={isLoading || !thumbnailBgUrl}
-              title={t('thumb.update_text_title')}
-              className="flex-1 py-2 text-slate-300 font-medium rounded-xl text-xs disabled:opacity-40 flex items-center justify-center gap-1.5 hover:text-white transition-colors"
-              style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)' }}
-            >
-              {loading === 'text' ? (
-                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> {t('thumb.update_text')}</>
-              ) : (
-                <>{t('thumb.update_text_btn')} (−{CREDIT_COSTS.thumbnail} {t('nav.credits_suffix')})</>
-              )}
-            </button>
+            {thumbnailTextMode === 'overlay' && (
+              <button
+                type="button"
+                onClick={() => generate({ regenBg: false })}
+                disabled={isLoading || !thumbnailBgUrl}
+                title={t('thumb.update_text_title')}
+                className="flex-1 py-2 text-slate-300 font-medium rounded-xl text-xs disabled:opacity-40 flex items-center justify-center gap-1.5 hover:text-white transition-colors"
+                style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)' }}
+              >
+                {loading === 'text' ? (
+                  <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> {t('thumb.update_text')}</>
+                ) : (
+                  <>{t('thumb.update_text_btn')} (−{CREDIT_COSTS.thumbnail} {t('nav.credits_suffix')})</>
+                )}
+              </button>
+            )}
 
             <button
               type="button"

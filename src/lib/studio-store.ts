@@ -36,6 +36,8 @@ interface StudioState {
   seo: SeoData | null
   thumbnailUrl: string | null
   thumbnailBgUrl: string | null
+  thumbnailTextMode: 'overlay' | 'ai' | 'none'
+  setThumbnailTextMode: (mode: 'overlay' | 'ai' | 'none') => void
 
   // Global credits (synced from /api/profile, updated after each generation)
   credits: number | null
@@ -118,6 +120,7 @@ const initialState = {
   seo: null,
   thumbnailUrl: null,
   thumbnailBgUrl: null,
+  thumbnailTextMode: 'overlay' as 'overlay' | 'ai' | 'none',
   credits: null as number | null,
   isGenerating: false,
   generatingStep: null,
@@ -147,6 +150,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setSeo: (seo) => set({ seo }),
   setThumbnailUrl: (url) => set({ thumbnailUrl: url }),
   setThumbnailBgUrl: (url) => set({ thumbnailBgUrl: url }),
+  setThumbnailTextMode: (mode) => set({ thumbnailTextMode: mode }),
   setCredits: (n) => set({ credits: n }),
   setGenerating: (isGenerating, step) =>
     set({ isGenerating, generatingStep: step ?? null }),
