@@ -29,11 +29,24 @@ function buildCsv(scenes: SceneImage[]): string {
 }
 
 function buildSeoText(seo: SeoData): string {
+  // seo.description may or may not contain hashtags depending on whether the project
+  // was freshly generated (appendHashtags called client-side) or loaded from DB
+  // (description stored without hashtags). Strip any trailing hashtag line, then
+  // always append from the reliable seo.hashtags array.
+  const hashtags: string[] = seo.hashtags ?? []
+  const trimmed = seo.description.trimEnd()
+  const lastNl = trimmed.lastIndexOf('\n')
+  const lastLine = lastNl >= 0 ? trimmed.slice(lastNl + 1).trim() : trimmed
+  const descBody = lastLine.length > 0 && lastLine.split(/\s+/).every((w) => w.startsWith('#'))
+    ? trimmed.slice(0, lastNl >= 0 ? lastNl : 0).trimEnd()
+    : trimmed
+
   const lines: string[] = []
   lines.push('Название:', seo.title)
   if (seo.title_alt) lines.push('', 'Альтернативный заголовок:', seo.title_alt)
-  // seo.description already has hashtags appended at the end by appendHashtags()
-  lines.push('', 'Описание (вставить в поле "Описание" на YouTube — хештеги уже в конце):', seo.description)
+  lines.push('', 'Описание (вставить в поле "Описание" на YouTube):')
+  lines.push(descBody)
+  if (hashtags.length > 0) lines.push('', hashtags.join(' '))
   if (seo.tags.length > 0) {
     lines.push('', 'Теги (вставить в отдельное поле "Теги" при загрузке на YouTube):', seo.tags.join(', '))
   }
