@@ -106,7 +106,9 @@ export async function POST(request: NextRequest) {
       model: 'whisper-1',
       response_format: 'verbose_json',
       timestamp_granularities: ['segment'],
-      language: language ?? 'ru',
+      // Pass language only when explicitly known — omitting it lets Whisper auto-detect.
+      // Hardcoding 'ru' as fallback caused Whisper to translate non-Russian audio into Russian.
+      ...(language ? { language } : {}),
     }) as unknown as WhisperVerboseResponse
 
     console.log('[subtitles] whisper segments:', transcription.segments?.length ?? 0)

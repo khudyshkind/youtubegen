@@ -81,7 +81,7 @@ function StepWizardInner() {
         const p: Project = json.data.project
         console.log('[studio] loaded data:', p.topic)
         setProjectId(p.id)
-        setScriptParams({ topic: p.topic, duration_minutes: p.duration_minutes })
+        setScriptParams({ topic: p.topic, duration_minutes: p.duration_minutes, ...(p.language ? { language: p.language as import('@/lib/types').ScriptLanguage } : {}) })
         if (p.script) setScript(p.script)
         if (p.voice_id) setVoiceId(p.voice_id)
         if (p.audio_url) setAudioUrl(p.audio_url)

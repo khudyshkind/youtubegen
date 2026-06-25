@@ -201,6 +201,7 @@ export interface Project {
   status: ProjectStatus
   topic: string
   duration_minutes: number
+  language: string | null
   voice_id: string | null
   script: string | null
   audio_url: string | null

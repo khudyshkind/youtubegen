@@ -423,6 +423,9 @@ alter table public.projects add column if not exists image_style text;
 -- Migration: thumbnail text mode
 alter table public.projects add column if not exists thumbnail_text_mode text not null default 'overlay';
 
+-- Migration: project language (was in-memory only; subtitles Whisper needs correct language hint)
+alter table public.projects add column if not exists language text;
+
 -- Migration: free plan default credits 20 → 30
 alter table public.profiles alter column credits set default 30;
 update public.profiles set credits = 30 where plan = 'free' and credits < 30;

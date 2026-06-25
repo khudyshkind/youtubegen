@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
     if (project_id) {
       await supabase
         .from('projects')
-        .update({ script, status: 'draft', credits_spent: cost })
+        .update({ script, status: 'draft', credits_spent: cost, language: scriptParams.language ?? null })
         .eq('id', project_id)
         .eq('user_id', user.id)
     }
