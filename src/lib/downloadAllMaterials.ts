@@ -30,11 +30,13 @@ function buildCsv(scenes: SceneImage[]): string {
 
 function buildSeoText(seo: SeoData): string {
   const lines: string[] = []
-  lines.push(`TITLE: ${seo.title}`)
-  if (seo.title_alt) lines.push(`TITLE ALT: ${seo.title_alt}`)
-  lines.push('', 'DESCRIPTION:', seo.description)
-  if (seo.tags.length > 0) lines.push('', `TAGS: ${seo.tags.join(', ')}`)
-  if (seo.hashtags?.length) lines.push('', `HASHTAGS: ${seo.hashtags.join(' ')}`)
+  lines.push('Название:', seo.title)
+  if (seo.title_alt) lines.push('', 'Альтернативный заголовок:', seo.title_alt)
+  // seo.description already has hashtags appended at the end by appendHashtags()
+  lines.push('', 'Описание (вставить в поле "Описание" на YouTube — хештеги уже в конце):', seo.description)
+  if (seo.tags.length > 0) {
+    lines.push('', 'Теги (вставить в отдельное поле "Теги" при загрузке на YouTube):', seo.tags.join(', '))
+  }
   return lines.join('\n')
 }
 
