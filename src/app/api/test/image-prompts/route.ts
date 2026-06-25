@@ -4,7 +4,22 @@ import { env } from '@/lib/env'
 import { createServerSupabase } from '@/lib/supabase-server'
 
 // Temporary test endpoint — delete after testing
-export const maxDuration = 60
+export const maxDuration = 120
+
+function parseJsonArray(text: string): unknown[] {
+  const cleaned = text.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
+  try {
+    const v = JSON.parse(cleaned)
+    return Array.isArray(v) ? v : []
+  } catch {
+    const match = cleaned.match(/\[[\s\S]*\]/)
+    if (!match) return []
+    try {
+      const v = JSON.parse(match[0])
+      return Array.isArray(v) ? v : []
+    } catch { return [] }
+  }
+}
 
 const SCENES_SYSTEM_PROMPT = `You are a film director and art director for YouTube videos with extensive experience creating visual sequences for educational and entertainment content.
 
@@ -81,8 +96,7 @@ Script: ${fullText.slice(0, 3000)}`,
     }],
   })
   const raw = msg.content[0].type === 'text' ? msg.content[0].text.trim() : '[]'
-  const cleaned = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
-  return JSON.parse(cleaned) as Array<{ name: string; description: string }>
+  return parseJsonArray(raw) as Array<{ name: string; description: string }>
 }
 
 async function generatePrompts(
@@ -97,7 +111,7 @@ async function generatePrompts(
 
   const msg = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: scenes.length * 120,
+    max_tokens: Math.max(2500, scenes.length * 200),
     system: [{ type: 'text', text: SCENES_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     messages: [{
       role: 'user',
@@ -112,8 +126,7 @@ ${scenes.map((s, i) => `Сцена ${i + 1} [${s.tc}]:\n"${s.text}"`).join('\n\n
     }],
   })
   const raw = msg.content[0].type === 'text' ? msg.content[0].text.trim() : '[]'
-  const cleaned = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
-  return JSON.parse(cleaned) as Array<{ scene: string; prompt: string }>
+  return parseJsonArray(raw) as Array<{ scene: string; prompt: string }>
 }
 
 export async function GET() {
@@ -124,6 +137,7 @@ export async function GET() {
 
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
 
+  try {
   const script1 = `Сегодня мы поговорим об одном из самых удивительных существ океана — осьминоге. Осьминог — хищник, который охотится на рыбу и ракообразных в тёмных глубинах. Его мозг содержит 500 миллионов нейронов — больше, чем у многих позвоночных. Каждое из восьми щупалец осьминога действует полуавтономно, как отдельный организм. Осьминог способен мгновенно менять цвет и текстуру кожи для маскировки. Когда осьминог чувствует угрозу, он выпускает чернильное облако и стремительно уплывает.`
   const scenes1 = [
     { tc: '0:00–0:30', text: 'Сегодня мы поговорим об одном из самых удивительных существ океана — осьминоге.' },
@@ -165,4 +179,9 @@ export async function GET() {
       scenes: scenes2.map((s, i) => ({ ...s, ...prompts2[i] })),
     },
   })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[test/image-prompts] error:', msg)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }

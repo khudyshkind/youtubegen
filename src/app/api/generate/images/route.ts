@@ -11,6 +11,23 @@ import type { StyleConfig } from '@/lib/image-style-configs'
 
 export const maxDuration = 300
 
+// Robust JSON array extractor — handles trailing text/explanation after the array
+function parseJsonArray(text: string): unknown[] {
+  const cleaned = text.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
+  try {
+    const v = JSON.parse(cleaned)
+    return Array.isArray(v) ? v : []
+  } catch {
+    // Claude sometimes appends explanatory text after the JSON — extract the array only
+    const match = cleaned.match(/\[[\s\S]*\]/)
+    if (!match) return []
+    try {
+      const v = JSON.parse(match[0])
+      return Array.isArray(v) ? v : []
+    } catch { return [] }
+  }
+}
+
 const SCENES_SYSTEM_PROMPT = `You are a film director and art director for YouTube videos with extensive experience creating visual sequences for educational and entertainment content.
 
 Your task: for each video scene, write a brief description of what is happening and a specific English prompt for generating an illustration via AI.
@@ -108,10 +125,7 @@ ${fullText.slice(0, 3000)}`,
       }],
     })
     const raw = msg.content[0].type === 'text' ? msg.content[0].text.trim() : '[]'
-    const cleaned = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
-    const parsed: unknown = JSON.parse(cleaned)
-    if (!Array.isArray(parsed)) return []
-    return (parsed as CharacterProfile[]).slice(0, 4)
+    return (parseJsonArray(raw) as CharacterProfile[]).slice(0, 4)
   } catch (e) {
     console.error('[images] extractCharacters failed:', e instanceof Error ? e.message : e)
     return []
@@ -220,8 +234,7 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
     console.log(`[images/subtitles] chunk ${chunkNum} tokens — input:${message.usage.input_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
 
     const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
-    const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
-    const chunkResults: Array<{ scene: string; prompt: string }> = JSON.parse(cleaned)
+    const chunkResults = parseJsonArray(rawText) as Array<{ scene: string; prompt: string }>
     allPromptResults.push(...chunkResults)
   }
 
@@ -336,8 +349,7 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
     console.log(`[images/script] chunk ${chunkNum} tokens — input:${message.usage.input_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
 
     const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
-    const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
-    const chunkResults: Array<{ scene: string; prompt: string }> = JSON.parse(cleaned)
+    const chunkResults = parseJsonArray(rawText) as Array<{ scene: string; prompt: string }>
     allPromptResults.push(...chunkResults)
   }
 
