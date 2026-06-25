@@ -27,9 +27,33 @@ Your task: for each video scene, write a brief description of what is happening 
 • No text, inscriptions, logos, or watermarks
 • Prompt must fully match the specified style (passed separately in the user message)
 • Use concrete nouns: "aged leather-bound book on wooden desk" not "knowledge"
-• Specify lighting and atmosphere: "soft morning light", "dramatic shadows", "golden hour"
-• Specify viewpoint when important: "close-up", "wide shot", "aerial view", "eye level"
+• LIGHTING — be specific: "soft diffused overcast light", "dramatic rim lighting from behind", "warm amber lamplight from lower-left", "cold blue moonlight with hard shadows" — never just "good lighting"
+• COMPOSITION — specify the shot type: "extreme close-up filling the frame", "wide establishing shot", "low-angle looking up at subject", "bird's-eye overhead view", "Dutch tilt medium shot"
+• MOOD — convey the emotional tone of the scene: "tense and claustrophobic", "serene and meditative", "chaotic and energetic", "eerie and mysterious"
 • Prompts must be in English — AI image generators perform better with English prompts
+• Target 40–60 words per prompt — enough detail for precise generation
+
+═══ FEW-SHOT QUALITY EXAMPLES ═══
+
+Scene — octopus hunting in the dark:
+❌ Weak:   "An octopus in the ocean catching prey"
+✓ Strong: "A reddish-brown octopus with textured mottled skin and large glowing amber eyes stretching a tentacle toward a fleeing silver fish, extreme close-up from below, dramatic deep-sea bioluminescent blue-green lighting with darkness at edges, tense and predatory atmosphere"
+
+Scene — person researching in a library:
+❌ Weak:   "A person reading old books"
+✓ Strong: "Weathered hands turning pages of an aged leather-bound open book on a worn oak desk covered in scattered papers, warm incandescent amber lamplight casting soft left-side shadows, shallow depth of field with book spines blurred in background, contemplative and scholarly atmosphere"
+
+Scene — vast ocean abyss:
+❌ Weak:   "The deep ocean"
+✓ Strong: "Vast dark ocean abyss stretching downward into blackness, wide establishing shot from above looking straight down, isolated beam of cold blue light piercing the darkness with tiny silhouettes of fish at different depths, awe-inspiring and vertiginous atmosphere"
+
+═══ CHARACTER CONSISTENCY RULES ═══
+If CHARACTER PROFILES are provided in the user message:
+• Determine which characters are PHYSICALLY PRESENT (visible, actively participating) in each scene — not just mentioned in narration
+• Copy character profile descriptions VERBATIM into the prompt for every scene they appear in
+• Never paraphrase or vary the character description — exact repetition ensures visual consistency
+• If two characters are both present in one scene — include BOTH descriptions in that prompt
+• If a scene contains no characters from the profiles — write the prompt normally without any character description
 
 ═══ STYLE CONSISTENCY RULES ═══
 • Every prompt MUST follow the style instruction provided in the user message
@@ -39,16 +63,60 @@ Your task: for each video scene, write a brief description of what is happening 
 • If the style requires a specific era or atmosphere — convey it in every prompt
 
 ═══ QUALITY AND VARIETY ═══
-• Each scene must have a UNIQUE visual image — do not repeat the same objects
-• Vary scale: close-up detail → medium shot of character → wide shot of space
-• Vary angle: frontal → side → top-down → bottom-up
-• The prompt must be specific enough for the AI generator to create an accurate image
-• Avoid overly generic prompts like "a person standing" — add details
+• Each scene must have a UNIQUE visual image — do not repeat the same objects or compositions
+• Vary scale across scenes: extreme close-up detail → medium character shot → wide establishing shot
+• Vary camera angle: eye level → low angle → bird's-eye → Dutch tilt
 
 ═══ RESPONSE FORMAT ═══
 Respond ONLY with a valid JSON array without markdown wrappers.
 The number of elements must exactly match the number of scenes in the request.
 Format of each element: {"scene": "Description in content language", "prompt": "English prompt"}`
+
+interface CharacterProfile {
+  name: string
+  description: string
+}
+
+async function extractCharacters(
+  fullText: string,
+  topic: string,
+  anthropic: Anthropic,
+): Promise<CharacterProfile[]> {
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      messages: [{
+        role: 'user',
+        content: `Analyze this video script about "${topic}".
+
+Identify ALL recurring visual characters (animals, creatures, people, beings) that PHYSICALLY APPEAR across multiple scenes — not just mentioned abstractly as concepts or ideas.
+
+For each recurring character, write a concise 15–25 word ENGLISH visual description: species/type, distinctive color, key physical features, size/scale.
+
+Rules:
+- Only include characters that visually appear in at least 2 different scenes
+- If no such characters exist (e.g. scenery-only documentary, different animals each scene) — return []
+- Maximum 4 characters
+- Descriptions must be purely visual — no personality, behavior, or story context
+
+Respond ONLY with valid JSON, no markdown:
+[{"name": "name as used in script", "description": "english visual description"}]
+
+Script (first 3000 chars):
+${fullText.slice(0, 3000)}`,
+      }],
+    })
+    const raw = msg.content[0].type === 'text' ? msg.content[0].text.trim() : '[]'
+    const cleaned = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
+    const parsed: unknown = JSON.parse(cleaned)
+    if (!Array.isArray(parsed)) return []
+    return (parsed as CharacterProfile[]).slice(0, 4)
+  } catch (e) {
+    console.error('[images] extractCharacters failed:', e instanceof Error ? e.message : e)
+    return []
+  }
+}
 
 type ImageEngine = 'flux' | 'flux_schnell' | 'gpt_mini'
 
@@ -115,14 +183,21 @@ async function generateScenesFromSubtitles(
     return { start, end, text }
   })
 
+  const fullText = subtitleBlocks.map((b) => b.text).join(' ')
+  const characters = await extractCharacters(fullText, topic, anthropic)
+  const charSection = characters.length > 0
+    ? `\nПЕРСОНАЖИ — включать точные описания в промпты для сцен где они присутствуют:\n${characters.map((c) => `• ${c.name}: ${c.description}`).join('\n')}\n`
+    : ''
+
   console.log(`[images/subtitles] claude style instruction: "${styleConfig.claudeInstruction}"`)
+  console.log(`[images/subtitles] characters found: ${characters.length}${characters.length > 0 ? ` (${characters.map(c => c.name).join(', ')})` : ''}`)
   console.log(`[images/subtitles] scenes: ${scenesWithText.length}, chunks: ${Math.ceil(scenesWithText.length / CLAUDE_CHUNK)}`)
 
   const allPromptResults: Array<{ scene: string; prompt: string }> = []
   for (let chunkStart = 0; chunkStart < scenesWithText.length; chunkStart += CLAUDE_CHUNK) {
     const chunk = scenesWithText.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
     const chunkSize = chunk.length
-    const maxTokens = Math.max(2500, chunkSize * 80)
+    const maxTokens = Math.max(2500, chunkSize * 100)
     const chunkNum = Math.floor(chunkStart / CLAUDE_CHUNK) + 1
 
     const message = await anthropic.messages.create({
@@ -135,7 +210,7 @@ async function generateScenesFromSubtitles(
 
 СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
 ${styleConfig.claudeInstruction}
-
+${charSection}
 СЦЕНЫ:
 ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${fmtSec(s.end)}]: "${s.text}"`).join('\n')}
 
@@ -225,14 +300,20 @@ async function generateScenesFromScript(
   const blocks = splitScriptByWords(script, imageCount)
   const blocksWithTimecodes = calculateTimecodes(blocks, durationSec)
 
+  const characters = await extractCharacters(script, topic, anthropic)
+  const charSection = characters.length > 0
+    ? `\nПЕРСОНАЖИ — включать точные описания в промпты для сцен где они присутствуют:\n${characters.map((c) => `• ${c.name}: ${c.description}`).join('\n')}\n`
+    : ''
+
   console.log(`[images/script] claude style instruction: "${styleConfig.claudeInstruction}"`)
+  console.log(`[images/script] characters found: ${characters.length}${characters.length > 0 ? ` (${characters.map(c => c.name).join(', ')})` : ''}`)
   console.log(`[images/script] scenes: ${blocksWithTimecodes.length}, chunks: ${Math.ceil(blocksWithTimecodes.length / CLAUDE_CHUNK)}`)
 
   const allPromptResults: Array<{ scene: string; prompt: string }> = []
   for (let chunkStart = 0; chunkStart < blocksWithTimecodes.length; chunkStart += CLAUDE_CHUNK) {
     const chunk = blocksWithTimecodes.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
     const chunkSize = chunk.length
-    const maxTokens = Math.max(2500, chunkSize * 80)
+    const maxTokens = Math.max(2500, chunkSize * 100)
     const chunkNum = Math.floor(chunkStart / CLAUDE_CHUNK) + 1
 
     const message = await anthropic.messages.create({
@@ -245,7 +326,7 @@ async function generateScenesFromScript(
 
 СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
 ${styleConfig.claudeInstruction}
-
+${charSection}
 ОТРЫВКИ:
 ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${fmtSec(b.end)}]:\n"${b.text.slice(0, 400)}"`).join('\n\n')}
 
