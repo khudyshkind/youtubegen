@@ -2991,12 +2991,15 @@ app.get('/status/:jobId', verifySecret, async (req, res) => {
 // Temporary: diagnostics + manual backup trigger — remove after verification
 app.get('/debug-pgdump', verifySecret, (req, res) => {
   const { execSync } = require('child_process')
-  const results = {}
-  try { results.version = execSync('pg_dump --version 2>&1').toString().trim() } catch (e) { results.version_error = e.message }
-  try { results.which = execSync('which pg_dump 2>&1 || echo "not in PATH"').toString().trim() } catch (e) { results.which_error = e.message }
-  try { results.find = execSync('find /usr -name "pg_dump" 2>/dev/null | head -5').toString().trim() || 'not found' } catch (e) { results.find_error = e.message }
-  try { results.pgclient_list = execSync('dpkg -l | grep postgresql-client 2>/dev/null || echo "not installed"').toString().trim() } catch (e) { results.pgclient_error = e.message }
-  res.json(results)
+  const r = {}
+  try { r.version = execSync('pg_dump --version 2>&1').toString().trim() } catch (e) { r.version_err = e.message }
+  try { r.which = execSync('which pg_dump 2>&1 || echo none').toString().trim() } catch (e) { r.which_err = e.message }
+  try { r.find = execSync('find /usr -name "pg_dump" 2>/dev/null | head -5').toString().trim() || 'not found' } catch (e) { r.find_err = e.message }
+  try { r.dpkg = execSync('dpkg -l 2>/dev/null | grep -i postgres | head -10').toString().trim() || 'none' } catch (e) { r.dpkg_err = e.message }
+  try { r.os = execSync('cat /etc/os-release 2>/dev/null | head -4').toString().trim() } catch (e) { r.os_err = e.message }
+  try { r.apt_sources = execSync('cat /etc/apt/sources.list 2>/dev/null | head -3').toString().trim() } catch (e) { r.apt_err = e.message }
+  try { r.path = process.env.PATH } catch (e) {}
+  res.json(r)
 })
 
 app.post('/debug-backup', verifySecret, async (req, res) => {
