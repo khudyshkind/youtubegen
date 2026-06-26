@@ -7,7 +7,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import type { SubtitleBlock } from '@/lib/types'
 
-export const maxDuration = 120
+export const maxDuration = 300
 
 interface SubtitlesRequest {
   audio_url: string
