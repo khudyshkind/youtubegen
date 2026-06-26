@@ -2620,7 +2620,15 @@ async function deleteTempImagesFromB2(keys) {
 // Burn subtitles via VGF — generates an ASS file with embedded style and uploads to B2.
 // Using ASS (not SRT + force_style) avoids passing &H color codes and single quotes
 // in the FFmpeg command string, which break in VGF's shell execution context.
-async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId) {
+// Compute dynamic VGF timeout for full-video encode passes (mux, subtitle burn).
+// Base 10 min + 30s per minute of content, capped at 30 min.
+// Slideshow H.264 encodes fast (~300+ fps), but 60-min content needs headroom.
+function vgfLongTimeout(audioDurationSeconds) {
+  const contentMinutes = Math.ceil(audioDurationSeconds / 60)
+  return Math.min(1_800_000, 600_000 + contentMinutes * 30_000)
+}
+
+async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId, timeoutMs = 600_000) {
   const assContent = blocksToAss(subtitle_blocks, subtitle_style)
   const assKey = `temp/subs_${jobId}.ass`
   let assUrl
@@ -2636,7 +2644,8 @@ async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId
     const result = await runFFmpegOnVGF(
       { in_1: videoUrl, in_2: assUrl },
       { out_1: 'output_subs.mp4' },
-      `-i {{in_1}} -vf subtitles={{in_2}} -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`
+      `-i {{in_1}} -vf subtitles={{in_2}} -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`,
+      timeoutMs
     )
     console.log('[vgf] subtitle burn-in done')
     return result.out_1
@@ -2851,10 +2860,12 @@ async function processVideoJob(jobId, body) {
         ? `format=yuv420p,${effectFilters.join(',')}`
         : 'format=yuv420p'
       console.log(`[vgf] mux+effects vf: ${muxVf}`)
+      const longTimeout = vgfLongTimeout(audioDuration)
       const muxResult = await runFFmpegOnVGF(
         { in_1: accUrl, in_2: finalAudioUrl },
         { out_1: 'temp_1.mp4' },
-        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -shortest {{out_1}}`
+        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -shortest {{out_1}}`,
+        longTimeout
       )
       let currentUrl = muxResult.out_1
       console.log(`[vgf] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
@@ -2867,7 +2878,7 @@ async function processVideoJob(jobId, body) {
       // ── Stage 5: Burn subtitles ─────────────────────────────────────────────
       if (subtitle_blocks?.length && subtitle_style?.burnIn) {
         console.time(T('5_subtitles'))
-        currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId)
+        currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId, longTimeout)
         console.timeEnd(T('5_subtitles'))
         await updateJob(jobId, { progress: 80 })
       } else {
@@ -2928,10 +2939,12 @@ async function processVideoJob(jobId, body) {
       const muxVf = effectFilters.length > 0
         ? `format=yuv420p,${effectFilters.join(',')}`
         : 'format=yuv420p'
+      const longTimeout = vgfLongTimeout(audioDuration)
       const cutMuxResult = await runFFmpegOnVGF(
         { in_1: mergedVideoUrl, in_2: finalAudioUrl },
         { out_1: 'temp_1.mp4' },
-        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -shortest {{out_1}}`
+        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -shortest {{out_1}}`,
+        longTimeout
       )
       let currentUrl = cutMuxResult.out_1
       console.log(`[vgf] concat+effects done: effects=[${effects.join(', ')}]`)
@@ -2944,7 +2957,7 @@ async function processVideoJob(jobId, body) {
       // ── Stage 5: Burn subtitles ─────────────────────────────────────────────
       if (subtitle_blocks?.length && subtitle_style?.burnIn) {
         console.time(T('5_subtitles'))
-        currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId)
+        currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId, longTimeout)
         console.timeEnd(T('5_subtitles'))
         await updateJob(jobId, { progress: 80 })
       } else {
