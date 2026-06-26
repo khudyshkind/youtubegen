@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
@@ -69,6 +70,9 @@ export async function POST(request: NextRequest) {
     }
 
     const { audio_url, project_id, language }: SubtitlesRequest = await request.json()
+
+    Sentry.setUser({ id: user.id })
+    Sentry.setContext('generate', { project_id, language, stage: 'subtitles' })
 
     console.log('[subtitles] audio_url:', audio_url?.slice(0, 120))
     console.log('[subtitles] project_id:', project_id, '| language:', language)

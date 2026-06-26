@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
+import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
@@ -135,6 +136,9 @@ export async function POST(request: NextRequest) {
     const body: ScriptRequest = await request.json()
     const { project_id, ...scriptParams } = body
     const { model } = scriptParams
+
+    Sentry.setUser({ id: user.id })
+    Sentry.setContext('generate', { project_id, model })
 
     const operation = modelOperation(model)
     const cost = modelCost(model)

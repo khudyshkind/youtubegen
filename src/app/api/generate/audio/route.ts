@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
@@ -63,6 +64,9 @@ export async function POST(request: NextRequest) {
     if (!text || !voice_id) {
       return NextResponse.json({ ok: false, error: 'Текст и голос обязательны' }, { status: 400 })
     }
+
+    Sentry.setUser({ id: user.id })
+    Sentry.setContext('generate', { project_id, engine, voice_id })
 
     const validEngines: AudioEngine[] = ['elevenlabs', 'openai', 'google', 'apihost']
     if (!validEngines.includes(engine)) {

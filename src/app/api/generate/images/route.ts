@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { fal } from '@fal-ai/client'
+import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { hasCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
@@ -535,6 +536,9 @@ export async function POST(request: NextRequest) {
   if (!script?.trim() || !topic?.trim()) {
     return NextResponse.json({ ok: false, error: 'script и topic обязательны' }, { status: 400 })
   }
+
+  Sentry.setUser({ id: user.id })
+  Sentry.setContext('generate', { project_id, engine, image_count })
 
   const count = Math.max(1, Math.min(200, image_count ?? 1))
   const interval = Math.max(3, Math.min(300, image_interval ?? 10))

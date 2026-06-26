@@ -5,6 +5,7 @@ import React from 'react'
 import { ImageResponse } from 'next/og'
 import Anthropic from '@anthropic-ai/sdk'
 import { fal } from '@fal-ai/client'
+import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
@@ -478,6 +479,12 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       )
     }
+
+    const AI_TEXT_ENGINE_HINT = text_mode === 'ai'
+      ? (process.env.THUMBNAIL_AI_TEXT_ENGINE ?? 'gpt')
+      : 'overlay'
+    Sentry.setUser({ id: user.id })
+    Sentry.setContext('generate', { project_id, text_mode, engine: AI_TEXT_ENGINE_HINT })
 
     // dry_run: return the Flux prompt only — no image generation, no credits
     if (dry_run) {

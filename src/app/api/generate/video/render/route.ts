@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
@@ -41,6 +42,9 @@ export async function POST(request: NextRequest) {
     const { project_id, audio_url, image_interval, images, subtitle_blocks, subtitle_style,
             transition, transition_duration, effects } = body
 
+    Sentry.setUser({ id: user.id })
+    Sentry.setContext('generate', { project_id, stage: 'video_render', image_count: images?.length })
+
     if (!project_id || !audio_url || !images?.length) {
       return NextResponse.json(
         { ok: false, error: 'Недостаточно данных для сборки видео' },
@@ -79,6 +83,7 @@ export async function POST(request: NextRequest) {
 
     const { job_id } = (await renderRes.json()) as { job_id: string }
 
+    Sentry.setContext('generate', { project_id, stage: 'video_render', job_id, image_count: images?.length })
     return NextResponse.json({ ok: true, data: { job_id } })
   } catch (error) {
     console.error('[generate/video/render]', error)
