@@ -18,6 +18,16 @@ const STYLE_EXAGGERATION: Record<string, number> = {
   emotional: 0.8,
 }
 
+// Per-engine chunk limits. Split long scripts before sending to TTS APIs.
+// ElevenLabs/OpenAI/APIHOST: Unicode character count (JS .length)
+// Google: UTF-8 byte count (Cyrillic = 2 bytes/char, limit is 5000 bytes)
+const CHUNK_LIMITS: Record<AudioEngine, { maxChars: number; measureBytes: boolean }> = {
+  elevenlabs: { maxChars: 4800, measureBytes: false }, // API limit 5000 chars
+  openai:     { maxChars: 4000, measureBytes: false }, // API limit 4096 chars
+  google:     { maxChars: 2300, measureBytes: true  }, // API limit 5000 bytes; Cyrillic 2 bytes/char
+  apihost:    { maxChars: 4000, measureBytes: false }, // no hard limit; keeps each job < 60s synthesis
+}
+
 interface AudioRequest {
   engine?: AudioEngine
   text: string
@@ -35,6 +45,163 @@ interface AudioRequest {
   apihost_lang?: string
   apihost_pitch?: number
 }
+
+// Split text into chunks that fit within the per-engine character/byte limit.
+// Splits at paragraph and sentence boundaries to avoid unnatural mid-speech breaks.
+function splitTextIntoChunks(text: string, maxChars: number, measureBytes: boolean): string[] {
+  const measure = (s: string) => measureBytes ? Buffer.byteLength(s, 'utf8') : s.length
+  if (measure(text) <= maxChars) return [text]
+
+  // Flatten paragraphs then sentence-split each paragraph
+  const sentences = text
+    .split(/\n{2,}/)
+    .flatMap(para => para.split(/(?<=[.!?…])\s+/))
+    .map(s => s.trim())
+    .filter(Boolean)
+
+  const chunks: string[] = []
+  let current = ''
+
+  for (const sentence of sentences) {
+    const candidate = current ? `${current} ${sentence}` : sentence
+    if (measure(candidate) <= maxChars) {
+      current = candidate
+    } else {
+      if (current) chunks.push(current)
+      // Single sentence too large → word-level split as last resort
+      if (measure(sentence) > maxChars) {
+        const words = sentence.split(/\s+/)
+        let wordBuf = ''
+        for (const word of words) {
+          const wCand = wordBuf ? `${wordBuf} ${word}` : word
+          if (measure(wCand) <= maxChars) {
+            wordBuf = wCand
+          } else {
+            if (wordBuf) chunks.push(wordBuf)
+            wordBuf = word
+          }
+        }
+        current = wordBuf
+      } else {
+        current = sentence
+      }
+    }
+  }
+  if (current.trim()) chunks.push(current.trim())
+  return chunks.filter(Boolean)
+}
+
+// ── Per-engine single-chunk synthesizers ────────────────────────────────────
+
+async function synthesizeElevenLabsChunk(
+  text: string,
+  voiceId: string,
+  settings: { stability: number; similarity_boost: number; style: number; use_speaker_boost: boolean },
+): Promise<Buffer> {
+  const res = await fetch(
+    `${ELEVENLABS_BASE}/v1/text-to-speech/${voiceId}?output_format=mp3_44100_64`,
+    {
+      method: 'POST',
+      headers: {
+        'xi-api-key': env('ELEVENLABS_API_KEY'),
+        'Content-Type': 'application/json',
+        Accept: 'audio/mpeg',
+      },
+      body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: settings }),
+    }
+  )
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`ElevenLabs HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+  return Buffer.from(await res.arrayBuffer())
+}
+
+async function synthesizeOpenAIChunk(text: string, voiceId: string, apiKey: string): Promise<Buffer> {
+  const res = await fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'tts-1', voice: voiceId, input: text, response_format: 'mp3' }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`OpenAI TTS HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+  return Buffer.from(await res.arrayBuffer())
+}
+
+async function synthesizeGoogleChunk(
+  text: string,
+  voiceId: string,
+  langCode: string,
+  apiKey: string,
+): Promise<Buffer> {
+  const res = await fetch(
+    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: { text },
+        voice: { languageCode: langCode, name: voiceId },
+        audioConfig: { audioEncoding: 'MP3' },
+      }),
+    }
+  )
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Google TTS HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+  const json = (await res.json()) as { audioContent?: string }
+  if (!json.audioContent) throw new Error('Google TTS returned empty audioContent')
+  return Buffer.from(json.audioContent, 'base64')
+}
+
+// APIHOST: submit one synthesis job, returns processId
+async function submitApihostJob(
+  text: string,
+  voiceId: string,
+  opts: { lang: string; rate: string; pitch: string },
+  headers: Record<string, string>,
+): Promise<string> {
+  const res = await fetch('https://apihost.ru/api/v1/synthesize', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      data: [{ lang: opts.lang, speaker: Number(voiceId), text, rate: opts.rate, pitch: opts.pitch, type: 'mp3', pause: '0' }],
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`APIHOST submit HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+  const json = (await res.json()) as { process?: string; id?: string }
+  const pid = json.process ?? json.id
+  if (!pid) throw new Error('APIHOST: no process ID in submit response')
+  return pid
+}
+
+// APIHOST: poll one job until it returns status 200 (max ~4.5 min)
+async function pollApihostJob(processId: string, headers: Record<string, string>): Promise<string> {
+  for (let i = 0; i < 54; i++) {
+    await new Promise((r) => setTimeout(r, 5000))
+    const res = await fetch('https://apihost.ru/api/v1/process', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ process: processId }),
+    })
+    if (!res.ok) continue
+    const json = (await res.json()) as { status?: number; message?: string; url?: string }
+    if (json.status === 200) {
+      const url = json.message ?? json.url
+      if (!url) throw new Error(`APIHOST: job ${processId} done but no URL in response`)
+      return url
+    }
+  }
+  throw new Error(`APIHOST: timeout waiting for job ${processId}`)
+}
+
+// ── Main route ───────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   try {
@@ -82,6 +249,12 @@ export async function POST(request: NextRequest) {
     }
 
     let audioBuffer: Buffer
+    const { maxChars, measureBytes } = CHUNK_LIMITS[engine]
+    const chunks = splitTextIntoChunks(text, maxChars, measureBytes)
+
+    if (chunks.length > 1) {
+      console.log(`[generate/audio] ${engine}: ${chunks.length} chunks for ${chars} chars`)
+    }
 
     if (engine === 'openai') {
       const openaiKey = env('OPENAI_API_KEY')
@@ -89,27 +262,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: false, error: 'OpenAI API key не настроен' }, { status: 503 })
       }
 
-      const openaiRes = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'tts-1',
-          voice: voice_id,
-          input: text,
-          response_format: 'mp3',
-        }),
-      })
-
-      if (!openaiRes.ok) {
-        const errBody = await openaiRes.text().catch(() => '')
-        console.error('[generate/audio] OpenAI TTS error:', openaiRes.status, errBody.slice(0, 200))
-        return NextResponse.json({ ok: false, error: 'Ошибка синтеза речи OpenAI' }, { status: 502 })
+      const buffers: Buffer[] = []
+      for (let i = 0; i < chunks.length; i++) {
+        try {
+          buffers.push(await synthesizeOpenAIChunk(chunks[i], voice_id, openaiKey))
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          console.error(`[generate/audio] OpenAI chunk ${i + 1}/${chunks.length} failed:`, msg)
+          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи OpenAI (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
+        }
       }
-
-      audioBuffer = Buffer.from(await openaiRes.arrayBuffer())
+      audioBuffer = Buffer.concat(buffers)
 
     } else if (engine === 'google') {
       const googleKey = env('GOOGLE_TTS_API_KEY')
@@ -120,95 +283,79 @@ export async function POST(request: NextRequest) {
       // Extract BCP-47 language code from voice name (e.g. "ru-RU-Standard-A" → "ru-RU")
       const langCode = voice_id.split('-').slice(0, 2).join('-') || 'ru-RU'
 
-      const googleRes = await fetch(
-        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${googleKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            input: { text },
-            voice: { languageCode: langCode, name: voice_id },
-            audioConfig: { audioEncoding: 'MP3' },
-          }),
+      const buffers: Buffer[] = []
+      for (let i = 0; i < chunks.length; i++) {
+        try {
+          buffers.push(await synthesizeGoogleChunk(chunks[i], voice_id, langCode, googleKey))
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          console.error(`[generate/audio] Google chunk ${i + 1}/${chunks.length} failed:`, msg)
+          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи Google (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
         }
-      )
-
-      if (!googleRes.ok) {
-        const errBody = await googleRes.text().catch(() => '')
-        console.error('[generate/audio] Google TTS error:', googleRes.status, errBody.slice(0, 200))
-        return NextResponse.json({ ok: false, error: 'Ошибка синтеза речи Google' }, { status: 502 })
       }
-
-      const googleJson = await googleRes.json() as { audioContent?: string }
-      if (!googleJson.audioContent) {
-        return NextResponse.json({ ok: false, error: 'Google TTS вернул пустой ответ' }, { status: 502 })
-      }
-
-      audioBuffer = Buffer.from(googleJson.audioContent, 'base64')
+      audioBuffer = Buffer.concat(buffers)
 
     } else if (engine === 'apihost') {
       const apihostKey = env('APIHOST_API_KEY')
-      const apihostHeaders = {
-        'Authorization': `Bearer ${apihostKey}`,
+      const apihostHeaders: Record<string, string> = {
+        Authorization: `Bearer ${apihostKey}`,
         'Content-Type': 'application/json',
       }
-
-      // Step 1 — submit synthesis job
-      const synthesizeRes = await fetch('https://apihost.ru/api/v1/synthesize', {
-        method: 'POST',
-        headers: apihostHeaders,
-        body: JSON.stringify({
-          data: [{
-            lang: apihost_lang,
-            speaker: Number(voice_id),
-            text,
-            rate: String(speech_rate),
-            pitch: String(apihost_pitch),
-            type: 'mp3',
-            pause: '0',
-          }],
-        }),
-      })
-
-      if (!synthesizeRes.ok) {
-        const errBody = await synthesizeRes.text().catch(() => '')
-        console.error('[generate/audio] APIHOST synthesize error:', synthesizeRes.status, errBody.slice(0, 200))
-        return NextResponse.json({ ok: false, error: 'Ошибка отправки задачи APIHOST' }, { status: 502 })
+      const apihostOpts = {
+        lang: apihost_lang,
+        rate: String(speech_rate),
+        pitch: String(apihost_pitch),
       }
 
-      const synthesizeJson = await synthesizeRes.json() as { process?: string; id?: string }
-      const processId = synthesizeJson.process ?? synthesizeJson.id
-      if (!processId) {
-        return NextResponse.json({ ok: false, error: 'APIHOST не вернул ID задачи' }, { status: 502 })
+      // Submit all chunks in parallel (one APIHOST job per chunk)
+      let processIds: string[]
+      try {
+        processIds = await Promise.all(
+          chunks.map((chunk, i) =>
+            submitApihostJob(chunk, voice_id, apihostOpts, apihostHeaders).catch(e => {
+              throw new Error(`chunk ${i + 1}/${chunks.length} submit: ${e instanceof Error ? e.message : String(e)}`)
+            })
+          )
+        )
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error('[generate/audio] APIHOST submit failed:', msg)
+        return NextResponse.json({ ok: false, error: `Ошибка отправки задачи APIHOST (${msg})` }, { status: 502 })
       }
 
-      // Step 2 — poll until status 200 (max ~4.5 minutes)
-      let audioFileUrl: string | null = null
-      for (let i = 0; i < 54; i++) {
-        await new Promise((r) => setTimeout(r, 5000))
-        const checkRes = await fetch('https://apihost.ru/api/v1/process', {
-          method: 'POST',
-          headers: apihostHeaders,
-          body: JSON.stringify({ process: processId }),
-        })
-        if (!checkRes.ok) continue
-        const check = await checkRes.json() as { status?: number; message?: string; url?: string }
-        if (check.status === 200) {
-          audioFileUrl = check.message ?? check.url ?? null
-          break
-        }
+      // Poll all jobs in parallel (each within 270s timeout)
+      let audioUrls: string[]
+      try {
+        audioUrls = await Promise.all(
+          processIds.map((pid, i) =>
+            pollApihostJob(pid, apihostHeaders).catch(e => {
+              throw new Error(`chunk ${i + 1}/${chunks.length}: ${e instanceof Error ? e.message : String(e)}`)
+            })
+          )
+        )
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error('[generate/audio] APIHOST poll failed:', msg)
+        return NextResponse.json({ ok: false, error: `APIHOST синтез не завершился вовремя (${msg})` }, { status: 504 })
       }
 
-      if (!audioFileUrl) {
-        return NextResponse.json({ ok: false, error: 'APIHOST: синтез занял слишком много времени' }, { status: 504 })
+      // Download all audio files in parallel
+      let buffers: Buffer[]
+      try {
+        buffers = await Promise.all(
+          audioUrls.map(async (url, i) => {
+            const dlRes = await fetch(url)
+            if (!dlRes.ok) throw new Error(`chunk ${i + 1} download HTTP ${dlRes.status}`)
+            return Buffer.from(await dlRes.arrayBuffer())
+          })
+        )
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error('[generate/audio] APIHOST download failed:', msg)
+        return NextResponse.json({ ok: false, error: `Ошибка загрузки аудио с APIHOST (${msg})` }, { status: 502 })
       }
 
-      // Step 3 — download audio
-      const dlRes = await fetch(audioFileUrl)
-      if (!dlRes.ok) {
-        return NextResponse.json({ ok: false, error: 'Ошибка загрузки аудио с APIHOST' }, { status: 502 })
-      }
-      audioBuffer = Buffer.from(await dlRes.arrayBuffer())
+      audioBuffer = Buffer.concat(buffers)
 
     } else {
       // ElevenLabs
@@ -216,35 +363,24 @@ export async function POST(request: NextRequest) {
         ? voice_style
         : STYLE_EXAGGERATION[voice_style] ?? 0
 
-      const elevenRes = await fetch(
-        `${ELEVENLABS_BASE}/v1/text-to-speech/${voice_id}?output_format=mp3_44100_64`,
-        {
-          method: 'POST',
-          headers: {
-            'xi-api-key': env('ELEVENLABS_API_KEY'),
-            'Content-Type': 'application/json',
-            Accept: 'audio/mpeg',
-          },
-          body: JSON.stringify({
-            text,
-            model_id: 'eleven_multilingual_v2',
-            voice_settings: {
-              stability,
-              similarity_boost,
-              style: styleExaggeration,
-              use_speaker_boost: clarity_boost,
-            },
-          }),
-        }
-      )
-
-      if (!elevenRes.ok) {
-        const errBody = await elevenRes.text().catch(() => '')
-        console.error('[generate/audio] ElevenLabs error:', elevenRes.status, errBody.slice(0, 200))
-        return NextResponse.json({ ok: false, error: 'Ошибка синтеза речи — проверьте настройки голоса' }, { status: 502 })
+      const elevenSettings = {
+        stability,
+        similarity_boost,
+        style: styleExaggeration,
+        use_speaker_boost: clarity_boost,
       }
 
-      audioBuffer = Buffer.from(await elevenRes.arrayBuffer())
+      const buffers: Buffer[] = []
+      for (let i = 0; i < chunks.length; i++) {
+        try {
+          buffers.push(await synthesizeElevenLabsChunk(chunks[i], voice_id, elevenSettings))
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          console.error(`[generate/audio] ElevenLabs chunk ${i + 1}/${chunks.length} failed:`, msg)
+          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи ElevenLabs (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
+        }
+      }
+      audioBuffer = Buffer.concat(buffers)
     }
 
     if (audioBuffer.byteLength === 0) {
@@ -276,7 +412,7 @@ export async function POST(request: NextRequest) {
         .eq('user_id', user.id)
     }
 
-    void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id })
+    void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id, chunks: chunks.length })
     // DB stores the clean URL (publicUrl). The response adds ?v= so the browser
     // treats each generation as a distinct resource and doesn't replay cached audio.
     return NextResponse.json({ ok: true, data: { audio_url: `${publicUrl}?v=${Date.now()}` } })
