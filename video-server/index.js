@@ -2993,12 +2993,13 @@ app.get('/debug-pgdump', verifySecret, (req, res) => {
   const { execSync } = require('child_process')
   const r = {}
   try { r.version = execSync('pg_dump --version 2>&1').toString().trim() } catch (e) { r.version_err = e.message }
-  try { r.which = execSync('which pg_dump 2>&1 || echo none').toString().trim() } catch (e) { r.which_err = e.message }
   try { r.find = execSync('find /usr -name "pg_dump" 2>/dev/null | head -5').toString().trim() || 'not found' } catch (e) { r.find_err = e.message }
   try { r.dpkg = execSync('dpkg -l 2>/dev/null | grep -i postgres | head -10').toString().trim() || 'none' } catch (e) { r.dpkg_err = e.message }
-  try { r.os = execSync('cat /etc/os-release 2>/dev/null | head -4').toString().trim() } catch (e) { r.os_err = e.message }
-  try { r.apt_sources = execSync('cat /etc/apt/sources.list 2>/dev/null | head -3').toString().trim() } catch (e) { r.apt_err = e.message }
-  try { r.path = process.env.PATH } catch (e) {}
+  try { r.sources_list = execSync('cat /etc/apt/sources.list 2>/dev/null').toString().trim() || 'empty' } catch (e) {}
+  try { r.sources_d = execSync('ls /etc/apt/sources.list.d/ 2>/dev/null').toString().trim() || 'empty dir' } catch (e) { r.sources_d_err = e.message }
+  try { r.sources_d_content = execSync('cat /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null | head -6').toString().trim() } catch (e) { r.sources_d_content = 'none' }
+  try { r.apt_install = execSync('apt-get update -qq 2>&1 && apt-get install -y --no-install-recommends postgresql-client 2>&1 | tail -3').toString().trim() } catch (e) { r.apt_install_err = e.message.slice(0, 300) }
+  try { r.version_after = execSync('pg_dump --version 2>&1').toString().trim() } catch (e) { r.version_after_err = e.message }
   res.json(r)
 })
 
