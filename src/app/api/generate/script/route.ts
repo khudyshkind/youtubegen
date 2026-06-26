@@ -102,24 +102,30 @@ function modelCost(model: string): number {
   return CREDIT_COSTS.script_sonnet
 }
 
-async function generateWithClaude(prompt: string, opus: boolean): Promise<string> {
+// Dynamic token budget: 130 words/min × 2 tokens/word (Cyrillic-safe) × 1.3 buffer.
+// Capped at 8192 — safe max output for Claude 4 Sonnet/Opus and GPT-4o.
+function calcMaxTokens(durationMinutes: number): number {
+  return Math.min(8192, Math.max(2048, Math.ceil(durationMinutes * 130 * 2 * 1.3)))
+}
+
+async function generateWithClaude(prompt: string, opus: boolean, maxTokens: number): Promise<string> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
   const modelId = opus ? 'claude-opus-4-5' : 'claude-sonnet-4-6'
   const message = await anthropic.messages.create({
     model: modelId,
-    max_tokens: 4096,
+    max_tokens: maxTokens,
     messages: [{ role: 'user', content: prompt }],
   })
   const block = message.content[0]
   return block.type === 'text' ? block.text : ''
 }
 
-async function generateWithGpt4o(prompt: string): Promise<string> {
+async function generateWithGpt4o(prompt: string, maxTokens: number): Promise<string> {
   const openai = new OpenAI({ apiKey: env('OPENAI_API_KEY') })
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [{ role: 'user', content: prompt }],
-    max_tokens: 4096,
+    max_tokens: maxTokens,
   })
   return completion.choices[0].message.content ?? ''
 }
@@ -149,12 +155,14 @@ export async function POST(request: NextRequest) {
     }
 
     const prompt = buildPrompt(scriptParams)
+    const maxTokens = calcMaxTokens(scriptParams.duration_minutes)
+    console.log(`[generate/script] duration=${scriptParams.duration_minutes}min max_tokens=${maxTokens}`)
 
     let script: string
     if (model === 'gpt-4o') {
-      script = await generateWithGpt4o(prompt)
+      script = await generateWithGpt4o(prompt, maxTokens)
     } else {
-      script = await generateWithClaude(prompt, model === 'claude-opus')
+      script = await generateWithClaude(prompt, model === 'claude-opus', maxTokens)
     }
 
     if (!script) {
