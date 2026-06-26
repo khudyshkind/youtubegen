@@ -2840,11 +2840,6 @@ app.get('/status/:jobId', verifySecret, async (req, res) => {
   }
 })
 
-// Temporary test route — remove after verifying Sentry receives events
-app.get('/debug-sentry', (req, res) => {
-  throw new Error('[sentry-test] video-server Express error capture verification')
-})
-
 // Must be added AFTER all routes
 Sentry.setupExpressErrorHandler(app)
 
