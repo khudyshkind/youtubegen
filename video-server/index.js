@@ -26,7 +26,7 @@ try {
 }
 
 const express = require('express')
-const { execFile, spawn } = require('child_process')
+const { execFile, execSync, spawn } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
@@ -40,6 +40,20 @@ const { Readable } = require('stream')
 const cron = require('node-cron')
 const RssParser = require('rss-parser')
 // R2 upload uses Node's native https + manual AWS SigV4 (no SDK dependency)
+
+// Ensure pg_dump is available at startup (Docker build cache may skip the apt-get layer)
+try {
+  execSync('pg_dump --version', { stdio: 'pipe' })
+  console.log('[startup] pg_dump available')
+} catch {
+  console.log('[startup] pg_dump not found, installing postgresql-client...')
+  try {
+    execSync('apt-get update -qq && apt-get install -y --no-install-recommends postgresql-client', { stdio: 'pipe' })
+    console.log('[startup] postgresql-client installed:', execSync('pg_dump --version', { stdio: 'pipe' }).toString().trim())
+  } catch (e) {
+    console.warn('[startup] postgresql-client install failed:', e.message)
+  }
+}
 
 const app = express()
 app.use(express.json({ limit: '2mb' }))
