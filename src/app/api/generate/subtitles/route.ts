@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
 import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
@@ -15,18 +14,7 @@ interface SubtitlesRequest {
   language?: string
 }
 
-interface WhisperSegment {
-  start: number
-  end: number
-  text: string
-}
-
-interface WhisperVerboseResponse {
-  text: string
-  segments: WhisperSegment[]
-}
-
-/** For Supabase private-bucket URLs, create a fresh 5-min signed URL via service client. */
+/** For Supabase private-bucket URLs, create a fresh signed URL via service client. */
 async function resolveAudioUrl(rawUrl: string): Promise<string> {
   const supabaseOrigin = env('NEXT_PUBLIC_SUPABASE_URL')
   if (!rawUrl.startsWith(supabaseOrigin)) return rawUrl
@@ -37,9 +25,10 @@ async function resolveAudioUrl(rawUrl: string): Promise<string> {
 
   const [, bucket, objectPath] = match
   const service = createServiceClient()
+  // 15 minutes — enough for Railway to download large audio files
   const { data, error } = await service.storage
     .from(bucket)
-    .createSignedUrl(objectPath, 300) // 5 minutes — enough for Whisper
+    .createSignedUrl(objectPath, 900)
 
   if (error || !data?.signedUrl) {
     console.warn('[subtitles] could not create signed URL, using raw:', error?.message)
@@ -77,57 +66,59 @@ export async function POST(request: NextRequest) {
     console.log('[subtitles] audio_url:', audio_url?.slice(0, 120))
     console.log('[subtitles] project_id:', project_id, '| language:', language)
 
-    // Resolve private Supabase URLs to a fresh signed URL
+    // Resolve private Supabase URLs to a fresh signed URL (15 min for Railway download)
     const fetchUrl = await resolveAudioUrl(audio_url)
-    console.log('[subtitles] fetching audio from:', fetchUrl.slice(0, 120))
 
-    const audioResponse = await fetch(fetchUrl)
-    console.log('[subtitles] audio response status:', audioResponse.status)
+    const railwayUrl = env('RAILWAY_VIDEO_SERVER_URL').replace(/\/$/, '')
+    const railwaySecret = env('RAILWAY_API_SECRET')
 
-    if (!audioResponse.ok) {
+    console.log('[subtitles] calling video-server /transcribe...')
+    const transcribeRes = await fetch(`${railwayUrl}/transcribe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-secret': railwaySecret,
+      },
+      body: JSON.stringify({ audio_url: fetchUrl, language }),
+      // 280s — leaves 20s for the rest of the handler within maxDuration=300
+      signal: AbortSignal.timeout(280_000),
+    })
+
+    if (!transcribeRes.ok) {
+      const errBody = await transcribeRes.text().catch(() => '')
+      console.error('[subtitles] video-server /transcribe error:', transcribeRes.status, errBody.slice(0, 300))
+      const status = transcribeRes.status
+      if (status === 503) {
+        return NextResponse.json(
+          { ok: false, error: 'Сервис транскрипции не настроен — обратитесь к администратору' },
+          { status: 503 }
+        )
+      }
       return NextResponse.json(
-        { ok: false, error: `Не удалось загрузить аудиофайл (HTTP ${audioResponse.status})` },
-        { status: 400 }
+        { ok: false, error: 'Ошибка генерации субтитров' },
+        { status: 502 }
       )
     }
 
-    const audioBuffer = await audioResponse.arrayBuffer()
-    console.log('[subtitles] audio size bytes:', audioBuffer.byteLength)
+    const transcribeJson = await transcribeRes.json() as {
+      ok: boolean
+      data?: { subtitle_blocks: SubtitleBlock[]; duration_seconds: number }
+      error?: string
+    }
 
-    if (audioBuffer.byteLength > 25 * 1024 * 1024) {
+    if (!transcribeJson.ok || !transcribeJson.data) {
+      console.error('[subtitles] video-server returned error:', transcribeJson.error)
       return NextResponse.json(
-        { ok: false, error: 'Аудиофайл превышает лимит Whisper (25 MB)' },
-        { status: 400 }
+        { ok: false, error: transcribeJson.error ?? 'Ошибка генерации субтитров' },
+        { status: 502 }
       )
     }
 
-    const audioFile = new File([audioBuffer], 'audio.mp3', { type: 'audio/mpeg' })
+    const { subtitle_blocks, duration_seconds } = transcribeJson.data
+    console.log('[subtitles] segments:', subtitle_blocks.length, 'duration:', duration_seconds.toFixed(1) + 's')
 
-    console.log('[subtitles] calling Whisper...')
-    const openai = new OpenAI({ apiKey: env('OPENAI_API_KEY') })
-    const transcription = await openai.audio.transcriptions.create({
-      file: audioFile,
-      model: 'whisper-1',
-      response_format: 'verbose_json',
-      timestamp_granularities: ['segment'],
-      // Pass language only when explicitly known — omitting it lets Whisper auto-detect.
-      // Hardcoding 'ru' as fallback caused Whisper to translate non-Russian audio into Russian.
-      ...(language ? { language } : {}),
-    }) as unknown as WhisperVerboseResponse
-
-    console.log('[subtitles] whisper segments:', transcription.segments?.length ?? 0)
-
-    const subtitle_blocks: SubtitleBlock[] = (transcription.segments ?? []).map(
-      (seg) => ({
-        start: Math.round(seg.start * 100) / 100,
-        end: Math.round(seg.end * 100) / 100,
-        text: seg.text.trim(),
-      })
-    )
-
-    // Charge based on actual audio duration from Whisper segments
-    const lastSegEnd = transcription.segments?.at(-1)?.end ?? 0
-    const durationMinutes = lastSegEnd > 0 ? lastSegEnd / 60 : 1
+    // Charge based on actual audio duration reported by Whisper
+    const durationMinutes = duration_seconds > 0 ? duration_seconds / 60 : 1
     const cost = Math.max(minCost, Math.ceil(durationMinutes) * CREDIT_COSTS.subtitles_per_minute)
     await spendCredits(user.id, cost, 'subtitles', project_id)
 
@@ -145,8 +136,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, data: { subtitle_blocks } })
   } catch (error) {
     console.error('[generate/subtitles]', error)
-    const status = (error as { status?: number }).status
-    if (status === 429) {
+    const msg = error instanceof Error ? error.message : String(error)
+    if (msg.includes('429') || (error as { status?: number }).status === 429) {
       return NextResponse.json(
         { ok: false, error: 'Превышена квота OpenAI — пополните баланс на platform.openai.com' },
         { status: 402 }

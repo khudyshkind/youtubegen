@@ -2999,6 +2999,96 @@ async function processVideoJob(jobId, body) {
   }
 }
 
+// ── Audio transcription endpoint ──────────────────────────────────────────────
+// Split audio into ≤24MB chunks (Whisper limit 25MB) using pure-JS byte offsets.
+// CBR MP3 (produced by all TTS engines) has constant bytes/second, so byte offset
+// accurately maps to time offset without needing ffprobe.
+async function splitMp3Buffer(buffer, maxBytes) {
+  if (buffer.byteLength <= maxBytes) return [{ buffer, offsetSeconds: 0 }]
+
+  const { parseBuffer } = await import('music-metadata')
+  const meta = await parseBuffer(new Uint8Array(buffer), { mimeType: 'audio/mpeg' })
+  const totalDuration = meta.format.duration
+  if (!totalDuration || !isFinite(totalDuration)) {
+    throw new Error('[transcribe] could not determine audio duration for chunking')
+  }
+
+  const bytesPerSecond = buffer.byteLength / totalDuration
+  const chunks = []
+  let byteOffset = 0
+  while (byteOffset < buffer.byteLength) {
+    const end = Math.min(byteOffset + maxBytes, buffer.byteLength)
+    chunks.push({ buffer: buffer.slice(byteOffset, end), offsetSeconds: byteOffset / bytesPerSecond })
+    byteOffset = end
+  }
+  return chunks
+}
+
+async function whisperTranscribeBuffer(audioBuffer, language, openaiKey) {
+  const blob = new Blob([audioBuffer], { type: 'audio/mpeg' })
+  const form = new FormData()
+  form.append('file', blob, 'audio.mp3')
+  form.append('model', 'whisper-1')
+  form.append('response_format', 'verbose_json')
+  form.append('timestamp_granularities[]', 'segment')
+  if (language) form.append('language', language)
+
+  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${openaiKey}` },
+    body: form,
+    signal: AbortSignal.timeout(240000), // 4 min per chunk
+  })
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`Whisper HTTP ${res.status}: ${errBody.slice(0, 300)}`)
+  }
+  const json = await res.json()
+  return json.segments ?? []
+}
+
+app.post('/transcribe', verifySecret, async (req, res) => {
+  const { audio_url, language } = req.body
+  if (!audio_url) return res.status(400).json({ ok: false, error: 'audio_url required' })
+
+  const openaiKey = process.env.OPENAI_API_KEY
+  if (!openaiKey) return res.status(503).json({ ok: false, error: 'OPENAI_API_KEY not configured on video-server' })
+
+  try {
+    console.log(`[transcribe] downloading: ${audio_url.slice(0, 100)}`)
+    const dlRes = await fetch(audio_url, { signal: AbortSignal.timeout(120000) })
+    if (!dlRes.ok) return res.status(400).json({ ok: false, error: `Failed to download audio: HTTP ${dlRes.status}` })
+
+    const audioBuffer = Buffer.from(await dlRes.arrayBuffer())
+    console.log(`[transcribe] size: ${(audioBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`)
+
+    const chunks = await splitMp3Buffer(audioBuffer, 24 * 1024 * 1024)
+    console.log(`[transcribe] chunks: ${chunks.length}, language: ${language || 'auto'}`)
+
+    const allSegments = []
+    for (let i = 0; i < chunks.length; i++) {
+      const { buffer: chunkBuf, offsetSeconds } = chunks[i]
+      console.log(`[transcribe] chunk ${i + 1}/${chunks.length}: ${(chunkBuf.byteLength / 1024 / 1024).toFixed(2)} MB, offset ${offsetSeconds.toFixed(1)}s`)
+      const segs = await whisperTranscribeBuffer(chunkBuf, language, openaiKey)
+      for (const seg of segs) {
+        allSegments.push({
+          start: Math.round((seg.start + offsetSeconds) * 100) / 100,
+          end:   Math.round((seg.end   + offsetSeconds) * 100) / 100,
+          text:  (seg.text || '').trim(),
+        })
+      }
+    }
+
+    const durationSeconds = allSegments.length > 0 ? allSegments[allSegments.length - 1].end : 0
+    console.log(`[transcribe] done: ${allSegments.length} segments, ${durationSeconds.toFixed(1)}s`)
+    return res.json({ ok: true, data: { subtitle_blocks: allSegments, duration_seconds: durationSeconds } })
+  } catch (e) {
+    console.error('[transcribe] error:', e.message)
+    Sentry.captureException(e, { extra: { audio_url: audio_url?.slice(0, 100) } })
+    return res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
 app.post('/render', verifySecret, async (req, res) => {
   const { audio_url, images, project_id, user_id } = req.body
 
