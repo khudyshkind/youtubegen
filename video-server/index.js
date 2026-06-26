@@ -1,6 +1,30 @@
 'use strict'
-require('./instrument')
-const Sentry = require('./instrument')
+
+// Sentry must be initialized before all other requires
+let Sentry
+try {
+  const SentryPkg = require('@sentry/node')
+  SentryPkg.init({
+    dsn: process.env.SENTRY_DSN || '',
+    tracesSampleRate: 0,
+    defaultIntegrations: false,
+    integrations: [],
+    debug: false,
+  })
+  console.log('[sentry] initialized, DSN present:', !!process.env.SENTRY_DSN)
+  Sentry = SentryPkg
+} catch (e) {
+  console.warn('[sentry] unavailable:', e.message)
+  Sentry = {
+    captureException: () => {},
+    captureMessage: () => {},
+    withScope: (fn) => fn({ setContext: () => {}, setUser: () => {} }),
+    setupExpressErrorHandler: () => {},
+    setUser: () => {},
+    setContext: () => {},
+  }
+}
+
 const express = require('express')
 const { execFile } = require('child_process')
 const fs = require('fs')
