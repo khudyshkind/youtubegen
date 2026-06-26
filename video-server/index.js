@@ -1835,26 +1835,38 @@ async function backupDatabase() {
   console.log(`[backup] starting pg_dump → ${key}`)
   const t0 = Date.now()
 
-  // Resolve hostname to IPv4 — Railway doesn't route IPv6 (Supabase resolves to IPv6 first)
-  // PGHOSTADDR tells libpq which IP to connect to; PGHOST is still used for SSL cert validation
+  // Parse connection URL and force IPv4 by using -h + PGHOSTADDR separately.
+  // libpq ignores PGHOSTADDR when a full postgres:// URI is passed — individual flags work.
+  const parsedDbUrl = new URL(dbUrl)
+  const pgHost = parsedDbUrl.hostname
+  const pgPort = parsedDbUrl.port || '5432'
+  const pgUser = decodeURIComponent(parsedDbUrl.username)
+  const pgPassword = decodeURIComponent(parsedDbUrl.password)
+  const pgDatabase = parsedDbUrl.pathname.slice(1) || 'postgres'
+
   let pgHostAddr = ''
   try {
-    const parsedDbUrl = new URL(dbUrl)
-    const [ipv4] = await require('dns').promises.resolve4(parsedDbUrl.hostname)
+    const [ipv4] = await require('dns').promises.resolve4(pgHost)
     pgHostAddr = ipv4
-    console.log(`[backup] resolved ${parsedDbUrl.hostname} → ${ipv4} (IPv4 forced)`)
+    console.log(`[backup] resolved ${pgHost} → ${ipv4} (IPv4 forced via PGHOSTADDR)`)
   } catch (e) {
-    console.warn('[backup] IPv4 resolve failed, proceeding without PGHOSTADDR:', e.message)
+    console.warn('[backup] IPv4 resolve failed, using hostname:', e.message)
   }
 
   // Stream pg_dump stdout through gzip into a Buffer (no temp file needed)
   const chunks = []
   await new Promise((resolve, reject) => {
-    const pg = spawn('pg_dump', ['--no-password', '--format=plain', dbUrl], {
+    const pg = spawn('pg_dump', [
+      '--no-password', '--format=plain',
+      '-h', pgHost,      // hostname kept for SSL cert validation
+      '-p', pgPort,
+      '-U', pgUser,
+      '-d', pgDatabase,
+    ], {
       env: {
         ...process.env,
-        PGPASSWORD: '',     // password is already in URL
-        ...(pgHostAddr ? { PGHOSTADDR: pgHostAddr } : {}), // force IPv4
+        PGPASSWORD: pgPassword,
+        ...(pgHostAddr ? { PGHOSTADDR: pgHostAddr } : {}), // force IPv4 actual connection
       },
     })
     const gz = zlib.createGzip({ level: 6 })
