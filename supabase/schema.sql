@@ -429,3 +429,10 @@ alter table public.projects add column if not exists language text;
 -- Migration: free plan default credits 20 → 30
 alter table public.profiles alter column credits set default 30;
 update public.profiles set credits = 30 where plan = 'free' and credits < 30;
+
+-- Migration: Sentry webhook deduplication (prevents notification spam for same issue)
+create table if not exists public.sentry_alert_dedup (
+  issue_id     text        primary key,
+  last_sent_at timestamptz not null default now()
+);
+grant all on public.sentry_alert_dedup to service_role;
