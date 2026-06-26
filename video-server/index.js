@@ -2988,6 +2988,18 @@ app.get('/status/:jobId', verifySecret, async (req, res) => {
   }
 })
 
+// Temporary: manual backup trigger for testing — remove after verification
+app.post('/debug-backup', verifySecret, async (req, res) => {
+  res.json({ ok: true, message: 'backup started, check logs' })
+  try {
+    await backupDatabase()
+    console.log('[debug-backup] completed successfully')
+  } catch (err) {
+    console.error('[debug-backup] failed:', err.message)
+    Sentry.captureException(err, { extra: { stage: 'debug_backup_trigger' } })
+  }
+})
+
 // Must be added AFTER all routes
 Sentry.setupExpressErrorHandler(app)
 
