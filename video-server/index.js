@@ -1792,7 +1792,9 @@ function b2BackupSign(method, key, queryString, contentType, bodyHash) {
   const canonReq = [method, urlPath, canonicalQS, canonHeaders, signedHdrs, bodyHash].join('\n')
   const sts      = ['AWS4-HMAC-SHA256', amzDate, credScope, crypto.createHash('sha256').update(canonReq).digest('hex')].join('\n')
   const hmac     = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
-  const sigKey   = hmac(hmac(hmac(hmac(`AWS4${process.env.B2_APPLICATION_KEY}`, dateStamp), region), service), 'aws4_request')
+  const backupKeyId  = process.env.B2_BACKUP_KEY_ID  || process.env.B2_KEY_ID
+  const backupAppKey = process.env.B2_BACKUP_APPLICATION_KEY || process.env.B2_APPLICATION_KEY
+  const sigKey   = hmac(hmac(hmac(hmac(`AWS4${backupAppKey}`, dateStamp), region), service), 'aws4_request')
   const sig      = crypto.createHmac('sha256', sigKey).update(sts).digest('hex')
 
   return {
@@ -1801,7 +1803,7 @@ function b2BackupSign(method, key, queryString, contentType, bodyHash) {
       ...(contentType ? { 'Content-Type': contentType } : {}),
       'x-amz-content-sha256': bodyHash,
       'x-amz-date': amzDate,
-      'Authorization': `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credScope}, SignedHeaders=${signedHdrs}, Signature=${sig}`,
+      'Authorization': `AWS4-HMAC-SHA256 Credential=${backupKeyId}/${credScope}, SignedHeaders=${signedHdrs}, Signature=${sig}`,
     },
   }
 }
