@@ -1835,11 +1835,27 @@ async function backupDatabase() {
   console.log(`[backup] starting pg_dump → ${key}`)
   const t0 = Date.now()
 
+  // Resolve hostname to IPv4 — Railway doesn't route IPv6 (Supabase resolves to IPv6 first)
+  // PGHOSTADDR tells libpq which IP to connect to; PGHOST is still used for SSL cert validation
+  let pgHostAddr = ''
+  try {
+    const parsedDbUrl = new URL(dbUrl)
+    const [ipv4] = await require('dns').promises.resolve4(parsedDbUrl.hostname)
+    pgHostAddr = ipv4
+    console.log(`[backup] resolved ${parsedDbUrl.hostname} → ${ipv4} (IPv4 forced)`)
+  } catch (e) {
+    console.warn('[backup] IPv4 resolve failed, proceeding without PGHOSTADDR:', e.message)
+  }
+
   // Stream pg_dump stdout through gzip into a Buffer (no temp file needed)
   const chunks = []
   await new Promise((resolve, reject) => {
     const pg = spawn('pg_dump', ['--no-password', '--format=plain', dbUrl], {
-      env: { ...process.env, PGPASSWORD: '' }, // password is in URL, suppress prompt
+      env: {
+        ...process.env,
+        PGPASSWORD: '',     // password is already in URL
+        ...(pgHostAddr ? { PGHOSTADDR: pgHostAddr } : {}), // force IPv4
+      },
     })
     const gz = zlib.createGzip({ level: 6 })
 
