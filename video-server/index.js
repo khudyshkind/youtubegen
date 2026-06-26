@@ -1,4 +1,6 @@
 'use strict'
+require('./instrument')
+const Sentry = require('./instrument')
 const express = require('express')
 const { execFile } = require('child_process')
 const fs = require('fs')
@@ -106,6 +108,7 @@ async function updateJob(jobId, data) {
     await sbPatch('video_jobs', `id=eq.${jobId}`, data)
   } catch (e) {
     console.error(`[job:${jobId}] updateJob failed:`, e.message)
+    Sentry.captureException(e, { extra: { jobId, data } })
   }
 }
 
@@ -1722,7 +1725,7 @@ app.post('/telegram/webhook', async (req, res) => {
 // ── Weekly stats cron — Monday 10:00 UTC ─────────────────────────────────────
 cron.schedule('0 10 * * 1', async () => {
   console.log('[cron] weekly stats')
-  try { await publishStats() } catch (err) { console.error('[cron]', err.message) }
+  try { await publishStats() } catch (err) { console.error('[cron]', err.message); Sentry.captureException(err, { extra: { cron: 'publishStats' } }) }
 }, { timezone: 'UTC' })
 
 // ── Monitor cron — hourly tick, fires based on configured interval ─────────────
@@ -1736,7 +1739,7 @@ cron.schedule('0 * * * *', async () => {
     (interval === 'weekly' && d === 1 && h === 9)
   if (!fire) return
   console.log(`[cron] monitor scan (${interval})`)
-  try { await runMonitor() } catch (err) { console.error('[cron/monitor]', err.message) }
+  try { await runMonitor() } catch (err) { console.error('[cron/monitor]', err.message); Sentry.captureException(err, { extra: { cron: 'runMonitor' } }) }
 }, { timezone: 'UTC' })
 
 // ── Content plan cron — every hour, fires at hours from POST_SCHEDULES ────────
@@ -1745,7 +1748,7 @@ cron.schedule('0 * * * *', async () => {
   const schedule = POST_SCHEDULES[planConfig.postsPerDay] ?? [planConfig.postHour]
   if (!schedule.includes(h)) return
   console.log(`[cron] plan post at ${h}:00 UTC (postsPerDay=${planConfig.postsPerDay})`)
-  try { await postFromQueue() } catch (err) { console.error('[cron/plan]', err.message) }
+  try { await postFromQueue() } catch (err) { console.error('[cron/plan]', err.message); Sentry.captureException(err, { extra: { cron: 'postFromQueue' } }) }
 }, { timezone: 'UTC' })
 
 // ── Vercel deployment polling ─────────────────────────────────────────────────
@@ -1812,7 +1815,7 @@ async function checkVercelDeploy() {
 // ── Vercel deploy polling cron — every 30 minutes ────────────────────────────
 cron.schedule('*/30 * * * *', async () => {
   console.log('[cron] vercel deploy check')
-  try { await checkVercelDeploy() } catch (err) { console.error('[cron/vercel]', err.message) }
+  try { await checkVercelDeploy() } catch (err) { console.error('[cron/vercel]', err.message); Sentry.captureException(err, { extra: { cron: 'checkVercelDeploy' } }) }
 }, { timezone: 'UTC' })
 
 // ── Register webhook at startup ───────────────────────────────────────────────
@@ -2396,6 +2399,7 @@ async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId
     console.log('[vgf] ASS uploaded:', assKey, '| size=%s bg=%s', subtitle_style.size, subtitle_style.background)
   } catch (e) {
     console.warn('[vgf] ASS upload failed, skipping subtitles:', e.message)
+    Sentry.captureException(e, { extra: { jobId, stage: 'subtitle_burn_upload' } })
     return videoUrl
   }
   try {
@@ -2408,6 +2412,7 @@ async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId
     return result.out_1
   } catch (subsErr) {
     console.warn('[vgf] subtitle burn-in failed, using video without subs:', subsErr.message)
+    Sentry.captureException(subsErr, { extra: { jobId, stage: 'subtitle_burn' } })
     return videoUrl
   }
 }
@@ -2548,6 +2553,7 @@ async function processVideoJob(jobId, body) {
         return { ...img, url: b2Url }
       } catch (err) {
         console.error(`[render] proxy failed for image ${i}:`, err.message)
+        Sentry.captureException(err, { extra: { jobId, imageIndex: i, engine: img.engine, stage: 'image_proxy_b2' } })
         return img
       }
     }))
@@ -2738,6 +2744,17 @@ async function processVideoJob(jobId, body) {
     console.log(`[job:${jobId}] done →`, publicUrl)
   } catch (err) {
     console.error(`[job:${jobId}] failed:`, err.message)
+    Sentry.withScope(scope => {
+      scope.setContext('job', {
+        jobId,
+        project_id: body.project_id,
+        user_id: body.user_id,
+        transition: body.transition,
+        effects: body.effects,
+        stage: 'processVideoJob',
+      })
+      Sentry.captureException(err)
+    })
     try { console.timeEnd(T('TOTAL')) } catch (_) {}
     await updateJob(jobId, { status: 'failed', error_message: err.message })
   } finally {
@@ -2771,14 +2788,16 @@ app.post('/render', verifySecret, async (req, res) => {
     if (!jobId) throw new Error('no id returned from video_jobs insert')
   } catch (err) {
     console.error('[render] create job failed:', err.message)
+    Sentry.captureException(err, { extra: { project_id, user_id: req.body.user_id, stage: 'job_create' } })
     return res.status(500).json({ ok: false, error: 'Failed to create render job' })
   }
 
   // Fire-and-forget: process in background without blocking the HTTP response
   setImmediate(() => {
-    processVideoJob(jobId, req.body).catch((err) =>
+    processVideoJob(jobId, req.body).catch((err) => {
       console.error(`[job:${jobId}] unhandled:`, err.message)
-    )
+      Sentry.captureException(err, { extra: { jobId, stage: 'processVideoJob_unhandled' } })
+    })
   })
 
   return res.json({ ok: true, job_id: jobId, status: 'pending' })
@@ -2796,6 +2815,14 @@ app.get('/status/:jobId', verifySecret, async (req, res) => {
     return res.status(500).json({ ok: false, error: err.message })
   }
 })
+
+// Temporary test route — remove after verifying Sentry receives events
+app.get('/debug-sentry', (req, res) => {
+  throw new Error('[sentry-test] video-server Express error capture verification')
+})
+
+// Must be added AFTER all routes
+Sentry.setupExpressErrorHandler(app)
 
 const PORT = parseInt(process.env.PORT || '3001', 10)
 app.listen(PORT, async () => {
