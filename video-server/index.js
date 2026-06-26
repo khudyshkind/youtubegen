@@ -26,13 +26,14 @@ try {
 }
 
 const express = require('express')
-const { execFile } = require('child_process')
+const { execFile, spawn } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const https = require('https')
 const http = require('http')
 const crypto = require('crypto')
+const zlib = require('zlib')
 const AnthropicPkg = require('@anthropic-ai/sdk')
 const Anthropic = AnthropicPkg.default ?? AnthropicPkg
 const { Readable } = require('stream')
@@ -1745,6 +1746,153 @@ app.post('/telegram/webhook', async (req, res) => {
     await sendTo(chatId, `❌ Ошибка: ${err.message.slice(0, 120)}`)
   }
 })
+
+// ── Database backup to B2 ────────────────────────────────────────────────────
+// SigV4 helper for backup bucket operations (GET list / PUT upload / DELETE)
+function b2BackupSign(method, key, queryString, contentType, bodyHash) {
+  const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
+  const region   = (process.env.B2_REGION   || 'us-east-005').trim()
+  const bucket   = (process.env.B2_BACKUP_BUCKET || 'youtubegen-db-backups').trim()
+
+  const now           = new Date()
+  const amzDate       = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  const dateStamp     = amzDate.slice(0, 8)
+  const service       = 's3'
+  const credScope     = `${dateStamp}/${region}/${service}/aws4_request`
+
+  const baseUrl   = key ? `${endpoint}/${bucket}/${key}` : `${endpoint}/${bucket}`
+  const fullUrl   = queryString ? `${baseUrl}?${queryString}` : baseUrl
+  const parsed    = new URL(fullUrl)
+  const host      = parsed.hostname
+  const urlPath   = parsed.pathname
+  const canonicalQS = [...parsed.searchParams.entries()]
+    .sort(([a], [b]) => a < b ? -1 : 1)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&')
+
+  const ctLine       = contentType ? `content-type:${contentType}\n` : ''
+  const ctSigned     = contentType ? 'content-type;' : ''
+  const canonHeaders = `${ctLine}host:${host}\nx-amz-content-sha256:${bodyHash}\nx-amz-date:${amzDate}\n`
+  const signedHdrs   = `${ctSigned}host;x-amz-content-sha256;x-amz-date`
+
+  const canonReq = [method, urlPath, canonicalQS, canonHeaders, signedHdrs, bodyHash].join('\n')
+  const sts      = ['AWS4-HMAC-SHA256', amzDate, credScope, crypto.createHash('sha256').update(canonReq).digest('hex')].join('\n')
+  const hmac     = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
+  const sigKey   = hmac(hmac(hmac(hmac(`AWS4${process.env.B2_APPLICATION_KEY}`, dateStamp), region), service), 'aws4_request')
+  const sig      = crypto.createHmac('sha256', sigKey).update(sts).digest('hex')
+
+  return {
+    fullUrl,
+    headers: {
+      ...(contentType ? { 'Content-Type': contentType } : {}),
+      'x-amz-content-sha256': bodyHash,
+      'x-amz-date': amzDate,
+      'Authorization': `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credScope}, SignedHeaders=${signedHdrs}, Signature=${sig}`,
+    },
+  }
+}
+
+async function b2BackupUpload(buffer, key) {
+  const bodyHash = crypto.createHash('sha256').update(buffer).digest('hex')
+  const { fullUrl, headers } = b2BackupSign('PUT', key, '', 'application/gzip', bodyHash)
+  const res = await fetch(fullUrl, {
+    method: 'PUT',
+    headers: { ...headers, 'Content-Length': String(buffer.length) },
+    body: buffer,
+  })
+  if (!res.ok) throw new Error(`[b2-backup] PUT ${key} → HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`)
+}
+
+async function b2BackupList() {
+  const emptyHash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+  const { fullUrl, headers } = b2BackupSign('GET', '', 'list-type=2&prefix=backup_', '', emptyHash)
+  const res = await fetch(fullUrl, { headers })
+  if (!res.ok) throw new Error(`[b2-backup] LIST → HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`)
+  const xml = await res.text()
+  // Parse <Key> tags from S3 XML response
+  const keys = [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map(m => m[1])
+  return keys
+}
+
+async function b2BackupDelete(key) {
+  const emptyHash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+  const { fullUrl, headers } = b2BackupSign('DELETE', key, '', '', emptyHash)
+  const res = await fetch(fullUrl, { method: 'DELETE', headers })
+  if (!res.ok && res.status !== 204) throw new Error(`[b2-backup] DELETE ${key} → HTTP ${res.status}`)
+}
+
+async function backupDatabase() {
+  const dbUrl = process.env.DATABASE_URL
+  if (!dbUrl) {
+    console.warn('[backup] DATABASE_URL not set — skipping backup')
+    return
+  }
+
+  const now = new Date()
+  // Key format: backup_YYYY-MM-DD_HHmmss.sql.gz — date in name allows age-based pruning
+  const ts  = now.toISOString().replace(/T/, '_').replace(/:/g, '').slice(0, 15)
+  const key = `backup_${ts}.sql.gz`
+  console.log(`[backup] starting pg_dump → ${key}`)
+  const t0 = Date.now()
+
+  // Stream pg_dump stdout through gzip into a Buffer (no temp file needed)
+  const chunks = []
+  await new Promise((resolve, reject) => {
+    const pg = spawn('pg_dump', ['--no-password', '--format=plain', dbUrl], {
+      env: { ...process.env, PGPASSWORD: '' }, // password is in URL, suppress prompt
+    })
+    const gz = zlib.createGzip({ level: 6 })
+
+    pg.on('error', err => reject(new Error(`pg_dump unavailable: ${err.message}`)))
+    pg.stderr.on('data', d => {
+      const msg = d.toString().trim()
+      if (msg) console.warn('[backup] pg_dump stderr:', msg)
+    })
+    gz.on('data', chunk => chunks.push(chunk))
+    gz.on('end', resolve)
+    gz.on('error', reject)
+    pg.stdout.pipe(gz)
+    pg.on('close', code => { if (code !== 0) reject(new Error(`pg_dump exited with code ${code}`)) })
+  })
+
+  const buffer = Buffer.concat(chunks)
+  console.log(`[backup] dump ready: ${(buffer.length / 1024 / 1024).toFixed(2)} MB compressed`)
+
+  await b2BackupUpload(buffer, key)
+  console.log(`[backup] uploaded ${key} in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
+
+  // Prune backups older than 30 days
+  try {
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const keys = await b2BackupList()
+    const stale = keys.filter(k => {
+      // Extract date from backup_YYYY-MM-DD_HHmmss.sql.gz
+      const m = k.match(/backup_(\d{4}-\d{2}-\d{2})/)
+      if (!m) return false
+      return new Date(m[1]) < cutoff
+    })
+    for (const staleKey of stale) {
+      await b2BackupDelete(staleKey)
+      console.log(`[backup] pruned old backup: ${staleKey}`)
+    }
+    if (stale.length === 0) console.log('[backup] no old backups to prune')
+  } catch (pruneErr) {
+    // Pruning failure doesn't invalidate the backup itself — log but don't throw
+    console.warn('[backup] prune failed:', pruneErr.message)
+    Sentry.captureException(pruneErr, { extra: { stage: 'backup_prune' } })
+  }
+}
+
+// ── Daily DB backup cron — 03:00 UTC ─────────────────────────────────────────
+cron.schedule('0 3 * * *', async () => {
+  console.log('[cron] daily db backup')
+  try {
+    await backupDatabase()
+  } catch (err) {
+    console.error('[cron/backup]', err.message)
+    Sentry.captureException(err, { extra: { cron: 'backupDatabase' } })
+  }
+}, { timezone: 'UTC' })
 
 // ── Weekly stats cron — Monday 10:00 UTC ─────────────────────────────────────
 cron.schedule('0 10 * * 1', async () => {
