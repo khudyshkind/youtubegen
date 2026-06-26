@@ -1851,8 +1851,9 @@ async function backupDatabase() {
   console.log(`[backup] starting pg_dump → ${key}`)
   const t0 = Date.now()
 
-  // Parse connection URL and force IPv4 by using -h + PGHOSTADDR separately.
-  // libpq ignores PGHOSTADDR when a full postgres:// URI is passed — individual flags work.
+  // Parse connection URL — use individual flags (libpq ignores PGHOSTADDR with full URI).
+  // The session-mode pooler (aws-0-*.pooler.supabase.com) resolves to IPv4 natively;
+  // no PGHOSTADDR needed. PGSSLMODE=require satisfies Supabase pooler's auth requirement.
   const parsedDbUrl = new URL(dbUrl)
   const pgHost = parsedDbUrl.hostname
   const pgPort = parsedDbUrl.port || '5432'
@@ -1860,21 +1861,20 @@ async function backupDatabase() {
   const pgPassword = decodeURIComponent(parsedDbUrl.password)
   const pgDatabase = parsedDbUrl.pathname.slice(1) || 'postgres'
 
-  let pgHostAddr = ''
-  try {
-    const [ipv4] = await require('dns').promises.resolve4(pgHost)
-    pgHostAddr = ipv4
-    console.log(`[backup] resolved ${pgHost} → ${ipv4} (IPv4 forced via PGHOSTADDR)`)
-  } catch (e) {
-    console.warn('[backup] IPv4 resolve failed, using hostname:', e.message)
-  }
-
   // Stream pg_dump stdout through gzip into a Buffer (no temp file needed)
   const chunks = []
   await new Promise((resolve, reject) => {
+    let pgCode = null
+    let gzEnded = false
+    const settle = () => {
+      if (pgCode === null || !gzEnded) return
+      if (pgCode !== 0) reject(new Error(`pg_dump exited with code ${pgCode}`))
+      else resolve()
+    }
+
     const pg = spawn('pg_dump', [
       '--no-password', '--format=plain',
-      '-h', pgHost,      // hostname kept for SSL cert validation
+      '-h', pgHost,
       '-p', pgPort,
       '-U', pgUser,
       '-d', pgDatabase,
@@ -1882,7 +1882,7 @@ async function backupDatabase() {
       env: {
         ...process.env,
         PGPASSWORD: pgPassword,
-        ...(pgHostAddr ? { PGHOSTADDR: pgHostAddr } : {}), // force IPv4 actual connection
+        PGSSLMODE: 'require',
       },
     })
     const gz = zlib.createGzip({ level: 6 })
@@ -1893,10 +1893,10 @@ async function backupDatabase() {
       if (msg) console.warn('[backup] pg_dump stderr:', msg)
     })
     gz.on('data', chunk => chunks.push(chunk))
-    gz.on('end', resolve)
+    gz.on('end', () => { gzEnded = true; settle() })
     gz.on('error', reject)
     pg.stdout.pipe(gz)
-    pg.on('close', code => { if (code !== 0) reject(new Error(`pg_dump exited with code ${code}`)) })
+    pg.on('close', code => { pgCode = code; settle() })
   })
 
   const buffer = Buffer.concat(chunks)
