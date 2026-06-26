@@ -4,31 +4,41 @@ import * as Sentry from '@sentry/nextjs'
 import { useState } from 'react'
 
 export default function SentryExamplePage() {
-  const [sent, setSent] = useState(false)
+  const [log, setLog] = useState<string[]>([])
 
   function triggerClientError() {
-    Sentry.captureException(new Error('[sentry-test] Client-side test error'))
-    setSent(true)
+    const id = Sentry.captureException(new Error('[sentry-test] Client-side test error'))
+    setLog((p) => [...p, `Client error sent — event ID: ${id}`])
   }
 
   async function triggerServerError() {
-    await fetch('/api/sentry-example-api')
-    setSent(true)
+    const res = await fetch('/api/sentry-example-api')
+    setLog((p) => [...p, `Server API responded: HTTP ${res.status}`])
   }
 
   return (
-    <main style={{ fontFamily: 'sans-serif', padding: 40 }}>
-      <h1>Sentry Test Page</h1>
-      <p>Click to send a test error to Sentry.</p>
-      <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-        <button onClick={triggerClientError} style={{ padding: '8px 16px' }}>
+    <div style={{ padding: 40, color: '#e2e8f0', fontFamily: 'sans-serif' }}>
+      <h1 style={{ fontSize: 24, marginBottom: 8 }}>Sentry Test Page</h1>
+      <p style={{ color: '#94a3b8', marginBottom: 24 }}>
+        Trigger test errors to verify Sentry is capturing events.
+      </p>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+        <button
+          onClick={triggerClientError}
+          style={{ padding: '8px 18px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+        >
           Trigger Client Error
         </button>
-        <button onClick={triggerServerError} style={{ padding: '8px 16px' }}>
+        <button
+          onClick={triggerServerError}
+          style={{ padding: '8px 18px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+        >
           Trigger Server Error
         </button>
       </div>
-      {sent && <p style={{ color: 'green', marginTop: 16 }}>Error sent — check Sentry Issues.</p>}
-    </main>
+      {log.map((line, i) => (
+        <p key={i} style={{ color: '#4ade80', fontFamily: 'monospace', margin: '4px 0' }}>✓ {line}</p>
+      ))}
+    </div>
   )
 }
