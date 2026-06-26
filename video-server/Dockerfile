@@ -1,7 +1,5 @@
-FROM node:22-slim
+FROM node:22-bookworm-slim
 
-# bust cache to force reinstall if postgresql-client was missing in prior build
-ARG CACHE_BUST=2
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
      curl \
