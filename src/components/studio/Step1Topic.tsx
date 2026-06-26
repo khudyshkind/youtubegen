@@ -45,7 +45,7 @@ const MODELS_BASE: { value: ScriptModel; key: 'standard' | 'enhanced' | 'alterna
   { value: 'gpt-4o',        key: 'alternative', credits: CREDIT_COSTS.script_gpt    },
 ]
 
-const DURATION_OPTIONS = [1, 2, 3, 5, 7, 10, 15, 20]
+const DURATION_OPTIONS = [1, 2, 3, 5, 7, 10, 15, 20, 30]
 
 // ─── Language dropdown ─────────────────────────────────────────────────────────
 
