@@ -1838,68 +1838,84 @@ async function b2BackupDelete(key) {
 }
 
 async function backupDatabase() {
-  const dbUrl = process.env.DATABASE_URL
-  if (!dbUrl) {
-    console.warn('[backup] DATABASE_URL not set — skipping backup')
+  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '')
+  const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!supabaseUrl || !serviceKey) {
+    console.warn('[backup] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set — skipping')
     return
   }
 
   const now = new Date()
-  // Key format: backup_YYYY-MM-DD_HHmmss.sql.gz — date in name allows age-based pruning
   const ts  = now.toISOString().replace(/T/, '_').replace(/:/g, '').slice(0, 15)
   const key = `backup_${ts}.sql.gz`
-  console.log(`[backup] starting pg_dump → ${key}`)
+  console.log(`[backup] starting REST backup → ${key}`)
   const t0 = Date.now()
 
-  // Parse connection URL — use individual flags (libpq ignores PGHOSTADDR with full URI).
-  // The session-mode pooler (aws-0-*.pooler.supabase.com) resolves to IPv4 natively;
-  // no PGHOSTADDR needed. PGSSLMODE=require satisfies Supabase pooler's auth requirement.
-  const parsedDbUrl = new URL(dbUrl)
-  const pgHost = parsedDbUrl.hostname
-  const pgPort = parsedDbUrl.port || '5432'
-  const pgUser = decodeURIComponent(parsedDbUrl.username)
-  const pgPassword = decodeURIComponent(parsedDbUrl.password)
-  const pgDatabase = parsedDbUrl.pathname.slice(1) || 'postgres'
+  // Tables to include in backup (schema is in git; this captures live data)
+  const tables = [
+    'profiles', 'projects', 'credit_transactions',
+    'analytics_events', 'analytics_reports',
+    'bot_content_queue', 'bot_seen_urls', 'bot_settings',
+    'support_tickets', 'sentry_alert_dedup',
+  ]
 
-  // Stream pg_dump stdout through gzip into a Buffer (no temp file needed)
-  const chunks = []
-  await new Promise((resolve, reject) => {
-    let pgCode = null
-    let gzEnded = false
-    const settle = () => {
-      if (pgCode === null || !gzEnded) return
-      if (pgCode !== 0) reject(new Error(`pg_dump exited with code ${pgCode}`))
-      else resolve()
+  const hdrs = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` }
+  let sql = `-- YouTubeGen DB backup ${now.toISOString()}\n-- Source: Supabase REST API (service role)\n\n`
+
+  for (const table of tables) {
+    try {
+      // Paginate in batches of 1000 (Supabase default max per request)
+      const PAGE = 1000
+      let allRows = []
+      let offset  = 0
+      while (true) {
+        const res = await fetch(
+          `${supabaseUrl}/rest/v1/${table}?select=*&limit=${PAGE}&offset=${offset}`,
+          { headers: { ...hdrs, 'Range-Unit': 'items', Range: `${offset}-${offset + PAGE - 1}` } }
+        )
+        if (!res.ok) { console.warn(`[backup] ${table}: HTTP ${res.status}`); break }
+        const rows = await res.json()
+        if (!Array.isArray(rows) || rows.length === 0) break
+        allRows = allRows.concat(rows)
+        if (rows.length < PAGE) break
+        offset += PAGE
+      }
+
+      if (allRows.length === 0) {
+        sql += `-- Table ${table}: empty\n\n`
+        console.log(`[backup] ${table}: empty`)
+        continue
+      }
+
+      sql += `-- Table: ${table} (${allRows.length} rows)\n`
+      for (const row of allRows) {
+        const cols = Object.keys(row)
+        const vals = cols.map(c => {
+          const v = row[c]
+          if (v === null || v === undefined) return 'NULL'
+          if (typeof v === 'number') return String(v)
+          if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE'
+          if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, "''")}'`
+          return `'${String(v).replace(/'/g, "''")}'`
+        })
+        sql += `INSERT INTO public.${table} (${cols.join(', ')}) VALUES (${vals.join(', ')}) ON CONFLICT DO NOTHING;\n`
+      }
+      sql += '\n'
+      console.log(`[backup] ${table}: ${allRows.length} rows`)
+    } catch (e) {
+      console.warn(`[backup] ${table} error:`, e.message)
+      sql += `-- Table ${table}: error — ${e.message}\n\n`
     }
+  }
 
-    const pg = spawn('pg_dump', [
-      '--no-password', '--format=plain',
-      '-h', pgHost,
-      '-p', pgPort,
-      '-U', pgUser,
-      '-d', pgDatabase,
-    ], {
-      env: {
-        ...process.env,
-        PGPASSWORD: pgPassword,
-        PGSSLMODE: 'require',
-      },
-    })
+  const buffer = await new Promise((resolve, reject) => {
+    const chunks = []
     const gz = zlib.createGzip({ level: 6 })
-
-    pg.on('error', err => reject(new Error(`pg_dump unavailable: ${err.message}`)))
-    pg.stderr.on('data', d => {
-      const msg = d.toString().trim()
-      if (msg) console.warn('[backup] pg_dump stderr:', msg)
-    })
     gz.on('data', chunk => chunks.push(chunk))
-    gz.on('end', () => { gzEnded = true; settle() })
+    gz.on('end', () => resolve(Buffer.concat(chunks)))
     gz.on('error', reject)
-    pg.stdout.pipe(gz)
-    pg.on('close', code => { pgCode = code; settle() })
+    gz.end(Buffer.from(sql, 'utf8'))
   })
-
-  const buffer = Buffer.concat(chunks)
   console.log(`[backup] dump ready: ${(buffer.length / 1024 / 1024).toFixed(2)} MB compressed`)
 
   await b2BackupUpload(buffer, key)
@@ -1908,20 +1924,18 @@ async function backupDatabase() {
   // Prune backups older than 30 days
   try {
     const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-    const keys = await b2BackupList()
-    const stale = keys.filter(k => {
-      // Extract date from backup_YYYY-MM-DD_HHmmss.sql.gz
+    const keys   = await b2BackupList()
+    const stale  = keys.filter(k => {
       const m = k.match(/backup_(\d{4}-\d{2}-\d{2})/)
-      if (!m) return false
-      return new Date(m[1]) < cutoff
+      return m && new Date(m[1]) < cutoff
     })
-    for (const staleKey of stale) {
-      await b2BackupDelete(staleKey)
-      console.log(`[backup] pruned old backup: ${staleKey}`)
+    if (stale.length) {
+      await Promise.all(stale.map(k => b2BackupDelete(k)))
+      console.log(`[backup] pruned ${stale.length} old backup(s)`)
+    } else {
+      console.log('[backup] no old backups to prune')
     }
-    if (stale.length === 0) console.log('[backup] no old backups to prune')
   } catch (pruneErr) {
-    // Pruning failure doesn't invalidate the backup itself — log but don't throw
     console.warn('[backup] prune failed:', pruneErr.message)
     Sentry.captureException(pruneErr, { extra: { stage: 'backup_prune' } })
   }
