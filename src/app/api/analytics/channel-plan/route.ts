@@ -38,11 +38,28 @@ function fixControlCharsInStrings(s: string): string {
   return result
 }
 
+function tryParse<T>(slice: string, label: string): T {
+  try {
+    return JSON.parse(slice) as T
+  } catch {
+    const repaired = fixControlCharsInStrings(slice)
+    try {
+      return JSON.parse(repaired) as T
+    } catch (e2) {
+      console.error(`[channel-plan] ${label} parse failed. Slice (first 3000):`, slice.substring(0, 3000))
+      throw new Error(`${label}: JSON parse failed — ${e2 instanceof Error ? e2.message : String(e2)}`)
+    }
+  }
+}
+
 function parseClaudeJson<T>(text: string, label: string): T {
-  console.log(`[channel-plan] ${label} raw:`, text.substring(0, 600))
+  console.log(`[channel-plan] ${label} raw length:`, text.length, 'preview:', text.substring(0, 600))
   const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
   const start = cleaned.indexOf('{')
   if (start === -1) throw new Error(`${label}: no { found`)
+
+  // Pass 1: exact boundary scanner (fails when LLM emits unescaped quotes
+  // that flip inStr, causing a closing } to be skipped as "inside string")
   let depth = 0, inStr = false, esc = false
   for (let i = start; i < cleaned.length; i++) {
     const c = cleaned[i]
@@ -53,24 +70,19 @@ function parseClaudeJson<T>(text: string, label: string): T {
     if (c === '{') depth++
     if (c === '}') {
       depth--
-      if (depth === 0) {
-        const slice = cleaned.slice(start, i + 1)
-        try {
-          return JSON.parse(slice) as T
-        } catch {
-          // Fallback: fix literal control characters (newlines/tabs) inside string values
-          const repaired = fixControlCharsInStrings(slice)
-          try {
-            return JSON.parse(repaired) as T
-          } catch (e2) {
-            console.error(`[channel-plan] ${label} parse failed. Raw (first 3000):`, slice.substring(0, 3000))
-            throw new Error(`${label}: JSON parse failed — ${e2 instanceof Error ? e2.message : String(e2)}`)
-          }
-        }
-      }
+      if (depth === 0) return tryParse<T>(cleaned.slice(start, i + 1), label)
     }
   }
-  throw new Error(`${label}: unbalanced braces`)
+
+  // Pass 2: greedy fallback — take everything from first { to last }
+  // Handles the case where unescaped quotes confused inStr and we missed the closing brace
+  console.warn(`[channel-plan] ${label} exact scan lost track (depth=${depth}), trying greedy fallback. Total length: ${cleaned.length}, last 500: ${cleaned.slice(-500)}`)
+  const lastBrace = cleaned.lastIndexOf('}')
+  if (lastBrace > start) {
+    return tryParse<T>(cleaned.slice(start, lastBrace + 1), label)
+  }
+
+  throw new Error(`${label}: unbalanced braces — no closing } found`)
 }
 
 function fmtViews(n: number): string {
@@ -301,7 +313,7 @@ export async function POST(req: NextRequest) {
     const [msg1, msg2a, msg2b] = await Promise.all([
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
+        max_tokens: 6000,
         system: [{ type: 'text', text: getIdeasPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: ctxWithLang }],
       }),
@@ -322,7 +334,7 @@ export async function POST(req: NextRequest) {
     const text1  = (msg1.content[0]  as { text: string }).text
     const text2a = (msg2a.content[0] as { text: string }).text
     const text2b = (msg2b.content[0] as { text: string }).text
-    console.log('[channel-plan] claude1  tokens:', msg1.usage.input_tokens,  'out:', msg1.usage.output_tokens)
+    console.log('[channel-plan] claude1  tokens:', msg1.usage.input_tokens, 'out:', msg1.usage.output_tokens, 'stop:', msg1.stop_reason)
     console.log('[channel-plan] claude2a tokens:', msg2a.usage.input_tokens, 'out:', msg2a.usage.output_tokens)
     console.log('[channel-plan] claude2b tokens:', msg2b.usage.input_tokens, 'out:', msg2b.usage.output_tokens)
     console.log('[channel-plan] claude2a raw:', text2a.substring(0, 500))
