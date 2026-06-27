@@ -2734,24 +2734,48 @@ async function processVideoJob(jobId, body) {
     const useXfade = transition && transition !== 'cut' && images.length > 1
     const td = Math.max(0.1, Math.min(1.5, Number(transition_duration) || 0.5))
 
+    // ── Stage 0: Repair potentially-concatenated MP3 ─────────────────────────
+    // ElevenLabs splits scripts >4800 chars into chunks and joins them via
+    // Buffer.concat. Each chunk has its own ID3v2/Xing header, so the resulting
+    // file has stray ID3 tags mid-stream. This confuses FFmpeg's MP3 demuxer:
+    //   • PTS resets at the second ID3 tag → audio-video drift in the final MP4
+    //   • music-metadata reads only first 512 KB (chunk-1 Xing) → wrong duration
+    //     → image clips cover wrong length → video ends early with -shortest flag
+    //   • If loudnorm falls back to the original, the malformed audio reaches
+    //     the AAC mux step → AAC frames with bad PTS → progressive distortion
+    // Full decode+re-encode via FFmpeg resolves all three issues at once.
+    console.time(T('0_audio_repair'))
+    let sourceAudioUrl = audio_url
+    try {
+      const repairResult = await runFFmpegOnVGF(
+        { in_1: audio_url },
+        { out_1: 'audio_repaired.mp3' },
+        '-i {{in_1}} -c:a libmp3lame -b:a 128k -ar 44100 {{out_1}}'
+      )
+      sourceAudioUrl = repairResult.out_1
+      console.log('[audio] repair re-encode done (was concatenated MP3)')
+    } catch (repairErr) {
+      console.warn('[audio] repair step failed, continuing with original:', repairErr.message)
+    }
+    console.timeEnd(T('0_audio_repair'))
+
     // ── Stage 1: Normalize audio via VGF + get duration ──────────────────────
     console.time(T('1_audio_norm'))
-    // Normalize loudness to -14 LUFS (YouTube standard). Duration is read from
-    // the original URL since loudnorm preserves duration exactly.
-    const audioDuration = await getAudioDuration(audio_url)
+    const audioDuration = await getAudioDuration(sourceAudioUrl)
     console.log(`[audio] duration: ${audioDuration.toFixed(2)}s`)
 
-    let finalAudioUrl = audio_url
+    let finalAudioUrl = sourceAudioUrl
     try {
       const normResult = await runFFmpegOnVGF(
-        { in_1: audio_url },
+        { in_1: sourceAudioUrl },
         { out_1: 'audio_norm.mp3' },
         '-i {{in_1}} -filter:a loudnorm=I=-14:LRA=7:TP=-1 -ar 44100 {{out_1}}'
       )
       finalAudioUrl = normResult.out_1
       console.log('[audio] loudnorm applied via VGF')
     } catch (normErr) {
-      console.warn('[audio] loudnorm failed, using original:', normErr.message)
+      console.warn('[audio] loudnorm failed, using repaired audio:', normErr.message)
+      // fallback is sourceAudioUrl (already clean), not the original
     }
     console.timeEnd(T('1_audio_norm'))
 
