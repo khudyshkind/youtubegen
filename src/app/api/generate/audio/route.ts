@@ -46,16 +46,21 @@ interface AudioRequest {
   apihost_pitch?: number
 }
 
-// Remove structural scene/section markers inserted by the script generator
-// (e.g. "[Сцена 1: Название]") so TTS doesn't pronounce them literally.
-// These markers are kept in the stored script for display and image-generation
-// context — they are only stripped here, immediately before TTS synthesis.
+// Remove structural scene/section markers and Markdown formatting inserted by
+// the script generator so TTS doesn't pronounce them literally.
+// The stored script is NOT modified — markers remain for UI display and
+// image-generation context. Only stripped here, immediately before TTS.
 function stripSectionMarkers(text: string): string {
   return text
-    // [Сцена N: any text] — scene markers from scene_markers option
-    .replace(/\[Сцена\s+\d+[^\]]*\]\s*/gi, '')
-    // [Scene N: any text] — English variant
-    .replace(/\[Scene\s+\d+[^\]]*\]\s*/gi, '')
+    // Bracket-style markers: [Сцена N:], [Scene N:], [Секция N:], [Section N:]
+    .replace(/\[(?:Сцена|Scene|Секция|Section)\s+\d+[^\]]*\]\s*/gi, '')
+    // Markdown headings on their own line: # Title, ## Title, etc.
+    .replace(/^#{1,6}\s+.+$/gm, '')
+    // Markdown horizontal rules: ---, ***, ___
+    .replace(/^(?:-{3,}|\*{3,}|_{3,})\s*$/gm, '')
+    // Markdown bold: **text** → text, __text__ → text
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
     // Collapse 3+ consecutive newlines down to 2 (paragraph break)
     .replace(/\n{3,}/g, '\n\n')
     .trim()
