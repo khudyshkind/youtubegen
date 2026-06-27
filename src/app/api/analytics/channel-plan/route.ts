@@ -4,6 +4,7 @@ import { createServerSupabase, createServiceClient } from '@/lib/supabase-server
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { resolveUserLang, langNote } from '@/lib/user-lang'
+import { verifyHandle, resolveChannelId, fetchRecentVideoTitles } from '@/lib/youtube-channel'
 
 export const maxDuration = 120
 
@@ -19,7 +20,6 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
 }
 
 // Escapes literal newlines/tabs/carriage returns INSIDE JSON string values only.
-// Structural whitespace (between tokens) is left untouched.
 function fixControlCharsInStrings(s: string): string {
   let result = ''
   let inStr = false
@@ -58,8 +58,7 @@ function parseClaudeJson<T>(text: string, label: string): T {
   const start = cleaned.indexOf('{')
   if (start === -1) throw new Error(`${label}: no { found`)
 
-  // Pass 1: exact boundary scanner (fails when LLM emits unescaped quotes
-  // that flip inStr, causing a closing } to be skipped as "inside string")
+  // Pass 1: exact boundary scanner
   let depth = 0, inStr = false, esc = false
   for (let i = start; i < cleaned.length; i++) {
     const c = cleaned[i]
@@ -74,8 +73,7 @@ function parseClaudeJson<T>(text: string, label: string): T {
     }
   }
 
-  // Pass 2: greedy fallback — take everything from first { to last }
-  // Handles the case where unescaped quotes confused inStr and we missed the closing brace
+  // Pass 2: greedy fallback — handles unescaped quotes that confuse the scanner
   console.warn(`[channel-plan] ${label} exact scan lost track (depth=${depth}), trying greedy fallback. Total length: ${cleaned.length}, last 500: ${cleaned.slice(-500)}`)
   const lastBrace = cleaned.lastIndexOf('}')
   if (lastBrace > start) {
@@ -91,8 +89,46 @@ function fmtViews(n: number): string {
   return String(n)
 }
 
-function getIdeasPrompt(lang: string): string {
+type VideoFormat = 'long' | 'shorts' | 'mixed'
+
+function fmtDescription(lang: string, fmt: VideoFormat): string {
+  if (lang !== 'en') {
+    if (fmt === 'long') return 'Длинные видео (8+ мин)'
+    if (fmt === 'shorts') return 'Shorts (до 60 сек)'
+    return 'Смесь: ~70% длинные (8+ мин), ~30% Shorts'
+  } else {
+    if (fmt === 'long') return 'Long-form videos (8+ min)'
+    if (fmt === 'shorts') return 'Shorts (under 60 sec)'
+    return 'Mix: ~70% long-form (8+ min), ~30% Shorts'
+  }
+}
+
+function fmtFormatRule(lang: string, fmt: VideoFormat): string {
+  if (lang !== 'en') {
+    if (fmt === 'long') return 'ВСЕ video_ideas должны иметь format: "Длинное" (8+ мин).'
+    if (fmt === 'shorts') return 'ВСЕ video_ideas должны иметь format: "Shorts" (до 60 сек).'
+    return 'video_ideas: примерно 14 штук format "Длинное" и 6 штук format "Shorts".'
+  } else {
+    if (fmt === 'long') return 'ALL video_ideas must have format: "Long" (8+ min).'
+    if (fmt === 'shorts') return 'ALL video_ideas must have format: "Shorts" (under 60 sec).'
+    return 'video_ideas: approximately 14 with format "Long" and 6 with format "Shorts".'
+  }
+}
+
+function getIdeasPrompt(lang: string, videoFormat: VideoFormat, continuationEnabled: boolean): string {
   const isRu = lang !== 'en'
+  const formatRule = fmtFormatRule(lang, videoFormat)
+  const continuationSchema = continuationEnabled
+    ? (isRu
+      ? `,"continuation_ideas":[{"title":"Название видео","format":"Длинное","inspired_by":"Название видео пользователя из его канала"},{"title":"...","format":"...","inspired_by":"..."},{"title":"...","format":"...","inspired_by":"..."},{"title":"...","format":"...","inspired_by":"..."},{"title":"...","format":"...","inspired_by":"..."}]`
+      : `,"continuation_ideas":[{"title":"Video title","format":"Long","inspired_by":"Title of user's existing video"},{"title":"...","format":"...","inspired_by":"..."},{"title":"...","format":"...","inspired_by":"..."},{"title":"...","format":"...","inspired_by":"..."},{"title":"...","format":"...","inspired_by":"..."}]`)
+    : ''
+  const continuationInstruction = continuationEnabled
+    ? (isRu
+      ? '\ncontinuation_ideas: 5 идей видео как продолжение тем из видео канала пользователя — в inspired_by укажи конкретное название его видео.'
+      : '\ncontinuation_ideas: 5 video ideas as follow-ups to the user\'s existing videos — in inspired_by name the specific video that inspired it.')
+    : ''
+
   return isRu
     ? `Ты стратег по YouTube контенту с 10-летним опытом запуска успешных каналов.
 
@@ -101,15 +137,16 @@ function getIdeasPrompt(lang: string): string {
 
 ВАЖНО: Идеи видео должны быть конкретными и готовыми к съёмке — не абстрактными темами.
 Учитывай что реально набирает просмотры в данной нише на основе YouTube данных.
+${formatRule}
 
 ФОРМАТ — строго JSON без markdown:
-{"channel_name_ideas":["Название 1","Название 2","Название 3"],"positioning":"Уникальное позиционирование: чем этот канал отличается от конкурентов — 2-3 предложения","video_ideas":[{"title":"Готовое название видео","format":"Shorts/Длинное/Серия","why_works":"Почему сработает — 1 предложение","best_time":"Вторник 18:00","priority":"Высокий потенциал"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Средний потенциал"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Нишевый потенциал"}],"title_formulas":[{"formula":"Как [действие] за [срок] без [препятствие]","example":"Как закрыть сделку за 5 минут без давления на клиента"},{"formula":"...","example":"..."}],"content_pillars":["Столп 1","Столп 2","Столп 3"],"reference_channels":[{"name":"Название реального канала на YouTube","why_follow":"Одно предложение — чему стоит у него поучиться"},{"name":"...","why_follow":"..."},{"name":"...","why_follow":"..."}],"common_mistakes":["Типичная ошибка 1","Типичная ошибка 2","Типичная ошибка 3","Типичная ошибка 4","Типичная ошибка 5"]}
+{"channel_name_ideas":["Название 1","Название 2","Название 3"],"positioning":"Уникальное позиционирование: чем этот канал отличается от конкурентов — 2-3 предложения","video_ideas":[{"title":"Готовое название видео","format":"Shorts/Длинное/Серия","why_works":"Почему сработает — 1 предложение","best_time":"Вторник 18:00","priority":"Высокий потенциал"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Средний потенциал"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Нишевый потенциал"}],"title_formulas":[{"formula":"Как [действие] за [срок] без [препятствие]","example":"Как закрыть сделку за 5 минут без давления на клиента"},{"formula":"...","example":"..."}],"content_pillars":["Столп 1","Столп 2","Столп 3"],"reference_channels":[{"name":"Название реального канала на YouTube","handle":"@channelhandle","why_follow":"Одно предложение — чему стоит у него поучиться"},{"name":"...","handle":"...","why_follow":"..."},{"name":"...","handle":"...","why_follow":"..."}],"common_mistakes":["Типичная ошибка 1","Типичная ошибка 2","Типичная ошибка 3","Типичная ошибка 4","Типичная ошибка 5"]${continuationSchema}}
 
-priority: оценивай на основе YouTube-данных, переданных тебе — "Высокий потенциал" (много похожих видео с высокими просмотрами в выборке), "Средний потенциал" (1-3 похожих видео или смежная тема), "Нишевый потенциал" (мало данных, узкая или новая аудитория). Только эти три значения.
-common_mistakes: 5 конкретных типичных ошибок новичков именно в этой нише — не общие советы, а специфика данного типа контента.
-reference_channels — 3 реальных YouTube канала в этой нише.
+priority: оценивай на основе YouTube-данных — "Высокий потенциал" (много похожих видео с высокими просмотрами), "Средний потенциал" (1-3 похожих видео), "Нишевый потенциал" (мало данных, узкая аудитория).
+common_mistakes: 5 конкретных типичных ошибок новичков именно в этой нише.
+reference_channels: 3 реальных YouTube канала в этой нише. handle — укажи реальный YouTube-хэндл (@channelname) если знаешь точно, иначе оставь пустой строкой ''.${continuationInstruction}
 Верни РОВНО 20 video_ideas и РОВНО 5 title_formulas.
-КРИТИЧНО: внутри строковых значений JSON НЕ используй символ двойной кавычки (") — вместо этого используй апостроф (') или перефразируй. Не допускай переносов строк внутри значений.
+КРИТИЧНО: внутри строковых значений JSON НЕ используй символ двойной кавычки (") — используй апостроф (') или перефразируй. Не допускай переносов строк внутри значений.
 Только JSON. Начни с { заканчивай с }.`
     : `You are a YouTube content strategist with 10 years of experience launching successful channels.
 
@@ -118,24 +155,32 @@ Create a detailed launch plan: channel name ideas, positioning, video ideas, tit
 
 IMPORTANT: Video ideas must be specific and ready to film — not abstract topics.
 Take into account what actually gets views in this niche based on the YouTube data.
+${formatRule}
 
 FORMAT — strict JSON without markdown:
-{"channel_name_ideas":["Name 1","Name 2","Name 3"],"positioning":"Unique positioning: what makes this channel different from competitors — 2-3 sentences","video_ideas":[{"title":"Ready-to-film video title","format":"Shorts/Long/Series","why_works":"Why it will work — 1 sentence","best_time":"Tuesday 6PM","priority":"High Potential"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Medium Potential"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Niche Potential"}],"title_formulas":[{"formula":"How to [action] in [time] without [obstacle]","example":"How to close a deal in 5 minutes without pressuring the client"},{"formula":"...","example":"..."}],"content_pillars":["Pillar 1","Pillar 2","Pillar 3"],"reference_channels":[{"name":"Real YouTube channel name","why_follow":"One sentence — what to learn from this channel"},{"name":"...","why_follow":"..."},{"name":"...","why_follow":"..."}],"common_mistakes":["Beginner mistake 1","Beginner mistake 2","Beginner mistake 3","Beginner mistake 4","Beginner mistake 5"]}
+{"channel_name_ideas":["Name 1","Name 2","Name 3"],"positioning":"Unique positioning: what makes this channel different from competitors — 2-3 sentences","video_ideas":[{"title":"Ready-to-film video title","format":"Shorts/Long/Series","why_works":"Why it will work — 1 sentence","best_time":"Tuesday 6PM","priority":"High Potential"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Medium Potential"},{"title":"...","format":"...","why_works":"...","best_time":"...","priority":"Niche Potential"}],"title_formulas":[{"formula":"How to [action] in [time] without [obstacle]","example":"How to close a deal in 5 minutes without pressuring the client"},{"formula":"...","example":"..."}],"content_pillars":["Pillar 1","Pillar 2","Pillar 3"],"reference_channels":[{"name":"Real YouTube channel name","handle":"@channelhandle","why_follow":"One sentence — what to learn from this channel"},{"name":"...","handle":"...","why_follow":"..."},{"name":"...","handle":"...","why_follow":"..."}],"common_mistakes":["Beginner mistake 1","Beginner mistake 2","Beginner mistake 3","Beginner mistake 4","Beginner mistake 5"]${continuationSchema}}
 
-priority: assess based on the YouTube data provided — "High Potential" (many similar videos with high views in the sample), "Medium Potential" (1-3 similar videos or adjacent topic), "Niche Potential" (few data points, narrow or emerging audience). Only these three values.
-common_mistakes: 5 specific beginner mistakes in this exact niche — not generic advice, specific to this content type.
-reference_channels — 3 real YouTube channels in this niche.
+priority: assess based on YouTube data — "High Potential" (many similar videos with high views), "Medium Potential" (1-3 similar videos), "Niche Potential" (few data points, narrow audience).
+common_mistakes: 5 specific beginner mistakes in this exact niche.
+reference_channels: 3 real YouTube channels in this niche. handle — include real YouTube handle (@channelname) if you know it exactly, otherwise use empty string ''.${continuationInstruction}
 Return EXACTLY 20 video_ideas and EXACTLY 5 title_formulas.
 CRITICAL: Do NOT use double-quote characters (") inside string values — use apostrophes (') or rephrase. No literal newlines inside values.
 JSON only. Start with { end with }.`
 }
 
-function getMonthsPlanPrompt(lang: string): string {
+function getMonthsPlanPrompt(lang: string, videoFormat: VideoFormat, publishFreq: number): string {
   const isRu = lang !== 'en'
+  const freqNote = isRu
+    ? `Частота публикаций: ${publishFreq} видео/нед (≈${publishFreq * 4} видео/мес). Цели месяцев формулируй с учётом этой частоты. 4 видео в плане — примеры, не полный список.`
+    : `Publishing frequency: ${publishFreq} video(s)/week (≈${publishFreq * 4}/month). Frame monthly goals around this frequency. The 4 videos listed per month are examples, not the full schedule.`
+  const fmtNote = isRu
+    ? `Формат видео: ${fmtDescription('ru', videoFormat)}.`
+    : `Video format: ${fmtDescription('en', videoFormat)}.`
   return isRu
     ? `Ты стратег по YouTube контенту. Составь контент-план на 3 месяца (по неделям).
 
-Для каждого месяца: цель, 4 видео (по одному в неделю), 3 конкретных действия.
+${freqNote}
+${fmtNote}
 Цели формулируй как ориентировочные — при упоминании числовых метрик (подписчики, просмотры) всегда добавляй «ориентировочно» или «при регулярных публикациях».
 
 ФОРМАТ — строго JSON без markdown:
@@ -144,7 +189,8 @@ function getMonthsPlanPrompt(lang: string): string {
 Только JSON. Начни с { заканчивай с }.`
     : `You are a YouTube content strategist. Create a 3-month content plan (week by week).
 
-For each month: goal, 4 videos (one per week), 3 concrete actions.
+${freqNote}
+${fmtNote}
 Frame goals as estimates — when mentioning numeric targets (subscribers, views) always add qualifiers like "approximately" or "with consistent publishing".
 
 FORMAT — strict JSON without markdown:
@@ -153,10 +199,15 @@ FORMAT — strict JSON without markdown:
 JSON only. Start with { end with }.`
 }
 
-function getStylePrompt(lang: string): string {
+function getStylePrompt(lang: string, publishFreq: number): string {
   const isRu = lang !== 'en'
+  const freqNote = isRu
+    ? `Частота публикаций: ${publishFreq} видео/нед. Путь к монетизации рассчитывай с учётом этой частоты.`
+    : `Publishing frequency: ${publishFreq} video(s)/week. Factor this into the monetization timeline.`
   return isRu
     ? `Ты стратег по YouTube контенту. На основе ниши дай стиль обложек, growth hacks, путь к монетизации и SEO ключевые слова.
+
+${freqNote}
 
 ПРАВИЛА:
 • thumbnail_style, monetization_path — максимум одно предложение каждый
@@ -171,6 +222,8 @@ function getStylePrompt(lang: string): string {
 
 Только JSON. Начни с { заканчивай с }.`
     : `You are a YouTube content strategist. Based on the niche, provide thumbnail style, growth hacks, monetization path, and SEO keywords.
+
+${freqNote}
 
 RULES:
 • thumbnail_style, monetization_path — max one sentence each
@@ -211,8 +264,9 @@ interface IdeasResult {
   video_ideas: VideoIdea[]
   title_formulas: TitleFormula[]
   content_pillars: string[]
-  reference_channels: Array<{ name: string; why_follow: string }>
+  reference_channels: Array<{ name: string; handle?: string; why_follow: string; verified_url?: string | null }>
   common_mistakes?: string[]
+  continuation_ideas?: Array<{ title: string; format: string; inspired_by: string }>
 }
 
 interface MonthsPlanResult {
@@ -235,10 +289,22 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
     const body = await req.json() as {
-      topic?: string; country?: string; content_lang?: string; ui_lang?: string
+      topic?: string
+      country?: string
+      content_lang?: string
+      ui_lang?: string
+      video_format?: VideoFormat
+      publish_frequency?: number
+      user_channel_url?: string
     }
     const {
-      topic = '', country = 'RU', content_lang = 'ru', ui_lang = 'ru',
+      topic = '',
+      country = 'RU',
+      content_lang = 'ru',
+      ui_lang = 'ru',
+      video_format = 'mixed',
+      publish_frequency = 1,
+      user_channel_url = '',
     } = body
 
     if (!topic.trim()) return NextResponse.json({ ok: false, error: 'Введите тему канала' }, { status: 400 })
@@ -249,7 +315,7 @@ export async function POST(req: NextRequest) {
     const uiLangFull = resolveUserLang(req, ui_lang)
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
 
-    // Fetch user's recent video projects for personalized context
+    // Fetch user's recent video projects for personalized context (Task 1: relevance filter)
     let userProjectsCtx = ''
     try {
       const { data: userProjects } = await supabase
@@ -263,11 +329,45 @@ export async function POST(req: NextRequest) {
         const sanitize = (s: string) => s.replace(/["«»„"]/g, '\'').replace(/[\r\n\t]/g, ' ').trim()
         const lines = userProjects.filter(p => p.topic).map(p => `• ${sanitize(p.topic as string)}`).join('\n')
         userProjectsCtx = ui_lang === 'en'
-          ? `\n\nVideos this user has already created on this platform:\n${lines}\nReference these when relevant (e.g. "building on your video about X...").`
-          : `\n\nВидео, которые этот пользователь уже создавал на платформе:\n${lines}\nСсылайся на них там где уместно (например: «в продолжение вашего видео про X...»).`
+          ? `\n\nVideos this user has already created on this platform:\n${lines}\nOnly reference these if they are relevant to the niche "${topic}" — if unrelated, ignore them completely.`
+          : `\n\nВидео, которые этот пользователь уже создавал на платформе:\n${lines}\nСсылайся на них только если они релевантны нише "${topic}" — если не связаны с нишей, игнорируй полностью.`
       }
     } catch (e) {
       console.warn('[channel-plan] user projects fetch:', e instanceof Error ? e.message : String(e))
+    }
+
+    // Resolve user's own YouTube channel for continuation ideas (Task 5)
+    let userChannelVideos: string[] = []
+    let userChannelError: string | null = null
+    let userChannelEmpty = false
+    if (user_channel_url.trim()) {
+      try {
+        const ytKey = env('YOUTUBE_API_KEY')
+        console.log('[channel-plan] resolving user channel:', user_channel_url.trim())
+        const channelId = await resolveChannelId(user_channel_url.trim(), ytKey)
+        if (!channelId) {
+          userChannelError = ui_lang === 'en'
+            ? 'Channel not found. Check the URL or @handle.'
+            : 'Канал не найден. Проверьте URL или @хэндл.'
+        } else {
+          userChannelVideos = await fetchRecentVideoTitles(channelId, ytKey, 15)
+          userChannelEmpty = userChannelVideos.length === 0
+          console.log(`[channel-plan] user channel resolved, ${userChannelVideos.length} videos`)
+        }
+      } catch (e) {
+        userChannelError = e instanceof Error ? e.message : String(e)
+        console.warn('[channel-plan] user channel fetch failed:', userChannelError)
+      }
+    }
+
+    // Build continuation context for claude1
+    let userContinuationCtx = ''
+    if (userChannelVideos.length > 0) {
+      const sanitize = (s: string) => s.replace(/["«»„"]/g, '\'').replace(/[\r\n\t]/g, ' ').trim()
+      const titles = userChannelVideos.map(t => `• ${sanitize(t)}`).join('\n')
+      userContinuationCtx = ui_lang === 'en'
+        ? `\n\nUser's own YouTube channel recent videos (use for continuation_ideas):\n${titles}`
+        : `\n\nПоследние видео YouTube-канала пользователя (используй для continuation_ideas):\n${titles}`
     }
 
     // Fetch YouTube trends data
@@ -304,29 +404,33 @@ export async function POST(req: NextRequest) {
     }
 
     const userCtx = (ui_lang === 'en'
-      ? `Niche: "${topic}"\nMarket: ${country}, content language: ${content_lang}\n\nTop videos in this niche (last 30 days):\n${ytSummary || 'No data available'}`
-      : `Ниша: "${topic}"\nРынок: ${country}, язык контента: ${content_lang}\n\nТоп видео в этой нише за последние 30 дней:\n${ytSummary || 'Данные недоступны'}`) + userProjectsCtx
+      ? `Niche: "${topic}"\nMarket: ${country}, content language: ${content_lang}\nVideo format: ${fmtDescription('en', video_format)}\n\nTop videos in this niche (last 30 days):\n${ytSummary || 'No data available'}`
+      : `Ниша: "${topic}"\nРынок: ${country}, язык контента: ${content_lang}\nФормат видео: ${fmtDescription('ru', video_format)}\n\nТоп видео в этой нише за последние 30 дней:\n${ytSummary || 'Данные недоступны'}`)
+      + userProjectsCtx
+      + userContinuationCtx
 
     console.log('[channel-plan] running Claude 1 + 2a + 2b in parallel')
     const ctxWithLang = userCtx + langNote(uiLangFull)
 
+    const continuationEnabled = userChannelVideos.length > 0
+
     const [msg1, msg2a, msg2b] = await Promise.all([
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 6000,
-        system: [{ type: 'text', text: getIdeasPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
+        max_tokens: continuationEnabled ? 7000 : 6000,
+        system: [{ type: 'text', text: getIdeasPrompt(ui_lang, video_format, continuationEnabled), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: ctxWithLang }],
       }),
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 2500,
-        system: [{ type: 'text', text: getMonthsPlanPrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: getMonthsPlanPrompt(ui_lang, video_format, publish_frequency), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: ctxWithLang }],
       }),
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 2000,
-        system: [{ type: 'text', text: getStylePrompt(ui_lang), cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: getStylePrompt(ui_lang, publish_frequency), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: ctxWithLang }],
       }),
     ])
@@ -337,12 +441,26 @@ export async function POST(req: NextRequest) {
     console.log('[channel-plan] claude1  tokens:', msg1.usage.input_tokens, 'out:', msg1.usage.output_tokens, 'stop:', msg1.stop_reason)
     console.log('[channel-plan] claude2a tokens:', msg2a.usage.input_tokens, 'out:', msg2a.usage.output_tokens)
     console.log('[channel-plan] claude2b tokens:', msg2b.usage.input_tokens, 'out:', msg2b.usage.output_tokens)
-    console.log('[channel-plan] claude2a raw:', text2a.substring(0, 500))
-    console.log('[channel-plan] claude2b raw:', text2b.substring(0, 500))
 
     const ideas      = parseClaudeJson<IdeasResult>(text1,  'claude1')
     const monthsPlan = parseClaudeJson<MonthsPlanResult>(text2a, 'claude2a')
     const style      = parseClaudeJson<StyleResult>(text2b, 'claude2b')
+
+    // Verify reference channel handles (Task 4) — 1 quota unit each, no search fallback
+    const refChannels = ideas.reference_channels ?? []
+    if (refChannels.length > 0) {
+      const ytKey = env('YOUTUBE_API_KEY')
+      const verified = await Promise.all(
+        refChannels.map(async ch => {
+          const rawHandle = ch.handle?.trim() ?? ''
+          if (!rawHandle || rawHandle === '@') return { ...ch, verified_url: null }
+          const channelId = await verifyHandle(rawHandle, ytKey)
+          const handle = rawHandle.startsWith('@') ? rawHandle : `@${rawHandle}`
+          return { ...ch, verified_url: channelId ? `https://www.youtube.com/${handle}` : null }
+        })
+      )
+      ideas.reference_channels = verified
+    }
 
     const result = {
       channel_name_ideas: ideas.channel_name_ideas ?? [],
@@ -352,6 +470,10 @@ export async function POST(req: NextRequest) {
       content_pillars: ideas.content_pillars ?? [],
       reference_channels: ideas.reference_channels ?? [],
       common_mistakes: ideas.common_mistakes ?? [],
+      continuation_ideas: ideas.continuation_ideas ?? null,
+      user_channel_url: user_channel_url.trim() || undefined,
+      continuation_empty: userChannelEmpty || undefined,
+      continuation_error: userChannelError || undefined,
       month_1: monthsPlan.month_1,
       month_2: monthsPlan.month_2,
       month_3: monthsPlan.month_3,

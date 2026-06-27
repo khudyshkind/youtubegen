@@ -108,19 +108,7 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
-type ChannelRef =
-  | { type: 'handle'; handle: string }
-  | { type: 'id'; channelId: string }
-  | { type: 'search'; query: string }
-
-function detectChannelInput(input: string): ChannelRef {
-  const handleMatch = input.match(/youtube\.com\/@([\w.-]+)|^@([\w.-]+)/)
-  if (handleMatch) return { type: 'handle', handle: handleMatch[1] ?? handleMatch[2] }
-  const idMatch = input.match(/youtube\.com\/channel\/(UC[\w-]+)/)
-  if (idMatch) return { type: 'id', channelId: idMatch[1] }
-  if (/^UC[\w-]{20,}$/.test(input.trim())) return { type: 'id', channelId: input.trim() }
-  return { type: 'search', query: input.trim() }
-}
+import { detectChannelInput } from '@/lib/youtube-channel'
 
 export async function POST(req: NextRequest) {
   try {

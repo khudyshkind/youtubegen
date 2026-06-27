@@ -917,6 +917,10 @@ export const translations = {
     'analytics.niche_potential':    'Нишевый потенциал',
     'analytics.common_mistakes':    'Типичные ошибки новичков в этой нише',
     'analytics.seo_refresh_hint':   'Рекомендуем обновлять ключевые слова каждые 1–2 месяца по мере роста канала.',
+    'analytics.video_format_label': 'Формат видео',
+    'analytics.publish_freq_label': 'Частота публикаций',
+    'analytics.user_channel_label': 'Ваш YouTube канал (необязательно)',
+    'analytics.continuation_title': 'Продолжение ваших тем',
     'analytics.trend_ideas':        'Идеи для видео:',
     'analytics.example_videos':     'Примеры вирусных видео:',
 
@@ -1844,6 +1848,10 @@ export const translations = {
     'analytics.niche_potential':    'Niche Potential',
     'analytics.common_mistakes':    'Typical Beginner Mistakes in This Niche',
     'analytics.seo_refresh_hint':   'Recommend refreshing keywords every 1–2 months as your channel grows.',
+    'analytics.video_format_label': 'Video format',
+    'analytics.publish_freq_label': 'Publishing frequency',
+    'analytics.user_channel_label': 'Your YouTube channel (optional)',
+    'analytics.continuation_title': 'Follow-up Ideas for Your Channel',
     'analytics.trend_ideas':        'Video ideas:',
     'analytics.example_videos':     'Viral video examples:',
 

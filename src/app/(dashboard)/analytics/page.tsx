@@ -184,8 +184,12 @@ interface ChannelPlanResult {
   video_ideas: Array<{ title: string; format: string; why_works: string; best_time: string; priority: string }>
   title_formulas: Array<{ formula: string; example: string }>
   content_pillars: string[]
-  reference_channels?: Array<{ name: string; why_follow: string }>
+  reference_channels?: Array<{ name: string; handle?: string; why_follow: string; verified_url?: string | null }>
   common_mistakes?: string[]
+  continuation_ideas?: Array<{ title: string; format: string; inspired_by: string }> | null
+  user_channel_url?: string
+  continuation_empty?: boolean
+  continuation_error?: string
   month_1: MonthPlan
   month_2: MonthPlan
   month_3: MonthPlan
@@ -1029,12 +1033,13 @@ function NicheFinderTab({ onGoToNiche, onGoToPlan, externalResult, onClearExtern
 
 // ─── Channel Plan Tab ─────────────────────────────────────────────────────────
 
-function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToNiche, onGoToKeywords }: {
+function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToNiche, onGoToKeywords, onGoToChannel }: {
   initialTopic?: string
   externalResult?: ChannelPlanResult | null
   onClearExternal?: () => void
   onGoToNiche?: (topic: string) => void
   onGoToKeywords?: (topic: string) => void
+  onGoToChannel?: (channelUrl: string) => void
 }) {
   const { t, lang: uiLang } = useLang()
   const router = useRouter()
@@ -1043,6 +1048,9 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
   const [topic, setTopic] = useState(initialTopic ?? '')
   const [country, setCountry] = useState('RU')
   const [contentLang, setContentLang] = useState('ru')
+  const [videoFormat, setVideoFormat] = useState<'long' | 'shorts' | 'mixed'>('mixed')
+  const [publishFreq, setPublishFreq] = useState<1 | 2 | 3>(1)
+  const [userChannelUrl, setUserChannelUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [step, setStepN] = useState(0)
   const [error, setError] = useState('')
@@ -1070,7 +1078,7 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
       const res = await fetch('/api/analytics/channel-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, country, content_lang: contentLang, ui_lang: uiLang }),
+        body: JSON.stringify({ topic, country, content_lang: contentLang, ui_lang: uiLang, video_format: videoFormat, publish_frequency: publishFreq, user_channel_url: userChannelUrl }),
       })
       const json = await res.json() as { ok: boolean; data?: ChannelPlanResult; error?: string; code?: string }
       if (!json.ok) {
@@ -1327,9 +1335,23 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
             {result.reference_channels.map((ch, i) => (
               <div key={i} className="flex gap-3">
                 <span className="text-violet-400 shrink-0 mt-0.5">▶</span>
-                <div>
-                  <p className="text-sm font-semibold text-white">{ch.name}</p>
+                <div className="flex-1 min-w-0">
+                  {ch.verified_url ? (
+                    <a href={ch.verified_url} target="_blank" rel="noopener noreferrer"
+                      className="text-sm font-semibold text-violet-300 hover:text-white transition-colors underline decoration-violet-500/40">
+                      {ch.name}
+                    </a>
+                  ) : (
+                    <p className="text-sm font-semibold text-white">{ch.name}</p>
+                  )}
                   <p className="text-xs text-slate-500 mt-0.5">{ch.why_follow}</p>
+                  {ch.verified_url && onGoToChannel && (
+                    <button onClick={() => onGoToChannel(ch.verified_url!)}
+                      className="mt-1.5 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors"
+                      style={{ background: 'rgba(124,58,237,0.12)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.25)' }}>
+                      📊 {uiLang === 'en' ? 'Analyze channel' : 'Анализ канала'}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -1398,6 +1420,42 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
               </div>
             </div>
           )}
+        </Card>
+      )}
+      {/* Continuation ideas (user's own channel) */}
+      {result.user_channel_url && (
+        <Card>
+          <SectionTitle>{uiLang === 'en' ? '🔄 Follow-up Ideas for Your Channel' : '🔄 Продолжение ваших тем'}</SectionTitle>
+          {result.continuation_error ? (
+            <p className="text-sm text-red-400">{result.continuation_error}</p>
+          ) : result.continuation_empty ? (
+            <p className="text-sm text-slate-500">{uiLang === 'en' ? 'No videos found on your channel yet.' : 'На вашем канале пока нет видео.'}</p>
+          ) : result.continuation_ideas && result.continuation_ideas.length > 0 ? (
+            <div className="flex flex-col gap-3">
+              {result.continuation_ideas.map((idea, i) => (
+                <div key={i} className="flex gap-3 items-start">
+                  <span className="text-emerald-400 shrink-0 mt-0.5">→</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium text-white">{idea.title}</p>
+                      <span className="text-xs px-2 py-0.5 rounded-full"
+                        style={{ background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.2)' }}>
+                        {idea.format}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {uiLang === 'en' ? 'Based on: ' : 'На основе: '}{idea.inspired_by}
+                    </p>
+                  </div>
+                  <button onClick={() => goToStudio(idea.title)}
+                    className="shrink-0 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors"
+                    style={{ background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.2)' }}>
+                    {uiLang === 'en' ? '▶ Create' : '▶ Снять'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </Card>
       )}
     </div>
@@ -1474,6 +1532,43 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
                 <option value="uk">Украинский / Ukrainian</option>
               </select>
             </div>
+          </div>
+          <div className="flex gap-3 flex-wrap">
+            <div className="flex-1 min-w-36">
+              <label className="block text-xs text-slate-400 mb-1.5">
+                {uiLang === 'en' ? 'Video format' : 'Формат видео'}
+              </label>
+              <select value={videoFormat} onChange={e => setVideoFormat(e.target.value as 'long' | 'shorts' | 'mixed')}
+                className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none" style={selectStyle}>
+                <option value="mixed">{uiLang === 'en' ? '🎬 Mix (70% Long + 30% Shorts)' : '🎬 Смесь (70% длинные + 30% Shorts)'}</option>
+                <option value="long">{uiLang === 'en' ? '📹 Long-form only (8+ min)' : '📹 Только длинные (8+ мин)'}</option>
+                <option value="shorts">{uiLang === 'en' ? '⚡ Shorts only (under 60 sec)' : '⚡ Только Shorts (до 60 сек)'}</option>
+              </select>
+            </div>
+            <div className="flex-1 min-w-36">
+              <label className="block text-xs text-slate-400 mb-1.5">
+                {uiLang === 'en' ? 'Publishing frequency' : 'Частота публикаций'}
+              </label>
+              <select value={publishFreq} onChange={e => setPublishFreq(Number(e.target.value) as 1 | 2 | 3)}
+                className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none" style={selectStyle}>
+                <option value={1}>{uiLang === 'en' ? '1 video / week' : '1 видео / неделю'}</option>
+                <option value={2}>{uiLang === 'en' ? '2 videos / week' : '2 видео / неделю'}</option>
+                <option value={3}>{uiLang === 'en' ? '3 videos / week' : '3 видео / неделю'}</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1.5">
+              {uiLang === 'en' ? 'Your YouTube channel (optional — for follow-up ideas)' : 'Ваш YouTube канал (необязательно — для идей продолжения)'}
+            </label>
+            <input
+              type="text"
+              value={userChannelUrl}
+              onChange={e => setUserChannelUrl(e.target.value)}
+              placeholder={uiLang === 'en' ? '@yourchannel or youtube.com/@yourchannel' : '@вашканал или youtube.com/@вашканал'}
+              className={inputCls}
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+            />
           </div>
 
           {error && <p className="text-sm text-red-400">{error}</p>}
@@ -3445,6 +3540,13 @@ export default function AnalyticsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  function handleGoToChannelFromPlan(channelUrl: string) {
+    setPendingChannelQuery(channelUrl)
+    setTab('channel')
+    clearOpenedReport()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   function handleGoToPlan(topic: string) {
     setChannelPlanInitialTopic(topic)
     setTab('channel_plan')
@@ -3550,6 +3652,7 @@ export default function AnalyticsPage() {
             onClearExternal={clearOpenedReport}
             onGoToNiche={handleGoToNicheFromFinder}
             onGoToKeywords={handleGoToKeywordsFromPlan}
+            onGoToChannel={handleGoToChannelFromPlan}
           />
         )}
         {tab === 'trends' && (
