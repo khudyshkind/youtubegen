@@ -1143,7 +1143,7 @@ export default function Step3Voice() {
         ) : audioUrl ? (
           `↺ ${t('step2.regenerate')} · −${cost} ${t('nav.credits_suffix')}`
         ) : (
-          `🎙 ${t('studio.step3')} · −${cost} ${t('nav.credits_suffix')}`
+          `🎙 ${t('step3.generate_btn')} · −${cost} ${t('nav.credits_suffix')}`
         )}
       </button>
 

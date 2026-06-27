@@ -46,6 +46,21 @@ interface AudioRequest {
   apihost_pitch?: number
 }
 
+// Remove structural scene/section markers inserted by the script generator
+// (e.g. "[Сцена 1: Название]") so TTS doesn't pronounce them literally.
+// These markers are kept in the stored script for display and image-generation
+// context — they are only stripped here, immediately before TTS synthesis.
+function stripSectionMarkers(text: string): string {
+  return text
+    // [Сцена N: any text] — scene markers from scene_markers option
+    .replace(/\[Сцена\s+\d+[^\]]*\]\s*/gi, '')
+    // [Scene N: any text] — English variant
+    .replace(/\[Scene\s+\d+[^\]]*\]\s*/gi, '')
+    // Collapse 3+ consecutive newlines down to 2 (paragraph break)
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 // Split text into chunks that fit within the per-engine character/byte limit.
 // Splits at paragraph and sentence boundaries to avoid unnatural mid-speech breaks.
 function splitTextIntoChunks(text: string, maxChars: number, measureBytes: boolean): string[] {
@@ -248,9 +263,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(check, { status: 402 })
     }
 
+    // Strip structural markers before TTS — they must not be spoken aloud.
+    // Cost was already calculated from the original text length (correct behaviour:
+    // user pays for the script they wrote, not the stripped version).
+    const ttsText = stripSectionMarkers(text)
+
     let audioBuffer: Buffer
     const { maxChars, measureBytes } = CHUNK_LIMITS[engine]
-    const chunks = splitTextIntoChunks(text, maxChars, measureBytes)
+    const chunks = splitTextIntoChunks(ttsText, maxChars, measureBytes)
 
     if (chunks.length > 1) {
       console.log(`[generate/audio] ${engine}: ${chunks.length} chunks for ${chars} chars`)
