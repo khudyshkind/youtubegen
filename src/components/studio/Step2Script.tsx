@@ -32,7 +32,7 @@ function SpinnerIcon({ className }: { className?: string }) {
 }
 
 export default function Step2Script() {
-  const { scriptParams, setScriptParams, projectId, script, setScript, setStep } = useStudioStore()
+  const { scriptParams, setScriptParams, projectId, planSections, script, setScript, setStep } = useStudioStore()
   const { t } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -58,7 +58,7 @@ export default function Step2Script() {
       const res = await fetch('/api/generate/script', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...scriptParams, project_id: projectId }),
+        body: JSON.stringify({ ...scriptParams, project_id: projectId, plan_sections: planSections.length > 0 ? planSections : undefined }),
       })
       const json = await res.json()
       if (!json.ok) {
@@ -297,7 +297,7 @@ export default function Step2Script() {
           )}
           <button
             type="button"
-            onClick={() => setStep(3)}
+            onClick={() => setStep(4)}
             className="flex items-center gap-1 py-2 px-3 text-slate-500 text-xs font-medium rounded-xl hover:text-slate-300 transition-colors"
             style={{ border: '1px solid rgba(255,255,255,0.07)' }}
           >
@@ -348,14 +348,14 @@ export default function Step2Script() {
       <div className="flex gap-3">
         <button
           type="button"
-          onClick={() => setStep(1)}
+          onClick={() => setStep(2)}
           className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
           {t('step2.back')}
         </button>
         <button
           type="button"
-          onClick={() => setStep(3)}
+          onClick={() => setStep(4)}
           disabled={!hasScript}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40"
         >

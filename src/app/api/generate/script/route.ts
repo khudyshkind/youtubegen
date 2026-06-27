@@ -6,11 +6,12 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
-import type { ScriptParams } from '@/lib/types'
+import type { ScriptParams, PlanSection } from '@/lib/types'
 import { CREDIT_COSTS } from '@/lib/types'
 
 interface ScriptRequest extends ScriptParams {
   project_id?: string
+  plan_sections?: PlanSection[]
 }
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -53,7 +54,7 @@ const HOOK_LABELS: Record<string, string> = {
   provocation: 'провокационное заявление',
 }
 
-function buildPrompt(p: ScriptParams): string {
+function buildPrompt(p: ScriptParams, planSections?: PlanSection[]): string {
   const wordsTarget = p.duration_minutes * 130
   const langName = LANGUAGE_NAMES[p.language] ?? p.language
 
@@ -79,6 +80,22 @@ function buildPrompt(p: ScriptParams): string {
   }
   if (p.pauses) {
     lines.push('- Добавь паузы для дыхания в виде [...] в местах естественных остановок')
+  }
+
+  if (planSections && planSections.length > 0) {
+    lines.push(
+      '',
+      'СТРУКТУРА ВИДЕО (следуй этому плану точно — количество и порядок секций):',
+    )
+    for (let i = 0; i < planSections.length; i++) {
+      const s = planSections[i]
+      lines.push(`[Секция ${i + 1}: ${s.title}]`)
+      lines.push(s.description)
+      lines.push('')
+    }
+    if (p.scene_markers) {
+      lines.push('Используй названия секций выше как заголовки маркеров [Сцена N: Название].')
+    }
   }
 
   lines.push(
@@ -140,7 +157,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: ScriptRequest = await request.json()
-    const { project_id, ...scriptParams } = body
+    const { project_id, plan_sections, ...scriptParams } = body
     const { model } = scriptParams
 
     Sentry.setUser({ id: user.id })
@@ -154,7 +171,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(check, { status: 402 })
     }
 
-    const prompt = buildPrompt(scriptParams)
+    const prompt = buildPrompt(scriptParams, plan_sections)
     const maxTokens = calcMaxTokens(scriptParams.duration_minutes)
     console.log(`[generate/script] duration=${scriptParams.duration_minutes}min max_tokens=${maxTokens}`)
 
@@ -172,9 +189,18 @@ export async function POST(request: NextRequest) {
     await spendCredits(user.id, cost, operation, project_id)
 
     if (project_id) {
+      const update: Record<string, unknown> = {
+        script,
+        status: 'draft',
+        credits_spent: cost,
+        language: scriptParams.language ?? null,
+      }
+      if (plan_sections && plan_sections.length > 0) {
+        update.plan_sections = plan_sections
+      }
       await supabase
         .from('projects')
-        .update({ script, status: 'draft', credits_spent: cost, language: scriptParams.language ?? null })
+        .update(update)
         .eq('id', project_id)
         .eq('user_id', user.id)
     }

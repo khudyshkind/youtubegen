@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { useStudioStore } from '@/lib/studio-store'
 import type { Project } from '@/lib/types'
 import Step1Topic from './Step1Topic'
+import Step2Plan from './Step2Plan'
 import Step2Script from './Step2Script'
 import Step3Voice from './Step3Voice'
 import Step4Subtitles from './Step4Subtitles'
@@ -13,17 +14,18 @@ import Step6Video from './Step6Video'
 import Step7Seo from './Step7Seo'
 import { useLang } from '@/hooks/useLang'
 
-type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7
+type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 
-const STEP_KEYS = ['step1', 'step2', 'step3', 'step4', 'step5', 'step6', 'step7'] as const
+const STEP_KEYS = ['step1', 'step2', 'step3', 'step4', 'step5', 'step6', 'step7', 'step8'] as const
 
 function inferStep(p: Project): Step {
-  if (p.seo) return 7
-  if (p.video_url) return 7
-  if (p.scene_images && p.scene_images.length > 0) return 6
-  if (p.subtitle_blocks && p.subtitle_blocks.length > 0) return 5
-  if (p.audio_url) return 4
-  if (p.script) return 3
+  if (p.seo) return 8
+  if (p.video_url) return 8
+  if (p.scene_images && p.scene_images.length > 0) return 7
+  if (p.subtitle_blocks && p.subtitle_blocks.length > 0) return 6
+  if (p.audio_url) return 5
+  if (p.script) return 4
+  if (p.plan_sections && p.plan_sections.length > 0) return 3
   return 2
 }
 
@@ -31,7 +33,7 @@ function StepWizardInner() {
   const searchParams = useSearchParams()
   const projectParam = searchParams.get('project')
 
-  const { currentStep, reset, setStep, setProjectId, setScriptParams, setScript,
+  const { currentStep, reset, setStep, setProjectId, setScriptParams, setPlanSections, setScript,
     setVoiceId, setAudioUrl, setSubtitleBlocks, setSceneImages, setVideoUrl, setSeo,
     setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode } = useStudioStore()
 
@@ -82,6 +84,7 @@ function StepWizardInner() {
         console.log('[studio] loaded data:', p.topic)
         setProjectId(p.id)
         setScriptParams({ topic: p.topic, duration_minutes: p.duration_minutes, ...(p.language ? { language: p.language as import('@/lib/types').ScriptLanguage } : {}) })
+        if (p.plan_sections) setPlanSections(p.plan_sections)
         if (p.script) setScript(p.script)
         if (p.voice_id) setVoiceId(p.voice_id)
         if (p.audio_url) setAudioUrl(p.audio_url)
@@ -203,12 +206,13 @@ function StepWizardInner() {
         }}
       >
         {currentStep === 1 && <Step1Topic />}
-        {currentStep === 2 && <Step2Script />}
-        {currentStep === 3 && <Step3Voice />}
-        {currentStep === 4 && <Step4Subtitles />}
-        {currentStep === 5 && <Step5Images />}
-        {currentStep === 6 && <Step6Video />}
-        {currentStep === 7 && <Step7Seo />}
+        {currentStep === 2 && <Step2Plan />}
+        {currentStep === 3 && <Step2Script />}
+        {currentStep === 4 && <Step3Voice />}
+        {currentStep === 5 && <Step4Subtitles />}
+        {currentStep === 6 && <Step5Images />}
+        {currentStep === 7 && <Step6Video />}
+        {currentStep === 8 && <Step7Seo />}
       </div>
 
       {currentStep > 1 && (

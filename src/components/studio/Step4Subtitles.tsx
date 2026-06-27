@@ -267,14 +267,14 @@ export default function Step4Subtitles() {
       <div className="flex gap-3">
         <button
           type="button"
-          onClick={() => setStep(3)}
+          onClick={() => setStep(4)}
           className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
           {t('step4.back')}
         </button>
         <button
           type="button"
-          onClick={() => setStep(5)}
+          onClick={() => setStep(6)}
           disabled={subtitleBlocks.length === 0}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40"
         >
@@ -283,7 +283,7 @@ export default function Step4Subtitles() {
         {subtitleBlocks.length === 0 && (
           <button
             type="button"
-            onClick={() => setStep(5)}
+            onClick={() => setStep(6)}
             className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
           >
             {t('step4.skip')}

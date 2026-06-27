@@ -1,10 +1,10 @@
 import { create } from 'zustand'
 import type {
   ScriptParams, SubtitleBlock, SceneImage, SeoData,
-  VoiceSettings, SubtitleStyle,
+  VoiceSettings, SubtitleStyle, PlanSection,
 } from './types'
 
-export type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7
+export type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 
 interface StudioState {
   currentStep: Step
@@ -13,7 +13,10 @@ interface StudioState {
   // Step 1: Topic & params
   scriptParams: ScriptParams
 
-  // Step 2: Script
+  // Step 2: Plan
+  planSections: PlanSection[]
+
+  // Step 3: Script
   script: string | null
 
   // Step 3: Voice
@@ -51,6 +54,7 @@ interface StudioState {
   setStep: (step: Step) => void
   setProjectId: (id: string) => void
   setScriptParams: (params: Partial<ScriptParams>) => void
+  setPlanSections: (sections: PlanSection[]) => void
   setScript: (script: string) => void
   setVoiceSettings: (settings: Partial<VoiceSettings>) => void
   setVoiceId: (id: string) => void          // backwards-compat for DB restore
@@ -108,6 +112,7 @@ const initialState = {
   currentStep: 1 as Step,
   projectId: null,
   scriptParams: defaultScriptParams,
+  planSections: [] as PlanSection[],
   script: null,
   voiceSettings: defaultVoiceSettings,
   audioUrl: null,
@@ -134,6 +139,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setProjectId: (id) => set({ projectId: id }),
   setScriptParams: (params) =>
     set((s) => ({ scriptParams: { ...s.scriptParams, ...params } })),
+  setPlanSections: (sections) => set({ planSections: sections }),
   setScript: (script) => set({ script }),
   setVoiceSettings: (settings) =>
     set((s) => ({ voiceSettings: { ...s.voiceSettings, ...settings } })),

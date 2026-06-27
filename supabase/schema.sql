@@ -430,6 +430,9 @@ alter table public.projects add column if not exists language text;
 alter table public.profiles alter column credits set default 30;
 update public.profiles set credits = 30 where plan = 'free' and credits < 30;
 
+-- Migration: plan_sections for the new Plan step (Step 2, between Topic and Script)
+alter table public.projects add column if not exists plan_sections jsonb;
+
 -- Migration: Sentry webhook deduplication (prevents notification spam for same issue)
 create table if not exists public.sentry_alert_dedup (
   issue_id     text        primary key,

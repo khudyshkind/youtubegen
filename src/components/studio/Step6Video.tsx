@@ -473,7 +473,7 @@ export default function Step6Video() {
             </p>
             <button
               type="button"
-              onClick={() => setStep(4)}
+              onClick={() => setStep(5)}
               className="text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors"
             >
               {t('step6.step4_link')}
@@ -879,14 +879,14 @@ export default function Step6Video() {
       <div className="flex gap-3">
         <button
           type="button"
-          onClick={() => setStep(5)}
+          onClick={() => setStep(6)}
           className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
           {t('step6.back')}
         </button>
         <button
           type="button"
-          onClick={() => setStep(7)}
+          onClick={() => setStep(8)}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm"
         >
           {t('step6.next')}

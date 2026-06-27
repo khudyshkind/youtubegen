@@ -1,6 +1,14 @@
 export type Plan = 'free' | 'basic' | 'starter' | 'pro' | 'agency'
 
+export interface PlanSection {
+  title: string
+  description: string
+}
+
 export const CREDIT_COSTS = {
+  // Plan
+  plan: 1,
+
   // Script
   script_sonnet: 4,
   script_opus:   7,
@@ -203,6 +211,7 @@ export interface Project {
   duration_minutes: number
   language: string | null
   voice_id: string | null
+  plan_sections: PlanSection[] | null
   script: string | null
   audio_url: string | null
   subtitle_blocks: SubtitleBlock[] | null

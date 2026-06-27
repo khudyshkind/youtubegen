@@ -950,7 +950,7 @@ export default function Step7Seo() {
       <div className="flex gap-3">
         <button
           type="button"
-          onClick={() => setStep(6)}
+          onClick={() => setStep(7)}
           className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
           {t('step7.back')}

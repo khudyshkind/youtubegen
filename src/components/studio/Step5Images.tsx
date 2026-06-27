@@ -849,7 +849,7 @@ export default function Step5Images() {
           </button>
           <button
             type="button"
-            onClick={() => setStep(6)}
+            onClick={() => setStep(7)}
             className="flex items-center gap-1 py-2 px-3 text-slate-500 text-xs font-medium rounded-xl hover:text-slate-300 transition-colors"
             style={{ border: '1px solid rgba(255,255,255,0.07)' }}
           >
@@ -1050,14 +1050,14 @@ export default function Step5Images() {
       <div className="flex gap-3">
         <button
           type="button"
-          onClick={() => setStep(4)}
+          onClick={() => setStep(5)}
           className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
         >
           {t('step5.back')}
         </button>
         <button
           type="button"
-          onClick={() => setStep(6)}
+          onClick={() => setStep(7)}
           disabled={sceneImages.length === 0}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40"
         >

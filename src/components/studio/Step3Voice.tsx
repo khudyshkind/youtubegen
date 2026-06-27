@@ -1187,7 +1187,7 @@ export default function Step3Voice() {
               </>
             )}
           </button>
-          <button type="button" onClick={() => setStep(4)}
+          <button type="button" onClick={() => setStep(5)}
             className="flex items-center gap-1 py-2 px-3 text-slate-500 text-xs font-medium rounded-xl hover:text-slate-300 transition-colors"
             style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
             {t('step3.skip')}
@@ -1231,10 +1231,10 @@ export default function Step3Voice() {
       )}
 
       <div className="flex gap-3">
-        <button type="button" onClick={() => setStep(2)} className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm">
+        <button type="button" onClick={() => setStep(3)} className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm">
           {t('step3.back')}
         </button>
-        <button type="button" onClick={() => setStep(4)} disabled={!audioUrl}
+        <button type="button" onClick={() => setStep(5)} disabled={!audioUrl}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40">
           {t('step3.next')}
         </button>

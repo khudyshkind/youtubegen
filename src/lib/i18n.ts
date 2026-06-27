@@ -46,12 +46,13 @@ export const translations = {
 
     // ── Studio steps ──────────────────────────────────────────────────────────
     'studio.step1':    'Тема',
-    'studio.step2':    'Сценарий',
-    'studio.step3':    'Озвучка',
-    'studio.step4':    'Субтитры',
-    'studio.step5':    'Картинки',
-    'studio.step6':    'Видео',
-    'studio.step7':    'SEO',
+    'studio.step2':    'План',
+    'studio.step3':    'Сценарий',
+    'studio.step4':    'Озвучка',
+    'studio.step5':    'Субтитры',
+    'studio.step6':    'Картинки',
+    'studio.step7':    'Видео',
+    'studio.step8':    'SEO',
     'studio.loading':  'Загрузка проекта...',
     'studio.not_found':'Проект не найден',
     'studio.new_project': 'Создать новый проект',
@@ -74,7 +75,7 @@ export const translations = {
     'step1.cta':                'Призыв к действию',
     'step1.scene_markers':      'Маркеры сцен',
     'step1.pauses':             'Паузы',
-    'step1.next':               'Далее: Сценарий →',
+    'step1.next':               'Далее: План →',
     'step1.credits_suffix':     'кр.',
     // Model labels
     'model.standard':    'Стандартная',
@@ -106,8 +107,31 @@ export const translations = {
     'hook.story':       'История',
     'hook.provocation': 'Провокация',
 
-    // ── Step 2 ────────────────────────────────────────────────────────────────
-    'step2.title':         'Шаг 2: Сценарий',
+    // ── Step 2 (Plan) ────────────────────────────────────────────────────────────
+    'plan.title':              'Шаг 2: План видео',
+    'plan.subtitle':           'Структура перед генерацией сценария',
+    'plan.hint':               'Отредактируйте структуру перед тем как тратить кредиты на полный текст',
+    'plan.generating':         'Генерация плана...',
+    'plan.generate_btn':       '✨ Сгенерировать план (−1 кр.)',
+    'plan.regenerate_btn':     '↺ Перегенерировать план (−1 кр.)',
+    'plan.section_title_ph':   'Заголовок секции',
+    'plan.section_desc_ph':    'Краткое описание (1-2 предложения)',
+    'plan.add_section':        '+ Добавить секцию',
+    'plan.delete_section':     'Удалить',
+    'plan.skip':               'Пропустить план →',
+    'plan.back':               '← Назад',
+    'plan.next':               'Далее: Сценарий →',
+    'plan.move_up':            'Вверх',
+    'plan.move_down':          'Вниз',
+    'plan.err_credits':        'Недостаточно кредитов',
+    'plan.err_gen':            'Ошибка генерации плана',
+    'plan.section_n':          'Секция',
+    'plan.sections_count':     'секций',
+    'plan.new_section_title':  'Новая секция',
+    'plan.new_section_desc':   'Опишите содержание этой секции',
+
+    // ── Step 3 (Script, formerly Step 2) ─────────────────────────────────────
+    'step2.title':         'Шаг 3: Сценарий',
     'step2.topic_prefix':  'Тема:',
     'step2.generate':      '✨ Сгенерировать сценарий',
     'step2.regenerate':    '↺ Перегенерировать',
@@ -432,8 +456,8 @@ export const translations = {
     'step1.pauses_hint':    '[ПАУЗА] — ориентир для диктора',
     'step1.credits_label':  'Генерация сценария:',
 
-    // ── Step 3 ────────────────────────────────────────────────────────────────────
-    'step3.title':          'Шаг 3: Озвучка',
+    // ── Step 4 (Voice, formerly Step 3) ──────────────────────────────────────────
+    'step3.title':          'Шаг 4: Озвучка',
     'step3.subtitle':       'Выберите движок и голос для синтеза речи',
     'step3.engine':         'Движок TTS',
     'step3.soon':           'Скоро',
@@ -516,12 +540,12 @@ export const translations = {
     'voice.style_emotional':     'Эмоциональный',
 
     // ── Step 4 ────────────────────────────────────────────────────────────────────
-    'step4.title':       'Шаг 4: Субтитры',
+    'step4.title':       'Шаг 5: Субтитры',
     'step4.subtitle':    'Автоматическое распознавание речи и создание субтитров',
     'step4.desc':        'Распознаёт речь и создаёт блоки субтитров с тайм-кодами',
     'step4.transcribing':'Транскрибация... (30–60 сек)',
     'step4.generate_btn':'📝 Создать субтитры (−2 кр./мин)',
-    'step4.no_audio':    'Сначала сгенерируйте аудио на шаге 3',
+    'step4.no_audio':    'Сначала сгенерируйте аудио на шаге 4',
     'step4.upload_srt':  'Загрузить .srt файл',
     'step4.regenerate':  '↺ Перегенерировать',
     'step4.style_settings': 'Настройки стиля',
@@ -556,8 +580,8 @@ export const translations = {
     'subs.color_yellow': 'Жёлтый',
     'subs.color_black':  'Чёрный',
 
-    // ── Step 5 ────────────────────────────────────────────────────────────────────
-    'step5.title':       'Шаг 5: Иллюстрации',
+    // ── Step 6 (Images, formerly Step 5) ─────────────────────────────────────────
+    'step5.title':       'Шаг 6: Иллюстрации',
     'step5.subtitle':    'Настройте частоту смены иллюстраций и сгенерируйте изображения',
     'step5.interval':    'Смена изображения каждые...',
     'step5.sec':         'сек',
@@ -568,7 +592,7 @@ export const translations = {
     'step5.click_hint':  'Нажмите на изображение чтобы перейти к этому моменту в аудио.',
     'step5.audio_hint':  'Вернитесь на шаг озвучки чтобы прослушать аудио вместе с иллюстрациями.',
     'step5.regen_hint':  '— нажмите ↺ для перегенерации отдельной сцены',
-    'step5.err_no_script': 'Сначала сгенерируйте сценарий (шаг 2)',
+    'step5.err_no_script': 'Сначала сгенерируйте сценарий (шаг 3)',
     'step5.err_gen':     'Ошибка генерации иллюстраций',
     'step5.err_no_project': 'Сначала создайте проект (шаг 1)',
     'step5.err_upload':  'Ошибка загрузки изображений',
@@ -609,8 +633,8 @@ export const translations = {
     'step5.ref_analyzing':   'Анализирую стиль...',
     'step5.ref_detected':    'Стиль:',
 
-    // ── Step 6 ────────────────────────────────────────────────────────────────────
-    'step6.title':          'Шаг 6: Сборка видео',
+    // ── Step 7 (Video, formerly Step 6) ──────────────────────────────────────────
+    'step6.title':          'Шаг 7: Сборка видео',
     'step6.subtitle':       'Соберите готовый MP4 автоматически или скачайте исходники для монтажа вручную',
     'step6.ready_assets':   'Готовые материалы',
     'step6.audio_label':    'Аудио MP3',
@@ -679,8 +703,8 @@ export const translations = {
     'effect.lens_flare':'Блик',
     'effect.vhs':       'VHS',
 
-    // ── Step 7 ────────────────────────────────────────────────────────────────────
-    'step7.title':       'Шаг 7: SEO + Превью',
+    // ── Step 8 (SEO, formerly Step 7) ────────────────────────────────────────────
+    'step7.title':       'Шаг 8: SEO + Превью',
     'step7.subtitle':    'Заголовок, описание, теги и превью для максимального охвата',
     'step7.generating':  'Генерация SEO...',
     'step7.title_label': 'Заголовок',
@@ -952,12 +976,13 @@ export const translations = {
 
     // ── Studio steps ──────────────────────────────────────────────────────────
     'studio.step1':    'Topic',
-    'studio.step2':    'Script',
-    'studio.step3':    'Voiceover',
-    'studio.step4':    'Subtitles',
-    'studio.step5':    'Images',
-    'studio.step6':    'Video',
-    'studio.step7':    'SEO',
+    'studio.step2':    'Plan',
+    'studio.step3':    'Script',
+    'studio.step4':    'Voiceover',
+    'studio.step5':    'Subtitles',
+    'studio.step6':    'Images',
+    'studio.step7':    'Video',
+    'studio.step8':    'SEO',
     'studio.loading':  'Loading project...',
     'studio.not_found':'Project not found',
     'studio.new_project': 'Create new project',
@@ -980,7 +1005,7 @@ export const translations = {
     'step1.cta':                'Call to action',
     'step1.scene_markers':      'Scene markers',
     'step1.pauses':             'Pauses',
-    'step1.next':               'Next: Script →',
+    'step1.next':               'Next: Plan →',
     'step1.credits_suffix':     'cr.',
     // Model labels
     'model.standard':    'Standard',
@@ -1012,8 +1037,31 @@ export const translations = {
     'hook.story':       'Story',
     'hook.provocation': 'Provocation',
 
-    // ── Step 2 ────────────────────────────────────────────────────────────────
-    'step2.title':         'Step 2: Script',
+    // ── Step 2 (Plan) ────────────────────────────────────────────────────────────
+    'plan.title':              'Step 2: Video Plan',
+    'plan.subtitle':           'Structure before generating the full script',
+    'plan.hint':               'Edit the structure before spending credits on the full text',
+    'plan.generating':         'Generating plan...',
+    'plan.generate_btn':       '✨ Generate plan (−1 cr.)',
+    'plan.regenerate_btn':     '↺ Regenerate plan (−1 cr.)',
+    'plan.section_title_ph':   'Section title',
+    'plan.section_desc_ph':    'Brief description (1-2 sentences)',
+    'plan.add_section':        '+ Add section',
+    'plan.delete_section':     'Delete',
+    'plan.skip':               'Skip plan →',
+    'plan.back':               '← Back',
+    'plan.next':               'Next: Script →',
+    'plan.move_up':            'Up',
+    'plan.move_down':          'Down',
+    'plan.err_credits':        'Not enough credits',
+    'plan.err_gen':            'Plan generation error',
+    'plan.section_n':          'Section',
+    'plan.sections_count':     'sections',
+    'plan.new_section_title':  'New section',
+    'plan.new_section_desc':   'Describe what will be in this section',
+
+    // ── Step 3 (Script, formerly Step 2) ─────────────────────────────────────
+    'step2.title':         'Step 3: Script',
     'step2.topic_prefix':  'Topic:',
     'step2.generate':      '✨ Generate script',
     'step2.regenerate':    '↺ Regenerate',
@@ -1338,8 +1386,8 @@ export const translations = {
     'step1.pauses_hint':    '[PAUSE] — marker for narrator',
     'step1.credits_label':  'Script generation:',
 
-    // ── Step 3 ────────────────────────────────────────────────────────────────────
-    'step3.title':          'Step 3: Voiceover',
+    // ── Step 4 (Voice, formerly Step 3) ──────────────────────────────────────────
+    'step3.title':          'Step 4: Voiceover',
     'step3.subtitle':       'Choose a TTS engine and voice for speech synthesis',
     'step3.engine':         'TTS Engine',
     'step3.soon':           'Soon',
@@ -1420,13 +1468,13 @@ export const translations = {
     'voice.style_documentary':   'Documentary',
     'voice.style_emotional':     'Emotional',
 
-    // ── Step 4 ────────────────────────────────────────────────────────────────────
-    'step4.title':       'Step 4: Subtitles',
+    // ── Step 5 (Subtitles, formerly Step 4) ──────────────────────────────────────
+    'step4.title':       'Step 5: Subtitles',
     'step4.subtitle':    'Automatic speech recognition and subtitle creation',
     'step4.desc':        'Recognizes speech and creates subtitle blocks with timestamps',
     'step4.transcribing':'Transcribing... (30–60 sec)',
     'step4.generate_btn':'📝 Create subtitles (−2 cr./min)',
-    'step4.no_audio':    'First generate audio in step 3',
+    'step4.no_audio':    'First generate audio in step 4',
     'step4.upload_srt':  'Upload .srt file',
     'step4.regenerate':  '↺ Regenerate',
     'step4.style_settings': 'Style settings',
@@ -1461,8 +1509,8 @@ export const translations = {
     'subs.color_yellow': 'Yellow',
     'subs.color_black':  'Black',
 
-    // ── Step 5 ────────────────────────────────────────────────────────────────────
-    'step5.title':       'Step 5: Illustrations',
+    // ── Step 6 (Images, formerly Step 5) ─────────────────────────────────────────
+    'step5.title':       'Step 6: Illustrations',
     'step5.subtitle':    'Configure image frequency and generate illustrations',
     'step5.interval':    'Change image every...',
     'step5.sec':         'sec',
@@ -1473,7 +1521,7 @@ export const translations = {
     'step5.click_hint':  'Click an image to jump to that moment in the audio.',
     'step5.audio_hint':  'Go back to the voiceover step to listen to audio with illustrations.',
     'step5.regen_hint':  '— click ↺ to regenerate a single scene',
-    'step5.err_no_script': 'First generate a script (step 2)',
+    'step5.err_no_script': 'First generate a script (step 3)',
     'step5.err_gen':     'Image generation error',
     'step5.err_no_project': 'First create a project (step 1)',
     'step5.err_upload':  'Image upload error',
@@ -1514,8 +1562,8 @@ export const translations = {
     'step5.ref_analyzing':   'Analyzing style...',
     'step5.ref_detected':    'Style:',
 
-    // ── Step 6 ────────────────────────────────────────────────────────────────────
-    'step6.title':          'Step 6: Video assembly',
+    // ── Step 7 (Video, formerly Step 6) ──────────────────────────────────────────
+    'step6.title':          'Step 7: Video assembly',
     'step6.subtitle':       'Assemble the final MP4 automatically or download sources for manual editing',
     'step6.ready_assets':   'Ready assets',
     'step6.audio_label':    'Audio MP3',
@@ -1584,8 +1632,8 @@ export const translations = {
     'effect.lens_flare':'Lens flare',
     'effect.vhs':       'VHS',
 
-    // ── Step 7 ────────────────────────────────────────────────────────────────────
-    'step7.title':       'Step 7: SEO + Thumbnail',
+    // ── Step 8 (SEO, formerly Step 7) ────────────────────────────────────────────
+    'step7.title':       'Step 8: SEO + Thumbnail',
     'step7.subtitle':    'Title, description, tags and thumbnail for maximum reach',
     'step7.generating':  'Generating SEO...',
     'step7.title_label': 'Title',
