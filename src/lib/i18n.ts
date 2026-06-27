@@ -912,6 +912,11 @@ export const translations = {
     // Trends result
     'analytics.urgent':             'Срочно',
     'analytics.can_wait':           'Можно подождать',
+    'analytics.high_potential':     'Высокий потенциал',
+    'analytics.medium_potential':   'Средний потенциал',
+    'analytics.niche_potential':    'Нишевый потенциал',
+    'analytics.common_mistakes':    'Типичные ошибки новичков в этой нише',
+    'analytics.seo_refresh_hint':   'Рекомендуем обновлять ключевые слова каждые 1–2 месяца по мере роста канала.',
     'analytics.trend_ideas':        'Идеи для видео:',
     'analytics.example_videos':     'Примеры вирусных видео:',
 
@@ -1834,6 +1839,11 @@ export const translations = {
 
     'analytics.urgent':             'Urgent',
     'analytics.can_wait':           'Can wait',
+    'analytics.high_potential':     'High Potential',
+    'analytics.medium_potential':   'Medium Potential',
+    'analytics.niche_potential':    'Niche Potential',
+    'analytics.common_mistakes':    'Typical Beginner Mistakes in This Niche',
+    'analytics.seo_refresh_hint':   'Recommend refreshing keywords every 1–2 months as your channel grows.',
     'analytics.trend_ideas':        'Video ideas:',
     'analytics.example_videos':     'Viral video examples:',
 

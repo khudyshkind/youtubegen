@@ -185,6 +185,7 @@ interface ChannelPlanResult {
   title_formulas: Array<{ formula: string; example: string }>
   content_pillars: string[]
   reference_channels?: Array<{ name: string; why_follow: string }>
+  common_mistakes?: string[]
   month_1: MonthPlan
   month_2: MonthPlan
   month_3: MonthPlan
@@ -1090,9 +1091,9 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
 
   function priorityBadge(priority: string): { dot: string; bg: string; color: string } {
     const p = priority.toLowerCase()
-    if (p.includes('срочно') || p.includes('urgent')) return { dot: '🔴', bg: 'rgba(239,68,68,0.1)', color: '#f87171' }
-    if (p.includes('скоро') || p.includes('soon'))   return { dot: '🟡', bg: 'rgba(234,179,8,0.1)',  color: '#facc15' }
-    return { dot: '🟢', bg: 'rgba(74,222,128,0.1)', color: '#4ade80' }
+    if (p.includes('высокий') || p.includes('high')) return { dot: '💎', bg: 'rgba(124,58,237,0.15)', color: '#c4b5fd' }
+    if (p.includes('средний') || p.includes('medium')) return { dot: '📊', bg: 'rgba(234,179,8,0.1)', color: '#facc15' }
+    return { dot: '🔭', bg: 'rgba(100,116,139,0.12)', color: '#94a3b8' }
   }
 
   const selectStyle = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }
@@ -1201,6 +1202,21 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
             })}
           </div>
         </div>
+      )}
+
+      {/* Common beginner mistakes */}
+      {result.common_mistakes && result.common_mistakes.length > 0 && (
+        <Card>
+          <SectionTitle>{uiLang === 'en' ? '⚠️ Typical Beginner Mistakes in This Niche' : '⚠️ Типичные ошибки новичков в этой нише'}</SectionTitle>
+          <ul className="flex flex-col gap-2">
+            {result.common_mistakes.map((mistake, i) => (
+              <li key={i} className="flex gap-2 text-sm text-slate-300">
+                <span className="text-amber-400 shrink-0 mt-0.5">✗</span>
+                {mistake}
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
 
       {/* Title formulas */}
@@ -1325,6 +1341,12 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
       {result.seo_keywords && (
         <Card>
           <SectionTitle>{uiLang === 'en' ? '🔍 Channel SEO' : '🔍 SEO для канала'}</SectionTitle>
+          <p className="text-xs text-slate-500 mb-3 flex items-start gap-1.5">
+            <span className="shrink-0">🔄</span>
+            {uiLang === 'en'
+              ? 'These keywords are generated once. Recommend refreshing them every 1–2 months as your channel grows.'
+              : 'Эти ключевые слова сгенерированы один раз. Рекомендуем обновлять их каждые 1–2 месяца по мере роста канала.'}
+          </p>
           {copied && (
             <p className="text-xs text-green-400 mb-3 transition-all">✓ {uiLang === 'en' ? 'Copied!' : 'Скопировано!'}</p>
           )}
