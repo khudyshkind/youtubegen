@@ -66,6 +66,27 @@ function stripSectionMarkers(text: string): string {
     .trim()
 }
 
+// Strip the ID3v2 tag from the start of an MP3 buffer.
+// TTS APIs return each synthesized chunk as a standalone MP3 file with its own
+// ID3v2 header. Raw Buffer.concat produces stray ID3 headers mid-stream, which
+// confuses MP3 decoders: they reset PTS at the second header, causing audio-video
+// drift that progressively worsens in the final video. Only applied to non-first
+// chunks — the first chunk keeps its ID3 header intact for metadata.
+// Pure Node.js, no external dependencies, O(1) per chunk.
+function stripId3Tag(buf: Buffer): Buffer {
+  // ID3v2 identifier: bytes 0-2 = 0x49 0x44 0x33 ("ID3")
+  // Tag size: bytes 6-9 as a synchsafe integer (each byte's bit 7 is always 0)
+  if (buf.length >= 10 && buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) {
+    const tagSize = ((buf[6] & 0x7f) << 21)
+                  | ((buf[7] & 0x7f) << 14)
+                  | ((buf[8] & 0x7f) <<  7)
+                  |  (buf[9] & 0x7f)
+    const end = 10 + tagSize
+    if (end < buf.length) return buf.subarray(end)
+  }
+  return buf
+}
+
 // Split text into chunks that fit within the per-engine character/byte limit.
 // Splits at paragraph and sentence boundaries to avoid unnatural mid-speech breaks.
 function splitTextIntoChunks(text: string, maxChars: number, measureBytes: boolean): string[] {
@@ -297,7 +318,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ ok: false, error: `Ошибка синтеза речи OpenAI (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
         }
       }
-      audioBuffer = Buffer.concat(buffers)
+      audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
 
     } else if (engine === 'google') {
       const googleKey = env('GOOGLE_TTS_API_KEY')
@@ -318,7 +339,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ ok: false, error: `Ошибка синтеза речи Google (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
         }
       }
-      audioBuffer = Buffer.concat(buffers)
+      audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
 
     } else if (engine === 'apihost') {
       const apihostKey = env('APIHOST_API_KEY')
@@ -380,7 +401,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: false, error: `Ошибка загрузки аудио с APIHOST (${msg})` }, { status: 502 })
       }
 
-      audioBuffer = Buffer.concat(buffers)
+      audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
 
     } else {
       // ElevenLabs
@@ -405,7 +426,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ ok: false, error: `Ошибка синтеза речи ElevenLabs (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
         }
       }
-      audioBuffer = Buffer.concat(buffers)
+      audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
     }
 
     if (audioBuffer.byteLength === 0) {
