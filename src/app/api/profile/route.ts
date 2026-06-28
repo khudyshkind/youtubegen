@@ -9,7 +9,7 @@ export async function GET() {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('credits, plan, preferred_lang')
+      .select('credits, plan, preferred_lang, full_name, avatar_url, email')
       .eq('id', user.id)
       .single()
 
@@ -17,9 +17,12 @@ export async function GET() {
 
     return NextResponse.json({
       ok: true,
-      credits: profile.credits as number,
-      plan: profile.plan as string,
+      credits:        profile.credits as number,
+      plan:           profile.plan as string,
       preferred_lang: (profile.preferred_lang as string | null) ?? 'ru',
+      full_name:      profile.full_name as string | null,
+      avatar_url:     profile.avatar_url as string | null,
+      email:          profile.email as string,
     })
   } catch (err) {
     console.error('[api/profile GET]', err instanceof Error ? err.message : err)
@@ -36,7 +39,13 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
 
-    const body: { onboarding_completed?: boolean; preferred_lang?: string } = await request.json()
+    const body: {
+      onboarding_completed?: boolean
+      preferred_lang?: string
+      full_name?: string | null
+      avatar_url?: string | null
+    } = await request.json()
+
     const update: Record<string, unknown> = {}
 
     if (typeof body.onboarding_completed === 'boolean') {
@@ -45,6 +54,33 @@ export async function PATCH(request: NextRequest) {
 
     if (typeof body.preferred_lang === 'string' && ['ru', 'en'].includes(body.preferred_lang)) {
       update.preferred_lang = body.preferred_lang
+    }
+
+    if ('full_name' in body) {
+      if (body.full_name === null) {
+        update.full_name = null
+      } else if (typeof body.full_name === 'string') {
+        const trimmed = body.full_name.trim().slice(0, 60)
+        update.full_name = trimmed.length > 0 ? trimmed : null
+      }
+    }
+
+    if ('avatar_url' in body) {
+      if (body.avatar_url === null) {
+        update.avatar_url = null
+      } else if (typeof body.avatar_url === 'string') {
+        const trimmed = body.avatar_url.trim()
+        if (trimmed.length === 0) {
+          update.avatar_url = null
+        } else if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+          update.avatar_url = trimmed
+        } else {
+          return NextResponse.json(
+            { ok: false, error: 'avatar_url должен начинаться с http:// или https://' },
+            { status: 400 }
+          )
+        }
+      }
     }
 
     if (Object.keys(update).length === 0) {
