@@ -8,6 +8,15 @@ export default function SidebarNav() {
   const { t } = useLang()
   const pathname = usePathname()
 
+  const isStudio = pathname === '/studio' || pathname.startsWith('/studio/')
+
+  const studioIcon = (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M15 10l4.553-2.069A1 1 0 0121 8.868v6.264a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+    </svg>
+  )
+
   const NAV_ITEMS = [
     {
       href: '/dashboard',
@@ -18,17 +27,6 @@ export default function SidebarNav() {
             d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
         </svg>
       ),
-    },
-    {
-      href: '/studio',
-      label: t('nav.create_video'),
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-            d="M15 10l4.553-2.069A1 1 0 0121 8.868v6.264a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
-      ),
-      highlight: true,
     },
     {
       href: '/tools',
@@ -72,26 +70,41 @@ export default function SidebarNav() {
           borderRight: '1px solid rgba(255,255,255,0.07)',
         }}
       >
-        <nav className="flex flex-col gap-1 p-4 flex-1">
-          {NAV_ITEMS.map((item) => {
-            const isActive = !item.highlight && (pathname === item.href || pathname.startsWith(item.href + '/'))
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                  item.highlight
-                    ? 'btn-gradient text-white shadow-lg'
-                    : isActive
-                    ? 'text-violet-400 bg-violet-500/10'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                {item.icon}
-                {item.label}
-              </Link>
-            )
-          })}
+        <nav className="flex flex-col p-4 flex-1">
+          {/* CTA — "Создать видео" */}
+          <Link
+            href="/studio"
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all btn-gradient text-white shadow-lg ${
+              isStudio ? 'ring-2 ring-violet-300/50' : ''
+            }`}
+          >
+            {studioIcon}
+            {t('nav.create_video')}
+          </Link>
+
+          {/* Divider */}
+          <div className="my-3 border-t border-slate-700/50" />
+
+          {/* Regular nav */}
+          <div className="flex flex-col gap-1">
+            {NAV_ITEMS.map((item) => {
+              const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                    isActive
+                      ? 'text-violet-400 bg-violet-500/10'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  {item.icon}
+                  {item.label}
+                </Link>
+              )
+            })}
+          </div>
         </nav>
 
         <div className="p-4" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
@@ -120,14 +133,26 @@ export default function SidebarNav() {
           borderTop: '1px solid rgba(255,255,255,0.08)',
         }}
       >
+        {/* Studio — first, always violet */}
+        <Link
+          href="/studio"
+          className={`flex flex-col items-center justify-center flex-1 py-3 gap-1 text-xs font-medium transition-colors ${
+            isStudio ? 'text-violet-300' : 'text-violet-400'
+          }`}
+        >
+          {studioIcon}
+          <span className="truncate">{t('nav.create_video').split(' ')[0]}</span>
+        </Link>
+
+        {/* Rest of nav */}
         {NAV_ITEMS.map((item) => {
-          const isActive = !item.highlight && (pathname === item.href || pathname.startsWith(item.href + '/'))
+          const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
           return (
             <Link
               key={item.href}
               href={item.href}
               className={`flex flex-col items-center justify-center flex-1 py-3 gap-1 text-xs font-medium transition-colors ${
-                item.highlight || isActive ? 'text-violet-400' : 'text-slate-500 hover:text-slate-300'
+                isActive ? 'text-violet-400' : 'text-slate-500 hover:text-slate-300'
               }`}
             >
               {item.icon}

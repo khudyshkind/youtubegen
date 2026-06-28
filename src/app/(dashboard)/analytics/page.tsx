@@ -3475,7 +3475,7 @@ type Tab = 'niche' | 'niche_finder' | 'channel_plan' | 'trends' | 'channel' | 'r
 
 export default function AnalyticsPage() {
   const { t } = useLang()
-  const [tab, setTab] = useState<Tab>('niche')
+  const [tab, setTab] = useState<Tab>('niche_finder')
   const [openedReport, setOpenedReport] = useState<AnalyticsReport | null>(null)
   const [pendingChannelQuery, setPendingChannelQuery] = useState<string | null>(null)
   const [risingStarsResult, setRisingStarsResult] = useState<RisingStarsResult | null>(null)
