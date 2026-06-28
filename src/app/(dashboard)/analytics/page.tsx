@@ -494,8 +494,8 @@ function NicheResultView({ result, cached, t, onCreateVideo, onAnalyzeChannel }:
         </Card>
       )}
 
-      <button onClick={onCreateVideo} className="no-print btn-gradient w-full py-3.5 rounded-xl text-sm font-semibold text-white">
-        {t('analytics.create_video_btn')}
+      <button onClick={onCreateVideo} className="no-print inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+        {t('analytics.make_video')}
       </button>
     </div>
   )
@@ -1202,9 +1202,8 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
                     <p className="text-xs text-slate-500 mb-3">{idea.why_works}</p>
                   )}
                   <button onClick={() => goToStudio(idea.title)}
-                    className="no-print text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
-                    style={{ background: 'rgba(124,58,237,0.15)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.3)' }}>
-                    {uiLang === 'en' ? '🎬 Create this video →' : '🎬 Создать это видео →'}
+                    className="no-print inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+                    {t('analytics.make_video')}
                   </button>
                 </Card>
               )
@@ -1449,9 +1448,8 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
                     </p>
                   </div>
                   <button onClick={() => goToStudio(idea.title)}
-                    className="shrink-0 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors"
-                    style={{ background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.2)' }}>
-                    {uiLang === 'en' ? '▶ Create' : '▶ Снять'}
+                    className="no-print shrink-0 inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+                    {t('analytics.make_video')}
                   </button>
                 </div>
               ))}
@@ -1789,9 +1787,16 @@ function TrendsTab({ externalResult, onClearExternal }: {
                     <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2">{t('analytics.trend_ideas')}</p>
                     <ul className="flex flex-col gap-1.5">
                       {trend.video_ideas.map((idea, j) => (
-                        <li key={j} className="flex items-start gap-2">
-                          <span className="text-violet-400 text-xs mt-0.5">💡</span>
-                          <span className="text-sm text-slate-300">{idea}</span>
+                        <li key={j} className="flex items-center justify-between gap-2">
+                          <div className="flex items-start gap-2 flex-1 min-w-0">
+                            <span className="text-violet-400 text-xs mt-0.5 shrink-0">💡</span>
+                            <span className="text-sm text-slate-300">{idea}</span>
+                          </div>
+                          <button
+                            onClick={() => goToStudio(idea)}
+                            className="no-print shrink-0 inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+                            {t('analytics.make_video')}
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -1823,9 +1828,8 @@ function TrendsTab({ externalResult, onClearExternal }: {
                 )}
 
                 <button onClick={() => goToStudio(trend.topic)}
-                  className="no-print w-full py-2.5 rounded-xl text-sm font-semibold text-violet-300 transition-all hover:text-white"
-                  style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}>
-                  {t('analytics.create_video_btn')}
+                  className="no-print inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+                  {t('analytics.make_video')}
                 </button>
               </Card>
             )
@@ -2079,8 +2083,8 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
           )}
 
           <button onClick={() => goToStudio(displayResult.channel_name ? `видео в стиле канала ${displayResult.channel_name}` : 'видео на YouTube')}
-            className="no-print btn-gradient w-full py-3.5 rounded-xl text-sm font-semibold text-white">
-            {t('analytics.create_video_btn')}
+            className="no-print inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+            {t('analytics.make_video')}
           </button>
         </div>
       )}
@@ -2281,7 +2285,7 @@ function CommentsTab({
   externalResult: CommentsResult | null
   onClearExternal: () => void
 }) {
-  const { lang } = useLang()
+  const { t, lang } = useLang()
   const router = useRouter()
   const { setScriptParams, setStep } = useStudioStore()
   const [url, setUrl] = useState('')
@@ -2387,14 +2391,19 @@ function CommentsTab({
               <SectionTitle>Аудитория просит снять</SectionTitle>
               <ul className="flex flex-col gap-2">
                 {displayResult.video_requests.map((r, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm">
+                  <li key={i} className="flex items-center gap-2 text-sm">
                     <span className="shrink-0">🎬</span>
-                    <span className="text-slate-200">{r.request}</span>
+                    <span className="text-slate-200 flex-1">{r.request}</span>
                     {r.count > 1 && (
-                      <span className="ml-auto shrink-0 text-xs text-violet-300 bg-violet-500/15 px-2 py-0.5 rounded-full">
+                      <span className="shrink-0 text-xs text-violet-300 bg-violet-500/15 px-2 py-0.5 rounded-full">
                         {r.count} упом.
                       </span>
                     )}
+                    <button
+                      onClick={() => goToStudio(r.request)}
+                      className="no-print shrink-0 inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+                      {t('analytics.make_video')}
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -2414,9 +2423,8 @@ function CommentsTab({
                     <p className="text-xs text-slate-600 italic">Из комментария: «{idea.based_on}»</p>
                     <button
                       onClick={() => goToStudio(idea.title)}
-                      className="no-print self-start mt-1 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-violet-300 transition-all hover:text-white"
-                      style={{ background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.35)' }}>
-                      🎬 Создать это видео →
+                      className="no-print self-start mt-1 inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+                      {t('analytics.make_video')}
                     </button>
                   </div>
                 ))}
@@ -2525,7 +2533,7 @@ function KeywordsTab({
   initialKeyword?: string
 }) {
   const router = useRouter()
-  const { lang: uiLang } = useLang()
+  const { t, lang: uiLang } = useLang()
   const { setScriptParams, setStep } = useStudioStore()
   const [keyword, setKeyword] = useState(initialKeyword ?? '')
 
@@ -2698,9 +2706,8 @@ function KeywordsTab({
                     <p className="text-xs text-slate-400 italic">{kw.recommendation}</p>
                     <button
                       onClick={() => goToStudio(kw.keyword)}
-                      className="no-print self-start flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-violet-300 hover:text-white transition-colors"
-                      style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.25)' }}>
-                      🎬 Создать видео по этому запросу →
+                      className="no-print inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+                      {t('analytics.make_video')}
                     </button>
                   </div>
                 )
@@ -2721,8 +2728,8 @@ function KeywordsTab({
                     </div>
                     <button
                       onClick={() => goToStudio(kw)}
-                      className="no-print shrink-0 text-xs text-violet-400 hover:text-violet-300 transition-colors">
-                      🎬 Создать →
+                      className="no-print shrink-0 inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+                      {t('analytics.make_video')}
                     </button>
                   </div>
                 ))}
@@ -3090,7 +3097,7 @@ function RisingStarsTab({
   savedResult?: RisingStarsResult | null
   onResult?: (r: RisingStarsResult | null) => void
 }) {
-  const { lang } = useLang()
+  const { t, lang } = useLang()
   const router = useRouter()
   const { setScriptParams, setStep } = useStudioStore()
 
@@ -3361,8 +3368,8 @@ function RisingStarsTab({
           )}
 
           <button onClick={goToStudio}
-            className="no-print btn-gradient w-full py-3.5 rounded-xl text-sm font-semibold text-white">
-            🎬 Создать видео в этой нише →
+            className="no-print inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+            {t('analytics.make_video')}
           </button>
         </div>
       )}
