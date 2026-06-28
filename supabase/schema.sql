@@ -189,6 +189,7 @@ grant usage on schema public to anon, authenticated;
 
 grant select, update                          on public.profiles             to authenticated;
 grant select, insert, update, delete          on public.projects             to authenticated;
+grant select, insert, update, delete          on public.projects             to service_role;
 grant select                                  on public.credit_transactions  to authenticated;
 
 -- ─────────────────────────────────────────

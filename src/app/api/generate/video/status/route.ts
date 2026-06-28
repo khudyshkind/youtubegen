@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
@@ -73,6 +74,11 @@ export async function GET(request: NextRequest) {
         .select('id')
 
       if (projectUpdateError) {
+        // Surface grant/RLS errors immediately — silent failures here mean
+        // video_url never lands in projects and credits are never spent.
+        Sentry.captureException(new Error(`projects UPDATE failed: ${projectUpdateError.message}`), {
+          extra: { code: projectUpdateError.code, hint: projectUpdateError.hint, project_id: job.project_id },
+        })
         throw new Error(`projects update failed: ${projectUpdateError.message}`)
       }
 
