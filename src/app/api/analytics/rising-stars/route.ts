@@ -99,6 +99,8 @@ export async function POST(req: NextRequest) {
       months_max?: number
       lang?: string
       ui_lang?: string
+      content_lang?: string
+      country?: string
     }
 
     const topic = body.topic?.trim() ?? ''
@@ -106,6 +108,9 @@ export async function POST(req: NextRequest) {
     const subMax = body.sub_max ?? 100000
     const monthsMax = body.months_max ?? 0
     const lang = body.ui_lang ?? body.lang ?? 'ru'
+    const isRu = lang !== 'en'
+    const contentLang = body.content_lang ?? 'ru'
+    const country = body.country ?? 'RU'
 
     console.log(`[rising] start topic="${topic}" sub_min=${subMin} sub_max=${subMax} months_max=${monthsMax}`)
 
@@ -123,6 +128,10 @@ export async function POST(req: NextRequest) {
       q: topic,
       order: 'viewCount',
       maxResults: '50',
+      relevanceLanguage: contentLang,
+    }
+    if (country && country !== 'worldwide') {
+      videoSearchParams.regionCode = country
     }
     if (monthsMax > 0) {
       const after = new Date()
@@ -307,12 +316,21 @@ export async function POST(req: NextRequest) {
 
     const channelsSummary = enriched.map((ch, i) => {
       const videoLines = ch.top_videos.length > 0
-        ? ch.top_videos.map((v, j) => `  ${j + 1}. "${v.title}" — ${fmt(v.views)} просм.`).join('\n')
-        : '  (нет данных по видео)'
-      return `Канал ${i + 1}: ${ch.name}
+        ? ch.top_videos.map((v, j) => isRu
+            ? `  ${j + 1}. "${v.title}" — ${fmt(v.views)} просм.`
+            : `  ${j + 1}. "${v.title}" — ${fmt(v.views)} views`
+          ).join('\n')
+        : isRu ? '  (нет данных по видео)' : '  (no video data)'
+      return isRu
+        ? `Канал ${i + 1}: ${ch.name}
   Возраст: ${ch.months_old} мес., ${fmt(ch.subscribers)} подп. (~${fmt(ch.monthly_growth_estimate)}/мес)
   Видео: ${ch.video_count}, виральность ${ch.viral_ratio}x, ср. просмотры ${fmt(ch.avg_views)}
   Топ видео:
+${videoLines}`
+        : `Channel ${i + 1}: ${ch.name}
+  Age: ${ch.months_old} mo., ${fmt(ch.subscribers)} subs (~${fmt(ch.monthly_growth_estimate)}/mo)
+  Videos: ${ch.video_count}, viral ratio ${ch.viral_ratio}x, avg views ${fmt(ch.avg_views)}
+  Top videos:
 ${videoLines}`
     }).join('\n\n')
 
@@ -322,7 +340,9 @@ ${videoLines}`
       system: [{ type: 'text', text: getRisingStarsPrompt(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{
         role: 'user',
-        content: `Ниша: "${topic}". Проанализируй ${enriched.length} восходящих каналов.\n\n${channelsSummary}\n\nВерни JSON ровно с ${enriched.length} элементами в channels.`,
+        content: isRu
+          ? `Ниша: "${topic}". Рынок: ${country === 'worldwide' ? 'весь мир' : country}, язык контента: ${contentLang}. Каналы могут быть на другом языке — отвечай строго на русском. Проанализируй ${enriched.length} восходящих каналов.\n\n${channelsSummary}\n\nВерни JSON ровно с ${enriched.length} элементами в channels.`
+          : `Niche: "${topic}". Market: ${country === 'worldwide' ? 'worldwide' : country}, content language: ${contentLang}. Channels may be in another language — reply strictly in English. Analyze ${enriched.length} rising channels.\n\n${channelsSummary}\n\nReturn JSON with exactly ${enriched.length} items in channels.`,
       }],
     })
     console.log('[rising] cache input:', msg.usage.input_tokens, 'cache_read:', msg.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg.usage.cache_creation_input_tokens ?? 0)
@@ -348,9 +368,9 @@ ${videoLines}`
       })
       return {
         ...ch,
-        growth_reason: insight?.growth_reason ?? 'Активность в нише с высокими просмотрами',
-        strategy: insight?.strategy ?? 'Регулярные публикации по теме',
-        key_takeaway: insight?.key_takeaway ?? 'Анализировать топ видео канала',
+        growth_reason: insight?.growth_reason ?? (isRu ? 'Активность в нише с высокими просмотрами' : 'High-view activity in the niche'),
+        strategy: insight?.strategy ?? (isRu ? 'Регулярные публикации по теме' : 'Regular content on the topic'),
+        key_takeaway: insight?.key_takeaway ?? (isRu ? 'Анализировать топ видео канала' : "Analyze the channel's top videos"),
       }
     })
 
