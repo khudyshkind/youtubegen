@@ -377,7 +377,7 @@ function Toggle({ checked, onChange, label, hint }: {
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function Step3Voice() {
-  const { script, projectId, voiceSettings, audioUrl, setVoiceSettings, setAudioUrl, setStep } = useStudioStore()
+  const { script, projectId, voiceSettings, audioUrl, subtitleBlocks, setVoiceSettings, setAudioUrl, setStep } = useStudioStore()
   const { t } = useLang()
 
   const ENGINES: { id: AudioEngine; medal: string; name: string; quality: string; meta: string; costLabel: string; soon?: boolean }[] = [
@@ -1256,6 +1256,17 @@ export default function Step3Voice() {
             style={{ background: 'rgba(245,158,11,0.15)', color: '#FBB04D', border: '1px solid rgba(245,158,11,0.4)' }}>
             {scriptIsRu ? '🇷🇺 Выбрать русский голос' : '🌐 Выбрать подходящий голос'}
           </button>
+        </div>
+      )}
+
+      {/* Subtitle staleness warning */}
+      {subtitleBlocks.length > 0 && (
+        <div className="flex items-start gap-3 rounded-xl px-4 py-3"
+          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
+          <svg className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <p className="text-xs text-amber-400/90">{t('voice.subs_exist_warning')}</p>
         </div>
       )}
 

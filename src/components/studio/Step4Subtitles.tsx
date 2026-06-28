@@ -77,7 +77,7 @@ export default function Step4Subtitles() {
   }
 
   async function handleGenerate() {
-    if (!audioUrl) return
+    if (!audioUrl) { setError(t('step4.no_audio')); return }
     setError('')
     setLoading(true)
     try {
@@ -201,10 +201,19 @@ export default function Step4Subtitles() {
                 <button
                   type="button"
                   onClick={handleGenerate}
-                  disabled={loading}
-                  className="text-xs text-slate-400 hover:text-slate-200 font-medium transition-colors"
+                  disabled={loading || !audioUrl}
+                  className="text-xs font-medium transition-colors flex items-center gap-1"
+                  style={{ color: loading ? '#475569' : '#94A3B8' }}
                 >
-                  {t('step4.regenerate')}
+                  {loading ? (
+                    <>
+                      <svg className="w-3 h-3 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      {t('step4.regenerating')}
+                    </>
+                  ) : t('step4.regenerate')}
                 </button>
                 <button
                   type="button"
