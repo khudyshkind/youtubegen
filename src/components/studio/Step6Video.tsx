@@ -114,8 +114,8 @@ function toSrt(blocks: SubtitleBlock[]): string {
 export default function Step6Video() {
   const {
     audioUrl, sceneImages, subtitleBlocks, subtitleStyle,
-    scriptParams, imageInterval, projectId, videoUrl,
-    setVideoUrl, setStep, setSubtitleStyle,
+    scriptParams, imageInterval, projectId, videoUrl, renderJobId,
+    setVideoUrl, setRenderJobId, setStep, setSubtitleStyle,
   } = useStudioStore()
 
   const { t } = useLang()
@@ -127,9 +127,9 @@ export default function Step6Video() {
   const [downloadError, setDownloadError] = useState('')
   const [renderState, setRenderState] = useState<RenderState>(videoUrl ? 'done' : 'idle')
   const [renderError, setRenderError] = useState('')
-  const [renderJobId, setRenderJobId] = useState<string | null>(null)
   const [renderProgress, setRenderProgress] = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollTickRef = useRef<(() => Promise<void>) | null>(null)
   const [burnIn, setBurnIn] = useState(true)
   const [transition, setTransition] = useState('cut')
   const [transitionDuration, setTransitionDuration] = useState(0.5)
@@ -158,6 +158,27 @@ export default function Step6Video() {
 
   // Stop polling on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+
+  // Resume polling if a job was found during project load (reload recovery)
+  useEffect(() => {
+    if (renderJobId && !videoUrl) {
+      setRenderState('processing')
+      startPolling(renderJobId)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Immediate status check when tab becomes visible — catches "finished in background"
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === 'visible' && pollTickRef.current) {
+        void pollTickRef.current()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
+
 
   function downloadSrt() {
     const content = toSrt(subtitleBlocks)
@@ -208,9 +229,15 @@ export default function Step6Video() {
     }
   }
 
-  function startPolling(jobId: string) {
-    if (pollRef.current) clearInterval(pollRef.current)
-    pollRef.current = setInterval(async () => {
+  function startPolling(jobId: string, deadlineMs = 45 * 60 * 1000) {
+    const deadline = Date.now() + deadlineMs
+
+    const tick = async () => {
+      if (Date.now() > deadline) {
+        clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
+        setRenderError(t('step6.render_timeout')); setRenderState('error')
+        return
+      }
       try {
         const res = await fetch(`/api/generate/video/status?job_id=${jobId}`)
         const json = await res.json() as { ok: boolean; status?: string; progress?: number; video_url?: string; error_message?: string }
@@ -219,21 +246,21 @@ export default function Step6Video() {
         setRenderProgress(json.progress ?? 0)
 
         if (json.status === 'completed' && json.video_url) {
-          clearInterval(pollRef.current!)
-          pollRef.current = null
-          setVideoUrl(json.video_url)
-          void refreshCredits()
-          setRenderState('done')
+          clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
+          setVideoUrl(json.video_url); setRenderJobId(null)
+          void refreshCredits(); setRenderState('done')
         } else if (json.status === 'failed') {
-          clearInterval(pollRef.current!)
-          pollRef.current = null
-          setRenderError(json.error_message ?? 'Ошибка рендеринга')
-          setRenderState('error')
+          clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
+          setRenderError(json.error_message ?? 'Ошибка рендеринга'); setRenderState('error')
         } else if (json.status === 'processing') {
           setRenderState('processing')
         }
       } catch (_) {}
-    }, 3000)
+    }
+
+    pollTickRef.current = tick
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = setInterval(() => { void tick() }, 3000)
   }
 
   async function handleRender() {

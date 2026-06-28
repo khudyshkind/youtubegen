@@ -34,6 +34,7 @@ interface StudioState {
 
   // Step 6: Video
   videoUrl: string | null
+  renderJobId: string | null
 
   // Step 7: SEO + Thumbnail
   seo: SeoData | null
@@ -65,6 +66,7 @@ interface StudioState {
   setImageInterval: (interval: number) => void
   setImageStyle: (style: string | null) => void
   setVideoUrl: (url: string) => void
+  setRenderJobId: (id: string | null) => void
   setSeo: (seo: SeoData) => void
   setThumbnailUrl: (url: string | null) => void
   setThumbnailBgUrl: (url: string | null) => void
@@ -122,6 +124,7 @@ const initialState = {
   imageInterval: 10,
   imageStyle: null,
   videoUrl: null,
+  renderJobId: null,
   seo: null,
   thumbnailUrl: null,
   thumbnailBgUrl: null,
@@ -153,6 +156,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setImageInterval: (interval) => set({ imageInterval: Math.max(3, Math.min(30, interval)) }),
   setImageStyle: (style) => set({ imageStyle: style }),
   setVideoUrl: (url) => set({ videoUrl: url }),
+  setRenderJobId: (id) => set({ renderJobId: id }),
   setSeo: (seo) => set({ seo }),
   setThumbnailUrl: (url) => set({ thumbnailUrl: url }),
   setThumbnailBgUrl: (url) => set({ thumbnailBgUrl: url }),

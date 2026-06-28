@@ -16,49 +16,79 @@ export async function GET(request: NextRequest) {
     }
 
     const jobId = request.nextUrl.searchParams.get('job_id')
-    if (!jobId) {
-      return NextResponse.json({ ok: false, error: 'Missing job_id' }, { status: 400 })
+    const projectIdParam = request.nextUrl.searchParams.get('project_id')
+
+    if (!jobId && !projectIdParam) {
+      return NextResponse.json({ ok: false, error: 'Missing job_id or project_id' }, { status: 400 })
     }
 
     const svc = createServiceClient()
 
-    const { data: job, error } = await svc
-      .from('video_jobs')
-      .select('id, status, progress, video_url, error_message, project_id, user_id')
-      .eq('id', jobId)
-      .eq('user_id', user.id)
-      .single()
+    // Resolve job: by job_id (normal polling) or by project_id (resume after reload)
+    let job: { id: string; status: string; progress: number | null; video_url: string | null; error_message: string | null; project_id: string | null; user_id: string } | null = null
 
-    if (error || !job) {
-      return NextResponse.json({ ok: false, error: 'Job not found' }, { status: 404 })
+    if (jobId) {
+      const { data, error } = await svc
+        .from('video_jobs')
+        .select('id, status, progress, video_url, error_message, project_id, user_id')
+        .eq('id', jobId)
+        .eq('user_id', user.id)
+        .single()
+      if (error || !data) {
+        return NextResponse.json({ ok: false, error: 'Job not found' }, { status: 404 })
+      }
+      job = data
+    } else {
+      // Resume polling: find the latest non-failed job for this project
+      const { data, error } = await svc
+        .from('video_jobs')
+        .select('id, status, progress, video_url, error_message, project_id, user_id')
+        .eq('project_id', projectIdParam!)
+        .eq('user_id', user.id)
+        .neq('status', 'failed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+      if (error || !data?.length) {
+        return NextResponse.json({ ok: false, error: 'No active job for this project' }, { status: 404 })
+      }
+      job = data[0]
     }
 
-    // On first completion: update project, spend credits, send email (idempotent via project.video_url check)
+    // On completion: bridge video_jobs → projects and spend credits.
+    //
+    // Two separate UPDATEs to avoid the status-clobbering race:
+    //   UPDATE #1 — credit gate: SET video_url WHERE video_url IS NULL RETURNING id.
+    //               Status is NOT touched here, so a concurrent SEO write to
+    //               status='completed' can never be overwritten by this request.
+    //   UPDATE #2 — status advance: SET status='generating_seo'
+    //               WHERE status='generating_video'. The WHERE on status ensures
+    //               we never roll back a status that already moved past this step.
     if (job.status === 'completed' && job.video_url && job.project_id) {
-      const { data: project } = await svc
+      // UPDATE #1 — credit gate. Only video_url, status untouched.
+      const { data: bridged, error: projectUpdateError } = await svc
         .from('projects')
-        .select('video_url, status')
+        .update({ video_url: job.video_url })
         .eq('id', job.project_id)
-        .single()
+        .is('video_url', null)
+        .select('id')
 
-      if (!project?.video_url) {
-        // Don't downgrade status if SEO already ran (projects.status is 'completed' or 'generating_seo')
-        const keepStatus = project?.status === 'completed' || project?.status === 'generating_seo'
-        const newStatus = keepStatus ? project!.status : 'generating_seo'
+      if (projectUpdateError) {
+        throw new Error(`projects update failed: ${projectUpdateError.message}`)
+      }
 
-        const { error: projectUpdateError } = await svc
-          .from('projects')
-          .update({ video_url: job.video_url, status: newStatus })
-          .eq('id', job.project_id)
-
-        if (projectUpdateError) {
-          // Throw → outer catch returns 500 → frontend retries polling on next tick
-          throw new Error(`projects update failed: ${projectUpdateError.message}`)
-        }
-
+      if (bridged && bridged.length > 0) {
+        // Won the write race → spend credits exactly once
         await spendCredits(user.id, 2, 'video', job.project_id)
         void trackEvent(user.id, 'step_completed', { step: 'video', project_id: job.project_id })
         void trackEvent(user.id, 'video_downloaded', { project_id: job.project_id })
+
+        // UPDATE #2 — advance status only if still at the video step.
+        // No-op if status is already 'generating_seo' or 'completed'.
+        await svc
+          .from('projects')
+          .update({ status: 'generating_seo' })
+          .eq('id', job.project_id)
+          .eq('status', 'generating_video')
 
         void (async () => {
           try {
@@ -75,7 +105,7 @@ export async function GET(request: NextRequest) {
             if (profile?.email) {
               await sendVideoReadyEmail(
                 { email: profile.email, name: profile.full_name },
-                { id: job.project_id, title: proj?.title ?? 'Без названия' },
+                { id: job.project_id!, title: proj?.title ?? 'Без названия' },
               )
             }
           } catch (e) {
@@ -87,6 +117,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      job_id: job.id,
       status: job.status,
       progress: job.progress,
       video_url: job.video_url ?? null,

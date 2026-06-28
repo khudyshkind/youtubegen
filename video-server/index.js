@@ -3009,6 +3009,23 @@ async function processVideoJob(jobId, body) {
       completed_at: new Date().toISOString(),
     })
     console.log(`[job:${jobId}] done →`, publicUrl)
+
+    // Write video_url to projects so the video appears after page reload
+    // without requiring frontend polling. Idempotent: WHERE video_url IS NULL
+    // ensures we never overwrite if the status-route polling bridge ran first.
+    // Credits are NOT spent here — the status-route handles that atomically.
+    if (project_id) {
+      try {
+        await sbPatch('projects', `id=eq.${project_id}&video_url=is.null`, {
+          video_url: publicUrl,
+          status: 'generating_seo',
+        })
+        console.log(`[job:${jobId}] projects.video_url written`)
+      } catch (projErr) {
+        console.warn(`[job:${jobId}] projects update non-fatal:`, projErr.message)
+        Sentry.captureException(projErr, { extra: { jobId, project_id, stage: 'projects_video_url' } })
+      }
+    }
   } catch (err) {
     console.error(`[job:${jobId}] failed:`, err.message)
     Sentry.withScope(scope => {

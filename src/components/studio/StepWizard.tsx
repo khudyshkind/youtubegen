@@ -35,7 +35,8 @@ function StepWizardInner() {
 
   const { currentStep, reset, setStep, setProjectId, setScriptParams, setPlanSections, setScript,
     setVoiceId, setAudioUrl, setSubtitleBlocks, setSceneImages, setVideoUrl, setSeo,
-    setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode } = useStudioStore()
+    setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode,
+    setRenderJobId } = useStudioStore()
 
   const { t } = useLang()
   const [restoring, setRestoring] = useState(!!projectParam)
@@ -99,6 +100,21 @@ function StepWizardInner() {
         if (p.thumbnail_text_mode === 'ai' || p.thumbnail_text_mode === 'none') {
           setThumbnailTextMode(p.thumbnail_text_mode)
         }
+
+        // If video is not yet in projects but render may still be running,
+        // try to find the latest active job by project_id so Step6Video can resume polling.
+        if (!p.video_url && p.scene_images && p.scene_images.length > 0) {
+          try {
+            const jobRes = await fetch(`/api/generate/video/status?project_id=${p.id}`)
+            if (!cancelled && jobRes.ok) {
+              const jobJson = await jobRes.json() as { ok: boolean; job_id?: string; status?: string }
+              if (jobJson.ok && jobJson.job_id && (jobJson.status === 'pending' || jobJson.status === 'processing')) {
+                setRenderJobId(jobJson.job_id)
+              }
+            }
+          } catch { /* non-fatal — Step6Video will show idle state */ }
+        }
+
         setStep(inferStep(p))
       } catch {
         if (!cancelled) setRestoreError('Ошибка загрузки проекта')
