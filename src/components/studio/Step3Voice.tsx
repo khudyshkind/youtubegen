@@ -725,11 +725,13 @@ export default function Step3Voice() {
           text: script,
           voice_id: voiceIdToUse,
           project_id: projectId,
-          ...(engine === 'elevenlabs' ? {
+          ...((engine === 'elevenlabs' || engine === 'secretvoicer') ? {
             stability: voiceSettings.stability,
             similarity_boost: voiceSettings.similarityBoost,
             speech_rate: voiceSettings.speechRate,
             voice_style: voiceSettings.style,
+          } : {}),
+          ...(engine === 'elevenlabs' ? {
             clarity_boost: voiceSettings.clarityBoost,
             paragraph_pauses: voiceSettings.paragraphPauses,
           } : {}),
@@ -869,6 +871,32 @@ export default function Step3Voice() {
             onPreview={handleSvPreview}
             previewingId={previewingId}
           />
+
+          <div>
+            <p className="text-sm font-medium text-slate-300 mb-2">{t('step3.voice_style')}</p>
+            <div className="grid grid-cols-4 gap-2">
+              {VOICE_STYLES.map((s) => (
+                <button key={s.value} type="button" onClick={() => setVoiceSettings({ style: s.value })}
+                  className="py-2 text-xs font-medium rounded-xl border-2 transition-all"
+                  style={voiceSettings.style === s.value
+                    ? { borderColor: '#7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA' }
+                    : { borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)', color: '#64748B' }
+                  }>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <Slider label={t('step3.speed')} value={voiceSettings.speechRate} min={0.5} max={2.0} step={0.05}
+              onChange={(v) => setVoiceSettings({ speechRate: v })} leftLabel={t('step3.slow')} rightLabel={t('step3.fast')}
+              format={(v) => `${v.toFixed(2)}×`} />
+            <Slider label={t('step3.stability')} value={voiceSettings.stability} min={0} max={1} step={0.05}
+              onChange={(v) => setVoiceSettings({ stability: v })} leftLabel={t('step3.expressive')} rightLabel={t('step3.stable')} />
+            <Slider label={t('step3.similarity')} value={voiceSettings.similarityBoost} min={0} max={1} step={0.05}
+              onChange={(v) => setVoiceSettings({ similarityBoost: v })} leftLabel={t('step3.free')} rightLabel={t('step3.exact')} />
+          </div>
         </>
       )}
 
