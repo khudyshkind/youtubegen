@@ -1,10 +1,12 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { useLang } from '@/hooks/useLang'
 
 export default function SidebarNav() {
   const { t } = useLang()
+  const pathname = usePathname()
 
   const NAV_ITEMS = [
     {
@@ -71,20 +73,25 @@ export default function SidebarNav() {
         }}
       >
         <nav className="flex flex-col gap-1 p-4 flex-1">
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                item.highlight
-                  ? 'btn-gradient text-white shadow-lg'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              {item.icon}
-              {item.label}
-            </Link>
-          ))}
+          {NAV_ITEMS.map((item) => {
+            const isActive = !item.highlight && (pathname === item.href || pathname.startsWith(item.href + '/'))
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                  item.highlight
+                    ? 'btn-gradient text-white shadow-lg'
+                    : isActive
+                    ? 'text-violet-400 bg-violet-500/10'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                {item.icon}
+                {item.label}
+              </Link>
+            )
+          })}
         </nav>
 
         <div className="p-4" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
@@ -113,18 +120,21 @@ export default function SidebarNav() {
           borderTop: '1px solid rgba(255,255,255,0.08)',
         }}
       >
-        {NAV_ITEMS.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`flex flex-col items-center justify-center flex-1 py-3 gap-1 text-xs font-medium transition-colors ${
-              item.highlight ? 'text-violet-400' : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            {item.icon}
-            <span className="truncate">{item.label.split(' ')[0]}</span>
-          </Link>
-        ))}
+        {NAV_ITEMS.map((item) => {
+          const isActive = !item.highlight && (pathname === item.href || pathname.startsWith(item.href + '/'))
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex flex-col items-center justify-center flex-1 py-3 gap-1 text-xs font-medium transition-colors ${
+                item.highlight || isActive ? 'text-violet-400' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {item.icon}
+              <span className="truncate">{item.label.split(' ')[0]}</span>
+            </Link>
+          )
+        })}
       </nav>
     </>
   )
