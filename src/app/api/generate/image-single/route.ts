@@ -10,6 +10,36 @@ import { getStyleConfig } from '@/lib/image-style-configs'
 
 export const maxDuration = 120
 
+// ─── Supabase Storage upload helper with retry (mirrors images/route.ts) ──────
+async function sleep(ms: number) { await new Promise((r) => setTimeout(r, ms)) }
+
+async function uploadFalToStorage(
+  falUrl: string,
+  storagePath: string,
+  contentType: 'image/jpeg' | 'image/png',
+  serviceClient: ReturnType<typeof createServiceClient>,
+): Promise<string> {
+  const delays = [500, 1000, 1500]
+  let lastErr: Error = new Error('upload failed')
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(falUrl, { signal: AbortSignal.timeout(30_000) })
+      if (!res.ok) throw new Error(`fetch FAL image: HTTP ${res.status}`)
+      const { error: uploadErr } = await serviceClient.storage
+        .from('images')
+        .upload(storagePath, await res.arrayBuffer(), { contentType, upsert: true })
+      if (uploadErr) throw new Error(`Storage upload: ${uploadErr.message}`)
+      const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
+      return publicUrl
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err))
+      if (attempt < 2) await sleep(delays[attempt])
+    }
+  }
+  throw lastErr
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 type ImageEngine = 'flux' | 'flux_schnell' | 'gpt_mini'
 
 interface SingleImageRequest {
@@ -69,17 +99,7 @@ async function generateFlux(
   if (!falUrl) throw new Error('Flux не вернул изображение')
 
   const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.jpg`
-  const imgResponse = await fetch(falUrl)
-  if (imgResponse.ok) {
-    const { error: uploadError } = await serviceClient.storage
-      .from('images')
-      .upload(storagePath, await imgResponse.arrayBuffer(), { contentType: 'image/jpeg', upsert: true })
-    if (!uploadError) {
-      const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
-      return publicUrl
-    }
-  }
-  return falUrl
+  return uploadFalToStorage(falUrl, storagePath, 'image/jpeg', serviceClient)
 }
 
 async function generateFluxSchnell(
@@ -103,17 +123,7 @@ async function generateFluxSchnell(
   if (!falUrl) throw new Error('Flux Schnell: no image returned')
 
   const storagePath = `${userId}/${projectId}/scene_schnell_${sceneIndex}.jpg`
-  const imgResponse = await fetch(falUrl)
-  if (imgResponse.ok) {
-    const { error: uploadError } = await serviceClient.storage
-      .from('images')
-      .upload(storagePath, await imgResponse.arrayBuffer(), { contentType: 'image/jpeg', upsert: true })
-    if (!uploadError) {
-      const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
-      return publicUrl
-    }
-  }
-  return falUrl
+  return uploadFalToStorage(falUrl, storagePath, 'image/jpeg', serviceClient)
 }
 
 async function generateGptMini(

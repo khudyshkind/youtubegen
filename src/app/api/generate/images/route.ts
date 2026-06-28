@@ -12,6 +12,40 @@ import type { StyleConfig } from '@/lib/image-style-configs'
 
 export const maxDuration = 300
 
+// ─── Supabase Storage upload helper with retry ───────────────────────────────
+// Downloads from falUrl and uploads to Supabase Storage.
+// Retries up to 3 times on transient network/upload failures.
+// Throws on final failure so callers get url:null (honest hole) instead of a
+// stale FAL CDN URL that will expire and break the video pipeline.
+async function sleep(ms: number) { await new Promise((r) => setTimeout(r, ms)) }
+
+async function uploadFalToStorage(
+  falUrl: string,
+  storagePath: string,
+  contentType: 'image/jpeg' | 'image/png',
+  serviceClient: ReturnType<typeof createServiceClient>,
+): Promise<string> {
+  const delays = [500, 1000, 1500]
+  let lastErr: Error = new Error('upload failed')
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(falUrl, { signal: AbortSignal.timeout(30_000) })
+      if (!res.ok) throw new Error(`fetch FAL image: HTTP ${res.status}`)
+      const { error: uploadErr } = await serviceClient.storage
+        .from('images')
+        .upload(storagePath, await res.arrayBuffer(), { contentType, upsert: true })
+      if (uploadErr) throw new Error(`Storage upload: ${uploadErr.message}`)
+      const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
+      return publicUrl
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err))
+      if (attempt < 2) await sleep(delays[attempt])
+    }
+  }
+  throw lastErr
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Robust JSON array extractor — handles trailing text/explanation after the array
 function parseJsonArray(text: string): unknown[] {
   const cleaned = text.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
@@ -393,17 +427,7 @@ async function generateImageFluxSchnell(
   if (!projectId) return falUrl
 
   const storagePath = `${userId}/${projectId}/scene_schnell_${sceneIndex}.jpg`
-  const imgResponse = await fetch(falUrl)
-  if (imgResponse.ok) {
-    const { error: uploadError } = await serviceClient.storage
-      .from('images')
-      .upload(storagePath, await imgResponse.arrayBuffer(), { contentType: 'image/jpeg', upsert: true })
-    if (!uploadError) {
-      const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
-      return publicUrl
-    }
-  }
-  return falUrl
+  return uploadFalToStorage(falUrl, storagePath, 'image/jpeg', serviceClient)
 }
 
 async function generateImageFlux(
@@ -428,21 +452,11 @@ async function generateImageFlux(
   }) as { data: FalImageResult }
 
   const imageUrl = result.data?.images?.[0]?.url ?? null
-  if (!imageUrl) return null
-
+  if (!imageUrl) throw new Error('Flux: no image returned')
   if (!projectId) return imageUrl
 
-  const imgRes = await fetch(imageUrl)
-  if (!imgRes.ok) return imageUrl
-
   const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.jpg`
-  const { error: uploadError } = await serviceClient.storage
-    .from('images')
-    .upload(storagePath, await imgRes.arrayBuffer(), { contentType: 'image/jpeg', upsert: true })
-
-  if (uploadError) return imageUrl
-  const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
-  return publicUrl
+  return uploadFalToStorage(imageUrl, storagePath, 'image/jpeg', serviceClient)
 }
 
 // Parse "Please try again in Xs" from OpenAI 429 error message
@@ -625,8 +639,13 @@ export async function POST(request: NextRequest) {
                 const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine }
                 sceneImages[i] = img
                 successCount++
-                if (url) batchNewImages.push(img)
-                await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
+                if (url) {
+                  batchNewImages.push(img)
+                  // Spend credits only for images that actually landed in Supabase Storage.
+                  // Generators now throw on upload failure, so url is always a permanent
+                  // Supabase URL here — but the guard stays as defence-in-depth.
+                  await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
+                }
                 console.log(`[images] scene ${i + 1} RESULT url: ${url?.slice(0, 100) ?? 'NULL'}`)
               } catch (err) {
                 failCount++
