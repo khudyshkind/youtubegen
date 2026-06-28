@@ -1,9 +1,12 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useLang } from '@/hooks/useLang'
+import { useStudioStore } from '@/lib/studio-store'
 import NewProjectButton from '@/components/shared/NewProjectButton'
 import DeleteProjectButton from '@/components/shared/DeleteProjectButton'
+import { PLAN_MAX_CREDITS } from '@/lib/types'
 import type { Profile, Project, ProjectStatus } from '@/lib/types'
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
@@ -28,8 +31,7 @@ function formatDate(iso: string, lang: string) {
 }
 
 function CreditsBar({ credits, plan }: { credits: number; plan: string }) {
-  const maxMap: Record<string, number> = { free: 20, starter: 100, pro: 300, agency: 1000 }
-  const max = maxMap[plan] ?? 5
+  const max = PLAN_MAX_CREDITS[plan as keyof typeof PLAN_MAX_CREDITS] ?? PLAN_MAX_CREDITS.free
   const pct = Math.min(100, Math.round((credits / max) * 100))
   return (
     <div className="w-full rounded-full h-1.5" style={{ background: 'rgba(255,255,255,0.08)' }}>
@@ -74,8 +76,22 @@ interface Props {
   projects: Project[]
 }
 
+const TEMPLATES = [
+  { id: 'top5',     emoji: '🏆', titleKey: 'dashboard.template_top5',     descKey: 'dashboard.template_top5_desc' },
+  { id: 'review',   emoji: '⭐', titleKey: 'dashboard.template_review',    descKey: 'dashboard.template_review_desc' },
+  { id: 'tutorial', emoji: '🎓', titleKey: 'dashboard.template_tutorial',  descKey: 'dashboard.template_tutorial_desc' },
+] as const
+
 export default function DashboardClient({ profile, projects }: Props) {
   const { t, lang } = useLang()
+  const router = useRouter()
+  const reset = useStudioStore((s) => s.reset)
+
+  function handleTemplate(id: string) {
+    localStorage.setItem('onboarding_template', id)
+    reset()
+    router.push('/studio')
+  }
 
   const statusLabel = (s: ProjectStatus) => t(`status.${s}`)
 
@@ -139,21 +155,39 @@ export default function DashboardClient({ profile, projects }: Props) {
         </div>
 
         {projects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-              style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.25)' }}
-            >
-              <svg className="w-8 h-8 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                  d="M15 10l4.553-2.069A1 1 0 0121 8.868v6.264a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
+          <div className="py-12 px-4">
+            <div className="max-w-2xl mx-auto text-center">
+              <h3 className="text-xl font-bold text-slate-100 mb-2">{t('dashboard.welcome_title')}</h3>
+              <p className="text-slate-400 text-sm mb-8">{t('dashboard.welcome_subtitle')}</p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+                {TEMPLATES.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => handleTemplate(tpl.id)}
+                    className="flex flex-col items-center gap-2 p-5 rounded-2xl text-left cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)')}
+                  >
+                    <span className="text-3xl">{tpl.emoji}</span>
+                    <span className="text-sm font-semibold text-slate-200">{t(tpl.titleKey)}</span>
+                    <span className="text-xs text-slate-500 text-center">{t(tpl.descKey)}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-4 mb-6">
+                <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
+                <span className="text-xs text-slate-600">{t('dashboard.or_scratch')}</span>
+                <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
+              </div>
+
+              <NewProjectButton className="px-6 py-2.5 rounded-xl text-sm font-semibold text-slate-300 transition-all hover:text-slate-100 bg-white/[0.06] border border-white/10">
+                {t('dashboard.create_first')}
+              </NewProjectButton>
             </div>
-            <p className="text-slate-200 font-medium mb-1">{t('dashboard.no_projects')}</p>
-            <p className="text-slate-500 text-sm mb-6">{t('dashboard.no_projects_desc')}</p>
-            <NewProjectButton className="px-5 py-2.5 btn-gradient text-white font-semibold rounded-xl text-sm">
-              {t('dashboard.create_first')}
-            </NewProjectButton>
           </div>
         ) : (
           <div>
