@@ -22,11 +22,14 @@ const STYLE_EXAGGERATION: Record<string, number> = {
 // ElevenLabs/OpenAI/APIHOST: Unicode character count (JS .length)
 // Google: UTF-8 byte count (Cyrillic = 2 bytes/char, limit is 5000 bytes)
 const CHUNK_LIMITS: Record<AudioEngine, { maxChars: number; measureBytes: boolean }> = {
-  elevenlabs: { maxChars: 4800, measureBytes: false }, // API limit 5000 chars
-  openai:     { maxChars: 4000, measureBytes: false }, // API limit 4096 chars
-  google:     { maxChars: 2300, measureBytes: true  }, // API limit 5000 bytes; Cyrillic 2 bytes/char
-  apihost:    { maxChars: 4000, measureBytes: false }, // no hard limit; keeps each job < 60s synthesis
+  secretvoicer: { maxChars: 295000, measureBytes: false }, // server handles large text natively; single chunk
+  elevenlabs:   { maxChars: 4800, measureBytes: false }, // API limit 5000 chars
+  openai:       { maxChars: 4000, measureBytes: false }, // API limit 4096 chars
+  google:       { maxChars: 2300, measureBytes: true  }, // API limit 5000 bytes; Cyrillic 2 bytes/char
+  apihost:      { maxChars: 4000, measureBytes: false }, // no hard limit; keeps each job < 60s synthesis
 }
+
+const SV_BASE = 'https://secret-voicer.ru/api/v1'
 
 interface AudioRequest {
   engine?: AudioEngine
@@ -133,6 +136,63 @@ function splitTextIntoChunks(text: string, maxChars: number, measureBytes: boole
 }
 
 // ── Per-engine single-chunk synthesizers ────────────────────────────────────
+
+async function synthesizeSecretVoicerChunk(
+  text: string,
+  voiceId: string,
+  settings: { stability: number; similarity: number; style: number; speechRate: number },
+): Promise<Buffer> {
+  const apiKey = env('SECRETVOICER_API_KEY')
+  const res = await fetch(`${SV_BASE}/synthesize`, {
+    method: 'POST',
+    headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      voice_id: voiceId,
+      mode: 'standard',
+      stability: settings.stability,
+      similarity_boost: settings.similarity,
+      style: settings.style,
+      rate: settings.speechRate,
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`SecretVoicer HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+  const j = (await res.json()) as { task_id?: number | string }
+  const taskId = j.task_id
+  if (!taskId) throw new Error('SecretVoicer: no task_id in response')
+
+  const POLL_MS = 2500
+  const TIMEOUT_MS = 240_000
+  const deadline = Date.now() + TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_MS))
+    let status: { status: string; audio_url?: string; error_message?: string }
+    try {
+      const pollRes = await fetch(`${SV_BASE}/task/${taskId}`, {
+        headers: { 'X-API-Key': apiKey },
+      })
+      if (!pollRes.ok) continue
+      status = (await pollRes.json()) as { status: string; audio_url?: string; error_message?: string }
+    } catch {
+      continue
+    }
+    if (status.status === 'COMPLETED') {
+      if (!status.audio_url) throw new Error('SecretVoicer: COMPLETED but no audio_url')
+      const dlRes = await fetch(status.audio_url)
+      if (!dlRes.ok) throw new Error(`SecretVoicer download HTTP ${dlRes.status}`)
+      return Buffer.from(await dlRes.arrayBuffer())
+    }
+    if (status.status === 'FAILED') {
+      throw new Error(`SecretVoicer FAILED: ${status.error_message ?? 'unknown'}`)
+    }
+    // PENDING / LOCAL_PROCESSING → continue polling
+  }
+  throw new Error(`SecretVoicer: timeout after ${TIMEOUT_MS / 1000}s`)
+}
 
 async function synthesizeElevenLabsChunk(
   text: string,
@@ -276,7 +336,7 @@ export async function POST(request: NextRequest) {
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, engine, voice_id })
 
-    const validEngines: AudioEngine[] = ['elevenlabs', 'openai', 'google', 'apihost']
+    const validEngines: AudioEngine[] = ['secretvoicer', 'elevenlabs', 'openai', 'google', 'apihost']
     if (!validEngines.includes(engine)) {
       return NextResponse.json({ ok: false, error: 'Неверный движок TTS' }, { status: 400 })
     }
@@ -402,6 +462,27 @@ export async function POST(request: NextRequest) {
       }
 
       audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
+
+    } else if (engine === 'secretvoicer') {
+      const svKey = env('SECRETVOICER_API_KEY')
+      if (!svKey) {
+        return NextResponse.json({ ok: false, error: 'SecretVoicer API key не настроен' }, { status: 503 })
+      }
+      const styleExaggeration = typeof voice_style === 'number'
+        ? voice_style
+        : STYLE_EXAGGERATION[voice_style] ?? 0
+      try {
+        audioBuffer = await synthesizeSecretVoicerChunk(ttsText, voice_id, {
+          stability,
+          similarity: similarity_boost,
+          style: styleExaggeration,
+          speechRate: speech_rate,
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error('[generate/audio] SecretVoicer failed:', msg)
+        return NextResponse.json({ ok: false, error: `Ошибка синтеза речи SecretVoicer: ${msg.slice(0, 200)}` }, { status: 502 })
+      }
 
     } else {
       // ElevenLabs

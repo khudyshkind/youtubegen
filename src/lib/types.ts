@@ -15,6 +15,7 @@ export const CREDIT_COSTS = {
   script_gpt:    6,
 
   // Audio (per 1 000 chars)
+  audio_secretvoicer_per_1000:    3,
   audio_openai_per_1000:          4,
   audio_elevenlabs_per_1000:     79,
   audio_apihost_basic_per_1000:   2,
@@ -56,11 +57,12 @@ export const CREDIT_COSTS = {
   rising_stars:      6,
 } as const
 
-export type AudioEngine = 'elevenlabs' | 'openai' | 'google' | 'apihost'
+export type AudioEngine = 'secretvoicer' | 'elevenlabs' | 'openai' | 'google' | 'apihost'
 export type ApihostVoiceType = 'basic' | 'standard' | 'pro' | 'studio'
 
 export function audioCost(chars: number, engine: AudioEngine, apihostVoiceType?: ApihostVoiceType): number {
   const blocks = Math.ceil(chars / 1000)
+  if (engine === 'secretvoicer') return Math.max(1, blocks * CREDIT_COSTS.audio_secretvoicer_per_1000)
   if (engine === 'apihost') {
     const rates: Record<ApihostVoiceType, number> = {
       basic:    CREDIT_COSTS.audio_apihost_basic_per_1000,
