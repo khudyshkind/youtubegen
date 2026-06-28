@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useLang } from '@/hooks/useLang'
 import { useStudioStore } from '@/lib/studio-store'
 import { refreshCredits } from '@/lib/refresh-credits'
+import { CREDIT_COSTS } from '@/lib/types'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -3475,7 +3476,7 @@ type Tab = 'niche' | 'niche_finder' | 'channel_plan' | 'trends' | 'channel' | 'r
 
 export default function AnalyticsPage() {
   const { t } = useLang()
-  const [tab, setTab] = useState<Tab>('niche_finder')
+  const [tab, setTab] = useState<Tab | null>(null)
   const [openedReport, setOpenedReport] = useState<AnalyticsReport | null>(null)
   const [pendingChannelQuery, setPendingChannelQuery] = useState<string | null>(null)
   const [risingStarsResult, setRisingStarsResult] = useState<RisingStarsResult | null>(null)
@@ -3554,41 +3555,55 @@ export default function AnalyticsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const TAB_GROUPS: Array<{ groupKey: string; accent?: boolean; tabs: Array<{ id: Tab; label: string }> }> = [
+  const TAB_GROUPS: Array<{ groupKey: string; accent?: boolean; tabs: Array<{ id: Tab; label: string; icon: string; descKey: string }> }> = [
     {
       groupKey: 'analytics.group_start',
       accent: true,
       tabs: [
-        { id: 'niche_finder', label: t('analytics.tab_niche_finder') },
-        { id: 'channel_plan', label: t('analytics.tab_channel_plan') },
+        { id: 'niche_finder', label: t('analytics.tab_niche_finder'), icon: '🎯', descKey: 'analytics.desc_niche_finder' },
+        { id: 'channel_plan', label: t('analytics.tab_channel_plan'), icon: '🚀', descKey: 'analytics.desc_channel_plan' },
       ],
     },
     {
       groupKey: 'analytics.group_research',
       tabs: [
-        { id: 'trends',   label: t('analytics.tab_trends') },
-        { id: 'keywords', label: t('analytics.tab_keywords') },
-        { id: 'revenue',  label: t('analytics.tab_revenue') },
+        { id: 'trends',   label: t('analytics.tab_trends'),   icon: '🔥', descKey: 'analytics.desc_trends' },
+        { id: 'keywords', label: t('analytics.tab_keywords'), icon: '🔑', descKey: 'analytics.desc_keywords' },
+        { id: 'revenue',  label: t('analytics.tab_revenue'),  icon: '💰', descKey: 'analytics.desc_revenue' },
       ],
     },
     {
       groupKey: 'analytics.group_competitors',
       tabs: [
-        { id: 'niche',        label: t('analytics.tab_niche') },
-        { id: 'channel',      label: t('analytics.tab_channel') },
-        { id: 'compare',      label: t('analytics.tab_compare') },
-        { id: 'rising_stars', label: t('analytics.tab_rising_stars') },
-        { id: 'comments',     label: t('analytics.tab_comments') },
+        { id: 'niche',        label: t('analytics.tab_niche'),        icon: '🧭', descKey: 'analytics.desc_niche' },
+        { id: 'channel',      label: t('analytics.tab_channel'),      icon: '📊', descKey: 'analytics.desc_channel' },
+        { id: 'compare',      label: t('analytics.tab_compare'),      icon: '⚖️', descKey: 'analytics.desc_compare' },
+        { id: 'rising_stars', label: t('analytics.tab_rising_stars'), icon: '⭐', descKey: 'analytics.desc_rising_stars' },
+        { id: 'comments',     label: t('analytics.tab_comments'),     icon: '💬', descKey: 'analytics.desc_comments' },
       ],
     },
     {
       groupKey: 'analytics.group_history',
       tabs: [
-        { id: 'history', label: t('analytics.tab_history') },
+        { id: 'history', label: t('analytics.tab_history'), icon: '📋', descKey: 'analytics.desc_history' },
       ],
     },
   ]
   const TABS = TAB_GROUPS.flatMap((g) => g.tabs)
+
+  const TAB_COST: Record<Tab, number> = {
+    niche:        CREDIT_COSTS.niche_analysis,
+    niche_finder: CREDIT_COSTS.niche_finder,
+    channel_plan: CREDIT_COSTS.channel_plan,
+    trends:       CREDIT_COSTS.trends,
+    channel:      CREDIT_COSTS.channel_analysis,
+    revenue:      CREDIT_COSTS.revenue_calc,
+    comments:     CREDIT_COSTS.comments_analysis,
+    keywords:     CREDIT_COSTS.keywords_analysis,
+    compare:      CREDIT_COSTS.channels_compare,
+    rising_stars: CREDIT_COSTS.rising_stars,
+    history:      0,
+  }
 
   return (
     <>
@@ -3605,137 +3620,187 @@ export default function AnalyticsPage() {
       `}</style>
 
       <div className="max-w-3xl mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="mb-8 no-print">
-          <h1 className="text-2xl font-bold text-white mb-1">{t('analytics.title')}</h1>
-          <p className="text-slate-400 text-sm">{t('analytics.subtitle')}</p>
-        </div>
+        {tab === null ? (
+          /* ── Gallery ── */
+          <>
+            <div className="mb-8">
+              <h1 className="text-2xl font-bold text-white mb-1">{t('analytics.gallery_title')}</h1>
+              <p className="text-slate-400 text-sm">{t('analytics.gallery_subtitle')}</p>
+            </div>
+            {TAB_GROUPS.map(({ groupKey, accent, tabs: groupTabs }) => (
+              <div key={groupKey} className="mb-8">
+                <p className={`text-xs font-medium uppercase tracking-wide mb-3 ${accent ? 'text-violet-400' : 'text-slate-500'}`}>
+                  {t(groupKey)}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {groupTabs.map((tabItem) => (
+                    <button
+                      key={tabItem.id}
+                      type="button"
+                      onClick={() => setTab(tabItem.id)}
+                      className="cursor-pointer rounded-xl border border-slate-700 bg-slate-800/40 p-4 text-left hover:border-violet-500 hover:bg-slate-800 transition"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-2xl">{tabItem.icon}</span>
+                        <span className="font-medium text-slate-100">{tabItem.label}</span>
+                      </div>
+                      <p className="text-sm text-slate-400 mt-1">{t(tabItem.descKey)}</p>
+                      <p className="text-xs mt-2">
+                        {TAB_COST[tabItem.id] === 0
+                          ? <span className="text-green-400">{t('analytics.free_label')}</span>
+                          : <span className="text-slate-500">{`−${TAB_COST[tabItem.id]} ${t('analytics.credits_short')}`}</span>}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </>
+        ) : (
+          /* ── Tool view ── */
+          <>
+            {/* Header */}
+            <div className="mb-8 no-print">
+              <h1 className="text-2xl font-bold text-white mb-1">{t('analytics.title')}</h1>
+              <p className="text-slate-400 text-sm">{t('analytics.subtitle')}</p>
+            </div>
 
-        {/* Print header (only visible on print) */}
-        <div className="hidden print:block mb-6">
-          <h1 className="text-2xl font-bold">YouTubeGen — Отчёт аналитики</h1>
-          <p className="text-sm text-gray-500">{new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-        </div>
+            {/* Print header (only visible on print) */}
+            <div className="hidden print:block mb-6">
+              <h1 className="text-2xl font-bold">YouTubeGen — Отчёт аналитики</h1>
+              <p className="text-sm text-gray-500">{new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+            </div>
 
-        {/* Tabs */}
-        <div className="no-print relative mb-6" ref={tabRef}>
-          <button
-            type="button"
-            onClick={() => setTabOpen((o) => !o)}
-            className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
-            style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.35)', color: '#C4B5FD' }}
-          >
-            <span>{TABS.find(({ id }) => id === tab)?.label}</span>
-            <span style={{ color: '#7C3AED', fontSize: '0.65rem', display: 'inline-block', transform: tabOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
-          </button>
-          {tabOpen && (
-            <div className="absolute left-0 right-0 top-full mt-1 rounded-xl overflow-hidden z-50"
-              style={{ background: 'rgba(15,12,35,0.98)', border: '1px solid rgba(124,58,237,0.2)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
-              <div className="py-1">
-                {TAB_GROUPS.map(({ groupKey, accent, tabs }, gi) => (
-                  <div key={groupKey}>
-                    <p className={`text-xs font-medium uppercase tracking-wide px-4 mb-1 ${gi === 0 ? 'mt-2' : 'mt-4'} ${accent ? 'text-violet-400' : 'text-slate-500'}`}>
-                      {t(groupKey)}
-                    </p>
-                    {tabs.map(({ id, label }) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => { setTab(id); setCameFromRisingStars(false); if (id !== openedReport?.report_type) clearOpenedReport(); setTabOpen(false) }}
-                        className="w-full flex items-center px-4 py-3 text-sm text-left transition-colors"
-                        style={{
-                          background: tab === id ? 'rgba(124,58,237,0.2)' : 'transparent',
-                          color: tab === id ? '#C4B5FD' : '#94A3B8',
-                        }}
-                      >
-                        <span className="flex-1">{label}</span>
-                        {tab === id && <span className="text-xs text-violet-400">✓</span>}
-                      </button>
+            {/* Back to gallery */}
+            <button
+              type="button"
+              onClick={() => setTab(null)}
+              className="text-sm text-slate-400 hover:text-violet-400 transition-colors mb-3 no-print"
+            >
+              {t('analytics.back_to_tools')}
+            </button>
+
+            {/* Tabs */}
+            <div className="no-print relative mb-6" ref={tabRef}>
+              <button
+                type="button"
+                onClick={() => setTabOpen((o) => !o)}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
+                style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.35)', color: '#C4B5FD' }}
+              >
+                <span>{TABS.find(({ id }) => id === tab)?.label}</span>
+                <span style={{ color: '#7C3AED', fontSize: '0.65rem', display: 'inline-block', transform: tabOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
+              </button>
+              {tabOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1 rounded-xl overflow-hidden z-50"
+                  style={{ background: 'rgba(15,12,35,0.98)', border: '1px solid rgba(124,58,237,0.2)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
+                  <div className="py-1">
+                    {TAB_GROUPS.map(({ groupKey, accent, tabs: dropdownTabs }, gi) => (
+                      <div key={groupKey}>
+                        <p className={`text-xs font-medium uppercase tracking-wide px-4 mb-1 ${gi === 0 ? 'mt-2' : 'mt-4'} ${accent ? 'text-violet-400' : 'text-slate-500'}`}>
+                          {t(groupKey)}
+                        </p>
+                        {dropdownTabs.map(({ id, label }) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => { setTab(id); setCameFromRisingStars(false); if (id !== openedReport?.report_type) clearOpenedReport(); setTabOpen(false) }}
+                            className="w-full flex items-center px-4 py-3 text-sm text-left transition-colors"
+                            style={{
+                              background: tab === id ? 'rgba(124,58,237,0.2)' : 'transparent',
+                              color: tab === id ? '#C4B5FD' : '#94A3B8',
+                            }}
+                          >
+                            <span className="flex-1">{label}</span>
+                            {tab === id && <span className="text-xs text-violet-400">✓</span>}
+                          </button>
+                        ))}
+                      </div>
                     ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        {/* Tab content */}
-        {tab === 'niche' && (
-          <NicheTab
-            externalResult={openedReport?.report_type === 'niche' ? openedReport.result as NicheResult : null}
-            onClearExternal={clearOpenedReport}
-            onAnalyzeChannel={handleGoToChannelFromNiche}
-            initialTopic={nicheInitialTopic ?? undefined}
-          />
+            {/* Tab content */}
+            {tab === 'niche' && (
+              <NicheTab
+                externalResult={openedReport?.report_type === 'niche' ? openedReport.result as NicheResult : null}
+                onClearExternal={clearOpenedReport}
+                onAnalyzeChannel={handleGoToChannelFromNiche}
+                initialTopic={nicheInitialTopic ?? undefined}
+              />
+            )}
+            {tab === 'niche_finder' && (
+              <NicheFinderTab
+                onGoToNiche={handleGoToNicheFromFinder}
+                onGoToPlan={handleGoToPlan}
+                externalResult={openedReport?.report_type === 'niche_finder' ? openedReport.result as NicheFinderResult : null}
+                onClearExternal={clearOpenedReport}
+              />
+            )}
+            {tab === 'channel_plan' && (
+              <ChannelPlanTab
+                initialTopic={channelPlanInitialTopic ?? undefined}
+                externalResult={openedReport?.report_type === 'channel_plan' ? openedReport.result as ChannelPlanResult : null}
+                onClearExternal={clearOpenedReport}
+                onGoToNiche={handleGoToNicheFromFinder}
+                onGoToKeywords={handleGoToKeywordsFromPlan}
+                onGoToChannel={handleGoToChannelFromPlan}
+              />
+            )}
+            {tab === 'trends' && (
+              <TrendsTab
+                externalResult={openedReport?.report_type === 'trends' ? openedReport.result as TrendResult : null}
+                onClearExternal={clearOpenedReport}
+              />
+            )}
+            {tab === 'channel' && (
+              <ChannelTab
+                externalResult={openedReport?.report_type === 'channel' ? openedReport.result as ChannelResult : null}
+                onClearExternal={clearOpenedReport}
+                initialChannel={pendingChannelQuery ?? undefined}
+                cameFromRisingStars={cameFromRisingStars}
+                onBackToRisingStars={handleBackToRisingStars}
+              />
+            )}
+            {tab === 'revenue' && (
+              <RevenueTab
+                externalResult={openedReport?.report_type === 'revenue' ? openedReport.result as RevenueResult : null}
+                onClearExternal={clearOpenedReport}
+              />
+            )}
+            {tab === 'comments' && (
+              <CommentsTab
+                externalResult={openedReport?.report_type === 'comments' ? openedReport.result as CommentsResult : null}
+                onClearExternal={clearOpenedReport}
+              />
+            )}
+            {tab === 'keywords' && (
+              <KeywordsTab
+                externalResult={openedReport?.report_type === 'keywords' ? openedReport.result as KeywordsResult : null}
+                onClearExternal={clearOpenedReport}
+                initialKeyword={keywordsInitialTopic ?? undefined}
+              />
+            )}
+            {tab === 'compare' && (
+              <CompareTab
+                externalResult={openedReport?.report_type === 'compare' ? openedReport.result as CompareResult : null}
+                onClearExternal={clearOpenedReport}
+              />
+            )}
+            {tab === 'rising_stars' && (
+              <RisingStarsTab
+                externalResult={openedReport?.report_type === 'rising_stars' ? openedReport.result as RisingStarsResult : null}
+                onClearExternal={clearOpenedReport}
+                onGoToChannel={handleGoToChannel}
+                savedResult={risingStarsResult}
+                onResult={r => setRisingStarsResult(r)}
+              />
+            )}
+            {tab === 'history' && <HistoryTab onOpen={handleOpenReport} />}
+          </>
         )}
-        {tab === 'niche_finder' && (
-          <NicheFinderTab
-            onGoToNiche={handleGoToNicheFromFinder}
-            onGoToPlan={handleGoToPlan}
-            externalResult={openedReport?.report_type === 'niche_finder' ? openedReport.result as NicheFinderResult : null}
-            onClearExternal={clearOpenedReport}
-          />
-        )}
-        {tab === 'channel_plan' && (
-          <ChannelPlanTab
-            initialTopic={channelPlanInitialTopic ?? undefined}
-            externalResult={openedReport?.report_type === 'channel_plan' ? openedReport.result as ChannelPlanResult : null}
-            onClearExternal={clearOpenedReport}
-            onGoToNiche={handleGoToNicheFromFinder}
-            onGoToKeywords={handleGoToKeywordsFromPlan}
-            onGoToChannel={handleGoToChannelFromPlan}
-          />
-        )}
-        {tab === 'trends' && (
-          <TrendsTab
-            externalResult={openedReport?.report_type === 'trends' ? openedReport.result as TrendResult : null}
-            onClearExternal={clearOpenedReport}
-          />
-        )}
-        {tab === 'channel' && (
-          <ChannelTab
-            externalResult={openedReport?.report_type === 'channel' ? openedReport.result as ChannelResult : null}
-            onClearExternal={clearOpenedReport}
-            initialChannel={pendingChannelQuery ?? undefined}
-            cameFromRisingStars={cameFromRisingStars}
-            onBackToRisingStars={handleBackToRisingStars}
-          />
-        )}
-        {tab === 'revenue' && (
-          <RevenueTab
-            externalResult={openedReport?.report_type === 'revenue' ? openedReport.result as RevenueResult : null}
-            onClearExternal={clearOpenedReport}
-          />
-        )}
-        {tab === 'comments' && (
-          <CommentsTab
-            externalResult={openedReport?.report_type === 'comments' ? openedReport.result as CommentsResult : null}
-            onClearExternal={clearOpenedReport}
-          />
-        )}
-        {tab === 'keywords' && (
-          <KeywordsTab
-            externalResult={openedReport?.report_type === 'keywords' ? openedReport.result as KeywordsResult : null}
-            onClearExternal={clearOpenedReport}
-            initialKeyword={keywordsInitialTopic ?? undefined}
-          />
-        )}
-        {tab === 'compare' && (
-          <CompareTab
-            externalResult={openedReport?.report_type === 'compare' ? openedReport.result as CompareResult : null}
-            onClearExternal={clearOpenedReport}
-          />
-        )}
-        {tab === 'rising_stars' && (
-          <RisingStarsTab
-            externalResult={openedReport?.report_type === 'rising_stars' ? openedReport.result as RisingStarsResult : null}
-            onClearExternal={clearOpenedReport}
-            onGoToChannel={handleGoToChannel}
-            savedResult={risingStarsResult}
-            onResult={r => setRisingStarsResult(r)}
-          />
-        )}
-        {tab === 'history' && <HistoryTab onOpen={handleOpenReport} />}
       </div>
     </>
   )
