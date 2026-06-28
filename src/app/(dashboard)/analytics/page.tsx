@@ -3554,19 +3554,41 @@ export default function AnalyticsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const TABS: Array<{ id: Tab; label: string }> = [
-    { id: 'niche',         label: t('analytics.tab_niche') },
-    { id: 'niche_finder',  label: t('analytics.tab_niche_finder') },
-    { id: 'channel_plan',  label: t('analytics.tab_channel_plan') },
-    { id: 'trends',        label: t('analytics.tab_trends') },
-    { id: 'channel',       label: t('analytics.tab_channel') },
-    { id: 'revenue',       label: t('analytics.tab_revenue') },
-    { id: 'comments',      label: t('analytics.tab_comments') },
-    { id: 'keywords',      label: t('analytics.tab_keywords') },
-    { id: 'compare',       label: t('analytics.tab_compare') },
-    { id: 'rising_stars',  label: t('analytics.tab_rising_stars') },
-    { id: 'history',       label: t('analytics.tab_history') },
+  const TAB_GROUPS: Array<{ groupKey: string; accent?: boolean; tabs: Array<{ id: Tab; label: string }> }> = [
+    {
+      groupKey: 'analytics.group_start',
+      accent: true,
+      tabs: [
+        { id: 'niche_finder', label: t('analytics.tab_niche_finder') },
+        { id: 'channel_plan', label: t('analytics.tab_channel_plan') },
+      ],
+    },
+    {
+      groupKey: 'analytics.group_research',
+      tabs: [
+        { id: 'trends',   label: t('analytics.tab_trends') },
+        { id: 'keywords', label: t('analytics.tab_keywords') },
+        { id: 'revenue',  label: t('analytics.tab_revenue') },
+      ],
+    },
+    {
+      groupKey: 'analytics.group_competitors',
+      tabs: [
+        { id: 'niche',        label: t('analytics.tab_niche') },
+        { id: 'channel',      label: t('analytics.tab_channel') },
+        { id: 'compare',      label: t('analytics.tab_compare') },
+        { id: 'rising_stars', label: t('analytics.tab_rising_stars') },
+        { id: 'comments',     label: t('analytics.tab_comments') },
+      ],
+    },
+    {
+      groupKey: 'analytics.group_history',
+      tabs: [
+        { id: 'history', label: t('analytics.tab_history') },
+      ],
+    },
   ]
+  const TABS = TAB_GROUPS.flatMap((g) => g.tabs)
 
   return (
     <>
@@ -3609,21 +3631,30 @@ export default function AnalyticsPage() {
           {tabOpen && (
             <div className="absolute left-0 right-0 top-full mt-1 rounded-xl overflow-hidden z-50"
               style={{ background: 'rgba(15,12,35,0.98)', border: '1px solid rgba(124,58,237,0.2)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
-              {TABS.map(({ id, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => { setTab(id); setCameFromRisingStars(false); if (id !== openedReport?.report_type) clearOpenedReport(); setTabOpen(false) }}
-                  className="w-full flex items-center px-4 py-3 text-sm text-left transition-colors"
-                  style={{
-                    background: tab === id ? 'rgba(124,58,237,0.2)' : 'transparent',
-                    color: tab === id ? '#C4B5FD' : '#94A3B8',
-                  }}
-                >
-                  <span className="flex-1">{label}</span>
-                  {tab === id && <span className="text-xs text-violet-400">✓</span>}
-                </button>
-              ))}
+              <div className="py-1">
+                {TAB_GROUPS.map(({ groupKey, accent, tabs }, gi) => (
+                  <div key={groupKey}>
+                    <p className={`text-xs font-medium uppercase tracking-wide px-4 mb-1 ${gi === 0 ? 'mt-2' : 'mt-4'} ${accent ? 'text-violet-400' : 'text-slate-500'}`}>
+                      {t(groupKey)}
+                    </p>
+                    {tabs.map(({ id, label }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => { setTab(id); setCameFromRisingStars(false); if (id !== openedReport?.report_type) clearOpenedReport(); setTabOpen(false) }}
+                        className="w-full flex items-center px-4 py-3 text-sm text-left transition-colors"
+                        style={{
+                          background: tab === id ? 'rgba(124,58,237,0.2)' : 'transparent',
+                          color: tab === id ? '#C4B5FD' : '#94A3B8',
+                        }}
+                      >
+                        <span className="flex-1">{label}</span>
+                        {tab === id && <span className="text-xs text-violet-400">✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

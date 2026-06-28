@@ -159,46 +159,55 @@ export default function ToolsPage() {
         {/* Action buttons */}
         <div className="flex flex-col gap-2">
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => handleProcess('unique')}
-              disabled={processingMode !== null}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold rounded-xl transition-all disabled:opacity-50"
-              style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)', color: processingMode === 'unique' ? '#6b7280' : '#60a5fa' }}
-            >
-              {processingMode === 'unique' ? (
-                <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('tools.processing')}</>
-              ) : (
-                <>{t('tools.unique_btn')} · −{creditCost('unique')}</>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleProcess('human')}
-              disabled={processingMode !== null}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold rounded-xl transition-all disabled:opacity-50"
-              style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', color: processingMode === 'human' ? '#6b7280' : '#34d399' }}
-            >
-              {processingMode === 'human' ? (
-                <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('tools.processing')}</>
-              ) : (
-                <>{t('tools.human_btn')} · −{creditCost('human')}</>
-              )}
-            </button>
+            <div className="flex-1">
+              <button
+                type="button"
+                onClick={() => handleProcess('unique')}
+                disabled={processingMode !== null}
+                className="w-full flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold rounded-xl transition-all disabled:opacity-50"
+                style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)', color: processingMode === 'unique' ? '#6b7280' : '#60a5fa' }}
+              >
+                {processingMode === 'unique' ? (
+                  <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('tools.processing')}</>
+                ) : (
+                  <>{t('tools.unique_btn')} · −{creditCost('unique')}</>
+                )}
+              </button>
+              <p className="text-xs text-slate-500 mt-1 text-center">{t('tools.uniqueize_desc')}</p>
+            </div>
+            <div className="flex-1">
+              <button
+                type="button"
+                onClick={() => handleProcess('human')}
+                disabled={processingMode !== null}
+                className="w-full flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold rounded-xl transition-all disabled:opacity-50"
+                style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', color: processingMode === 'human' ? '#6b7280' : '#34d399' }}
+              >
+                {processingMode === 'human' ? (
+                  <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('tools.processing')}</>
+                ) : (
+                  <>{t('tools.human_btn')} · −{creditCost('human')}</>
+                )}
+              </button>
+              <p className="text-xs text-slate-500 mt-1 text-center">{t('tools.humanize_desc')}</p>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => handleProcess('both')}
-            disabled={processingMode !== null}
-            className="w-full flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold rounded-xl transition-all disabled:opacity-50"
-            style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)', color: processingMode === 'both' ? '#6b7280' : '#a78bfa' }}
-          >
-            {processingMode === 'both' ? (
-              <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('tools.processing')}</>
-            ) : (
-              <>{t('tools.both_btn')} · −{creditCost('both')}</>
-            )}
-          </button>
+          <div>
+            <button
+              type="button"
+              onClick={() => handleProcess('both')}
+              disabled={processingMode !== null}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold rounded-xl transition-all disabled:opacity-50"
+              style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)', color: processingMode === 'both' ? '#6b7280' : '#a78bfa' }}
+            >
+              {processingMode === 'both' ? (
+                <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('tools.processing')}</>
+              ) : (
+                <>{t('tools.both_btn')} · −{creditCost('both')}</>
+              )}
+            </button>
+            <p className="text-xs text-slate-500 mt-1 text-center">{t('tools.both_desc')}</p>
+          </div>
 
           {/* Cost info */}
           {charCount > 0 && (
