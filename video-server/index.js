@@ -2817,7 +2817,10 @@ async function processVideoJob(jobId, body) {
       } catch (err) {
         console.error(`[render] proxy failed for image ${i}:`, err.message)
         Sentry.captureException(err, { extra: { jobId, imageIndex: i, engine: img.engine, stage: 'image_proxy_b2' } })
-        return img
+        // Do NOT fall back to the original (likely expired) FAL CDN URL — sending a
+        // dead URL to VGF/RunPod produces a cryptic "expired" error with no recourse.
+        // Fail fast instead: the job error_message will tell the user which scene to fix.
+        throw new Error(`scene ${i + 1} image unavailable (${img.engine ?? 'flux'}) — regenerate images and retry`)
       }
     }))
 

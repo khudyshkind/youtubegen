@@ -909,13 +909,30 @@ export default function Step5Images() {
               {t('studio.step5')} ({sceneImages.length})
               <span className="ml-2 text-xs text-slate-500 font-normal">{t('step5.regen_hint')}</span>
             </p>
+
+            {/* Broken-image banner — shown when any scene failed to upload */}
+            {sceneImages.some((img) => !img.url) && (
+              <div
+                className="flex items-start gap-2 mb-3 px-3 py-2.5 rounded-xl text-sm text-orange-300"
+                style={{ background: 'rgba(251,146,60,0.1)', border: '1px solid rgba(251,146,60,0.25)' }}
+              >
+                <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+                <span>
+                  <strong>{sceneImages.filter((img) => !img.url).length}</strong> {t('step5.broken_banner')}
+                </span>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {sceneImages.map((img, arrayIdx) => {
                 const isLoading = regenLoading.has(img.scene_index)
                 const isEditing = editingIdx === img.scene_index
                 const err = regenErrors[img.scene_index]
                 const isActive = !isEditing && activeSceneIdx === arrayIdx
-                const canSeek = !!audioUrl && !!img.timecode_start && !isEditing
+                const canSeek = !!audioUrl && !!img.timecode_start && !isEditing && !!img.url
 
                 return (
                   <div
@@ -923,7 +940,9 @@ export default function Step5Images() {
                     className={`flex flex-col gap-2 rounded-xl transition-all ${isEditing ? 'col-span-2 sm:col-span-3' : ''} ${canSeek ? 'cursor-pointer' : ''}`}
                     onClick={canSeek ? () => seekAndPlay(img.timecode_start) : undefined}
                     style={
-                      isActive
+                      !img.url && !isEditing
+                        ? { outline: '2px solid rgba(251,146,60,0.6)', boxShadow: '0 0 12px rgba(251,146,60,0.15)' }
+                        : isActive
                         ? { outline: '2px solid rgba(124,58,237,0.7)', boxShadow: '0 0 18px rgba(124,58,237,0.25)' }
                         : {}
                     }
@@ -934,7 +953,7 @@ export default function Step5Images() {
                         className={`relative rounded-xl overflow-hidden shrink-0 ${
                           isEditing ? 'w-40 sm:w-52 aspect-video' : 'aspect-video w-full'
                         }`}
-                        style={{ background: 'rgba(255,255,255,0.04)' }}
+                        style={{ background: img.url ? 'rgba(255,255,255,0.04)' : 'rgba(251,146,60,0.06)' }}
                       >
                         {img.url ? (
                           // eslint-disable-next-line @next/next/no-img-element
@@ -944,8 +963,12 @@ export default function Step5Images() {
                             className={`w-full h-full object-cover transition-opacity ${isLoading ? 'opacity-40' : 'opacity-100'}`}
                           />
                         ) : (
-                          <div className="flex items-center justify-center h-full text-slate-600 text-xs">
-                            {t('msg.error')}
+                          <div className="flex flex-col items-center justify-center h-full gap-1.5 px-2 text-center">
+                            <svg className="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                                d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                            </svg>
+                            <span className="text-xs text-orange-300">↺ {t('step2.regenerate')}</span>
                           </div>
                         )}
 
@@ -968,9 +991,9 @@ export default function Step5Images() {
                             type="button"
                             onClick={(e) => { e.stopPropagation(); openEditor(img.scene_index, img.prompt) }}
                             className="absolute top-1 right-1 p-1.5 rounded-lg transition-colors text-white"
-                            style={{ background: 'rgba(0,0,0,0.5)' }}
-                            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.7)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.5)')}
+                            style={{ background: img.url ? 'rgba(0,0,0,0.5)' : 'rgba(251,146,60,0.6)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = img.url ? 'rgba(124,58,237,0.7)' : 'rgba(251,146,60,0.9)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = img.url ? 'rgba(0,0,0,0.5)' : 'rgba(251,146,60,0.6)')}
                             title={t('step2.regenerate')}
                           >
                             <RefreshIcon className="w-3.5 h-3.5" />
@@ -1058,7 +1081,7 @@ export default function Step5Images() {
         <button
           type="button"
           onClick={() => setStep(7)}
-          disabled={sceneImages.length === 0}
+          disabled={sceneImages.length === 0 || sceneImages.some((img) => !img.url)}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40"
         >
           {t('step5.next')}

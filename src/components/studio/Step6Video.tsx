@@ -142,6 +142,7 @@ export default function Step6Video() {
   const hasAudio = !!audioUrl
   const hasImages = sceneImages.length > 0
   const hasSubs = subtitleBlocks.length > 0
+  const missingImageCount = sceneImages.filter((img) => !img.url).length
 
   function toggleEffect(id: string) {
     setEffects((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
@@ -265,6 +266,11 @@ export default function Step6Video() {
 
   async function handleRender() {
     if (!audioUrl || !hasImages || !projectId) return
+    if (missingImageCount > 0) {
+      setRenderError(`${missingImageCount} ${t('step6.broken_images')}`)
+      setRenderState('error')
+      return
+    }
     setVideoUrl(null)      // clear stale video so UI doesn't flash old video on re-render
     setRenderState('queued')
     setRenderError('')
@@ -679,14 +685,18 @@ export default function Step6Video() {
             <button
               type="button"
               onClick={handleRender}
-              disabled={!hasAudio || !hasImages}
+              disabled={!hasAudio || !hasImages || missingImageCount > 0}
               className="w-full py-2.5 btn-gradient disabled:opacity-40 text-white font-semibold rounded-xl text-sm"
             >
               {t('step6.render_btn')}
             </button>
-            {(!hasAudio || !hasImages) && (
+            {(!hasAudio || !hasImages || missingImageCount > 0) && (
               <p className="text-xs text-slate-500 mt-2 text-center">
-                {!hasAudio ? t('step6.no_audio_hint') : t('step6.no_images_hint')}
+                {!hasAudio
+                  ? t('step6.no_audio_hint')
+                  : !hasImages
+                  ? t('step6.no_images_hint')
+                  : `${missingImageCount} ${t('step6.broken_images')}`}
               </p>
             )}
           </>
