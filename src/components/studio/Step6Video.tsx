@@ -265,6 +265,7 @@ export default function Step6Video() {
 
   async function handleRender() {
     if (!audioUrl || !hasImages || !projectId) return
+    setVideoUrl(null)      // clear stale video so UI doesn't flash old video on re-render
     setRenderState('queued')
     setRenderError('')
     setRenderProgress(0)

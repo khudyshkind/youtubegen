@@ -52,6 +52,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Mark project as "render in progress" BEFORE calling Railway.
+    // This closes the race window: any page reload after this point will see
+    // status='generating_video' and inferStep → step 7, never the old video.
+    // Fatal: if the DB write fails we return 500 and skip Railway entirely —
+    // no orphaned job, project state is unchanged, user can retry.
+    // Trade-off: if Railway later fails, the old video_url is already gone.
+    // That's acceptable — the user's explicit intent is to replace the video.
+    const { error: resetError } = await supabase
+      .from('projects')
+      .update({ video_url: null, status: 'generating_video' })
+      .eq('id', project_id)
+      .eq('user_id', user.id)
+    if (resetError) {
+      Sentry.captureException(new Error(`projects reset failed: ${resetError.message}`), {
+        extra: { project_id },
+      })
+      return NextResponse.json(
+        { ok: false, error: 'Ошибка подготовки проекта к рендерингу' },
+        { status: 500 },
+      )
+    }
+
     const railwayUrl = env('RAILWAY_VIDEO_SERVER_URL').replace(/\/$/, '')
     const railwaySecret = env('RAILWAY_API_SECRET')
 

@@ -65,7 +65,7 @@ interface StudioState {
   setSceneImages: (images: SceneImage[]) => void
   setImageInterval: (interval: number) => void
   setImageStyle: (style: string | null) => void
-  setVideoUrl: (url: string) => void
+  setVideoUrl: (url: string | null) => void
   setRenderJobId: (id: string | null) => void
   setSeo: (seo: SeoData) => void
   setThumbnailUrl: (url: string | null) => void
@@ -155,7 +155,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setSceneImages: (images) => set({ sceneImages: images }),
   setImageInterval: (interval) => set({ imageInterval: Math.max(3, Math.min(30, interval)) }),
   setImageStyle: (style) => set({ imageStyle: style }),
-  setVideoUrl: (url) => set({ videoUrl: url }),
+  setVideoUrl: (url) => set({ videoUrl: url ?? null }),
   setRenderJobId: (id) => set({ renderJobId: id }),
   setSeo: (seo) => set({ seo }),
   setThumbnailUrl: (url) => set({ thumbnailUrl: url }),

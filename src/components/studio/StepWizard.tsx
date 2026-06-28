@@ -19,6 +19,7 @@ type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 const STEP_KEYS = ['step1', 'step2', 'step3', 'step4', 'step5', 'step6', 'step7', 'step8'] as const
 
 function inferStep(p: Project): Step {
+  if (p.status === 'generating_video') return 7   // render in progress → stay on video step
   if (p.seo) return 8
   if (p.video_url) return 8
   if (p.scene_images && p.scene_images.length > 0) return 7
@@ -101,9 +102,10 @@ function StepWizardInner() {
           setThumbnailTextMode(p.thumbnail_text_mode)
         }
 
-        // If video is not yet in projects but render may still be running,
-        // try to find the latest active job by project_id so Step6Video can resume polling.
-        if (!p.video_url && p.scene_images && p.scene_images.length > 0) {
+        // If project is in 'generating_video' state, try to find the active job and
+        // resume polling. Using status (not !video_url) handles re-render correctly:
+        // render/route.ts resets video_url=null + status='generating_video' on each render start.
+        if (p.status === 'generating_video') {
           try {
             const jobRes = await fetch(`/api/generate/video/status?project_id=${p.id}`)
             if (!cancelled && jobRes.ok) {
