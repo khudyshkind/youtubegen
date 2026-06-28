@@ -9,6 +9,7 @@ import ScrollProgress from './ScrollProgress'
 import AnimatedCounter from './AnimatedCounter'
 import FaqAccordion from './FaqAccordion'
 import { useLang } from '@/hooks/useLang'
+import { PLAN_CREDITS, PLAN_PRICES } from '@/lib/types'
 
 const BG = '#0A0A0F'
 const DIV_LINE = '1px solid rgba(255,255,255,0.05)'
@@ -46,7 +47,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
     {
       name: 'Free',
       isFree: true,
-      credits: 30,
+      credits: PLAN_CREDITS['free'],
       features: [t('billing.f_script'), t('billing.f_voice_openai'), t('billing.f_2_images'), t('billing.f_all_tools')],
       cta: t('landing.plan_cta_free'),
       href: '/auth/register',
@@ -55,9 +56,9 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
     {
       name: 'Basic',
       isFree: false,
-      priceUsd: 9,
-      rub: Math.ceil(9 * usdToRub),
-      credits: 800,
+      priceUsd: PLAN_PRICES['basic'],
+      rub: Math.ceil(PLAN_PRICES['basic'] * usdToRub),
+      credits: PLAN_CREDITS['basic'],
       features: [t('billing.f_credits_basic'), t('billing.f_videos_3'), t('billing.f_all_tools'), t('billing.f_voices_3')],
       cta: t('landing.plan_cta_basic'),
       href: tgPlan('basic'),
@@ -66,9 +67,9 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
     {
       name: 'Starter',
       isFree: false,
-      priceUsd: 19,
-      rub: Math.ceil(19 * usdToRub),
-      credits: 2000,
+      priceUsd: PLAN_PRICES['starter'],
+      rub: Math.ceil(PLAN_PRICES['starter'] * usdToRub),
+      credits: PLAN_CREDITS['starter'],
       features: [t('billing.f_credits_100'), t('billing.f_videos_7'), t('billing.f_all_tools'), t('billing.f_analytics')],
       cta: t('landing.plan_cta_starter'),
       href: tgPlan('starter'),
@@ -77,9 +78,9 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
     {
       name: 'Pro',
       isFree: false,
-      priceUsd: 39,
-      rub: Math.ceil(39 * usdToRub),
-      credits: 5000,
+      priceUsd: PLAN_PRICES['pro'],
+      rub: Math.ceil(PLAN_PRICES['pro'] * usdToRub),
+      credits: PLAN_CREDITS['pro'],
       features: [t('billing.f_credits_300'), t('billing.f_videos_18'), t('billing.f_all_tools'), t('billing.f_priority_support')],
       cta: t('landing.plan_cta_pro'),
       href: tgPlan('pro'),
@@ -88,9 +89,9 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
     {
       name: 'Agency',
       isFree: false,
-      priceUsd: 99,
-      rub: Math.ceil(99 * usdToRub),
-      credits: 15000,
+      priceUsd: PLAN_PRICES['agency'],
+      rub: Math.ceil(PLAN_PRICES['agency'] * usdToRub),
+      credits: PLAN_CREDITS['agency'],
       features: [t('billing.f_credits_1000'), t('billing.f_videos_54'), t('billing.f_all_tools'), t('billing.f_dedicated_support')],
       cta: t('landing.plan_cta_agency'),
       href: tgPlan('agency'),

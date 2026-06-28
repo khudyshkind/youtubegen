@@ -2,15 +2,10 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase-server'
+import { PLAN_CREDITS } from '@/lib/types'
 import type { Plan } from '@/lib/types'
 
 const VALID_PLANS: Plan[] = ['starter', 'pro', 'agency']
-
-const PLAN_CREDITS: Record<string, number> = {
-  starter: 100,
-  pro:     300,
-  agency:  1000,
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -57,7 +52,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Add credits
-    const credits = PLAN_CREDITS[plan] ?? 0
+    const credits = PLAN_CREDITS[plan as Plan] ?? 0
     const { error: credErr } = await svc.rpc('add_credits', {
       p_user_id:   targetUser.id,
       p_amount:    credits,
