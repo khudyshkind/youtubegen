@@ -381,10 +381,11 @@ export default function Step3Voice() {
   const { t } = useLang()
 
   const ENGINES: { id: AudioEngine; medal: string; name: string; quality: string; meta: string; costLabel: string; soon?: boolean }[] = [
-    { id: 'elevenlabs', medal: '🥇', name: 'ElevenLabs', quality: t('voice.el_quality'),     meta: t('voice.el_meta'),     costLabel: `${CREDIT_COSTS.audio_elevenlabs_per_1000} ${t('step3.cr_per_k')}` },
-    { id: 'openai',     medal: '🥈', name: 'OpenAI TTS', quality: t('voice.openai_quality'), meta: t('voice.openai_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}` },
-    { id: 'apihost',    medal: '🏠', name: 'APIHOST RU', quality: t('voice.apihost_quality'),meta: t('voice.apihost_meta'),costLabel: t('voice.apihost_cost') },
-    { id: 'google',     medal: '🥉', name: 'Google TTS', quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}`, soon: true },
+    { id: 'secretvoicer', medal: '✨', name: 'SecretVoicer', quality: t('voice.sv_desc'),       meta: t('voice.sv_meta'),     costLabel: `${CREDIT_COSTS.audio_secretvoicer_per_1000} ${t('step3.cr_per_k')}` },
+    { id: 'elevenlabs',   medal: '🥇', name: 'ElevenLabs',   quality: t('voice.el_desc'),       meta: t('voice.el_meta'),     costLabel: `${CREDIT_COSTS.audio_elevenlabs_per_1000} ${t('step3.cr_per_k')}` },
+    { id: 'openai',       medal: '🥈', name: 'OpenAI TTS',   quality: t('voice.openai_quality'), meta: t('voice.openai_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}` },
+    { id: 'apihost',      medal: '🏠', name: 'APIHOST RU',   quality: t('voice.apihost_quality'),meta: t('voice.apihost_meta'),costLabel: t('voice.apihost_cost') },
+    { id: 'google',       medal: '🥉', name: 'Google TTS',   quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}`, soon: true },
   ]
 
   const OPENAI_VOICES = [
@@ -407,12 +408,20 @@ export default function Step3Voice() {
   const EL_LANGUAGE_OPTIONS = [...EL_LANGUAGE_OPTIONS_BASE, LANG_ALL]
   const GOOGLE_LANGUAGE_OPTIONS = [...EL_LANGUAGE_OPTIONS_BASE, LANG_ALL]
 
-  // Engine
-  const [engine, setEngine] = useState<AudioEngine>('elevenlabs')
+  // Engine — default depends on plan: free → secretvoicer, paid → elevenlabs
+  const [engine, setEngine] = useState<AudioEngine>('secretvoicer')
+  const [planLoading, setPlanLoading] = useState(true)
+  const engineTouchedRef = useRef(false)
+
+  // SecretVoicer voices
+  const [svVoices, setSvVoices] = useState<ApiVoice[]>([])
+  const [svVoicesLoading, setSvVoicesLoading] = useState(false)
+  const [svVoicesError, setSvVoicesError] = useState('')
+  const [svVoiceId, setSvVoiceId] = useState('')
 
   // ElevenLabs voices
   const [voices, setVoices] = useState<ApiVoice[]>([])
-  const [voicesLoading, setVoicesLoading] = useState(true)
+  const [voicesLoading, setVoicesLoading] = useState(false)
   const [voicesError, setVoicesError] = useState('')
   const [voiceLanguage, setVoiceLanguage] = useState('ru')
   const [genderFilter, setGenderFilter] = useState<'all' | 'M' | 'F'>('all')
@@ -465,6 +474,24 @@ export default function Step3Voice() {
     ((script.match(/[Ѐ-ӿ]/g) ?? []).length / Math.max(1, script.replace(/\s/g, '').length)) > 0.15
   const voiceIsRu = apihostSelectedVoice?.lang.toLowerCase().startsWith('ru') ?? false
   const apihostLangMismatch = !!apihostSelectedVoice && scriptIsRu !== voiceIsRu
+
+  // Load SecretVoicer voices
+  function loadSvVoices() {
+    setSvVoicesLoading(true)
+    setSvVoicesError('')
+    fetch('/api/voices/secretvoicer?language=ru')
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.ok && Array.isArray(json.data?.voices)) {
+          setSvVoices(json.data.voices as ApiVoice[])
+          if (json.data.voices.length > 0 && !svVoiceId) setSvVoiceId(json.data.voices[0].voice_id)
+        } else {
+          setSvVoicesError(json.error ?? t('step3.voices_error'))
+        }
+      })
+      .catch(() => setSvVoicesError(t('step3.voices_error')))
+      .finally(() => setSvVoicesLoading(false))
+  }
 
   // Load ElevenLabs voices
   function loadVoices(lang: string) {
@@ -524,9 +551,28 @@ export default function Step3Voice() {
       .finally(() => setApihostVoicesLoading(false))
   }
 
-  useEffect(() => { loadVoices(voiceLanguage) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadSvVoices() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Switch default engine to ElevenLabs for paid plans — only if user hasn't touched the selector
+  useEffect(() => {
+    fetch('/api/profile')
+      .then((r) => r.json())
+      .then((json: { ok: boolean; plan?: string }) => {
+        if (json.ok && json.plan && json.plan !== 'free' && !engineTouchedRef.current) {
+          setEngine('elevenlabs')
+        }
+      })
+      .catch(() => {})
+      .finally(() => setPlanLoading(false))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (engine === 'secretvoicer' && svVoices.length === 0 && !svVoicesLoading) {
+      loadSvVoices()
+    }
+    if (engine === 'elevenlabs' && voices.length === 0 && !voicesLoading) {
+      loadVoices(voiceLanguage)
+    }
     if (engine === 'google' && googleVoices.length === 0 && !googleVoicesLoading) {
       loadGoogleVoices(googleLanguage)
     }
@@ -642,12 +688,30 @@ export default function Step3Voice() {
     }
   }, [projectId, setAudioUrl])
 
+  async function handleSvPreview(voiceId: string) {
+    if (currentAudioRef.current) { currentAudioRef.current.pause(); currentAudioRef.current = null }
+    if (previewingId === voiceId) { setPreviewingId(null); return }
+    const voice = svVoices.find((v) => v.voice_id === voiceId)
+    if (!voice?.preview_url) { setPreviewingId(null); return }
+    setPreviewingId(voiceId)
+    try {
+      const audio = new Audio(voice.preview_url)
+      currentAudioRef.current = audio
+      audio.onended = () => { setPreviewingId(null); currentAudioRef.current = null }
+      audio.onerror = () => { setPreviewingId(null); currentAudioRef.current = null }
+      await audio.play()
+    } catch {
+      setPreviewingId(null)
+    }
+  }
+
   async function handleGenerateAudio() {
     if (!script) return
     setError('')
     setLoading(true)
     try {
       const voiceIdToUse =
+        engine === 'secretvoicer' ? svVoiceId :
         engine === 'openai' ? openaiVoice :
         engine === 'google' ? googleVoice :
         engine === 'apihost' ? apihostVoiceId :
@@ -692,6 +756,7 @@ export default function Step3Voice() {
   }
 
   const canGenerate = !loading && !uploading && !!script && (
+    engine === 'secretvoicer' ? !!svVoiceId && !svVoicesLoading :
     engine === 'elevenlabs' ? !!voiceSettings.voiceId && !voicesLoading :
     engine === 'openai' ? !!openaiVoice :
     engine === 'apihost' ? !!apihostVoiceId && !apihostVoicesLoading :
@@ -710,12 +775,20 @@ export default function Step3Voice() {
       {/* Engine selection — 2×2 grid */}
       <div>
         <p className="text-sm font-medium text-slate-300 mb-2">{t('step3.engine')}</p>
+        {planLoading ? (
+          <div className="grid grid-cols-2 gap-2">
+            {ENGINES.map((eng) => (
+              <div key={eng.id} className="h-[72px] rounded-xl animate-pulse"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '2px solid rgba(255,255,255,0.06)' }} />
+            ))}
+          </div>
+        ) : (
         <div className="grid grid-cols-2 gap-2">
           {ENGINES.map((eng) => (
             <button
               key={eng.id}
               type="button"
-              onClick={() => !eng.soon && setEngine(eng.id)}
+              onClick={() => { if (!eng.soon) { engineTouchedRef.current = true; setEngine(eng.id) } }}
               disabled={!!eng.soon}
               className="relative flex flex-col gap-1 p-3 rounded-xl text-left transition-all disabled:cursor-not-allowed"
               style={eng.soon
@@ -745,6 +818,7 @@ export default function Step3Voice() {
             </button>
           ))}
         </div>
+        )}
       </div>
 
       {/* Dynamic cost display */}
@@ -764,6 +838,38 @@ export default function Step3Voice() {
             <span className="text-sm font-bold text-violet-400">{cost} {t('nav.credits_suffix')}</span>
           </div>
         </div>
+      )}
+
+      {/* ── SecretVoicer voices ── */}
+      {engine === 'secretvoicer' && (
+        <>
+          {svVoicesError && !svVoicesLoading && (
+            <div className="flex items-start gap-3 rounded-xl px-4 py-3"
+              style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+              <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-red-400">{t('step3.voices_error')}</p>
+                <p className="text-xs text-red-500/70 mt-0.5">{svVoicesError}</p>
+              </div>
+              <button type="button" onClick={loadSvVoices}
+                className="shrink-0 text-xs text-red-400 hover:text-red-300 font-medium underline transition-colors">
+                {t('step3.retry')}
+              </button>
+            </div>
+          )}
+
+          <VoiceDropdown
+            value={svVoiceId}
+            voices={svVoices}
+            loading={svVoicesLoading}
+            genderFilter={genderFilter}
+            onChange={setSvVoiceId}
+            onPreview={handleSvPreview}
+            previewingId={previewingId}
+          />
+        </>
       )}
 
       {/* ── ElevenLabs voices ── */}
@@ -1138,7 +1244,7 @@ export default function Step3Voice() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
             </svg>
-            {t('step3.generating')}
+            {engine === 'secretvoicer' ? t('voice.sv_synthesizing') : t('step3.generating')}
           </>
         ) : audioUrl ? (
           `↺ ${t('step2.regenerate')} · −${cost} ${t('nav.credits_suffix')}`
