@@ -36,7 +36,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fallbackPrompt: 'Watercolor painting of scene related to {topic}, soft blended colors, textured paper',
   },
   'cinematic photography, dramatic lighting, movie still, wide-angle': {
-    claudeInstruction: 'Cinematic photography. Movie still frame, dramatic lighting, wide-angle composition. 25–35 words.',
+    claudeInstruction: 'Cinematic movie still frame. CRITICAL: first describe the actual subject, action and setting from the scene text — what is happening, who or what is in frame, and where. Apply cinematic treatment (dramatic lighting, wide-angle, depth of field) only as framing around that concrete content. The subject and action must stay clearly identifiable, never replaced by mood words. 25-35 words.',
     fluxSuffix: 'cinematic photography, dramatic lighting, movie still, wide-angle lens, film grain, depth of field',
     negativePrompt: 'cartoon, sketch, watercolor, painting, illustration, anime, low quality, blurry',
     enhanceSystemHint: 'Cinematic photography style. Dramatic lighting, movie still.',
@@ -57,7 +57,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fallbackPrompt: 'Cyberpunk neon scene related to {topic}, futuristic city, glowing neon lights',
   },
   'photorealistic, professional photography, detailed, shot on camera': {
-    claudeInstruction: 'Photorealistic photography. Professional camera shot, sharp detail. 25–35 words.',
+    claudeInstruction: 'Photorealistic photograph. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render it with professional camera realism and sharp detail. The concrete content must be clearly described, not just photographic style. 25-35 words.',
     fluxSuffix: 'photorealistic, professional photography, sharp detail, shot on DSLR, 8K resolution',
     negativePrompt: 'cartoon, sketch, watercolor, painting, illustration, anime, low quality, blur, grain',
     enhanceSystemHint: 'Photorealistic photography style. Professional camera, detailed.',
