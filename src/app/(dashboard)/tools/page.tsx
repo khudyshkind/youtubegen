@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useLang } from '@/hooks/useLang'
 import { useStudioStore } from '@/lib/studio-store'
 import { refreshCredits } from '@/lib/refresh-credits'
+import { SCRIPT_LANGUAGES } from '@/lib/languages'
 
 function SpinnerIcon({ className }: { className?: string }) {
   return (
@@ -35,20 +36,6 @@ export default function ToolsPage() {
 
   const charCount = inputText.length
 
-  const OUTPUT_LANGS = [
-    { value: 'ru',   label: 'Русский' },
-    { value: 'en',   label: 'English' },
-    { value: 'de',   label: 'Deutsch' },
-    { value: 'fr',   label: 'Français' },
-    { value: 'es',   label: 'Español' },
-    { value: 'it',   label: 'Italiano' },
-    { value: 'pt',   label: 'Português' },
-    { value: 'zh',   label: '中文' },
-    { value: 'ja',   label: '日本語' },
-    { value: 'ko',   label: '한국어' },
-    { value: 'ar',   label: 'العربية' },
-    { value: 'tr',   label: 'Türkçe' },
-  ]
 
   async function handleProcess(mode: 'unique' | 'human' | 'both') {
     if (!inputText.trim()) {
@@ -150,8 +137,8 @@ export default function ToolsPage() {
             className="flex-1 px-3 py-2 rounded-lg text-sm text-slate-300 cursor-pointer outline-none"
             style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
           >
-            {OUTPUT_LANGS.map(l => (
-              <option key={l.value} value={l.value} className="bg-slate-900">{l.label}</option>
+            {SCRIPT_LANGUAGES.map(l => (
+              <option key={l.code} value={l.code} className="bg-slate-900">{l.flag} {l.name}</option>
             ))}
           </select>
         </div>

@@ -19,7 +19,23 @@ const LANG_NAMES: Record<string, string> = {
   ja: 'Japanese (日本語)',
   ko: 'Korean (한국어)',
   ar: 'Arabic (العربية)',
+  hi: 'Hindi (हिंदी)',
+  nl: 'Dutch (Nederlands)',
+  pl: 'Polish (Polski)',
   tr: 'Turkish (Türkçe)',
+  sv: 'Swedish (Svenska)',
+  no: 'Norwegian (Norsk)',
+  da: 'Danish (Dansk)',
+  fi: 'Finnish (Suomi)',
+  uk: 'Ukrainian (Українська)',
+  cs: 'Czech (Čeština)',
+  ro: 'Romanian (Română)',
+  hu: 'Hungarian (Magyar)',
+  el: 'Greek (Ελληνικά)',
+  he: 'Hebrew (עברית)',
+  th: 'Thai (ภาษาไทย)',
+  id: 'Indonesian (Bahasa Indonesia)',
+  vi: 'Vietnamese (Tiếng Việt)',
 }
 
 function langInstruction(outputLang: string): string {

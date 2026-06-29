@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import { CREDIT_COSTS } from '@/lib/types'
+import { SCRIPT_LANGUAGES } from '@/lib/languages'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { useLang } from '@/hooks/useLang'
 
@@ -14,12 +15,6 @@ const MODEL_COSTS: Record<string, number> = {
 
 function countWords(text: string) {
   return text.trim().split(/\s+/).filter(Boolean).length
-}
-
-function detectLang(text: string): string {
-  const cyr = (text.match(/[а-яёА-ЯЁ]/g) || []).length
-  const lat = (text.match(/[a-zA-Z]/g) || []).length
-  return cyr > lat ? 'ru' : 'en'
 }
 
 function SpinnerIcon({ className }: { className?: string }) {
@@ -40,6 +35,7 @@ export default function Step2Script() {
   const [processingMode, setProcessingMode] = useState<'unique' | 'human' | 'both' | null>(null)
   const [originalScript, setOriginalScript] = useState<string | null>(null)
   const [processSuccess, setProcessSuccess] = useState(false)
+  const [outputLang, setOutputLang] = useState<string>(scriptParams.language ?? 'ru')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const MODEL_LABELS: Record<string, string> = {
@@ -114,7 +110,7 @@ export default function Step2Script() {
       const res = await fetch('/api/generate/uniqueize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script, project_id: projectId, mode, output_lang: detectLang(script) }),
+        body: JSON.stringify({ script, project_id: projectId, mode, output_lang: outputLang }),
       })
       const json = await res.json()
       if (!json.ok) {
@@ -209,6 +205,19 @@ export default function Step2Script() {
       {/* Text processing buttons — shown when script exists */}
       {hasScript && !loading && (
         <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-slate-400 whitespace-nowrap shrink-0">{t('tools.output_lang')}</label>
+            <select
+              value={outputLang}
+              onChange={(e) => setOutputLang(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-lg text-sm text-slate-300 cursor-pointer outline-none"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              {SCRIPT_LANGUAGES.map(l => (
+                <option key={l.code} value={l.code} className="bg-slate-900">{l.flag} {l.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex gap-2">
             <button
               type="button"
