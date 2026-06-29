@@ -87,25 +87,26 @@ Your task: for each video scene, write a brief description of what is happening 
 
 ═══ FEW-SHOT QUALITY EXAMPLES ═══
 
-Scene — octopus hunting in the dark:
-❌ Weak:   "An octopus in the ocean catching prey"
-✓ Strong: "A reddish-brown octopus with textured mottled skin and large glowing amber eyes stretching a tentacle toward a fleeing silver fish, extreme close-up from below, dramatic deep-sea bioluminescent blue-green lighting with darkness at edges, tense and predatory atmosphere"
+Scene — the inner mechanism of an antique clock:
+❌ Weak:   "An old clock with gears"
+✓ Strong: "Intricate brass gear train of an 18th-century pocket watch filling the frame, extreme macro close-up, warm amber lamplight raking across polished metal teeth and hairspring coils casting long shadows, scratched crystal partially visible above, precise and mechanical atmosphere"
 
 Scene — person researching in a library:
 ❌ Weak:   "A person reading old books"
 ✓ Strong: "Weathered hands turning pages of an aged leather-bound open book on a worn oak desk covered in scattered papers, warm incandescent amber lamplight casting soft left-side shadows, shallow depth of field with book spines blurred in background, contemplative and scholarly atmosphere"
 
-Scene — vast ocean abyss:
-❌ Weak:   "The deep ocean"
-✓ Strong: "Vast dark ocean abyss stretching downward into blackness, wide establishing shot from above looking straight down, isolated beam of cold blue light piercing the darkness with tiny silhouettes of fish at different depths, awe-inspiring and vertiginous atmosphere"
+Scene — abandoned mountain pass at dusk:
+❌ Weak:   "A mountain landscape"
+✓ Strong: "Narrow rocky mountain pass carved between two sheer cliff faces, wide establishing shot looking down the corridor toward a distant valley glowing amber in last sunlight, cold blue shadow filling the foreground stone, silent and austere atmosphere"
 
 ═══ CHARACTER CONSISTENCY RULES ═══
 If CHARACTER PROFILES are provided in the user message:
-• Determine which characters are PHYSICALLY PRESENT (visible, actively participating) in each scene — not just mentioned in narration
-• Copy character profile descriptions VERBATIM into the prompt for every scene they appear in
-• Never paraphrase or vary the character description — exact repetition ensures visual consistency
-• If two characters are both present in one scene — include BOTH descriptions in that prompt
-• If a scene contains no characters from the profiles — write the prompt normally without any character description
+• Add a character to a scene's prompt ONLY if that character is physically present in THIS scene's text — meaning the scene text names the character directly OR uses a pronoun/reference that unambiguously points to it ("it", "the predator", "the creature" — only if the scene text makes clear which character is meant).
+• CRITICAL: The video's main subject being a character does NOT mean that character appears in every scene. Scenes describing statistics, locations, historical facts, abstract concepts, or other objects must be illustrated WITHOUT the character — even if the character is the overall topic of the video. Topic ≠ presence in every frame.
+• If the scene text describes something other than the character (a place, a number, an event, another object) — do NOT insert the character. Illustrate what the scene text actually describes.
+• When a character IS present in a scene: copy its profile description VERBATIM into the prompt — never paraphrase or vary it, so the character looks identical across all scenes it appears in.
+• If two characters are both present in one scene — include BOTH descriptions verbatim in that prompt.
+• If a scene contains no characters from the profiles — write the prompt normally, illustrating the scene's actual content.
 
 ═══ STYLE CONSISTENCY RULES ═══
 • Every prompt MUST follow the style instruction provided in the user message
@@ -140,15 +141,16 @@ async function extractCharacters(
       max_tokens: 500,
       messages: [{
         role: 'user',
-        content: `Analyze this video script about "${topic}". Identify all visual characters (animals, creatures, people, beings) that will be DEPICTED or SHOWN in at least 2 different scene illustrations.
+        content: `Analyze this video script about "${topic}". Identify visual characters (animals, creatures, people, beings) that appear visually in multiple scenes.
 
-IMPORTANT: If the video is about a specific animal, creature, or person — even in an educational or factual format — that subject IS a recurring visual character. Include it.
+PURPOSE: These profiles ensure the character looks IDENTICAL every time it appears in an illustration. A profile does NOT mean the character must appear in every scene — it is only used when the scene text actually shows that character.
 
-For each recurring character, write a concise 15–25 word ENGLISH visual description: species/type, distinctive color, key physical features, size/scale.
+For each recurring character, write a concise 15–25 word ENGLISH visual description covering: species/type, distinctive color, key physical features, size/scale. This description will be copied verbatim into prompts for scenes where that character is physically present.
 
 Rules:
-- Include ANY creature/animal/person that appears visually in 2+ scenes, even as the sole subject of narration
-- Return [] ONLY if each scene depicts COMPLETELY DIFFERENT subjects with no visual repeats (e.g. a nature documentary showing a different unrelated species every scene)
+- Include a character only if it will be visually depicted (shown, seen) in 2 or more scenes
+- If the video is about an animal or person as its topic, include that subject — but only to establish its appearance for scenes where it is actually in frame, not as a directive to show it everywhere
+- Return [] if all scenes show completely different subjects with no visual repeats
 - Maximum 4 characters
 - Descriptions must be purely visual — no personality, behavior, or story context
 
