@@ -63,6 +63,34 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     enhanceSystemHint: 'Photorealistic photography style. Professional camera, detailed.',
     fallbackPrompt: 'Photorealistic scene related to {topic}, professional photography, detailed',
   },
+  'anime style, cel shading, Japanese animation, expressive characters': {
+    claudeInstruction: 'Anime illustration in modern Japanese animation style. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with clean cel-shaded lines, expressive eyes, vibrant colors. 20-25 words.',
+    fluxSuffix: 'anime style, cel shading, clean linework, expressive large eyes, vibrant colors, modern Japanese animation',
+    negativePrompt: 'photorealistic, photograph, 3d render, western cartoon, pencil sketch, watercolor, oil painting',
+    enhanceSystemHint: 'Anime illustration style. Cel shading, clean linework. No photorealism, no western cartoon.',
+    fallbackPrompt: 'Anime-style illustration of scene related to {topic}, cel shading, vibrant colors, expressive characters',
+  },
+  '3D animated render, Pixar style, volumetric lighting, polished CGI': {
+    claudeInstruction: '3D animated render in polished Pixar-like style. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with soft volumetric lighting, smooth rounded forms, rich detail. 20-25 words.',
+    fluxSuffix: '3d animated render, pixar style, soft volumetric lighting, smooth rounded shapes, subsurface scattering, polished cgi',
+    negativePrompt: 'photorealistic photograph, 2d flat, pencil sketch, watercolor, anime cel shading, oil painting, low poly',
+    enhanceSystemHint: '3D Pixar-style render. Volumetric lighting, smooth shapes. No flat 2D, no photorealism.',
+    fallbackPrompt: '3D Pixar-style render of scene related to {topic}, soft lighting, smooth shapes, polished CGI',
+  },
+  'oil painting, visible brushstrokes, impasto texture, classical palette': {
+    claudeInstruction: 'Classical oil painting. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with visible brushstrokes, rich textured impasto, warm classical palette. 20-25 words.',
+    fluxSuffix: 'oil painting, visible brushstrokes, textured impasto, rich classical palette, canvas texture, old master style',
+    negativePrompt: 'photorealistic, photograph, 3d render, digital art, cartoon, anime, pencil sketch, flat colors, cgi',
+    enhanceSystemHint: 'Classical oil painting style. Visible brushstrokes, impasto texture. No photorealism, no digital art.',
+    fallbackPrompt: 'Oil painting of scene related to {topic}, visible brushstrokes, rich textured colors, classical style',
+  },
+  'dark atmospheric, low-key lighting, deep shadows, moody cinematic': {
+    claudeInstruction: 'Dark atmospheric cinematic scene. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with deep shadows, moody low-key lighting, muted desaturated tones, heavy atmosphere. 25-35 words.',
+    fluxSuffix: 'dark atmospheric, low-key lighting, deep shadows, moody, muted desaturated colors, cinematic, dramatic chiaroscuro',
+    negativePrompt: 'bright, cheerful, vibrant colors, cartoon, sketch, watercolor, high-key lighting, pastel, daytime',
+    enhanceSystemHint: 'Dark atmospheric style. Low-key lighting, deep shadows. No bright colors, no cartoon.',
+    fallbackPrompt: 'Dark atmospheric scene related to {topic}, deep shadows, moody lighting, muted tones',
+  },
 }
 
 export const DEFAULT_STYLE_CONFIG: StyleConfig = {

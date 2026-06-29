@@ -277,6 +277,10 @@ export const IMAGE_STYLES = {
   cinematic:   'cinematic photography, dramatic lighting, movie still, wide-angle',
   cyberpunk:   'neon cyberpunk style, vibrant neon colors, futuristic dystopia',
   doodle:      'flat 2D doodle cartoon, minimalist stick figures, bold black outlines, simple comedic style',
+  anime:       'anime style, cel shading, Japanese animation, expressive characters',
+  render3d:    '3D animated render, Pixar style, volumetric lighting, polished CGI',
+  oil:         'oil painting, visible brushstrokes, impasto texture, classical palette',
+  dark:        'dark atmospheric, low-key lighting, deep shadows, moody cinematic',
 } as const
 
 export type ImageStyleKey = keyof typeof IMAGE_STYLES
