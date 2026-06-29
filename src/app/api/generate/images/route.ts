@@ -196,8 +196,8 @@ interface SceneInfo {
 
 function fmtSec(s: number): string {
   const m = Math.floor(s / 60)
-  const sec = Math.floor(s % 60)
-  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+  const sec = (s % 60).toFixed(2)
+  return `${String(m).padStart(2, '0')}:${sec.padStart(5, '0')}`
 }
 
 function splitSubtitlesIntoGroups(blocks: SubtitleBlock[], n: number): SubtitleBlock[][] {
