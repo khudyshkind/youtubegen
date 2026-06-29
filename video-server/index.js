@@ -2306,6 +2306,19 @@ function hexToAss(hex) {
   return `&H00${b}${g}${r}`.toUpperCase()
 }
 
+// Shared style params used by both blocksToAss (for ASS [V4+ Styles]) and
+// burnSubtitlesVGF (for force_style override). Keep in sync if adding new fields.
+function computeSubtitleStyle(subtitle_style) {
+  const sizeMap  = { small: 18, medium: 22, large: 28 }
+  const alignMap = { top: 8, center: 5, bottom: 2 }
+  return {
+    fontSize:   sizeMap[subtitle_style.size] ?? 22,
+    alignment:  alignMap[subtitle_style.position] ?? 2,
+    primColour: hexToAss(subtitle_style.color),
+    bg:         subtitle_style.background,
+  }
+}
+
 function blocksToSrt(blocks) {
   function fmt(s) {
     const h = Math.floor(s / 3600)
@@ -2319,16 +2332,11 @@ function blocksToSrt(blocks) {
     .join('\n\n')
 }
 
-// Build an ASS subtitle file with the style embedded.
-// Keeps all &H color codes inside the file — not in the FFmpeg command string —
-// so VGF's shell execution context never sees bare & characters.
+// Build an ASS subtitle file. The [V4+ Styles] section is generated but may be
+// overridden by force_style in burnSubtitlesVGF. The file is used as the event
+// container — Dialogue lines carry timing and text regardless of [V4+ Styles].
 function blocksToAss(blocks, subtitle_style) {
-  const sizeMap  = { small: 18, medium: 22, large: 28 }
-  const alignMap = { top: 8, center: 5, bottom: 2 }
-  const fontSize   = sizeMap[subtitle_style.size] ?? 22
-  const alignment  = alignMap[subtitle_style.position] ?? 2
-  const primColour = hexToAss(subtitle_style.color)
-  const bg = subtitle_style.background
+  const { fontSize, alignment, primColour, bg } = computeSubtitleStyle(subtitle_style)
 
   let borderStyle, outline, shadow, outlineColour, backColour
   if (bg) {
@@ -2617,9 +2625,12 @@ async function deleteTempImagesFromB2(keys) {
   }))
 }
 
-// Burn subtitles via VGF — generates an ASS file with embedded style and uploads to B2.
-// Using ASS (not SRT + force_style) avoids passing &H color codes and single quotes
-// in the FFmpeg command string, which break in VGF's shell execution context.
+// Burn subtitles via VGF. ASS file supplies events (timing + text); force_style
+// overrides [V4+ Styles] in the FFmpeg command so the style is applied regardless
+// of whether VGF's libass picks up the embedded style section.
+// Comma escaping in force_style: \\\\, in JS source (same pattern as ken_burns filter)
+// → \\, at runtime → \, after bash double-quote processing → , parsed by FFmpeg.
+// & in &H color codes is literal inside bash "..." — no escaping needed.
 // Compute dynamic VGF timeout for full-video encode passes (mux, subtitle burn).
 // Base 10 min + 30s per minute of content, capped at 30 min.
 // Slideshow H.264 encodes fast (~300+ fps), but 60-min content needs headroom.
@@ -2640,11 +2651,19 @@ async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId
     Sentry.captureException(e, { extra: { jobId, stage: 'subtitle_burn_upload' } })
     return videoUrl
   }
+  const { fontSize, primColour, bg, alignment } = computeSubtitleStyle(subtitle_style)
+  const forceParams = bg
+    ? ['FontSize='+fontSize, 'PrimaryColour='+primColour, 'BorderStyle=3',
+       'BackColour=&H80000000', 'Outline=1', 'Shadow=0', 'Bold=1', 'Alignment='+alignment]
+    : ['FontSize='+fontSize, 'PrimaryColour='+primColour, 'OutlineColour=&H00000000',
+       'BorderStyle=1', 'Outline=2', 'Shadow=1', 'Bold=1', 'Alignment='+alignment]
+  const forceStyle = forceParams.join('\\\\,')
+
   try {
     const result = await runFFmpegOnVGF(
       { in_1: videoUrl, in_2: assUrl },
       { out_1: 'output_subs.mp4' },
-      `-i {{in_1}} -vf subtitles={{in_2}} -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`,
+      `-i {{in_1}} -vf subtitles={{in_2}}:force_style=${forceStyle} -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`,
       timeoutMs
     )
     console.log('[vgf] subtitle burn-in done')
