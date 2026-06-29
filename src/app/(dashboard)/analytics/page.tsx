@@ -2538,7 +2538,8 @@ function KeywordsTab({
   const [keyword, setKeyword] = useState(initialKeyword ?? '')
 
   useEffect(() => { if (initialKeyword) setKeyword(initialKeyword) }, [initialKeyword])
-  const [contentLang, setContentLang] = useState<'ru' | 'en'>('ru')
+  const [country, setCountry] = useState('RU')
+  const [contentLang, setContentLang] = useState('ru')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<KeywordsResult | null>(null)
@@ -2559,7 +2560,7 @@ function KeywordsTab({
       const res = await fetch('/api/analytics/keywords', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, content_lang: contentLang, ui_lang: uiLang }),
+        body: JSON.stringify({ keyword, country, content_lang: contentLang, ui_lang: uiLang }),
       })
       const json = await res.json() as { ok: boolean; data?: KeywordsResult; error?: string; code?: string }
       if (!json.ok) { setError(json.error ?? 'Ошибка'); return }
@@ -2594,23 +2595,57 @@ function KeywordsTab({
                 style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-slate-400">Язык контента</label>
-              <div className="flex gap-2">
-                {(['ru', 'en'] as const).map(l => (
-                  <button
-                    key={l}
-                    type="button"
-                    onClick={() => setContentLang(l)}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
-                    style={{
-                      background: contentLang === l ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.06)',
-                      color: contentLang === l ? '#c4b5fd' : '#64748b',
-                      border: contentLang === l ? '1px solid rgba(124,58,237,0.5)' : '1px solid rgba(255,255,255,0.1)',
-                    }}>
-                    {l === 'ru' ? '🇷🇺 Русский' : '🇺🇸 Английский'}
-                  </button>
-                ))}
+            <div className="flex gap-3 flex-wrap">
+              <div className="flex-1 min-w-36">
+                <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.country_label')}</label>
+                <select value={country} onChange={e => setCountry(e.target.value)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <option value="worldwide">🌍 Весь мир</option>
+                  <option value="US">🇺🇸 США</option>
+                  <option value="GB">🇬🇧 Великобритания</option>
+                  <option value="CA">🇨🇦 Канада</option>
+                  <option value="AU">🇦🇺 Австралия</option>
+                  <option value="DE">🇩🇪 Германия</option>
+                  <option value="FR">🇫🇷 Франция</option>
+                  <option value="ES">🇪🇸 Испания</option>
+                  <option value="IT">🇮🇹 Италия</option>
+                  <option value="BR">🇧🇷 Бразилия</option>
+                  <option value="MX">🇲🇽 Мексика</option>
+                  <option value="IN">🇮🇳 Индия</option>
+                  <option value="JP">🇯🇵 Япония</option>
+                  <option value="KR">🇰🇷 Южная Корея</option>
+                  <option value="RU">🇷🇺 Россия</option>
+                  <option value="UA">🇺🇦 Украина</option>
+                  <option value="KZ">🇰🇿 Казахстан</option>
+                  <option value="PL">🇵🇱 Польша</option>
+                  <option value="NL">🇳🇱 Нидерланды</option>
+                  <option value="TR">🇹🇷 Турция</option>
+                  <option value="AE">🇦🇪 ОАЭ</option>
+                  <option value="SA">🇸🇦 Саудовская Аравия</option>
+                </select>
+              </div>
+              <div className="flex-1 min-w-36">
+                <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.lang_label')}</label>
+                <select value={contentLang} onChange={e => setContentLang(e.target.value)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <option value="en">Английский</option>
+                  <option value="ru">Русский</option>
+                  <option value="de">Немецкий</option>
+                  <option value="fr">Французский</option>
+                  <option value="es">Испанский</option>
+                  <option value="it">Итальянский</option>
+                  <option value="pt">Португальский</option>
+                  <option value="ja">Японский</option>
+                  <option value="ko">Корейский</option>
+                  <option value="hi">Хинди</option>
+                  <option value="tr">Турецкий</option>
+                  <option value="ar">Арабский</option>
+                  <option value="pl">Польский</option>
+                  <option value="nl">Нидерландский</option>
+                  <option value="uk">Украинский</option>
+                </select>
               </div>
             </div>
             {error && <p className="text-red-400 text-sm">{error}</p>}

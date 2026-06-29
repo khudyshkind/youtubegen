@@ -124,15 +124,18 @@ interface YtVideoListResponse {
 }
 
 // Get avg views for top-5 videos on a query
-async function getQueryStats(query: string): Promise<{ avg_views: number; video_count: number }> {
+async function getQueryStats(query: string, contentLang: string, country: string): Promise<{ avg_views: number; video_count: number }> {
   try {
     const apiKey = env('YOUTUBE_API_KEY')
+    const regionCode = country === 'worldwide' ? undefined : country
     const searchUrl = new URL(`${YT_BASE}/search`)
     searchUrl.searchParams.set('part', 'snippet')
     searchUrl.searchParams.set('type', 'video')
     searchUrl.searchParams.set('q', query)
     searchUrl.searchParams.set('maxResults', '5')
     searchUrl.searchParams.set('key', apiKey)
+    searchUrl.searchParams.set('relevanceLanguage', contentLang)
+    if (regionCode) searchUrl.searchParams.set('regionCode', regionCode)
 
     const searchRes = await fetch(searchUrl.toString())
     if (!searchRes.ok) return { avg_views: 0, video_count: 0 }
@@ -181,10 +184,11 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
-    const body = await req.json() as { keyword?: string; content_lang?: string; ui_lang?: string; lang?: string }
+    const body = await req.json() as { keyword?: string; content_lang?: string; ui_lang?: string; lang?: string; country?: string }
     const keyword = body.keyword?.trim() ?? ''
     const contentLang = body.content_lang ?? body.lang ?? 'ru'
     const uiLang = body.ui_lang ?? body.lang ?? 'ru'
+    const country = body.country ?? 'RU'
 
     if (!keyword) return NextResponse.json({ ok: false, error: 'Введите ключевое слово' }, { status: 400 })
 
@@ -201,7 +205,7 @@ export async function POST(req: NextRequest) {
       `how to ${keyword}`,
     ]
 
-    console.log(`[keywords] fetching suggestions for: ${keyword} (content: ${contentLang}, ui: ${uiLang})`)
+    console.log(`[keywords] fetching suggestions for: ${keyword} (content: ${contentLang}, ui: ${uiLang}, country: ${country})`)
 
     const suggestionsArrays = await Promise.all(
       seeds.map(seed => getAutocompleteSuggestions(seed, contentLang))
@@ -232,7 +236,7 @@ export async function POST(req: NextRequest) {
 
     for (let i = 0; i < suggestions.length; i += batchSize) {
       const batch = suggestions.slice(i, i + batchSize)
-      const results = await Promise.all(batch.map(s => getQueryStats(s)))
+      const results = await Promise.all(batch.map(s => getQueryStats(s, contentLang, country)))
       batch.forEach((s, j) => statsMap.set(s, results[j]))
     }
 
