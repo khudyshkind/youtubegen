@@ -248,7 +248,7 @@ async function generateScenesFromSubtitles(
   for (let chunkStart = 0; chunkStart < scenesWithText.length; chunkStart += CLAUDE_CHUNK) {
     const chunk = scenesWithText.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
     const chunkSize = chunk.length
-    const maxTokens = Math.max(2500, chunkSize * 100)
+    const maxTokens = Math.max(4000, chunkSize * 130)
     const chunkNum = Math.floor(chunkStart / CLAUDE_CHUNK) + 1
 
     const message = await anthropic.messages.create({
@@ -272,6 +272,13 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
 
     const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
     const chunkResults = parseJsonArray(rawText) as Array<{ scene: string; prompt: string }>
+    if (chunkResults.length !== chunkSize) {
+      console.warn(`[images/subtitles] chunk deficit: got ${chunkResults.length} of ${chunkSize} (chunkStart=${chunkStart})`)
+    }
+    while (chunkResults.length < chunkSize) {
+      const absIdx = chunkStart + chunkResults.length
+      chunkResults.push({ scene: `Сцена ${absIdx + 1}`, prompt: styleConfig.fallbackPrompt.replace('{topic}', topic) })
+    }
     allPromptResults.push(...chunkResults)
   }
 
@@ -363,7 +370,7 @@ async function generateScenesFromScript(
   for (let chunkStart = 0; chunkStart < blocksWithTimecodes.length; chunkStart += CLAUDE_CHUNK) {
     const chunk = blocksWithTimecodes.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
     const chunkSize = chunk.length
-    const maxTokens = Math.max(2500, chunkSize * 100)
+    const maxTokens = Math.max(4000, chunkSize * 130)
     const chunkNum = Math.floor(chunkStart / CLAUDE_CHUNK) + 1
 
     const message = await anthropic.messages.create({
@@ -387,6 +394,16 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
 
     const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
     const chunkResults = parseJsonArray(rawText) as Array<{ scene: string; prompt: string }>
+    if (chunkResults.length !== chunkSize) {
+      console.warn(`[images/script] chunk deficit: got ${chunkResults.length} of ${chunkSize} (chunkStart=${chunkStart})`)
+    }
+    while (chunkResults.length < chunkSize) {
+      const absIdx = chunkStart + chunkResults.length
+      chunkResults.push({
+        scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
+        prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
+      })
+    }
     allPromptResults.push(...chunkResults)
   }
 
