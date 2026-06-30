@@ -213,11 +213,12 @@ async function synthesizeVoicerChunk(
       voice_id: voiceId,
       model_id: 'eleven_multilingual_v2',
       split_type: 'smart',
+      max_chunk_length: 2500,
       voice_settings: {
         stability: settings.stability,
         similarity_boost: settings.similarity,
         style: settings.style,
-        speed: settings.speechRate,
+        speed: Math.min(1.2, Math.max(0.7, settings.speechRate ?? 1.0)),
       },
     }),
   })
