@@ -231,7 +231,7 @@ async function synthesizeVoicerChunk(
   if (!taskId) throw new Error('Voicer: no task_id in response')
 
   const POLL_MS = 2500
-  const TIMEOUT_MS = 240_000
+  const TIMEOUT_MS = 360_000 // 6 min: Voicer queues tasks ~100s before synthesis starts
   const deadline = Date.now() + TIMEOUT_MS
 
   while (Date.now() < deadline) {
