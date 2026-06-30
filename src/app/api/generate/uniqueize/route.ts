@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
+import { CREDIT_COSTS } from '@/lib/types'
 
 export const maxDuration = 120
 
@@ -233,7 +234,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Неверный режим' }, { status: 400 })
     }
 
-    const creditCost = mode === 'both' ? 2 : 1
+    const creditCost =
+      mode === 'both'  ? CREDIT_COSTS.uniqueize + CREDIT_COSTS.humanize :
+      mode === 'human' ? CREDIT_COSTS.humanize :
+      CREDIT_COSTS.uniqueize
     const check = await requireCreditsAmount(user.id, creditCost, supabase)
     if (!check.ok) {
       return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })

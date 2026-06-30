@@ -259,7 +259,7 @@ export default function Step2Script() {
             >
               {processingMode === 'unique' ? (
                 <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.uniqueizing')}</>
-              ) : t('step2.uniqueize')}
+              ) : <>{t('step2.uniqueize')} · −{CREDIT_COSTS.uniqueize} {t('nav.credits_suffix')}</>}
             </button>
             <button
               type="button"
@@ -270,7 +270,7 @@ export default function Step2Script() {
             >
               {processingMode === 'human' ? (
                 <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.humanizing')}</>
-              ) : t('step2.humanize')}
+              ) : <>{t('step2.humanize')} · −{CREDIT_COSTS.humanize} {t('nav.credits_suffix')}</>}
             </button>
           </div>
           <div className="flex gap-2">
@@ -283,7 +283,7 @@ export default function Step2Script() {
             >
               {processingMode === 'both' ? (
                 <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{bothStep === 1 ? 'Шаг 1/2: уникализация...' : 'Шаг 2/2: очеловечивание...'}</>
-              ) : t('step2.both_process')}
+              ) : <>{t('step2.both_process')} · −{CREDIT_COSTS.uniqueize + CREDIT_COSTS.humanize} {t('nav.credits_suffix')}</>}
             </button>
             {originalScript !== null && (
               <button

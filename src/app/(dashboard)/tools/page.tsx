@@ -6,6 +6,7 @@ import { useLang } from '@/hooks/useLang'
 import { useStudioStore } from '@/lib/studio-store'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { SCRIPT_LANGUAGES } from '@/lib/languages'
+import { CREDIT_COSTS } from '@/lib/types'
 
 function SpinnerIcon({ className }: { className?: string }) {
   return (
@@ -119,7 +120,10 @@ export default function ToolsPage() {
     router.push('/studio?from=tools')
   }
 
-  const creditCost = (mode: 'unique' | 'human' | 'both') => mode === 'both' ? t('tools.cr2') : t('tools.cr1')
+  const creditCost = (mode: 'unique' | 'human' | 'both') =>
+    mode === 'both'  ? CREDIT_COSTS.uniqueize + CREDIT_COSTS.humanize :
+    mode === 'human' ? CREDIT_COSTS.humanize :
+    CREDIT_COSTS.uniqueize
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -184,7 +188,7 @@ export default function ToolsPage() {
                 {processingMode === 'unique' ? (
                   <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('tools.processing')}</>
                 ) : (
-                  <>{t('tools.unique_btn')} · −{creditCost('unique')}</>
+                  <>{t('tools.unique_btn')} · −{creditCost('unique')} {t('nav.credits_suffix')}</>
                 )}
               </button>
               <p className="text-xs text-slate-500 mt-1 text-center">{t('tools.uniqueize_desc')}</p>
@@ -200,7 +204,7 @@ export default function ToolsPage() {
                 {processingMode === 'human' ? (
                   <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('tools.processing')}</>
                 ) : (
-                  <>{t('tools.human_btn')} · −{creditCost('human')}</>
+                  <>{t('tools.human_btn')} · −{creditCost('human')} {t('nav.credits_suffix')}</>
                 )}
               </button>
               <p className="text-xs text-slate-500 mt-1 text-center">{t('tools.humanize_desc')}</p>
@@ -217,7 +221,7 @@ export default function ToolsPage() {
               {processingMode === 'both' ? (
                 <><SpinnerIcon className="w-4 h-4 animate-spin" /> {bothStep === 1 ? 'Шаг 1/2: повышаем уникальность...' : 'Шаг 2/2: убираем следы ИИ...'}</>
               ) : (
-                <>{t('tools.both_btn')} · −{creditCost('both')}</>
+                <>{t('tools.both_btn')} · −{creditCost('both')} {t('nav.credits_suffix')}</>
               )}
             </button>
             <p className="text-xs text-slate-500 mt-1 text-center">{t('tools.both_desc')}</p>
@@ -226,7 +230,7 @@ export default function ToolsPage() {
           {/* Cost info */}
           {charCount > 0 && (
             <p className="text-xs text-slate-600 text-right">
-              {charCount} {t('tools.cost_info')} <span className="text-slate-400">{t('tools.cr1')} / {t('tools.cr1')} / {t('tools.cr2')}</span>
+              {charCount} {t('tools.cost_info')} <span className="text-slate-400">{CREDIT_COSTS.uniqueize} / {CREDIT_COSTS.humanize} / {CREDIT_COSTS.uniqueize + CREDIT_COSTS.humanize} {t('nav.credits_suffix')}</span>
             </p>
           )}
         </div>
