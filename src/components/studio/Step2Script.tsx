@@ -27,7 +27,7 @@ function SpinnerIcon({ className }: { className?: string }) {
 }
 
 export default function Step2Script() {
-  const { scriptParams, setScriptParams, projectId, planSections, script, setScript, setStep } = useStudioStore()
+  const { scriptParams, setScriptParams, projectId, planSections, script, setScript, setStep, ownScript } = useStudioStore()
   const { t } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -338,67 +338,71 @@ export default function Step2Script() {
             )}
           </div>
 
-          {/* Enhance block */}
-          <div className="rounded-xl p-3" style={{ border: '1px solid rgba(251,191,36,0.2)', background: 'rgba(251,191,36,0.04)' }}>
-            <p className="text-xs font-semibold mb-2.5" style={{ color: '#fbbf24' }}>
-              {t('step2.enhance_title')} · −{CREDIT_COSTS.enhance} {t('nav.credits_suffix')}
-            </p>
-            <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={enhanceHook}
-                  onChange={(e) => setEnhanceHook(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded accent-amber-400 cursor-pointer"
-                />
-                <span className="text-xs text-slate-300">{t('step2.enhance_hook')}</span>
-              </label>
-              {enhanceHook && (
-                <select
-                  value={enhanceHookType}
-                  onChange={(e) => setEnhanceHookType(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg text-xs text-slate-300 cursor-pointer outline-none ml-5"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
-                >
-                  <option value="question">{t('hook.question')}</option>
-                  <option value="statistic">{t('hook.statistic')}</option>
-                  <option value="story">{t('hook.story')}</option>
-                  <option value="provocation">{t('hook.provocation')}</option>
-                </select>
-              )}
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={enhanceCta}
-                  onChange={(e) => setEnhanceCta(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded accent-amber-400 cursor-pointer"
-                />
-                <span className="text-xs text-slate-300">{t('step2.enhance_cta')}</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={enhancePauses}
-                  onChange={(e) => setEnhancePauses(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded accent-amber-400 cursor-pointer"
-                />
-                <span className="text-xs text-slate-300">{t('step2.enhance_pauses')}</span>
-              </label>
+          {/* Enhance block — only for own-text users (AI-generation users get hook/CTA/pauses free via Step 1 toggles) */}
+          {ownScript && (
+            <div className="rounded-xl p-3" style={{ border: '1px solid rgba(124,58,237,0.25)', background: 'rgba(124,58,237,0.06)' }}>
+              <p className="text-xs font-semibold mb-2.5 text-violet-400">
+                {t('step2.enhance_title')} · −{CREDIT_COSTS.enhance} {t('nav.credits_suffix')}
+              </p>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={enhanceHook}
+                    onChange={(e) => setEnhanceHook(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded accent-violet-500 cursor-pointer"
+                  />
+                  <span className="text-xs text-slate-300">{t('step2.enhance_hook')}</span>
+                </label>
+                {enhanceHook && (
+                  <div className="pl-5">
+                    <select
+                      value={enhanceHookType}
+                      onChange={(e) => setEnhanceHookType(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg text-xs text-slate-300 cursor-pointer outline-none"
+                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                    >
+                      <option value="question">{t('hook.question')}</option>
+                      <option value="statistic">{t('hook.statistic')}</option>
+                      <option value="story">{t('hook.story')}</option>
+                      <option value="provocation">{t('hook.provocation')}</option>
+                    </select>
+                  </div>
+                )}
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={enhanceCta}
+                    onChange={(e) => setEnhanceCta(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded accent-violet-500 cursor-pointer"
+                  />
+                  <span className="text-xs text-slate-300">{t('step2.enhance_cta')}</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={enhancePauses}
+                    onChange={(e) => setEnhancePauses(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded accent-violet-500 cursor-pointer"
+                  />
+                  <span className="text-xs text-slate-300">{t('step2.enhance_pauses')}</span>
+                </label>
+              </div>
+              <button
+                type="button"
+                onClick={handleEnhance}
+                disabled={enhancing || processingMode !== null || (!enhanceHook && !enhanceCta && !enhancePauses)}
+                className="w-full mt-2.5 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl transition-all disabled:opacity-40"
+                style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)', color: enhancing ? '#6b7280' : '#a78bfa' }}
+              >
+                {enhancing ? (
+                  <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.enhancing')}</>
+                ) : (
+                  <>{t('step2.enhance_btn')} · −{CREDIT_COSTS.enhance} {t('nav.credits_suffix')}</>
+                )}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleEnhance}
-              disabled={enhancing || processingMode !== null || (!enhanceHook && !enhanceCta && !enhancePauses)}
-              className="w-full mt-2.5 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl transition-all disabled:opacity-40"
-              style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.25)', color: enhancing ? '#6b7280' : '#fbbf24' }}
-            >
-              {enhancing ? (
-                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.enhancing')}</>
-              ) : (
-                <>{t('step2.enhance_btn')} · −{CREDIT_COSTS.enhance} {t('nav.credits_suffix')}</>
-              )}
-            </button>
-          </div>
+          )}
         </div>
       )}
 
