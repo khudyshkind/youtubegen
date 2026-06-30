@@ -44,6 +44,7 @@ export const CREDIT_COSTS = {
   // Text tools
   humanize:  3,
   uniqueize: 3,
+  enhance:   3,
 
   // YouTube analytics
   niche_analysis:    4,

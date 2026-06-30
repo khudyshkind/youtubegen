@@ -37,6 +37,11 @@ export default function Step2Script() {
   const [originalScript, setOriginalScript] = useState<string | null>(null)
   const [processSuccess, setProcessSuccess] = useState(false)
   const [outputLang, setOutputLang] = useState<string>(scriptParams.language ?? 'ru')
+  const [enhanceHook, setEnhanceHook] = useState(false)
+  const [enhanceHookType, setEnhanceHookType] = useState<string>(scriptParams.hook_type ?? 'question')
+  const [enhanceCta, setEnhanceCta] = useState(false)
+  const [enhancePauses, setEnhancePauses] = useState(false)
+  const [enhancing, setEnhancing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const MODEL_LABELS: Record<string, string> = {
@@ -172,6 +177,42 @@ export default function Step2Script() {
     }
   }
 
+  async function handleEnhance() {
+    if (!script?.trim() || (!enhanceHook && !enhanceCta && !enhancePauses)) return
+    setError('')
+    setEnhancing(true)
+    setProcessSuccess(false)
+    try {
+      const res = await fetch('/api/generate/enhance-script', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          script,
+          hook: enhanceHook,
+          hook_type: enhanceHookType,
+          cta: enhanceCta,
+          pauses: enhancePauses,
+          output_lang: outputLang,
+          project_id: projectId,
+        }),
+      })
+      const json = await res.json()
+      if (!json.ok) {
+        if (json.code === 'NO_CREDITS') { setError(t('step2.err_credits')); return }
+        throw new Error(json.error)
+      }
+      setOriginalScript(script)
+      setScript(json.data.script)
+      setProcessSuccess(true)
+      void refreshCredits()
+      setTimeout(() => setProcessSuccess(false), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('step2.err_enhance'))
+    } finally {
+      setEnhancing(false)
+    }
+  }
+
   function handlePasteMode() { setScript('') }
 
   const words = script ? countWords(script) : 0
@@ -253,7 +294,7 @@ export default function Step2Script() {
             <button
               type="button"
               onClick={() => handleProcess('unique')}
-              disabled={processingMode !== null}
+              disabled={processingMode !== null || enhancing}
               className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
               style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)', color: processingMode === 'unique' ? '#6b7280' : '#60a5fa' }}
             >
@@ -264,7 +305,7 @@ export default function Step2Script() {
             <button
               type="button"
               onClick={() => handleProcess('human')}
-              disabled={processingMode !== null}
+              disabled={processingMode !== null || enhancing}
               className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
               style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', color: processingMode === 'human' ? '#6b7280' : '#34d399' }}
             >
@@ -277,7 +318,7 @@ export default function Step2Script() {
             <button
               type="button"
               onClick={() => handleProcess('both')}
-              disabled={processingMode !== null}
+              disabled={processingMode !== null || enhancing}
               className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
               style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)', color: processingMode === 'both' ? '#6b7280' : '#a78bfa' }}
             >
@@ -295,6 +336,68 @@ export default function Step2Script() {
                 {t('step2.original')}
               </button>
             )}
+          </div>
+
+          {/* Enhance block */}
+          <div className="rounded-xl p-3" style={{ border: '1px solid rgba(251,191,36,0.2)', background: 'rgba(251,191,36,0.04)' }}>
+            <p className="text-xs font-semibold mb-2.5" style={{ color: '#fbbf24' }}>
+              {t('step2.enhance_title')} · −{CREDIT_COSTS.enhance} {t('nav.credits_suffix')}
+            </p>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={enhanceHook}
+                  onChange={(e) => setEnhanceHook(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-amber-400 cursor-pointer"
+                />
+                <span className="text-xs text-slate-300">{t('step2.enhance_hook')}</span>
+              </label>
+              {enhanceHook && (
+                <select
+                  value={enhanceHookType}
+                  onChange={(e) => setEnhanceHookType(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg text-xs text-slate-300 cursor-pointer outline-none ml-5"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                >
+                  <option value="question">{t('hook.question')}</option>
+                  <option value="statistic">{t('hook.statistic')}</option>
+                  <option value="story">{t('hook.story')}</option>
+                  <option value="provocation">{t('hook.provocation')}</option>
+                </select>
+              )}
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={enhanceCta}
+                  onChange={(e) => setEnhanceCta(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-amber-400 cursor-pointer"
+                />
+                <span className="text-xs text-slate-300">{t('step2.enhance_cta')}</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={enhancePauses}
+                  onChange={(e) => setEnhancePauses(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-amber-400 cursor-pointer"
+                />
+                <span className="text-xs text-slate-300">{t('step2.enhance_pauses')}</span>
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={handleEnhance}
+              disabled={enhancing || processingMode !== null || (!enhanceHook && !enhanceCta && !enhancePauses)}
+              className="w-full mt-2.5 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl transition-all disabled:opacity-40"
+              style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.25)', color: enhancing ? '#6b7280' : '#fbbf24' }}
+            >
+              {enhancing ? (
+                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.enhancing')}</>
+              ) : (
+                <>{t('step2.enhance_btn')} · −{CREDIT_COSTS.enhance} {t('nav.credits_suffix')}</>
+              )}
+            </button>
           </div>
         </div>
       )}
