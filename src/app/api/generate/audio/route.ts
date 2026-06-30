@@ -211,7 +211,7 @@ async function synthesizeVoicerChunk(
     body: JSON.stringify({
       text,
       voice_id: voiceId,
-      model_id: 'eleven_multilingual_v2',
+      model_id: 'eleven_turbo_v2_5',
       split_type: 'smart',
       max_chunk_length: 2500,
       voice_settings: {
