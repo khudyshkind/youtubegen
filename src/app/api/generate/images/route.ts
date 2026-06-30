@@ -77,6 +77,7 @@ Your task: for each video scene, write a brief description of what is happening 
 • Only concrete visual imagery: objects, people, places, actions, atmosphere
 • No abstractions: do not write "concept", "idea", "symbol", "metaphor"
 • No text, inscriptions, logos, or watermarks
+• NUMBERS, YEARS, STATISTICS, COUNTS: when the scene text mentions a number, year, date, count, score, rank or statistic (e.g. "In 1957…", "16 species…", "ranked first…", "3 of 5…") — NEVER depict the digit, numeral or typographic number as a visual object. Instead illustrate the concrete real-world context its meaning refers to: what happened that year, what the counted things look like, who achieved the rank. The numeral itself must never appear in the image.
 • Prompt must fully match the specified style (passed separately in the user message)
 • Use concrete nouns: "aged leather-bound book on wooden desk" not "knowledge"
 • LIGHTING — be specific: "soft diffused overcast light", "dramatic rim lighting from behind", "warm amber lamplight from lower-left", "cold blue moonlight with hard shadows" — never just "good lighting"
@@ -99,11 +100,19 @@ Scene — abandoned mountain pass at dusk:
 ❌ Weak:   "A mountain landscape"
 ✓ Strong: "Narrow rocky mountain pass carved between two sheer cliff faces, wide establishing shot looking down the corridor toward a distant valley glowing amber in last sunlight, cold blue shadow filling the foreground stone, silent and austere atmosphere"
 
+Scene — a year mentioned in narration ("In 1957 the Soviet Union launched Sputnik"):
+❌ Weak:   "The number 1957, retro typography, bold silver digits"
+✓ Strong: "Polished brushed-metal sphere with four slender antennae tumbling through black starfield, Earth's blue-glowing curved horizon in lower corner, wide establishing shot, dramatic rim lighting from distant sun, awe-inspiring historic atmosphere"
+
+Scene — a count or statistic in the text ("There are 16 species of wild cat in Asia"):
+❌ Weak:   "Bold numeral 16 surrounded by cat silhouettes, infographic layout"
+✓ Strong: "Dense monsoon jungle undergrowth, leopard crouching low in dappled green shadow foreground, second cat's amber eyes glowing from dark bamboo grove behind, layered depth of field, humid predatory atmosphere"
+
 ═══ CHARACTER CONSISTENCY RULES ═══
 If CHARACTER PROFILES are provided in the user message:
 • Add a character to a scene's prompt ONLY if that character is physically present in THIS scene's text — meaning the scene text names the character directly OR uses a pronoun/reference that unambiguously points to it ("it", "the predator", "the creature" — only if the scene text makes clear which character is meant).
 • CRITICAL: The video's main subject being a character does NOT mean that character appears in every scene. Scenes describing statistics, locations, historical facts, abstract concepts, or other objects must be illustrated WITHOUT the character — even if the character is the overall topic of the video. Topic ≠ presence in every frame.
-• If the scene text describes something other than the character (a place, a number, an event, another object) — do NOT insert the character. Illustrate what the scene text actually describes.
+• If the scene text describes something other than the character (a place, an event, another object, or an abstract fact) — do NOT insert the character. Illustrate what the scene text actually describes.
 • When a character IS present in a scene: copy its profile description VERBATIM into the prompt — never paraphrase or vary it, so the character looks identical across all scenes it appears in.
 • If two characters are both present in one scene — include BOTH descriptions verbatim in that prompt.
 • If a scene contains no characters from the profiles — write the prompt normally, illustrating the scene's actual content.
@@ -435,7 +444,7 @@ async function generateImageFluxSchnell(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await (fal.subscribe as any)('fal-ai/flux/schnell', {
     input: {
-      prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
+      prompt: `${prompt}, NO TEXT, NO NUMBERS, NO DIGITS, NO WATERMARKS`,
       image_size: { width: 1280, height: 720 },
       num_images: 1,
     },
@@ -462,7 +471,7 @@ async function generateImageFlux(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await (fal.subscribe as any)('fal-ai/flux/dev', {
     input: {
-      prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
+      prompt: `${prompt}, NO TEXT, NO NUMBERS, NO DIGITS, NO WATERMARKS`,
       negative_prompt: negativePrompt,
       image_size: { width: 1280, height: 720 },
       num_images: 1,
@@ -511,7 +520,7 @@ async function generateImageGptMini(
       },
       body: JSON.stringify({
         model: 'gpt-image-2',
-        prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
+        prompt: `${prompt}, NO TEXT, NO NUMBERS, NO DIGITS, NO WATERMARKS`,
         size: '1536x1024',
         quality: 'medium',
         n: 1,
