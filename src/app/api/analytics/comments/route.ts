@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 
 export const maxDuration = 120
 
@@ -42,22 +43,6 @@ RESPONSE FORMAT — strict JSON without markdown:
 IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json blocks. No explanations. Start with { end with }.`
 }
 
-function parseClaudeJson<T>(text: string, label: string): T {
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = cleaned.indexOf('{')
-  if (start === -1) throw new Error(`${label}: no { found`)
-  let depth = 0, inStr = false, esc = false
-  for (let i = start; i < cleaned.length; i++) {
-    const c = cleaned[i]
-    if (esc) { esc = false; continue }
-    if (c === '\\') { esc = true; continue }
-    if (c === '"') { inStr = !inStr; continue }
-    if (inStr) continue
-    if (c === '{') depth++
-    if (c === '}') { depth--; if (depth === 0) return JSON.parse(cleaned.slice(start, i + 1)) as T }
-  }
-  throw new Error(`${label}: unbalanced braces`)
-}
 
 async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
   const url = new URL(`${YT_BASE}${path}`)
@@ -272,6 +257,7 @@ export async function POST(req: NextRequest) {
     const raw = (msg.content[0] as { text: string }).text
     console.log('[comments] claude raw:', raw.substring(0, 300))
     console.log('[comments] cache input:', msg.usage.input_tokens, 'cache_read:', msg.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg.usage.cache_creation_input_tokens ?? 0)
+    if (msg.stop_reason === 'max_tokens') console.warn('[comments] claude truncated by max_tokens')
 
     interface CommentsAnalysis {
       video_requests: Array<{ request: string; count: number }>

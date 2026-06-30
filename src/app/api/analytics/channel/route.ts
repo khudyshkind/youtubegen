@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 
 export const maxDuration = 120
 
@@ -80,68 +81,6 @@ RESPONSE FORMAT — strict JSON without markdown:
 IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json blocks. No explanations. Start with { end with }.`
 }
 
-function fixControlCharsInStrings(s: string): string {
-  let result = ''
-  let inStr = false
-  let esc = false
-  for (const c of s) {
-    if (esc) { result += c; esc = false; continue }
-    if (c === '\\') { result += c; esc = true; continue }
-    if (c === '"') { inStr = !inStr; result += c; continue }
-    if (inStr) {
-      if (c === '\n') { result += '\\n'; continue }
-      if (c === '\r') { result += '\\r'; continue }
-      if (c === '\t') { result += '\\t'; continue }
-    }
-    result += c
-  }
-  return result
-}
-
-function tryParse<T>(slice: string, label: string): T {
-  try {
-    return JSON.parse(slice) as T
-  } catch {
-    const repaired = fixControlCharsInStrings(slice)
-    try {
-      return JSON.parse(repaired) as T
-    } catch (e2) {
-      console.error(`[channel] ${label} parse failed. Slice (first 2000):`, slice.substring(0, 2000))
-      throw new Error(`${label}: JSON parse failed — ${e2 instanceof Error ? e2.message : String(e2)}`)
-    }
-  }
-}
-
-function parseClaudeJson<T>(text: string, label: string): T {
-  console.log(`[channel] ${label} raw length:`, text.length, 'preview:', text.substring(0, 500))
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = cleaned.indexOf('{')
-  if (start === -1) throw new Error(`${label}: no { found`)
-
-  // Pass 1: exact boundary scanner
-  let depth = 0, inStr = false, esc = false
-  for (let i = start; i < cleaned.length; i++) {
-    const c = cleaned[i]
-    if (esc) { esc = false; continue }
-    if (c === '\\') { esc = true; continue }
-    if (c === '"') { inStr = !inStr; continue }
-    if (inStr) continue
-    if (c === '{') depth++
-    if (c === '}') {
-      depth--
-      if (depth === 0) return tryParse<T>(cleaned.slice(start, i + 1), label)
-    }
-  }
-
-  // Pass 2: greedy fallback — handles unescaped quotes that confuse the scanner
-  console.warn(`[channel] ${label} exact scan lost track (depth=${depth}), trying greedy fallback`)
-  const lastBrace = cleaned.lastIndexOf('}')
-  if (lastBrace > start) {
-    return tryParse<T>(cleaned.slice(start, lastBrace + 1), label)
-  }
-
-  throw new Error(`${label}: unbalanced braces — no closing } found`)
-}
 
 async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
   const key = env('YOUTUBE_API_KEY')
@@ -330,11 +269,12 @@ export async function POST(req: NextRequest) {
     console.log('[channel] step 5a: claude overview')
     const msg1 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 500,
+      max_tokens: 800,
       system: [{ type: 'text', text: getChannelPrompt1(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: dataCtx }],
     })
     console.log('[channel] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
+    if (msg1.stop_reason === 'max_tokens') console.warn('[channel] claude1 truncated by max_tokens')
     const text1 = (msg1.content[0] as { text: string }).text
 
     interface Overview {
@@ -356,6 +296,7 @@ export async function POST(req: NextRequest) {
       messages: [{ role: 'user', content: `${dataCtx}\n\nОпредели форматы видео и дай рекомендации.` }],
     })
     console.log('[channel] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
+    if (msg2.stop_reason === 'max_tokens') console.warn('[channel] claude2 truncated by max_tokens')
     const text2 = (msg2.content[0] as { text: string }).text
     console.log('[channel] claude2 raw:', text2.substring(0, 500))
 

@@ -3,27 +3,12 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 
 export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-function parseClaudeJson<T>(text: string, label: string): T {
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = cleaned.indexOf('{')
-  if (start === -1) throw new Error(`${label}: no { found`)
-  let depth = 0, inStr = false, esc = false
-  for (let i = start; i < cleaned.length; i++) {
-    const c = cleaned[i]
-    if (esc) { esc = false; continue }
-    if (c === '\\') { esc = true; continue }
-    if (c === '"') { inStr = !inStr; continue }
-    if (inStr) continue
-    if (c === '{') depth++
-    if (c === '}') { depth--; if (depth === 0) return JSON.parse(cleaned.slice(start, i + 1)) as T }
-  }
-  throw new Error(`${label}: unbalanced braces`)
-}
 
 async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
   const url = new URL(`${YT_BASE}${path}`)
@@ -272,12 +257,12 @@ ${channelBlocks}
     const [msg1, msg2] = await Promise.all([
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 600,
+        max_tokens: 900,
         messages: [{ role: 'user', content: prompt1 }],
       }),
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 700,
+        max_tokens: 1000,
         messages: [{ role: 'user', content: prompt2 }],
       }),
     ])
@@ -286,6 +271,8 @@ ${channelBlocks}
     const text2 = (msg2.content[0] as { text: string }).text
     console.log('[compare] claude1 raw:', text1.substring(0, 300))
     console.log('[compare] claude2 raw:', text2.substring(0, 300))
+    if (msg1.stop_reason === 'max_tokens') console.warn('[compare] claude1 truncated by max_tokens')
+    if (msg2.stop_reason === 'max_tokens') console.warn('[compare] claude2 truncated by max_tokens')
 
     interface CompareMetrics {
       channels: Array<{

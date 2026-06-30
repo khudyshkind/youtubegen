@@ -4,6 +4,7 @@ import { createServerSupabase, createServiceClient } from '@/lib/supabase-server
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { resolveUserLang, langNote } from '@/lib/user-lang'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 
 export const maxDuration = 120
 
@@ -18,23 +19,6 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
-function parseClaudeJson<T>(text: string, label: string): T {
-  console.log(`[niche-finder] ${label} raw:`, text.substring(0, 600))
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = cleaned.indexOf('{')
-  if (start === -1) throw new Error(`${label}: no { found`)
-  let depth = 0, inStr = false, esc = false
-  for (let i = start; i < cleaned.length; i++) {
-    const c = cleaned[i]
-    if (esc) { esc = false; continue }
-    if (c === '\\') { esc = true; continue }
-    if (c === '"') { inStr = !inStr; continue }
-    if (inStr) continue
-    if (c === '{') depth++
-    if (c === '}') { depth--; if (depth === 0) return JSON.parse(cleaned.slice(start, i + 1)) as T }
-  }
-  throw new Error(`${label}: unbalanced braces`)
-}
 
 function getNicheGenPrompt(lang: string): string {
   const isRu = lang !== 'en'
@@ -183,6 +167,7 @@ export async function POST(req: NextRequest) {
       messages: [{ role: 'user', content: userCtx + langNote(uiLangFull) }],
     })
     console.log('[niche-finder] claude1 tokens:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0)
+    if (msg1.stop_reason === 'max_tokens') console.warn('[niche-finder] claude1 truncated by max_tokens')
     const text1 = (msg1.content[0] as { text: string }).text
     const { niches } = parseClaudeJson<{ niches: NicheItem[] }>(text1, 'claude1')
     if (!niches?.length) throw new Error('No niches returned from Claude')
@@ -248,6 +233,8 @@ export async function POST(req: NextRequest) {
     console.log('[niche-finder] claude2b raw:', text2b.substring(0, 500))
     console.log('[niche-finder] claude2a tokens:', msg2a.usage.input_tokens, 'out:', msg2a.usage.output_tokens)
     console.log('[niche-finder] claude2b tokens:', msg2b.usage.input_tokens, 'out:', msg2b.usage.output_tokens)
+    if (msg2a.stop_reason === 'max_tokens') console.warn('[niche-finder] claude2a truncated by max_tokens')
+    if (msg2b.stop_reason === 'max_tokens') console.warn('[niche-finder] claude2b truncated by max_tokens')
 
     const winner = parseClaudeJson<{ winner: RecommendationResult['winner'] }>(text2a, 'claude2a').winner
     const { avoid, alternatives } = parseClaudeJson<Pick<RecommendationResult, 'avoid' | 'alternatives'>>(text2b, 'claude2b')

@@ -3,25 +3,10 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 
 export const maxDuration = 60
 
-function parseClaudeJson<T>(text: string, label: string): T {
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = cleaned.indexOf('{')
-  if (start === -1) throw new Error(`${label}: no { found`)
-  let depth = 0, inStr = false, esc = false
-  for (let i = start; i < cleaned.length; i++) {
-    const c = cleaned[i]
-    if (esc) { esc = false; continue }
-    if (c === '\\') { esc = true; continue }
-    if (c === '"') { inStr = !inStr; continue }
-    if (inStr) continue
-    if (c === '{') depth++
-    if (c === '}') { depth--; if (depth === 0) return JSON.parse(cleaned.slice(start, i + 1)) as T }
-  }
-  throw new Error(`${label}: unbalanced braces`)
-}
 
 function getRevenuePrompt(lang: string): string {
   const isRu = lang !== 'en'
@@ -95,10 +80,11 @@ export async function POST(req: NextRequest) {
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 300,
+      max_tokens: 600,
       system: [{ type: 'text', text: getRevenuePrompt(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Ниша: ${niche}\nРынок аудитории: ${countryLabel}` }],
     })
+    if (msg.stop_reason === 'max_tokens') console.warn('[revenue] claude truncated by max_tokens')
     const raw = (msg.content[0] as { text: string }).text
 
     interface RpmData {

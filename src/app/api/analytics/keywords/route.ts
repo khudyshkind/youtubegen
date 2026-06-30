@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 
 export const maxDuration = 120
 
@@ -68,22 +69,6 @@ RESPONSE FORMAT — strict JSON without markdown:
 IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json. No explanations. Start with { end with }.`
 }
 
-function parseClaudeJson<T>(text: string, label: string): T {
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = cleaned.indexOf('{')
-  if (start === -1) throw new Error(`${label}: no { found`)
-  let depth = 0, inStr = false, esc = false
-  for (let i = start; i < cleaned.length; i++) {
-    const c = cleaned[i]
-    if (esc) { esc = false; continue }
-    if (c === '\\') { esc = true; continue }
-    if (c === '"') { inStr = !inStr; continue }
-    if (inStr) continue
-    if (c === '{') depth++
-    if (c === '}') { depth--; if (depth === 0) return JSON.parse(cleaned.slice(start, i + 1)) as T }
-  }
-  throw new Error(`${label}: unbalanced braces`)
-}
 
 // YouTube Autocomplete (free, no API key needed)
 async function getAutocompleteSuggestions(query: string, lang: string): Promise<string[]> {
@@ -268,7 +253,7 @@ export async function POST(req: NextRequest) {
       }),
       anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 600,
+        max_tokens: 900,
         system: [{ type: 'text', text: getKeywordsPrompt2(uiLang), cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: `Ниша: "${keyword}"\nКлючевые слова:\n${keywordsList}` }],
       }),
@@ -280,6 +265,8 @@ export async function POST(req: NextRequest) {
     console.log('[keywords] claude2 raw:', text2.substring(0, 300))
     console.log('[keywords] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
     console.log('[keywords] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
+    if (msg1.stop_reason === 'max_tokens') console.warn('[keywords] claude1 truncated by max_tokens')
+    if (msg2.stop_reason === 'max_tokens') console.warn('[keywords] claude2 truncated by max_tokens')
 
     interface ScoredKeywords {
       keywords: Array<{

@@ -4,6 +4,7 @@ import { createServerSupabase, createServiceClient } from '@/lib/supabase-server
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 
 export const maxDuration = 120
 
@@ -59,22 +60,6 @@ RESPONSE FORMAT — strict JSON without markdown:
 IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`json. No explanations. Start with { end with }.`
 }
 
-function parseClaudeJson<T>(text: string): T {
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = cleaned.indexOf('{')
-  if (start === -1) throw new Error('no { found')
-  let depth = 0, inStr = false, esc = false
-  for (let i = start; i < cleaned.length; i++) {
-    const c = cleaned[i]
-    if (esc) { esc = false; continue }
-    if (c === '\\') { esc = true; continue }
-    if (c === '"') { inStr = !inStr; continue }
-    if (inStr) continue
-    if (c === '{') depth++
-    if (c === '}') { depth--; if (depth === 0) return JSON.parse(cleaned.slice(start, i + 1)) as T }
-  }
-  throw new Error('unbalanced braces')
-}
 
 async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
   const key = env('YOUTUBE_API_KEY')
@@ -346,6 +331,7 @@ ${videoLines}`
       }],
     })
     console.log('[rising] cache input:', msg.usage.input_tokens, 'cache_read:', msg.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg.usage.cache_creation_input_tokens ?? 0)
+    if (msg.stop_reason === 'max_tokens') console.warn('[rising-stars] claude truncated by max_tokens')
 
     const claudeText = (msg.content[0] as { type: string; text: string }).text
 
@@ -355,7 +341,7 @@ ${videoLines}`
     } = { channels: [], common_patterns: [] }
 
     try {
-      claudeResult = parseClaudeJson(claudeText)
+      claudeResult = parseClaudeJson(claudeText, 'rising-stars')
     } catch (e) {
       console.warn('[rising] claude parse failed:', e instanceof Error ? e.message : String(e))
     }

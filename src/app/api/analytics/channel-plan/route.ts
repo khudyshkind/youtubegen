@@ -5,6 +5,7 @@ import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { resolveUserLang, langNote } from '@/lib/user-lang'
 import { verifyHandle, resolveChannelId, fetchRecentVideoTitles } from '@/lib/youtube-channel'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 
 export const maxDuration = 120
 
@@ -19,69 +20,6 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   return JSON.parse(text)
 }
 
-// Escapes literal newlines/tabs/carriage returns INSIDE JSON string values only.
-function fixControlCharsInStrings(s: string): string {
-  let result = ''
-  let inStr = false
-  let esc = false
-  for (const c of s) {
-    if (esc) { result += c; esc = false; continue }
-    if (c === '\\') { result += c; esc = true; continue }
-    if (c === '"') { inStr = !inStr; result += c; continue }
-    if (inStr) {
-      if (c === '\n') { result += '\\n'; continue }
-      if (c === '\r') { result += '\\r'; continue }
-      if (c === '\t') { result += '\\t'; continue }
-    }
-    result += c
-  }
-  return result
-}
-
-function tryParse<T>(slice: string, label: string): T {
-  try {
-    return JSON.parse(slice) as T
-  } catch {
-    const repaired = fixControlCharsInStrings(slice)
-    try {
-      return JSON.parse(repaired) as T
-    } catch (e2) {
-      console.error(`[channel-plan] ${label} parse failed. Slice (first 3000):`, slice.substring(0, 3000))
-      throw new Error(`${label}: JSON parse failed — ${e2 instanceof Error ? e2.message : String(e2)}`)
-    }
-  }
-}
-
-function parseClaudeJson<T>(text: string, label: string): T {
-  console.log(`[channel-plan] ${label} raw length:`, text.length, 'preview:', text.substring(0, 600))
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = cleaned.indexOf('{')
-  if (start === -1) throw new Error(`${label}: no { found`)
-
-  // Pass 1: exact boundary scanner
-  let depth = 0, inStr = false, esc = false
-  for (let i = start; i < cleaned.length; i++) {
-    const c = cleaned[i]
-    if (esc) { esc = false; continue }
-    if (c === '\\') { esc = true; continue }
-    if (c === '"') { inStr = !inStr; continue }
-    if (inStr) continue
-    if (c === '{') depth++
-    if (c === '}') {
-      depth--
-      if (depth === 0) return tryParse<T>(cleaned.slice(start, i + 1), label)
-    }
-  }
-
-  // Pass 2: greedy fallback — handles unescaped quotes that confuse the scanner
-  console.warn(`[channel-plan] ${label} exact scan lost track (depth=${depth}), trying greedy fallback. Total length: ${cleaned.length}, last 500: ${cleaned.slice(-500)}`)
-  const lastBrace = cleaned.lastIndexOf('}')
-  if (lastBrace > start) {
-    return tryParse<T>(cleaned.slice(start, lastBrace + 1), label)
-  }
-
-  throw new Error(`${label}: unbalanced braces — no closing } found`)
-}
 
 function fmtViews(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -441,6 +379,9 @@ export async function POST(req: NextRequest) {
     console.log('[channel-plan] claude1  tokens:', msg1.usage.input_tokens, 'out:', msg1.usage.output_tokens, 'stop:', msg1.stop_reason)
     console.log('[channel-plan] claude2a tokens:', msg2a.usage.input_tokens, 'out:', msg2a.usage.output_tokens)
     console.log('[channel-plan] claude2b tokens:', msg2b.usage.input_tokens, 'out:', msg2b.usage.output_tokens)
+    if (msg1.stop_reason === 'max_tokens') console.warn('[channel-plan] claude1 truncated by max_tokens')
+    if (msg2a.stop_reason === 'max_tokens') console.warn('[channel-plan] claude2a truncated by max_tokens')
+    if (msg2b.stop_reason === 'max_tokens') console.warn('[channel-plan] claude2b truncated by max_tokens')
 
     const ideas      = parseClaudeJson<IdeasResult>(text1,  'claude1')
     const monthsPlan = parseClaudeJson<MonthsPlanResult>(text2a, 'claude2a')

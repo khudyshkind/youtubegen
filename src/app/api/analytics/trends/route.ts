@@ -3,28 +3,12 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 
 export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-function parseClaudeJson<T>(text: string, label: string): T {
-  console.log(`[trends] ${label} raw:`, text.substring(0, 500))
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = cleaned.indexOf('{')
-  if (start === -1) throw new Error(`${label}: no { found`)
-  let depth = 0, inStr = false, esc = false
-  for (let i = start; i < cleaned.length; i++) {
-    const c = cleaned[i]
-    if (esc) { esc = false; continue }
-    if (c === '\\') { esc = true; continue }
-    if (c === '"') { inStr = !inStr; continue }
-    if (inStr) continue
-    if (c === '{') depth++
-    if (c === '}') { depth--; if (depth === 0) return JSON.parse(cleaned.slice(start, i + 1)) as T }
-  }
-  throw new Error(`${label}: unbalanced braces`)
-}
 
 async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
   const key = env('YOUTUBE_API_KEY')
@@ -235,11 +219,12 @@ export async function POST(req: NextRequest) {
     console.log('[trends] step 3a: claude trend list')
     const msg1 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 500,
+      max_tokens: 1000,
       system: [{ type: 'text', text: getTrendsPrompt1(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: dataCtx }],
     })
     console.log('[trends] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
+    if (msg1.stop_reason === 'max_tokens') console.warn('[trends] claude1 truncated by max_tokens')
     const text1 = (msg1.content[0] as { text: string }).text
 
     interface TrendList {
@@ -252,11 +237,12 @@ export async function POST(req: NextRequest) {
     const trendNames = (trendList.trends ?? []).slice(0, 4).map(t => t.topic)
     const msg2 = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 600,
+      max_tokens: 900,
       system: [{ type: 'text', text: getTrendsPrompt2(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Ниша: "${topic}". Тренды: ${JSON.stringify(trendNames)}\n\nДля каждого тренда — 3 идеи для видео.` }],
     })
     console.log('[trends] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
+    if (msg2.stop_reason === 'max_tokens') console.warn('[trends] claude2 truncated by max_tokens')
     const text2 = (msg2.content[0] as { text: string }).text
 
     interface VideoIdeas {
