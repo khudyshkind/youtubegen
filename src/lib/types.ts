@@ -22,6 +22,7 @@ export const CREDIT_COSTS = {
   audio_apihost_standard_per_1000: 5,
   audio_apihost_pro_per_1000:    10,
   audio_apihost_studio_per_1000: 18,
+  audio_voicer_per_1000:          4,
 
   // Subtitles (per minute of audio)
   subtitles_per_minute: 2,
@@ -57,7 +58,7 @@ export const CREDIT_COSTS = {
   rising_stars:      6,
 } as const
 
-export type AudioEngine = 'secretvoicer' | 'elevenlabs' | 'openai' | 'google' | 'apihost'
+export type AudioEngine = 'secretvoicer' | 'elevenlabs' | 'openai' | 'google' | 'apihost' | 'voicer'
 export type ApihostVoiceType = 'basic' | 'standard' | 'pro' | 'studio'
 
 export function audioCost(chars: number, engine: AudioEngine, apihostVoiceType?: ApihostVoiceType): number {
@@ -75,6 +76,7 @@ export function audioCost(chars: number, engine: AudioEngine, apihostVoiceType?:
   const rate =
     engine === 'elevenlabs' ? CREDIT_COSTS.audio_elevenlabs_per_1000 :
     engine === 'openai'     ? CREDIT_COSTS.audio_openai_per_1000     :
+    engine === 'voicer'     ? CREDIT_COSTS.audio_voicer_per_1000     :
     CREDIT_COSTS.audio_openai_per_1000  // google same as openai
   return Math.max(1, blocks * rate)
 }

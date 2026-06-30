@@ -380,12 +380,13 @@ export default function Step3Voice() {
   const { script, projectId, voiceSettings, audioUrl, subtitleBlocks, setVoiceSettings, setAudioUrl, setStep } = useStudioStore()
   const { t } = useLang()
 
-  const ENGINES: { id: AudioEngine; medal: string; name: string; quality: string; meta: string; costLabel: string; soon?: boolean }[] = [
-    { id: 'secretvoicer', medal: '✨', name: 'SecretVoicer', quality: t('voice.sv_desc'),       meta: t('voice.sv_meta'),     costLabel: `${CREDIT_COSTS.audio_secretvoicer_per_1000} ${t('step3.cr_per_k')}` },
-    { id: 'elevenlabs',   medal: '🥇', name: 'ElevenLabs',   quality: t('voice.el_desc'),       meta: t('voice.el_meta'),     costLabel: `${CREDIT_COSTS.audio_elevenlabs_per_1000} ${t('step3.cr_per_k')}` },
-    { id: 'openai',       medal: '🥈', name: 'OpenAI TTS',   quality: t('voice.openai_quality'), meta: t('voice.openai_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}` },
-    { id: 'apihost',      medal: '🏠', name: 'APIHOST RU',   quality: t('voice.apihost_quality'),meta: t('voice.apihost_meta'),costLabel: t('voice.apihost_cost') },
-    { id: 'google',       medal: '🥉', name: 'Google TTS',   quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}`, soon: true },
+  const ENGINES: { id: AudioEngine; medal: string; name: string; quality: string; meta: string; costLabel: string; soon?: boolean; premiumOnly?: boolean }[] = [
+    { id: 'secretvoicer', medal: '✨', name: 'SecretVoicer',     quality: t('voice.sv_desc'),       meta: t('voice.sv_meta'),     costLabel: `${CREDIT_COSTS.audio_secretvoicer_per_1000} ${t('step3.cr_per_k')}` },
+    { id: 'elevenlabs',   medal: '🥇', name: 'ElevenLabs',       quality: t('voice.el_desc'),       meta: t('voice.el_meta'),     costLabel: `${CREDIT_COSTS.audio_elevenlabs_per_1000} ${t('step3.cr_per_k')}` },
+    { id: 'voicer',       medal: '💎', name: 'Премиум-озвучка',  quality: 'ElevenLabs качество',    meta: 'Мультиязычный, быстрый', costLabel: `${CREDIT_COSTS.audio_voicer_per_1000} ${t('step3.cr_per_k')}`, premiumOnly: true },
+    { id: 'openai',       medal: '🥈', name: 'OpenAI TTS',       quality: t('voice.openai_quality'), meta: t('voice.openai_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}` },
+    { id: 'apihost',      medal: '🏠', name: 'APIHOST RU',       quality: t('voice.apihost_quality'),meta: t('voice.apihost_meta'),costLabel: t('voice.apihost_cost') },
+    { id: 'google',       medal: '🥉', name: 'Google TTS',       quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}`, soon: true },
   ]
 
   const OPENAI_VOICES = [
@@ -411,6 +412,7 @@ export default function Step3Voice() {
   // Engine — default depends on plan: free → secretvoicer, paid → elevenlabs
   const [engine, setEngine] = useState<AudioEngine>('secretvoicer')
   const [planLoading, setPlanLoading] = useState(true)
+  const [userPlan, setUserPlan] = useState<string>('free')
   const engineTouchedRef = useRef(false)
 
   // SecretVoicer voices
@@ -558,8 +560,11 @@ export default function Step3Voice() {
     fetch('/api/profile')
       .then((r) => r.json())
       .then((json: { ok: boolean; plan?: string }) => {
-        if (json.ok && json.plan && json.plan !== 'free' && !engineTouchedRef.current) {
-          setEngine('elevenlabs')
+        if (json.ok && json.plan) {
+          setUserPlan(json.plan)
+          if (json.plan !== 'free' && !engineTouchedRef.current) {
+            setEngine('elevenlabs')
+          }
         }
       })
       .catch(() => {})
@@ -570,7 +575,7 @@ export default function Step3Voice() {
     if (engine === 'secretvoicer' && svVoices.length === 0 && !svVoicesLoading) {
       loadSvVoices()
     }
-    if (engine === 'elevenlabs' && voices.length === 0 && !voicesLoading) {
+    if ((engine === 'elevenlabs' || engine === 'voicer') && voices.length === 0 && !voicesLoading) {
       loadVoices(voiceLanguage)
     }
     if (engine === 'google' && googleVoices.length === 0 && !googleVoicesLoading) {
@@ -725,7 +730,7 @@ export default function Step3Voice() {
           text: script,
           voice_id: voiceIdToUse,
           project_id: projectId,
-          ...((engine === 'elevenlabs' || engine === 'secretvoicer') ? {
+          ...((engine === 'elevenlabs' || engine === 'secretvoicer' || engine === 'voicer') ? {
             stability: voiceSettings.stability,
             similarity_boost: voiceSettings.similarityBoost,
             speech_rate: voiceSettings.speechRate,
@@ -759,11 +764,15 @@ export default function Step3Voice() {
 
   const canGenerate = !loading && !uploading && !!script && (
     engine === 'secretvoicer' ? !!svVoiceId && !svVoicesLoading :
-    engine === 'elevenlabs' ? !!voiceSettings.voiceId && !voicesLoading :
-    engine === 'openai' ? !!openaiVoice :
-    engine === 'apihost' ? !!apihostVoiceId && !apihostVoicesLoading :
+    engine === 'elevenlabs'   ? !!voiceSettings.voiceId && !voicesLoading :
+    engine === 'voicer'       ? !!voiceSettings.voiceId && !voicesLoading :
+    engine === 'openai'       ? !!openaiVoice :
+    engine === 'apihost'      ? !!apihostVoiceId && !apihostVoicesLoading :
     !!googleVoice
   )
+
+  // Engines visible to the user: premium-only ones (voicer) are hidden for free plan
+  const visibleEngines = ENGINES.filter(e => !e.premiumOnly || userPlan !== 'free')
 
   const cardStyle = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }
 
@@ -779,14 +788,14 @@ export default function Step3Voice() {
         <p className="text-sm font-medium text-slate-300 mb-2">{t('step3.engine')}</p>
         {planLoading ? (
           <div className="grid grid-cols-2 gap-2">
-            {ENGINES.map((eng) => (
+            {ENGINES.filter(e => !e.premiumOnly).map((eng) => (
               <div key={eng.id} className="h-[72px] rounded-xl animate-pulse"
                 style={{ background: 'rgba(255,255,255,0.04)', border: '2px solid rgba(255,255,255,0.06)' }} />
             ))}
           </div>
         ) : (
         <div className="grid grid-cols-2 gap-2">
-          {ENGINES.map((eng) => (
+          {visibleEngines.map((eng) => (
             <button
               key={eng.id}
               type="button"
@@ -900,9 +909,16 @@ export default function Step3Voice() {
         </>
       )}
 
-      {/* ── ElevenLabs voices ── */}
-      {engine === 'elevenlabs' && (
+      {/* ── ElevenLabs / Voicer (Premium) voices ── */}
+      {(engine === 'elevenlabs' || engine === 'voicer') && (
         <>
+          {engine === 'voicer' && (
+            <div className="rounded-xl p-3 flex items-center gap-2.5"
+              style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
+              <span className="text-base">💎</span>
+              <p className="text-xs text-violet-300/90">Голоса ElevenLabs, синтез через премиум-сервер. Качество выше, стоимость ниже чем в прямом ElevenLabs.</p>
+            </div>
+          )}
           {voicesError && !voicesLoading && (
             <div className="flex items-start gap-3 rounded-xl px-4 py-3"
               style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
@@ -994,12 +1010,14 @@ export default function Step3Voice() {
               onChange={(v) => setVoiceSettings({ similarityBoost: v })} leftLabel={t('step3.free')} rightLabel={t('step3.exact')} />
           </div>
 
-          <div className="rounded-xl px-4 divide-y" style={{ border: '1px solid rgba(255,255,255,0.08)', '--divide-color': 'rgba(255,255,255,0.06)' } as React.CSSProperties}>
-            <Toggle checked={voiceSettings.clarityBoost} onChange={(v) => setVoiceSettings({ clarityBoost: v })}
-              label={t('step3.clarity')} hint={t('step3.clarity_hint')} />
-            <Toggle checked={voiceSettings.paragraphPauses} onChange={(v) => setVoiceSettings({ paragraphPauses: v })}
-              label={t('step3.pauses')} hint={t('step3.pauses_hint')} />
-          </div>
+          {engine === 'elevenlabs' && (
+            <div className="rounded-xl px-4 divide-y" style={{ border: '1px solid rgba(255,255,255,0.08)', '--divide-color': 'rgba(255,255,255,0.06)' } as React.CSSProperties}>
+              <Toggle checked={voiceSettings.clarityBoost} onChange={(v) => setVoiceSettings({ clarityBoost: v })}
+                label={t('step3.clarity')} hint={t('step3.clarity_hint')} />
+              <Toggle checked={voiceSettings.paragraphPauses} onChange={(v) => setVoiceSettings({ paragraphPauses: v })}
+                label={t('step3.pauses')} hint={t('step3.pauses_hint')} />
+            </div>
+          )}
         </>
       )}
 

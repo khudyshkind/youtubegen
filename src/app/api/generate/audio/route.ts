@@ -27,9 +27,12 @@ const CHUNK_LIMITS: Record<AudioEngine, { maxChars: number; measureBytes: boolea
   openai:       { maxChars: 4000, measureBytes: false }, // API limit 4096 chars
   google:       { maxChars: 2300, measureBytes: true  }, // API limit 5000 bytes; Cyrillic 2 bytes/char
   apihost:      { maxChars: 4000, measureBytes: false }, // no hard limit; keeps each job < 60s synthesis
+  voicer:       { maxChars: 195000, measureBytes: false }, // Voicer task limit 200k; server splits via split_type:'smart'
 }
 
 const SV_BASE = 'https://secret-voicer.ru/api/v1'
+const VOICER_DOMAIN = 'https://voicer.mat3u.com'
+const VOICER_BASE = `${VOICER_DOMAIN}/api/v1`
 
 interface AudioRequest {
   engine?: AudioEngine
@@ -194,6 +197,73 @@ async function synthesizeSecretVoicerChunk(
   throw new Error(`SecretVoicer: timeout after ${TIMEOUT_MS / 1000}s`)
 }
 
+async function synthesizeVoicerChunk(
+  text: string,
+  voiceId: string,
+  settings: { stability: number; similarity: number; style: number; speechRate: number },
+): Promise<Buffer> {
+  const apiKey = env('VOICER_API_KEY')
+  const authHeader = `Bearer ${apiKey}`
+
+  const res = await fetch(`${VOICER_BASE}/voice/synthesize`, {
+    method: 'POST',
+    headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      voice_id: voiceId,
+      model_id: 'eleven_multilingual_v2',
+      split_type: 'smart',
+      voice_settings: {
+        stability: settings.stability,
+        similarity_boost: settings.similarity,
+        style: settings.style,
+        speed: settings.speechRate,
+      },
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Voicer HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+  const j = (await res.json()) as { task_id?: string }
+  const taskId = j.task_id
+  if (!taskId) throw new Error('Voicer: no task_id in response')
+
+  const POLL_MS = 2500
+  const TIMEOUT_MS = 240_000
+  const deadline = Date.now() + TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_MS))
+    let status: { status: string; download_url?: string | null; error_message?: string | null }
+    try {
+      const pollRes = await fetch(`${VOICER_BASE}/voice/status/${taskId}`, {
+        headers: { Authorization: authHeader },
+      })
+      if (!pollRes.ok) continue
+      status = (await pollRes.json()) as { status: string; download_url?: string | null; error_message?: string | null }
+    } catch {
+      continue
+    }
+    if (status.status === 'completed') {
+      if (!status.download_url) throw new Error('Voicer: completed but no download_url')
+      const dlRes = await fetch(`${VOICER_DOMAIN}${status.download_url}`, {
+        headers: { Authorization: authHeader },
+      })
+      if (!dlRes.ok) throw new Error(`Voicer download HTTP ${dlRes.status}`)
+      return Buffer.from(await dlRes.arrayBuffer())
+    }
+    if (status.status === 'failed') {
+      throw new Error(`Voicer FAILED: ${status.error_message ?? 'unknown'}`)
+    }
+    if (status.status === 'censored') {
+      throw new Error(`Voicer CENSORED: ${status.error_message ?? 'content blocked by ElevenLabs filter'}`)
+    }
+    // pending / processing → continue polling
+  }
+  throw new Error(`Voicer: timeout after ${TIMEOUT_MS / 1000}s`)
+}
+
 async function synthesizeElevenLabsChunk(
   text: string,
   voiceId: string,
@@ -336,9 +406,24 @@ export async function POST(request: NextRequest) {
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, engine, voice_id })
 
-    const validEngines: AudioEngine[] = ['secretvoicer', 'elevenlabs', 'openai', 'google', 'apihost']
+    const validEngines: AudioEngine[] = ['secretvoicer', 'elevenlabs', 'openai', 'google', 'apihost', 'voicer']
     if (!validEngines.includes(engine)) {
       return NextResponse.json({ ok: false, error: 'Неверный движок TTS' }, { status: 400 })
+    }
+
+    // Server-side plan gate: voicer is only available to paid plans
+    if (engine === 'voicer') {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('plan')
+        .eq('id', user.id)
+        .single()
+      if (!profile || profile.plan === 'free') {
+        return NextResponse.json(
+          { ok: false, error: 'Премиум-озвучка доступна только на платных планах' },
+          { status: 403 }
+        )
+      }
     }
 
     const chars = text.length
@@ -483,6 +568,31 @@ export async function POST(request: NextRequest) {
         console.error('[generate/audio] SecretVoicer failed:', msg)
         return NextResponse.json({ ok: false, error: `Ошибка синтеза речи SecretVoicer: ${msg.slice(0, 200)}` }, { status: 502 })
       }
+
+    } else if (engine === 'voicer') {
+      const voicerKey = env('VOICER_API_KEY')
+      if (!voicerKey) {
+        return NextResponse.json({ ok: false, error: 'Voicer API key не настроен' }, { status: 503 })
+      }
+      const styleExaggeration = typeof voice_style === 'number'
+        ? voice_style
+        : STYLE_EXAGGERATION[voice_style] ?? 0
+      const buffers: Buffer[] = []
+      for (let i = 0; i < chunks.length; i++) {
+        try {
+          buffers.push(await synthesizeVoicerChunk(chunks[i], voice_id, {
+            stability,
+            similarity: similarity_boost,
+            style: styleExaggeration,
+            speechRate: speech_rate,
+          }))
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          console.error(`[generate/audio] Voicer chunk ${i + 1}/${chunks.length} failed:`, msg)
+          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи Voicer: ${msg.slice(0, 200)}` }, { status: 502 })
+        }
+      }
+      audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
 
     } else {
       // ElevenLabs
