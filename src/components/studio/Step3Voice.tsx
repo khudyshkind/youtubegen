@@ -738,7 +738,6 @@ export default function Step3Voice() {
           } : {}),
           ...(engine === 'elevenlabs' ? {
             clarity_boost: voiceSettings.clarityBoost,
-            paragraph_pauses: voiceSettings.paragraphPauses,
           } : {}),
           ...(engine === 'apihost' ? {
             apihost_voice_type: apihostVoiceType,
@@ -1026,8 +1025,6 @@ export default function Step3Voice() {
             <div className="rounded-xl px-4 divide-y" style={{ border: '1px solid rgba(255,255,255,0.08)', '--divide-color': 'rgba(255,255,255,0.06)' } as React.CSSProperties}>
               <Toggle checked={voiceSettings.clarityBoost} onChange={(v) => setVoiceSettings({ clarityBoost: v })}
                 label={t('step3.clarity')} hint={t('step3.clarity_hint')} />
-              <Toggle checked={voiceSettings.paragraphPauses} onChange={(v) => setVoiceSettings({ paragraphPauses: v })}
-                label={t('step3.pauses')} hint={t('step3.pauses_hint')} />
             </div>
           )}
         </>

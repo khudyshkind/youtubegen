@@ -45,7 +45,6 @@ interface AudioRequest {
   speech_rate?: number
   voice_style?: string | number
   clarity_boost?: boolean
-  paragraph_pauses?: boolean
   // APIHOST-specific
   apihost_voice_type?: ApihostVoiceType
   apihost_lang?: string
@@ -60,6 +59,8 @@ function stripSectionMarkers(text: string): string {
   return text
     // Bracket-style markers: [Сцена N:], [Scene N:], [Секция N:], [Section N:]
     .replace(/\[(?:Сцена|Scene|Секция|Section)\s+\d+[^\]]*\]\s*/gi, '')
+    // Pause markers inserted by scriptParams.pauses: [...], [ ... ], […]
+    .replace(/\[\s*(?:\.{2,}|…+)\s*\]\s*/g, '')
     // Markdown headings on their own line: # Title, ## Title, etc.
     .replace(/^#{1,6}\s+.+$/gm, '')
     // Markdown horizontal rules: ---, ***, ___

@@ -12,6 +12,7 @@ interface StudioState {
 
   // Step 1: Topic & params
   scriptParams: ScriptParams
+  ownScript: boolean
 
   // Step 2: Plan
   planSections: PlanSection[]
@@ -55,6 +56,7 @@ interface StudioState {
   setStep: (step: Step) => void
   setProjectId: (id: string) => void
   setScriptParams: (params: Partial<ScriptParams>) => void
+  setOwnScript: (v: boolean) => void
   setPlanSections: (sections: PlanSection[]) => void
   setScript: (script: string) => void
   setVoiceSettings: (settings: Partial<VoiceSettings>) => void
@@ -97,7 +99,6 @@ const defaultVoiceSettings: VoiceSettings = {
   similarityBoost: 0.75,
   style: 'neutral',
   clarityBoost: false,
-  paragraphPauses: false,
 }
 
 const defaultSubtitleStyle: SubtitleStyle = {
@@ -114,6 +115,7 @@ const initialState = {
   currentStep: 1 as Step,
   projectId: null,
   scriptParams: defaultScriptParams,
+  ownScript: false,
   planSections: [] as PlanSection[],
   script: null,
   voiceSettings: defaultVoiceSettings,
@@ -142,6 +144,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setProjectId: (id) => set({ projectId: id }),
   setScriptParams: (params) =>
     set((s) => ({ scriptParams: { ...s.scriptParams, ...params } })),
+  setOwnScript: (v) => set({ ownScript: v }),
   setPlanSections: (sections) => set({ planSections: sections }),
   setScript: (script) => set({ script }),
   setVoiceSettings: (settings) =>

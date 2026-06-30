@@ -153,7 +153,6 @@ export interface VoiceSettings {
   similarityBoost: number  // 0–1
   style: VoiceStyleType
   clarityBoost: boolean
-  paragraphPauses: boolean
 }
 
 // ─── Subtitle style ───────────────────────────────────────────────────────────

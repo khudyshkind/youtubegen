@@ -16,7 +16,7 @@ function SpinnerIcon({ className }: { className?: string }) {
 }
 
 export default function Step2Plan() {
-  const { scriptParams, projectId, planSections, setPlanSections, setStep } = useStudioStore()
+  const { scriptParams, projectId, planSections, setPlanSections, setStep, ownScript } = useStudioStore()
   const { t } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -100,36 +100,63 @@ export default function Step2Plan() {
         )}
       </div>
 
-      {/* Info hint */}
-      <div
-        className="flex items-start gap-2 rounded-xl px-4 py-3"
-        style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)' }}
-      >
-        <svg className="w-4 h-4 text-violet-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <p className="text-xs text-slate-400">{t('plan.hint')}</p>
-      </div>
+      {ownScript ? (
+        <>
+          {/* Own-text hint */}
+          <div
+            className="flex items-start gap-2 rounded-xl px-4 py-3"
+            style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)' }}
+          >
+            <svg className="w-4 h-4 text-violet-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-xs text-slate-400">{t('plan.hint_own')}</p>
+          </div>
 
-      {/* Generate button */}
-      <button
-        type="button"
-        onClick={handleGenerate}
-        disabled={loading || !scriptParams.topic.trim()}
-        className="w-full py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-50 flex items-center justify-center gap-2"
-      >
-        {loading ? (
-          <>
-            <SpinnerIcon className="w-4 h-4 animate-spin" />
-            {t('plan.generating')}
-          </>
-        ) : planSections.length > 0 ? (
-          t('plan.regenerate_btn')
-        ) : (
-          t('plan.generate_btn')
-        )}
-      </button>
+          {/* Skip — primary action for own text */}
+          <button
+            type="button"
+            onClick={() => setStep(3)}
+            className="w-full py-3 btn-gradient text-white font-semibold rounded-xl text-sm"
+          >
+            {t('plan.skip_own')}
+          </button>
+        </>
+      ) : (
+        <>
+          {/* Info hint */}
+          <div
+            className="flex items-start gap-2 rounded-xl px-4 py-3"
+            style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)' }}
+          >
+            <svg className="w-4 h-4 text-violet-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-xs text-slate-400">{t('plan.hint')}</p>
+          </div>
+
+          {/* Generate button */}
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={loading || !scriptParams.topic.trim()}
+            className="w-full py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <SpinnerIcon className="w-4 h-4 animate-spin" />
+                {t('plan.generating')}
+              </>
+            ) : planSections.length > 0 ? (
+              t('plan.regenerate_btn')
+            ) : (
+              t('plan.generate_btn')
+            )}
+          </button>
+        </>
+      )}
 
       {/* Section cards */}
       {planSections.length > 0 && (
@@ -238,8 +265,8 @@ export default function Step2Plan() {
         </button>
       </div>
 
-      {/* Skip — only shown when no plan generated yet */}
-      {planSections.length === 0 && (
+      {/* Skip — only shown when no plan generated yet (own-text already has its own skip button above) */}
+      {!ownScript && planSections.length === 0 && (
         <div className="text-center">
           <button
             type="button"

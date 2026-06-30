@@ -194,7 +194,7 @@ function Pill({
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function Step1Topic() {
-  const { scriptParams, setScriptParams, setStep, setProjectId, projectId } = useStudioStore()
+  const { scriptParams, setScriptParams, setStep, setProjectId, projectId, setOwnScript: setStoreOwnScript } = useStudioStore()
   const { t } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -241,6 +241,8 @@ export default function Step1Topic() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!ownScript && !scriptParams.topic.trim()) { setError(t('step1.err_topic')); return }
+
+    setStoreOwnScript(ownScript)
 
     if (projectId) { setStep(2); return }
 
