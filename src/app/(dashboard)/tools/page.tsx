@@ -25,6 +25,7 @@ export default function ToolsPage() {
   const [outputLang, setOutputLang] = useState('ru')
   const [resultText, setResultText] = useState('')
   const [processingMode, setProcessingMode] = useState<'unique' | 'human' | 'both' | null>(null)
+  const [bothStep, setBothStep] = useState<1 | 2 | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -46,28 +47,53 @@ export default function ToolsPage() {
     setSuccess(false)
     setProcessingMode(mode)
     try {
-      const res = await fetch('/api/generate/uniqueize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script: inputText, mode, output_lang: outputLang }),
-      })
-      if (res.status === 504 || res.status === 524) {
-        throw new Error(t('tools.err_timeout'))
-      }
-      let json: { ok: boolean; data?: { script: string }; error?: string; code?: string }
-      try {
-        json = await res.json()
-      } catch {
-        throw new Error(t('tools.err_gen'))
-      }
-      if (!json.ok) {
-        if (json.code === 'NO_CREDITS') {
-          setError(t('tools.err_credits'))
-          return
+      if (mode === 'both') {
+        // Step 1: uniqueize
+        setBothStep(1)
+        const res1 = await fetch('/api/generate/uniqueize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ script: inputText, mode: 'unique', output_lang: outputLang }),
+        })
+        if (res1.status === 504 || res1.status === 524) throw new Error(t('tools.err_timeout'))
+        let json1: { ok: boolean; data?: { script: string }; error?: string; code?: string }
+        try { json1 = await res1.json() } catch { throw new Error(t('tools.err_gen')) }
+        if (!json1.ok) {
+          if (json1.code === 'NO_CREDITS') { setError(t('tools.err_credits')); return }
+          throw new Error(json1.error ?? t('tools.err_gen'))
         }
-        throw new Error(json.error ?? t('tools.err_gen'))
+        const uniqueized = json1.data!.script
+
+        // Step 2: humanize the uniqueized output (not the original text)
+        setBothStep(2)
+        const res2 = await fetch('/api/generate/uniqueize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ script: uniqueized, mode: 'human', output_lang: outputLang }),
+        })
+        if (res2.status === 504 || res2.status === 524) throw new Error(t('tools.err_timeout'))
+        let json2: { ok: boolean; data?: { script: string }; error?: string; code?: string }
+        try { json2 = await res2.json() } catch { throw new Error(t('tools.err_gen')) }
+        if (!json2.ok) {
+          if (json2.code === 'NO_CREDITS') { setError(t('tools.err_credits')); return }
+          throw new Error(json2.error ?? t('tools.err_gen'))
+        }
+        setResultText(json2.data!.script)
+      } else {
+        const res = await fetch('/api/generate/uniqueize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ script: inputText, mode, output_lang: outputLang }),
+        })
+        if (res.status === 504 || res.status === 524) throw new Error(t('tools.err_timeout'))
+        let json: { ok: boolean; data?: { script: string }; error?: string; code?: string }
+        try { json = await res.json() } catch { throw new Error(t('tools.err_gen')) }
+        if (!json.ok) {
+          if (json.code === 'NO_CREDITS') { setError(t('tools.err_credits')); return }
+          throw new Error(json.error ?? t('tools.err_gen'))
+        }
+        setResultText(json.data!.script)
       }
-      setResultText(json.data!.script)
       setSuccess(true)
       void refreshCredits()
       setTimeout(() => setSuccess(false), 3000)
@@ -75,6 +101,7 @@ export default function ToolsPage() {
       setError(err instanceof Error ? err.message : t('tools.err_gen'))
     } finally {
       setProcessingMode(null)
+      setBothStep(null)
     }
   }
 
@@ -188,7 +215,7 @@ export default function ToolsPage() {
               style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)', color: processingMode === 'both' ? '#6b7280' : '#a78bfa' }}
             >
               {processingMode === 'both' ? (
-                <><SpinnerIcon className="w-4 h-4 animate-spin" /> {t('tools.processing')}</>
+                <><SpinnerIcon className="w-4 h-4 animate-spin" /> {bothStep === 1 ? 'Шаг 1/2: повышаем уникальность...' : 'Шаг 2/2: убираем следы ИИ...'}</>
               ) : (
                 <>{t('tools.both_btn')} · −{creditCost('both')}</>
               )}

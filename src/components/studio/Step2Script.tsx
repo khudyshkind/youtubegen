@@ -33,6 +33,7 @@ export default function Step2Script() {
   const [error, setError] = useState('')
   const [uploadError, setUploadError] = useState('')
   const [processingMode, setProcessingMode] = useState<'unique' | 'human' | 'both' | null>(null)
+  const [bothStep, setBothStep] = useState<1 | 2 | null>(null)
   const [originalScript, setOriginalScript] = useState<string | null>(null)
   const [processSuccess, setProcessSuccess] = useState(false)
   const [outputLang, setOutputLang] = useState<string>(scriptParams.language ?? 'ru')
@@ -107,21 +108,50 @@ export default function Step2Script() {
     setProcessingMode(mode)
     setProcessSuccess(false)
     try {
-      const res = await fetch('/api/generate/uniqueize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script, project_id: projectId, mode, output_lang: outputLang }),
-      })
-      const json = await res.json()
-      if (!json.ok) {
-        if (json.code === 'NO_CREDITS') {
-          setError(t('step2.err_credits'))
-          return
+      let finalText: string
+      if (mode === 'both') {
+        // Step 1: uniqueize
+        setBothStep(1)
+        const res1 = await fetch('/api/generate/uniqueize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ script, project_id: projectId, mode: 'unique', output_lang: outputLang }),
+        })
+        const json1 = await res1.json()
+        if (!json1.ok) {
+          if (json1.code === 'NO_CREDITS') { setError(t('step2.err_credits')); return }
+          throw new Error(json1.error)
         }
-        throw new Error(json.error)
+        const uniqueized = json1.data.script
+
+        // Step 2: humanize the uniqueized output (not the original text)
+        setBothStep(2)
+        const res2 = await fetch('/api/generate/uniqueize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ script: uniqueized, project_id: projectId, mode: 'human', output_lang: outputLang }),
+        })
+        const json2 = await res2.json()
+        if (!json2.ok) {
+          if (json2.code === 'NO_CREDITS') { setError(t('step2.err_credits')); return }
+          throw new Error(json2.error)
+        }
+        finalText = json2.data.script
+      } else {
+        const res = await fetch('/api/generate/uniqueize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ script, project_id: projectId, mode, output_lang: outputLang }),
+        })
+        const json = await res.json()
+        if (!json.ok) {
+          if (json.code === 'NO_CREDITS') { setError(t('step2.err_credits')); return }
+          throw new Error(json.error)
+        }
+        finalText = json.data.script
       }
       setOriginalScript(script)
-      setScript(json.data.script)
+      setScript(finalText)
       setProcessSuccess(true)
       void refreshCredits()
       setTimeout(() => setProcessSuccess(false), 3000)
@@ -130,6 +160,7 @@ export default function Step2Script() {
       setError(err instanceof Error ? err.message : t(errKey))
     } finally {
       setProcessingMode(null)
+      setBothStep(null)
     }
   }
 
@@ -251,7 +282,7 @@ export default function Step2Script() {
               style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)', color: processingMode === 'both' ? '#6b7280' : '#a78bfa' }}
             >
               {processingMode === 'both' ? (
-                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.processing')}</>
+                <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{bothStep === 1 ? 'Шаг 1/2: уникализация...' : 'Шаг 2/2: очеловечивание...'}</>
               ) : t('step2.both_process')}
             </button>
             {originalScript !== null && (
