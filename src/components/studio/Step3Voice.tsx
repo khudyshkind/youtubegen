@@ -771,8 +771,8 @@ export default function Step3Voice() {
     !!googleVoice
   )
 
-  // Engines visible to the user: premium-only ones (voicer) are hidden for free plan
-  const visibleEngines = ENGINES.filter(e => !e.premiumOnly || userPlan !== 'free')
+  // All engines are visible; premium-only ones (voicer) are locked (disabled) for free users
+  const visibleEngines = ENGINES
 
   const cardStyle = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }
 
@@ -788,22 +788,24 @@ export default function Step3Voice() {
         <p className="text-sm font-medium text-slate-300 mb-2">{t('step3.engine')}</p>
         {planLoading ? (
           <div className="grid grid-cols-2 gap-2">
-            {ENGINES.filter(e => !e.premiumOnly).map((eng) => (
+            {ENGINES.map((eng) => (
               <div key={eng.id} className="h-[72px] rounded-xl animate-pulse"
                 style={{ background: 'rgba(255,255,255,0.04)', border: '2px solid rgba(255,255,255,0.06)' }} />
             ))}
           </div>
         ) : (
         <div className="grid grid-cols-2 gap-2">
-          {visibleEngines.map((eng) => (
+          {visibleEngines.map((eng) => {
+            const isPremiumLocked = !!eng.premiumOnly && userPlan === 'free'
+            return (
             <button
               key={eng.id}
               type="button"
-              onClick={() => { if (!eng.soon) { engineTouchedRef.current = true; setEngine(eng.id) } }}
-              disabled={!!eng.soon}
+              onClick={() => { if (!eng.soon && !isPremiumLocked) { engineTouchedRef.current = true; setEngine(eng.id) } }}
+              disabled={!!eng.soon || isPremiumLocked}
               className="relative flex flex-col gap-1 p-3 rounded-xl text-left transition-all disabled:cursor-not-allowed"
-              style={eng.soon
-                ? { background: 'rgba(255,255,255,0.02)', border: '2px solid rgba(255,255,255,0.05)', opacity: 0.5 }
+              style={eng.soon || isPremiumLocked
+                ? { background: 'rgba(255,255,255,0.02)', border: '2px solid rgba(255,255,255,0.05)', opacity: isPremiumLocked ? 0.65 : 0.5 }
                 : engine === eng.id
                 ? { background: 'rgba(124,58,237,0.15)', border: '2px solid rgba(124,58,237,0.5)' }
                 : { background: 'rgba(255,255,255,0.03)', border: '2px solid rgba(255,255,255,0.07)' }
@@ -815,19 +817,26 @@ export default function Step3Voice() {
                   {t('step3.soon')}
                 </span>
               )}
+              {isPremiumLocked && (
+                <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 rounded-full font-medium"
+                  style={{ background: 'rgba(124,58,237,0.12)', color: '#A78BFA' }}>
+                  🔒 Платный
+                </span>
+              )}
               <div className="flex items-center gap-1.5">
                 <span className="text-base">{eng.medal}</span>
-                <span className={`text-xs font-bold ${engine === eng.id && !eng.soon ? 'text-violet-300' : 'text-slate-400'}`}>{eng.name}</span>
+                <span className={`text-xs font-bold ${engine === eng.id && !eng.soon && !isPremiumLocked ? 'text-violet-300' : 'text-slate-400'}`}>{eng.name}</span>
               </div>
               <p className="text-xs text-slate-500">{eng.quality}</p>
               <p className="text-xs text-slate-600">{eng.meta}</p>
               {!eng.soon && (
-                <p className={`text-xs font-semibold mt-0.5 ${engine === eng.id ? 'text-violet-400' : 'text-slate-500'}`}>
+                <p className={`text-xs font-semibold mt-0.5 ${engine === eng.id && !isPremiumLocked ? 'text-violet-400' : 'text-slate-500'}`}>
                   {eng.costLabel}
                 </p>
               )}
             </button>
-          ))}
+            )
+          })}
         </div>
         )}
       </div>
@@ -913,10 +922,13 @@ export default function Step3Voice() {
       {(engine === 'elevenlabs' || engine === 'voicer') && (
         <>
           {engine === 'voicer' && (
-            <div className="rounded-xl p-3 flex items-center gap-2.5"
+            <div className="rounded-xl p-3 flex flex-col gap-1.5"
               style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
-              <span className="text-base">💎</span>
-              <p className="text-xs text-violet-300/90">Голоса ElevenLabs, синтез через премиум-сервер. Качество выше, стоимость ниже чем в прямом ElevenLabs.</p>
+              <div className="flex items-center gap-2.5">
+                <span className="text-base">💎</span>
+                <p className="text-xs text-violet-300/90">Голоса ElevenLabs, синтез через премиум-сервер. Качество выше, стоимость ниже чем в прямом ElevenLabs.</p>
+              </div>
+              <p className="text-xs text-violet-400/70 pl-7">⏱ Синтез занимает 2–4 минуты — не закрывайте вкладку.</p>
             </div>
           )}
           {voicesError && !voicesLoading && (
@@ -1301,7 +1313,7 @@ export default function Step3Voice() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
             </svg>
-            {engine === 'secretvoicer' ? t('voice.sv_synthesizing') : t('step3.generating')}
+            {engine === 'secretvoicer' ? t('voice.sv_synthesizing') : engine === 'voicer' ? 'Идёт премиум-синтез, несколько минут...' : t('step3.generating')}
           </>
         ) : audioUrl ? (
           `↺ ${t('step2.regenerate')} · −${cost} ${t('nav.credits_suffix')}`
