@@ -80,7 +80,14 @@ function ServiceCard({ svc }: { svc: ServiceResult }) {
           {svc.metrics.map((m) => (
             <div key={m.label} className="flex items-start justify-between gap-2">
               <span className="text-xs text-gray-400 shrink-0">{m.label}</span>
-              <span className="text-xs text-gray-700 font-medium text-right">{m.value}</span>
+              {m.url ? (
+                <a href={m.url} target="_blank" rel="noopener noreferrer"
+                   className="text-xs text-blue-600 hover:text-blue-800 font-medium text-right hover:underline">
+                  {m.value}
+                </a>
+              ) : (
+                <span className="text-xs text-gray-700 font-medium text-right">{m.value}</span>
+              )}
             </div>
           ))}
         </div>

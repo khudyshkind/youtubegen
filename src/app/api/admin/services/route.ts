@@ -11,6 +11,7 @@ type Status = 'ok' | 'warn' | 'error' | 'unconfigured'
 interface Metric {
   label: string
   value: string
+  url?: string
 }
 
 export interface ServiceResult {
@@ -67,7 +68,7 @@ async function checkAnthropic(): Promise<ServiceResult> {
       metrics: [
         { label: 'Статус', value: '✓ Ключ активен' },
         { label: 'Доступно моделей', value: String(modelCount) },
-        { label: 'Баланс', value: '↗ Проверить в консоли' },
+        { label: 'Биллинг', value: '↗ Console Billing', url: 'https://console.anthropic.com/settings/billing' },
       ],
     }
   } catch (err) {
@@ -90,7 +91,7 @@ async function checkOpenAI(): Promise<ServiceResult> {
       ...base, status: 'ok',
       metrics: [
         { label: 'Статус', value: '✓ Ключ активен' },
-        { label: 'Использование', value: '↗ Смотри в платформе' },
+        { label: 'Использование', value: '↗ Platform Usage', url: 'https://platform.openai.com/usage' },
       ],
     }
   } catch (err) {
@@ -148,7 +149,7 @@ async function checkFal(): Promise<ServiceResult> {
     ...base, status: 'ok',
     metrics: [
       { label: 'Статус', value: '✓ Ключ настроен' },
-      { label: 'Баланс', value: '↗ Проверить на fal.ai' },
+      { label: 'Биллинг', value: '↗ fal.ai Billing', url: 'https://fal.ai/dashboard/billing' },
     ],
   }
 }
@@ -173,6 +174,7 @@ async function checkResend(): Promise<ServiceResult> {
         { label: 'Доменов', value: String(domainCount) },
         { label: 'Основной домен', value: domainName },
         { label: 'Лимит free', value: '3 000 писем/мес' },
+        { label: 'Биллинг', value: '↗ Resend Settings', url: 'https://resend.com/settings/billing' },
       ],
     }
   } catch (err) {
@@ -227,6 +229,20 @@ async function checkSupabase(): Promise<ServiceResult> {
   if (!serviceKey) return unconfigured(base, 'SUPABASE_SERVICE_ROLE_KEY')
   try {
     const supabase = createServiceClient()
+
+    // DB row counts (HEAD request — no data transferred)
+    let profileCount: number | null = null
+    let projectCount: number | null = null
+    try {
+      const [profRes, projRes] = await Promise.all([
+        supabase.from('profiles').select('*', { count: 'exact', head: true }),
+        supabase.from('projects').select('*', { count: 'exact', head: true }),
+      ])
+      profileCount = profRes.count
+      projectCount = projRes.count
+    } catch { /* swallow — storage still shown */ }
+
+    // Storage
     const buckets = ['audio', 'images', 'videos'] as const
     const stats: { bucket: string; count: number; sizeMB: number }[] = []
     for (const bucket of buckets) {
@@ -243,6 +259,8 @@ async function checkSupabase(): Promise<ServiceResult> {
     return {
       ...base, status,
       metrics: [
+        ...(profileCount !== null ? [{ label: 'Пользователей (DB)', value: profileCount.toLocaleString('ru') }] : []),
+        ...(projectCount !== null ? [{ label: 'Проектов (DB)', value: projectCount.toLocaleString('ru') }] : []),
         { label: 'Storage использовано', value: `${totalMB.toFixed(1)} MB / 1 024 MB` },
         ...stats.map(b => ({ label: `${b.bucket}`, value: `${b.count} файл${b.count === 1 ? '' : 'ов'} · ${b.sizeMB.toFixed(1)} MB` })),
       ],
@@ -354,7 +372,7 @@ async function checkYouTubeAPI(): Promise<ServiceResult> {
       metrics: [
         { label: 'Статус', value: '✓ Ключ активен' },
         { label: 'Дневная квота', value: '10 000 единиц (по умолчанию)' },
-        { label: 'Использование', value: '↗ Смотреть в GCP Console' },
+        { label: 'Квоты', value: '↗ API Quotas', url: 'https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas' },
       ],
     }
   } catch (err) {
@@ -385,7 +403,7 @@ async function checkApihost(): Promise<ServiceResult> {
         ...base, status: 'ok',
         metrics: [
           { label: 'Статус', value: '✓ Ключ настроен' },
-          { label: 'Баланс', value: '↗ Проверить на сайте' },
+          { label: 'Баланс', value: '↗ apihost.ru', url: 'https://apihost.ru' },
         ],
       }
     }
@@ -433,7 +451,7 @@ async function checkGoogleCloud(): Promise<ServiceResult> {
         { label: 'Cloud TTS API', value: '✓ Активен' },
         { label: 'Голосов (ru-RU)', value: String(voiceCount) },
         { label: 'YouTube API', value: youtubeConfigured ? '✓ Настроен' : '⚠ Не задан' },
-        { label: 'OAuth', value: '↗ Проверить в GCP Console' },
+        { label: 'GCP Billing', value: '↗ Cloud Console', url: 'https://console.cloud.google.com/billing' },
       ],
     }
   } catch (err) {
@@ -475,7 +493,8 @@ async function checkVercel(): Promise<ServiceResult> {
       metrics: [
         { label: 'Статус деплоя', value: labels[state] ?? state },
         { label: 'Дата', value: dateStr },
-        { label: 'URL', value: deployment.url ? `https://${deployment.url}` : '—' },
+        { label: 'Деплой', value: deployment.url ? '↗ Preview URL' : '—', ...(deployment.url ? { url: `https://${deployment.url}` } : {}) },
+        { label: 'Биллинг', value: '↗ Team Billing', url: 'https://vercel.com/you-tube-gen-s-projects/settings/billing' },
       ],
     }
   } catch (err) {
@@ -615,6 +634,7 @@ async function checkSecretVoicer(): Promise<ServiceResult> {
           { label: 'Голосов (API)', value: apiCount !== null ? String(apiCount) : '—' },
           { label: 'Голосов (каталог)', value: '102' },
           { label: 'Движок', value: 'ElevenLabs-based (async)' },
+          { label: 'Сайт', value: '↗ secret-voicer.ru', url: 'https://secret-voicer.ru' },
         ],
       }
     }
@@ -624,7 +644,7 @@ async function checkSecretVoicer(): Promise<ServiceResult> {
       metrics: [
         { label: 'Статус', value: `✓ Ключ настроен · API HTTP ${res.status}` },
         { label: 'Голосов (каталог)', value: '102' },
-        { label: 'Движок', value: 'secret-voicer.ru (async TTS)' },
+        { label: 'Сайт', value: '↗ secret-voicer.ru', url: 'https://secret-voicer.ru' },
       ],
     }
   } catch (err) {
@@ -651,7 +671,7 @@ async function checkVoicer(): Promise<ServiceResult> {
       metrics: [
         { label: 'Статус', value: '✓ Ключ активен' },
         { label: 'Движок', value: 'ElevenLabs (реселлер)' },
-        { label: 'Баланс', value: '↗ Проверить у реселлера' },
+        { label: 'Сайт', value: '↗ voicer.mat3u.com', url: 'https://voicer.mat3u.com' },
       ],
     }
   } catch (err) {
@@ -683,7 +703,7 @@ async function checkGemini(): Promise<ServiceResult> {
         { label: 'Картинки', value: imageModel
           ? `✓ ${imageModel.displayName ?? imageModel.name.split('/').pop() ?? imageModel.name}`
           : '— нет image-модели' },
-        { label: 'Квота', value: '↗ AI Studio' },
+        { label: 'Квота', value: '↗ AI Studio', url: 'https://aistudio.google.com/' },
       ],
     }
   } catch (err) {
@@ -738,10 +758,10 @@ async function checkVGF(statsP: Promise<RailwayStats | null>): Promise<ServiceRe
     return {
       ...base, status,
       metrics: [
-        { label: 'Ключ',        value: '✓ Настроен (Railway)' },
-        { label: 'API',         value: vgf.statusNote ?? '—' },
-        { label: 'Рендер',      value: 'verygoodffmpeg.com (Cloud FFmpeg)' },
-        { label: 'Использование', value: '↗ Панель VGF' },
+        { label: 'Ключ',   value: '✓ Настроен (Railway)' },
+        { label: 'API',    value: vgf.statusNote ?? '—' },
+        { label: 'Рендер', value: 'verygoodffmpeg.com (Cloud FFmpeg)' },
+        { label: 'Панель', value: '↗ VGF Dashboard', url: 'https://verygoodffmpeg.com' },
       ],
     }
   } catch (err) {
