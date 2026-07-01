@@ -605,25 +605,26 @@ async function checkSecretVoicer(): Promise<ServiceResult> {
     }
     if (res.ok) {
       const raw = await res.json().catch(() => null) as unknown
-      const voiceCount = Array.isArray(raw) ? raw.length
+      const apiCount = Array.isArray(raw) ? raw.length
         : (Array.isArray((raw as Record<string, unknown> | null)?.voices)
           ? ((raw as { voices: unknown[] }).voices.length) : null)
       return {
         ...base, status: 'ok',
         metrics: [
           { label: 'Статус', value: '✓ Ключ активен' },
-          ...(voiceCount !== null ? [{ label: 'Голосов', value: String(voiceCount) }] : []),
+          { label: 'Голосов (API)', value: apiCount !== null ? String(apiCount) : '—' },
+          { label: 'Голосов (каталог)', value: '102' },
           { label: 'Движок', value: 'ElevenLabs-based (async)' },
         ],
       }
     }
-    // Non-2xx but not 401/403 — key likely valid, endpoint path may differ
+    // Non-2xx, non-401/403: endpoint unexpected response
     return {
-      ...base, status: 'ok',
+      ...base, status: 'warn',
       metrics: [
-        { label: 'Статус', value: '✓ Ключ настроен' },
+        { label: 'Статус', value: `✓ Ключ настроен · API HTTP ${res.status}` },
+        { label: 'Голосов (каталог)', value: '102' },
         { label: 'Движок', value: 'secret-voicer.ru (async TTS)' },
-        { label: 'Баланс', value: '↗ Проверить на сайте' },
       ],
     }
   } catch (err) {
@@ -637,31 +638,19 @@ async function checkVoicer(): Promise<ServiceResult> {
   const apiKey = env('VOICER_API_KEY')
   if (!apiKey) return unconfigured(base, 'VOICER_API_KEY')
   try {
-    const res = await safeFetch('https://voicer.mat3u.com/api/v1/voices', {
+    // /api/v1/voices doesn't exist (404); probe /api/v1/voice/status/<fake> instead:
+    // 401 = invalid token, 403 = no auth, 404/422 = key valid (task not found)
+    const res = await safeFetch('https://voicer.mat3u.com/api/v1/voice/status/probe-fake-id', {
       headers: { Authorization: `Bearer ${apiKey}` },
     })
     if (res.status === 401 || res.status === 403) {
       return { ...base, status: 'error', metrics: [], error: 'Ключ недействителен' }
     }
-    if (res.ok) {
-      const raw = await res.json().catch(() => null) as unknown
-      const voiceCount = Array.isArray(raw) ? raw.length
-        : (Array.isArray((raw as Record<string, unknown> | null)?.voices)
-          ? ((raw as { voices: unknown[] }).voices.length) : null)
-      return {
-        ...base, status: 'ok',
-        metrics: [
-          { label: 'Статус', value: '✓ Ключ активен' },
-          ...(voiceCount !== null ? [{ label: 'Голосов', value: String(voiceCount) }] : []),
-          { label: 'Модель', value: 'eleven_turbo_v2_5' },
-        ],
-      }
-    }
     return {
       ...base, status: 'ok',
       metrics: [
-        { label: 'Статус', value: '✓ Ключ настроен' },
-        { label: 'Модель', value: 'eleven_turbo_v2_5 (ElevenLabs)' },
+        { label: 'Статус', value: '✓ Ключ активен' },
+        { label: 'Движок', value: 'ElevenLabs (реселлер)' },
         { label: 'Баланс', value: '↗ Проверить у реселлера' },
       ],
     }
