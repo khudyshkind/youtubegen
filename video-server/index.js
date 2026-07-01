@@ -2745,20 +2745,21 @@ app.get('/admin/stats', verifySecret, async (req, res) => {
     result.b2Backup = { error: e.message.slice(0, 150) }
   }
 
-  // VGF — probe key validity: 404=valid key (job not found), 401/403=invalid key
+  // VGF — probe key: GET /api/jobs/<fake-uuid> → 400 "notFound" = key valid, 401/403 = invalid
   if (!VGF_API_KEY) {
     result.vgf = { keySet: false, status: 'unconfigured' }
   } else {
     try {
-      const probeRes = await fetch('https://verygoodffmpeg.com/api/jobs/admin-health-probe', {
+      const probeRes = await fetch('https://verygoodffmpeg.com/api/jobs/00000000-0000-0000-0000-000000000000', {
         headers: { Authorization: `Bearer ${VGF_API_KEY}` },
         signal: AbortSignal.timeout(7000),
       })
       const st = probeRes.status
+      // 400 = job not found (valid key); 401/403 = invalid key; anything else = unknown
       result.vgf = {
         keySet: true,
-        status: st === 404 ? 'ok' : (st === 401 || st === 403) ? 'error' : 'warn',
-        statusNote: st === 404 ? '✓ Ключ активен'
+        status: st === 400 ? 'ok' : (st === 401 || st === 403) ? 'error' : 'warn',
+        statusNote: st === 400 ? '✓ Ключ активен'
           : (st === 401 || st === 403) ? '✗ Ключ недействителен'
           : `HTTP ${st}`,
       }
