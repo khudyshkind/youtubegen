@@ -323,8 +323,8 @@ export default function Step1Topic() {
         </div>
       )}
 
-      {/* Language + Duration */}
-      <div className="grid grid-cols-2 gap-4">
+      {/* Language always visible; Duration only when generating (ownScript computes it from text) */}
+      {ownScript ? (
         <div>
           <label className="block text-sm font-medium text-slate-400 mb-1.5">{t('step1.language')}</label>
           <LanguageSelect
@@ -332,19 +332,29 @@ export default function Step1Topic() {
             onChange={(v) => setScriptParams({ language: v })}
           />
         </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-400 mb-1.5">{t('step1.duration')}</label>
-          <select
-            value={scriptParams.duration_minutes}
-            onChange={(e) => setScriptParams({ duration_minutes: Number(e.target.value) })}
-            className="w-full px-4 py-2.5 rounded-xl text-sm"
-          >
-            {DURATION_OPTIONS.map((d) => (
-              <option key={d} value={d}>{d} {t('step1.min')}</option>
-            ))}
-          </select>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-1.5">{t('step1.language')}</label>
+            <LanguageSelect
+              value={scriptParams.language}
+              onChange={(v) => setScriptParams({ language: v })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-1.5">{t('step1.duration')}</label>
+            <select
+              value={scriptParams.duration_minutes}
+              onChange={(e) => setScriptParams({ duration_minutes: Number(e.target.value) })}
+              className="w-full px-4 py-2.5 rounded-xl text-sm"
+            >
+              {DURATION_OPTIONS.map((d) => (
+                <option key={d} value={d}>{d} {t('step1.min')}</option>
+              ))}
+            </select>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* AI Model — only relevant when generating script */}
       {!ownScript && (
@@ -374,90 +384,95 @@ export default function Step1Topic() {
         </div>
       )}
 
-      {/* Narrative style + Tone */}
-      <div className="grid grid-cols-2 gap-4">
-        <SelectRow
-          label={t('step1.style')}
-          value={scriptParams.narrative_style}
-          options={NARRATIVE_STYLES}
-          onChange={(v) => setScriptParams({ narrative_style: v })}
-        />
-        <SelectRow
-          label={t('step1.tone')}
-          value={scriptParams.tone}
-          options={TONES}
-          onChange={(v) => setScriptParams({ tone: v })}
-        />
-      </div>
+      {/* These settings only apply to AI generation — hide for own-text mode */}
+      {!ownScript && (
+        <>
+          {/* Narrative style + Tone */}
+          <div className="grid grid-cols-2 gap-4">
+            <SelectRow
+              label={t('step1.style')}
+              value={scriptParams.narrative_style}
+              options={NARRATIVE_STYLES}
+              onChange={(v) => setScriptParams({ narrative_style: v })}
+            />
+            <SelectRow
+              label={t('step1.tone')}
+              value={scriptParams.tone}
+              options={TONES}
+              onChange={(v) => setScriptParams({ tone: v })}
+            />
+          </div>
 
-      {/* Target audience */}
-      <div>
-        <label className="block text-sm font-medium text-slate-400 mb-2">{t('step1.audience')}</label>
-        <div className="grid grid-cols-4 gap-2">
-          {AUDIENCES.map((a) => (
-            <Pill
-              key={a.value}
-              selected={scriptParams.target_audience === a.value}
-              onClick={() => setScriptParams({ target_audience: a.value })}
-            >
-              {a.label}
-            </Pill>
-          ))}
-        </div>
-      </div>
-
-      {/* Toggles */}
-      <div
-        className="rounded-xl px-4 divide-y"
-        style={{ border: '1px solid rgba(255,255,255,0.08)', '--divide-color': 'rgba(255,255,255,0.06)' } as React.CSSProperties}
-      >
-        <Toggle
-          checked={scriptParams.hook}
-          onChange={(v) => setScriptParams({ hook: v })}
-          label={t('step1.hook')}
-          hint={t('step1.hook_hint')}
-        />
-        {scriptParams.hook && (
-          <div className="py-2">
-            <p className="text-xs font-medium text-slate-400 mb-1.5">{t('step1.hook_type')}</p>
-            <div className="grid grid-cols-2 gap-1.5">
-              {HOOK_TYPES.map((h) => (
-                <button
-                  key={h.value}
-                  type="button"
-                  onClick={() => setScriptParams({ hook_type: h.value })}
-                  className="py-1.5 text-xs rounded-lg border transition-all"
-                  style={
-                    scriptParams.hook_type === h.value
-                      ? { borderColor: '#7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA', fontWeight: 600 }
-                      : { borderColor: 'rgba(255,255,255,0.08)', color: '#64748B' }
-                  }
+          {/* Target audience */}
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-2">{t('step1.audience')}</label>
+            <div className="grid grid-cols-4 gap-2">
+              {AUDIENCES.map((a) => (
+                <Pill
+                  key={a.value}
+                  selected={scriptParams.target_audience === a.value}
+                  onClick={() => setScriptParams({ target_audience: a.value })}
                 >
-                  {h.label}
-                </button>
+                  {a.label}
+                </Pill>
               ))}
             </div>
           </div>
-        )}
-        <Toggle
-          checked={scriptParams.cta}
-          onChange={(v) => setScriptParams({ cta: v })}
-          label={t('step1.cta')}
-          hint={t('step1.cta_hint')}
-        />
-        <Toggle
-          checked={scriptParams.scene_markers}
-          onChange={(v) => setScriptParams({ scene_markers: v })}
-          label={t('step1.scene_markers')}
-          hint={t('step1.scene_hint')}
-        />
-        <Toggle
-          checked={scriptParams.pauses}
-          onChange={(v) => setScriptParams({ pauses: v })}
-          label={t('step1.pauses')}
-          hint={t('step1.pauses_hint')}
-        />
-      </div>
+
+          {/* Toggles */}
+          <div
+            className="rounded-xl px-4 divide-y"
+            style={{ border: '1px solid rgba(255,255,255,0.08)', '--divide-color': 'rgba(255,255,255,0.06)' } as React.CSSProperties}
+          >
+            <Toggle
+              checked={scriptParams.hook}
+              onChange={(v) => setScriptParams({ hook: v })}
+              label={t('step1.hook')}
+              hint={t('step1.hook_hint')}
+            />
+            {scriptParams.hook && (
+              <div className="py-2">
+                <p className="text-xs font-medium text-slate-400 mb-1.5">{t('step1.hook_type')}</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {HOOK_TYPES.map((h) => (
+                    <button
+                      key={h.value}
+                      type="button"
+                      onClick={() => setScriptParams({ hook_type: h.value })}
+                      className="py-1.5 text-xs rounded-lg border transition-all"
+                      style={
+                        scriptParams.hook_type === h.value
+                          ? { borderColor: '#7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA', fontWeight: 600 }
+                          : { borderColor: 'rgba(255,255,255,0.08)', color: '#64748B' }
+                      }
+                    >
+                      {h.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <Toggle
+              checked={scriptParams.cta}
+              onChange={(v) => setScriptParams({ cta: v })}
+              label={t('step1.cta')}
+              hint={t('step1.cta_hint')}
+            />
+            <Toggle
+              checked={scriptParams.scene_markers}
+              onChange={(v) => setScriptParams({ scene_markers: v })}
+              label={t('step1.scene_markers')}
+              hint={t('step1.scene_hint')}
+            />
+            <Toggle
+              checked={scriptParams.pauses}
+              onChange={(v) => setScriptParams({ pauses: v })}
+              label={t('step1.pauses')}
+              hint={t('step1.pauses_hint')}
+            />
+          </div>
+        </>
+      )}
 
       {/* Cost notice — only when generating */}
       {!ownScript && (

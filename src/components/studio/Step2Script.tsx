@@ -26,6 +26,33 @@ function SpinnerIcon({ className }: { className?: string }) {
   )
 }
 
+function EnhanceToggle({ checked, onChange, label, hint }: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  label: string
+  hint?: string
+}) {
+  return (
+    <div className="flex items-center justify-between py-2">
+      <div>
+        <p className="text-sm font-medium text-slate-300">{label}</p>
+        {hint && <p className="text-xs text-slate-500 mt-0.5">{hint}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(!checked)}
+        className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0"
+        style={{ background: checked ? '#7C3AED' : 'rgba(255,255,255,0.1)' }}
+      >
+        <span
+          className="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
+          style={{ transform: checked ? 'translateX(24px)' : 'translateX(4px)' }}
+        />
+      </button>
+    </div>
+  )
+}
+
 export default function Step2Script() {
   const { scriptParams, setScriptParams, projectId, planSections, script, setScript, setStep, ownScript } = useStudioStore()
   const { t } = useLang()
@@ -49,6 +76,13 @@ export default function Step2Script() {
     'claude-opus':   t('model.enhanced'),
     'gpt-4o':        t('model.alternative'),
   }
+
+  const ENHANCE_HOOK_TYPES = [
+    { value: 'question',    label: t('hook.question')    },
+    { value: 'statistic',   label: t('hook.statistic')   },
+    { value: 'story',       label: t('hook.story')       },
+    { value: 'provocation', label: t('hook.provocation') },
+  ]
 
   const model = scriptParams.model
   const creditCost = MODEL_COSTS[model] ?? 10
@@ -95,6 +129,9 @@ export default function Step2Script() {
       if (!text?.trim()) { setUploadError(t('step2.err_file_empty')); return }
       const trimmed = text.trim()
       setScript(trimmed)
+      if (ownScript) {
+        setScriptParams({ duration_minutes: Math.max(1, Math.round(countWords(trimmed) / 130)) })
+      }
       // Auto-fill topic from first 50 chars if topic is missing or placeholder
       const { topic } = useStudioStore.getState().scriptParams
       if (!topic.trim() || topic === 'Свой текст') {
@@ -215,8 +252,22 @@ export default function Step2Script() {
 
   function handlePasteMode() { setScript('') }
 
+  function handleAutoName() {
+    if (!ownScript || !projectId || !script?.trim()) return
+    void fetch(`/api/projects/${projectId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ generate_from: script.slice(0, 1500) }),
+    })
+  }
+
+  function handleNext() {
+    if (ownScript) handleAutoName()
+    setStep(4)
+  }
+
   const words = script ? countWords(script) : 0
-  const estimatedMin = Math.round(words / 130)
+  const estimatedMin = Math.max(1, Math.round(words / 130))
   const hasScript = script !== null && script.trim().length > 0
 
   return (
@@ -340,67 +391,69 @@ export default function Step2Script() {
 
           {/* Enhance block — only for own-text users (AI-generation users get hook/CTA/pauses free via Step 1 toggles) */}
           {ownScript && (
-            <div className="rounded-xl p-3" style={{ border: '1px solid rgba(124,58,237,0.25)', background: 'rgba(124,58,237,0.06)' }}>
-              <p className="text-xs font-semibold mb-2.5 text-violet-400">
-                {t('step2.enhance_title')} · −{CREDIT_COSTS.enhance} {t('nav.credits_suffix')}
-              </p>
-              <div className="flex flex-col gap-2">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={enhanceHook}
-                    onChange={(e) => setEnhanceHook(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded accent-violet-500 cursor-pointer"
-                  />
-                  <span className="text-xs text-slate-300">{t('step2.enhance_hook')}</span>
-                </label>
-                {enhanceHook && (
-                  <div className="pl-5">
-                    <select
-                      value={enhanceHookType}
-                      onChange={(e) => setEnhanceHookType(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-lg text-xs text-slate-300 cursor-pointer outline-none"
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
-                    >
-                      <option value="question">{t('hook.question')}</option>
-                      <option value="statistic">{t('hook.statistic')}</option>
-                      <option value="story">{t('hook.story')}</option>
-                      <option value="provocation">{t('hook.provocation')}</option>
-                    </select>
-                  </div>
-                )}
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={enhanceCta}
-                    onChange={(e) => setEnhanceCta(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded accent-violet-500 cursor-pointer"
-                  />
-                  <span className="text-xs text-slate-300">{t('step2.enhance_cta')}</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={enhancePauses}
-                    onChange={(e) => setEnhancePauses(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded accent-violet-500 cursor-pointer"
-                  />
-                  <span className="text-xs text-slate-300">{t('step2.enhance_pauses')}</span>
-                </label>
+            <div
+              className="rounded-xl px-4 divide-y"
+              style={{ border: '1px solid rgba(124,58,237,0.25)', background: 'rgba(124,58,237,0.06)', '--divide-color': 'rgba(124,58,237,0.15)' } as React.CSSProperties}
+            >
+              <div className="py-2.5">
+                <p className="text-xs font-semibold text-violet-400">
+                  {t('step2.enhance_title')} · −{CREDIT_COSTS.enhance} {t('nav.credits_suffix')}
+                </p>
               </div>
-              <button
-                type="button"
-                onClick={handleEnhance}
-                disabled={enhancing || processingMode !== null || (!enhanceHook && !enhanceCta && !enhancePauses)}
-                className="w-full mt-2.5 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl transition-all disabled:opacity-40"
-                style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)', color: enhancing ? '#6b7280' : '#a78bfa' }}
-              >
-                {enhancing ? (
-                  <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.enhancing')}</>
-                ) : (
-                  <>{t('step2.enhance_btn')} · −{CREDIT_COSTS.enhance} {t('nav.credits_suffix')}</>
-                )}
-              </button>
+              <EnhanceToggle
+                checked={enhanceHook}
+                onChange={setEnhanceHook}
+                label={t('step2.enhance_hook')}
+                hint={t('step2.enhance_hook_hint')}
+              />
+              {enhanceHook && (
+                <div className="py-2">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {ENHANCE_HOOK_TYPES.map((h) => (
+                      <button
+                        key={h.value}
+                        type="button"
+                        onClick={() => setEnhanceHookType(h.value)}
+                        className="py-1.5 text-xs rounded-lg border transition-all"
+                        style={
+                          enhanceHookType === h.value
+                            ? { borderColor: '#7C3AED', background: 'rgba(124,58,237,0.12)', color: '#A78BFA', fontWeight: 600 }
+                            : { borderColor: 'rgba(255,255,255,0.08)', color: '#64748B' }
+                        }
+                      >
+                        {h.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <EnhanceToggle
+                checked={enhanceCta}
+                onChange={setEnhanceCta}
+                label={t('step2.enhance_cta')}
+                hint={t('step2.enhance_cta_hint')}
+              />
+              <EnhanceToggle
+                checked={enhancePauses}
+                onChange={setEnhancePauses}
+                label={t('step2.enhance_pauses')}
+                hint={t('step2.enhance_pauses_hint')}
+              />
+              <div className="py-2.5">
+                <button
+                  type="button"
+                  onClick={handleEnhance}
+                  disabled={enhancing || processingMode !== null || (!enhanceHook && !enhanceCta && !enhancePauses)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-xl transition-all disabled:opacity-40"
+                  style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)', color: enhancing ? '#6b7280' : '#a78bfa' }}
+                >
+                  {enhancing ? (
+                    <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step2.enhancing')}</>
+                  ) : (
+                    <>{t('step2.enhance_btn')} · −{CREDIT_COSTS.enhance} {t('nav.credits_suffix')}</>
+                  )}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -484,7 +537,12 @@ export default function Step2Script() {
           <textarea
             rows={16}
             value={script}
-            onChange={(e) => setScript(e.target.value)}
+            onChange={(e) => {
+              setScript(e.target.value)
+              if (ownScript) {
+                setScriptParams({ duration_minutes: Math.max(1, Math.round(countWords(e.target.value) / 130)) })
+              }
+            }}
             placeholder="..."
             className="w-full px-4 py-3 rounded-xl text-sm resize-none leading-relaxed"
           />
@@ -502,7 +560,7 @@ export default function Step2Script() {
         </button>
         <button
           type="button"
-          onClick={() => setStep(4)}
+          onClick={handleNext}
           disabled={!hasScript}
           className="flex-1 py-3 btn-gradient text-white font-semibold rounded-xl text-sm disabled:opacity-40"
         >
