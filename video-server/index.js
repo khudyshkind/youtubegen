@@ -3072,6 +3072,7 @@ async function processVideoJob(jobId, body) {
     if (typeof tempImageB2Keys !== 'undefined' && tempImageB2Keys.length) {
       await deleteTempImagesFromB2(tempImageB2Keys).catch(e => console.warn('[b2-cleanup] images:', e.message))
     }
+    await deleteTempImagesFromB2([`temp/subs_${jobId}.ass`]).catch(e => console.warn('[b2-cleanup] subs:', e.message))
   }
 }
 
