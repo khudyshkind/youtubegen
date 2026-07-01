@@ -754,12 +754,9 @@ export default function Step3Voice() {
           throw new Error('Синтез занял слишком долго. Попробуйте текст короче или другой движок.')
         }
         const errText = await res.text().catch(() => '')
-        try {
-          const errJson = JSON.parse(errText) as { error?: string }
-          throw new Error(errJson.error || `Ошибка сервера (${res.status})`)
-        } catch {
-          throw new Error(`Ошибка сервера (${res.status})`)
-        }
+        let errMsg: string | undefined
+        try { errMsg = (JSON.parse(errText) as { error?: string }).error } catch { /* not JSON */ }
+        throw new Error(errMsg || `Ошибка сервера (${res.status})`)
       }
       const json = await res.json()
       if (!json.ok) {

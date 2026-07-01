@@ -7,7 +7,7 @@ import { audioCost } from '@/lib/types'
 import type { AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { env } from '@/lib/env'
 
-export const maxDuration = 800
+export const maxDuration = 300
 
 const ELEVENLABS_BASE = 'https://api.elevenlabs.io'
 
@@ -232,7 +232,7 @@ async function synthesizeVoicerChunk(
   if (!taskId) throw new Error('Voicer: no task_id in response')
 
   const POLL_MS = 2500
-  const TIMEOUT_MS = 360_000 // 6 min: Voicer queues tasks ~100s before synthesis starts
+  const TIMEOUT_MS = 280_000 // 280s: Voicer queues tasks ~100s + synthesis; must fit in 300s Lambda
   const deadline = Date.now() + TIMEOUT_MS
 
   while (Date.now() < deadline) {
@@ -591,7 +591,13 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           console.error(`[generate/audio] Voicer chunk ${i + 1}/${chunks.length} failed:`, msg)
-          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи Voicer: ${msg.slice(0, 200)}` }, { status: 502 })
+          const isTimeout = msg.includes('timeout after')
+          return NextResponse.json({
+            ok: false,
+            error: isTimeout
+              ? 'Премиум-озвучка не успела обработать текст такой длины. Попробуйте более короткий текст или другой движок озвучки.'
+              : `Ошибка синтеза речи Voicer: ${msg.slice(0, 200)}`,
+          }, { status: 502 })
         }
       }
       audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
