@@ -2711,6 +2711,65 @@ function getVfFilter(_img) {
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
+// ── Admin stats endpoint (Railway-only data for admin panel) ─────────────────
+// Protected by RAILWAY_API_SECRET via verifySecret middleware.
+// Returns B2 bucket stats + VGF key status. Called by Vercel admin once per page load.
+app.get('/admin/stats', verifySecret, async (req, res) => {
+  const result = {}
+
+  // B2 main bucket — media video files (max 1000 per list; truncated flag set if ≥1000)
+  try {
+    const mediaObjs = await b2MediaListObjects('users/')
+    const mediaSizeMb = mediaObjs.reduce((s, f) => s + f.size, 0) / 1024 / 1024
+    result.b2Media = {
+      files:     mediaObjs.length,
+      sizeMb:    parseFloat(mediaSizeMb.toFixed(2)),
+      truncated: mediaObjs.length >= 1000,
+    }
+  } catch (e) {
+    result.b2Media = { error: e.message.slice(0, 150) }
+  }
+
+  // B2 backup bucket — list all backup files
+  try {
+    const backupKeys = await b2BackupList()
+    const dates = backupKeys
+      .map(k => k.match(/backup_(\d{4}-\d{2}-\d{2})/)?.[1])
+      .filter(Boolean)
+      .sort()
+    result.b2Backup = {
+      files:          backupKeys.length,
+      lastBackupDate: dates.at(-1) ?? null,
+    }
+  } catch (e) {
+    result.b2Backup = { error: e.message.slice(0, 150) }
+  }
+
+  // VGF — probe key validity: 404=valid key (job not found), 401/403=invalid key
+  if (!VGF_API_KEY) {
+    result.vgf = { keySet: false, status: 'unconfigured' }
+  } else {
+    try {
+      const probeRes = await fetch('https://verygoodffmpeg.com/api/jobs/admin-health-probe', {
+        headers: { Authorization: `Bearer ${VGF_API_KEY}` },
+        signal: AbortSignal.timeout(7000),
+      })
+      const st = probeRes.status
+      result.vgf = {
+        keySet: true,
+        status: st === 404 ? 'ok' : (st === 401 || st === 403) ? 'error' : 'warn',
+        statusNote: st === 404 ? '✓ Ключ активен'
+          : (st === 401 || st === 403) ? '✗ Ключ недействителен'
+          : `HTTP ${st}`,
+      }
+    } catch (e) {
+      result.vgf = { keySet: true, status: 'error', statusNote: e.message.slice(0, 100) }
+    }
+  }
+
+  res.json({ ok: true, ...result })
+})
+
 // ── Very Good FFmpeg API wrapper ───────────────────────────────────────────
 // inputFiles:  { in_1: "https://...", in_2: "https://..." }
 // outputFiles: { out_1: "output.mp4" }  ← converted internally to VGF array format

@@ -561,9 +561,210 @@ async function checkBackup(): Promise<ServiceResult> {
   }
 }
 
+// ─── Railway stats (shared between checkB2 + checkVGF — single network call) ───
+
+interface RailwayStats {
+  b2Media?:  { files?: number; sizeMb?: number; truncated?: boolean; error?: string }
+  b2Backup?: { files?: number; lastBackupDate?: string | null; error?: string }
+  vgf?:      { keySet: boolean; status: string; statusNote?: string }
+}
+
+async function fetchRailwayStats(): Promise<RailwayStats | null> {
+  const url    = env('RAILWAY_VIDEO_SERVER_URL')
+  const secret = env('RAILWAY_API_SECRET')
+  if (!url || !secret) return null
+  const controller = new AbortController()
+  const t = setTimeout(() => controller.abort(), 12000)
+  try {
+    const res = await fetch(`${url.replace(/\/$/, '')}/admin/stats`, {
+      headers: { 'x-api-secret': secret },
+      signal: controller.signal,
+      cache: 'no-store',
+    })
+    if (!res.ok) return null
+    return await res.json() as RailwayStats
+  } catch {
+    return null
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+// ─── New service checks ────────────────────────────────────────────────────────
+
+async function checkSecretVoicer(): Promise<ServiceResult> {
+  const base = { key: 'secretvoicer', name: 'SecretVoicer (TTS)', icon: '🗣️', link: 'https://secret-voicer.ru' }
+  const apiKey = env('SECRETVOICER_API_KEY')
+  if (!apiKey) return unconfigured(base, 'SECRETVOICER_API_KEY')
+  try {
+    const res = await safeFetch('https://secret-voicer.ru/api/v1/voices', {
+      headers: { 'X-API-Key': apiKey },
+    })
+    if (res.status === 401 || res.status === 403) {
+      return { ...base, status: 'error', metrics: [], error: 'Ключ недействителен' }
+    }
+    if (res.ok) {
+      const raw = await res.json().catch(() => null) as unknown
+      const voiceCount = Array.isArray(raw) ? raw.length
+        : (Array.isArray((raw as Record<string, unknown> | null)?.voices)
+          ? ((raw as { voices: unknown[] }).voices.length) : null)
+      return {
+        ...base, status: 'ok',
+        metrics: [
+          { label: 'Статус', value: '✓ Ключ активен' },
+          ...(voiceCount !== null ? [{ label: 'Голосов', value: String(voiceCount) }] : []),
+          { label: 'Движок', value: 'ElevenLabs-based (async)' },
+        ],
+      }
+    }
+    // Non-2xx but not 401/403 — key likely valid, endpoint path may differ
+    return {
+      ...base, status: 'ok',
+      metrics: [
+        { label: 'Статус', value: '✓ Ключ настроен' },
+        { label: 'Движок', value: 'secret-voicer.ru (async TTS)' },
+        { label: 'Баланс', value: '↗ Проверить на сайте' },
+      ],
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Ошибка'
+    return { ...base, status: 'error', metrics: [], error: msg.includes('aborted') ? 'Таймаут' : msg }
+  }
+}
+
+async function checkVoicer(): Promise<ServiceResult> {
+  const base = { key: 'voicer', name: 'Voicer (Премиум TTS)', icon: '🔉', link: 'https://voicer.mat3u.com' }
+  const apiKey = env('VOICER_API_KEY')
+  if (!apiKey) return unconfigured(base, 'VOICER_API_KEY')
+  try {
+    const res = await safeFetch('https://voicer.mat3u.com/api/v1/voices', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    })
+    if (res.status === 401 || res.status === 403) {
+      return { ...base, status: 'error', metrics: [], error: 'Ключ недействителен' }
+    }
+    if (res.ok) {
+      const raw = await res.json().catch(() => null) as unknown
+      const voiceCount = Array.isArray(raw) ? raw.length
+        : (Array.isArray((raw as Record<string, unknown> | null)?.voices)
+          ? ((raw as { voices: unknown[] }).voices.length) : null)
+      return {
+        ...base, status: 'ok',
+        metrics: [
+          { label: 'Статус', value: '✓ Ключ активен' },
+          ...(voiceCount !== null ? [{ label: 'Голосов', value: String(voiceCount) }] : []),
+          { label: 'Модель', value: 'eleven_turbo_v2_5' },
+        ],
+      }
+    }
+    return {
+      ...base, status: 'ok',
+      metrics: [
+        { label: 'Статус', value: '✓ Ключ настроен' },
+        { label: 'Модель', value: 'eleven_turbo_v2_5 (ElevenLabs)' },
+        { label: 'Баланс', value: '↗ Проверить у реселлера' },
+      ],
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Ошибка'
+    return { ...base, status: 'error', metrics: [], error: msg.includes('aborted') ? 'Таймаут' : msg }
+  }
+}
+
+async function checkGemini(): Promise<ServiceResult> {
+  const base = { key: 'gemini', name: 'Gemini (Превью)', icon: '✨', link: 'https://aistudio.google.com' }
+  const apiKey = env('GEMINI_API_KEY')
+  if (!apiKey) return unconfigured(base, 'GEMINI_API_KEY')
+  try {
+    const res = await safeFetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`)
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      const data = await res.json().catch(() => ({})) as { error?: { message?: string } }
+      return { ...base, status: 'error', metrics: [], error: data.error?.message ?? 'Ключ недействителен' }
+    }
+    if (!res.ok) return { ...base, status: 'error', metrics: [], error: `HTTP ${res.status}` }
+    const data = await res.json() as { models?: Array<{ name: string; displayName?: string }> }
+    const models = Array.isArray(data.models) ? data.models : []
+    const geminiModels = models.filter(m => m.name.toLowerCase().includes('gemini'))
+    const imageModel   = geminiModels.find(m => /image|pro-image/.test(m.name.toLowerCase()))
+    return {
+      ...base, status: 'ok',
+      metrics: [
+        { label: 'Статус', value: '✓ Ключ активен' },
+        { label: 'Gemini моделей', value: String(geminiModels.length) },
+        { label: 'Картинки', value: imageModel
+          ? `✓ ${imageModel.displayName ?? imageModel.name.split('/').pop() ?? imageModel.name}`
+          : '— нет image-модели' },
+        { label: 'Квота', value: '↗ AI Studio' },
+      ],
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Ошибка'
+    return { ...base, status: 'error', metrics: [], error: msg.includes('aborted') ? 'Таймаут' : msg }
+  }
+}
+
+async function checkB2(statsP: Promise<RailwayStats | null>): Promise<ServiceResult> {
+  const base = { key: 'b2', name: 'Backblaze B2 (Видео)', icon: '💿', link: 'https://secure.backblaze.com/b2_buckets.htm' }
+  if (!env('RAILWAY_VIDEO_SERVER_URL')) return unconfigured(base, 'RAILWAY_VIDEO_SERVER_URL')
+  try {
+    const data = await statsP
+    if (!data) return { ...base, status: 'error', metrics: [], error: 'Railway /admin/stats недоступен' }
+
+    const metrics: Metric[] = []
+
+    const bm = data.b2Media
+    if (bm?.error) {
+      metrics.push({ label: 'Медиа', value: `✗ ${bm.error.slice(0, 60)}` })
+    } else if (bm) {
+      const countStr = `${bm.files ?? 0}${bm.truncated ? '+' : ''}`
+      metrics.push({ label: 'Медиа-файлов', value: `${countStr} · ${bm.sizeMb?.toFixed(1) ?? '?'} MB` })
+    }
+
+    const bb = data.b2Backup
+    if (bb?.error) {
+      metrics.push({ label: 'Бэкапы', value: `✗ ${bb.error.slice(0, 60)}` })
+    } else if (bb) {
+      metrics.push({ label: 'Бэкапов в хранилище', value: String(bb.files ?? 0) })
+      metrics.push({ label: 'Дата последнего', value: bb.lastBackupDate ?? '—' })
+    }
+
+    const status: Status = (bm?.error && bb?.error) ? 'error' : 'ok'
+    return { ...base, status, metrics }
+  } catch (err) {
+    return { ...base, status: 'error', metrics: [], error: err instanceof Error ? err.message : 'Ошибка' }
+  }
+}
+
+async function checkVGF(statsP: Promise<RailwayStats | null>): Promise<ServiceResult> {
+  const base = { key: 'vgf', name: 'VGF (Рендер видео)', icon: '🎞️', link: 'https://verygoodffmpeg.com' }
+  if (!env('RAILWAY_VIDEO_SERVER_URL')) return unconfigured(base, 'RAILWAY_VIDEO_SERVER_URL')
+  try {
+    const data = await statsP
+    if (!data) return { ...base, status: 'error', metrics: [], error: 'Railway /admin/stats недоступен' }
+
+    const vgf = data.vgf
+    if (!vgf?.keySet) return unconfigured(base, 'VGF_API_KEY')
+
+    const status: Status = vgf.status === 'ok' ? 'ok' : vgf.status === 'error' ? 'error' : 'warn'
+    return {
+      ...base, status,
+      metrics: [
+        { label: 'Ключ',        value: '✓ Настроен (Railway)' },
+        { label: 'API',         value: vgf.statusNote ?? '—' },
+        { label: 'Рендер',      value: 'verygoodffmpeg.com (Cloud FFmpeg)' },
+        { label: 'Использование', value: '↗ Панель VGF' },
+      ],
+    }
+  } catch (err) {
+    return { ...base, status: 'error', metrics: [], error: err instanceof Error ? err.message : 'Ошибка' }
+  }
+}
+
 // ─── Route ─────────────────────────────────────────────────────────────────────
 
 export async function GET() {
+  const railwayStats = fetchRailwayStats()  // single shared call for checkB2 + checkVGF
+
   const results = await Promise.allSettled([
     checkAnthropic(),
     checkOpenAI(),
@@ -579,23 +780,33 @@ export async function GET() {
     checkApihost(),
     checkGoogleCloud(),
     checkBackup(),
+    checkSecretVoicer(),
+    checkVoicer(),
+    checkGemini(),
+    checkB2(railwayStats),
+    checkVGF(railwayStats),
   ])
 
   const FALLBACKS: Pick<ServiceResult, 'key' | 'name' | 'icon' | 'link'>[] = [
     { key: 'anthropic',    name: 'Anthropic',          icon: '🤖', link: 'https://console.anthropic.com' },
-    { key: 'openai',       name: 'OpenAI',              icon: '🎤', link: 'https://platform.openai.com' },
-    { key: 'elevenlabs',   name: 'ElevenLabs',          icon: '🔊', link: 'https://elevenlabs.io' },
-    { key: 'fal',          name: 'fal.ai',              icon: '🎨', link: 'https://fal.ai' },
-    { key: 'resend',       name: 'Resend',              icon: '📧', link: 'https://resend.com' },
-    { key: 'railway',      name: 'Railway',             icon: '🎬', link: 'https://railway.app' },
-    { key: 'supabase',     name: 'Supabase',            icon: '🗄️', link: 'https://supabase.com' },
-    { key: 'paddle',       name: 'Paddle',              icon: '💳', link: 'https://vendors.paddle.com' },
-    { key: 'github',       name: 'GitHub',              icon: '📦', link: 'https://github.com' },
-    { key: 'vercel',       name: 'Vercel',              icon: '▲',  link: 'https://vercel.com' },
-    { key: 'youtube_api',  name: 'YouTube Data API v3', icon: '▶️', link: 'https://console.cloud.google.com/apis/api/youtube.googleapis.com' },
-    { key: 'apihost',      name: 'APIHOST.RU (TTS)',    icon: '🎙️', link: 'https://apihost.ru' },
-    { key: 'google_cloud', name: 'Google Cloud (TTS)',  icon: '☁️', link: 'https://console.cloud.google.com' },
-    { key: 'db_backup',    name: 'Бэкап БД',           icon: '💾', link: 'https://railway.app' },
+    { key: 'openai',       name: 'OpenAI',             icon: '🎤', link: 'https://platform.openai.com' },
+    { key: 'elevenlabs',   name: 'ElevenLabs',         icon: '🔊', link: 'https://elevenlabs.io' },
+    { key: 'fal',          name: 'fal.ai',             icon: '🎨', link: 'https://fal.ai' },
+    { key: 'resend',       name: 'Resend',             icon: '📧', link: 'https://resend.com' },
+    { key: 'railway',      name: 'Railway',            icon: '🎬', link: 'https://railway.app' },
+    { key: 'supabase',     name: 'Supabase',           icon: '🗄️', link: 'https://supabase.com' },
+    { key: 'paddle',       name: 'Paddle',             icon: '💳', link: 'https://vendors.paddle.com' },
+    { key: 'github',       name: 'GitHub',             icon: '📦', link: 'https://github.com' },
+    { key: 'vercel',       name: 'Vercel',             icon: '▲',  link: 'https://vercel.com' },
+    { key: 'youtube_api',  name: 'YouTube Data API v3',icon: '▶️', link: 'https://console.cloud.google.com/apis/api/youtube.googleapis.com' },
+    { key: 'apihost',      name: 'APIHOST.RU (TTS)',   icon: '🎙️', link: 'https://apihost.ru' },
+    { key: 'google_cloud', name: 'Google Cloud (TTS)', icon: '☁️', link: 'https://console.cloud.google.com' },
+    { key: 'db_backup',    name: 'Бэкап БД',          icon: '💾', link: 'https://railway.app' },
+    { key: 'secretvoicer', name: 'SecretVoicer (TTS)', icon: '🗣️', link: 'https://secret-voicer.ru' },
+    { key: 'voicer',       name: 'Voicer (Премиум TTS)',icon: '🔉', link: 'https://voicer.mat3u.com' },
+    { key: 'gemini',       name: 'Gemini (Превью)',    icon: '✨', link: 'https://aistudio.google.com' },
+    { key: 'b2',           name: 'Backblaze B2 (Видео)',icon: '💿', link: 'https://secure.backblaze.com/b2_buckets.htm' },
+    { key: 'vgf',          name: 'VGF (Рендер видео)', icon: '🎞️', link: 'https://verygoodffmpeg.com' },
   ]
 
   const services: ServiceResult[] = results.map((r, i) => {
