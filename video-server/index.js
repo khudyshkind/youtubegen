@@ -86,6 +86,14 @@ const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
   : 'https://ytgen-video-server-production.up.railway.app'
 
+// ── Media retention policy ────────────────────────────────────────────────────
+// Edit thresholds here; logic reads from this object only.
+const RETENTION_DAYS = {
+  free: { abandoned: 1, completed: 2 },
+  paid: { abandoned: 3, completed: 5 },
+}
+function retentionTier(plan) { return plan === 'free' ? 'free' : 'paid' }
+
 // ── Monitor config ────────────────────────────────────────────────────────────
 const RSS_SOURCES = [
   { url: 'https://vc.ru/rss',                                                  name: 'vc.ru',       delayMs: 0 },
@@ -1941,6 +1949,268 @@ async function backupDatabase() {
   }
 }
 
+// ── Media retention: B2 helpers (main bucket, not backup) ────────────────────
+function b2MediaSign(method, key, queryString, contentType, bodyHash) {
+  const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
+  const region   = (process.env.B2_REGION   || 'us-east-005').trim()
+  const bucket   = (process.env.B2_BUCKET   || '').trim()
+  const now      = new Date()
+  const amzDate  = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  const dateStamp = amzDate.slice(0, 8)
+  const service  = 's3'
+  const credScope = `${dateStamp}/${region}/${service}/aws4_request`
+  const baseUrl  = key ? `${endpoint}/${bucket}/${key}` : `${endpoint}/${bucket}`
+  const fullUrl  = queryString ? `${baseUrl}?${queryString}` : baseUrl
+  const parsed   = new URL(fullUrl)
+  const canonicalQS = [...parsed.searchParams.entries()]
+    .sort(([a], [b]) => a < b ? -1 : 1)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&')
+  const ctLine   = contentType ? `content-type:${contentType}\n` : ''
+  const ctSigned = contentType ? 'content-type;' : ''
+  const canonHeaders = `${ctLine}host:${parsed.hostname}\nx-amz-content-sha256:${bodyHash}\nx-amz-date:${amzDate}\n`
+  const signedHdrs   = `${ctSigned}host;x-amz-content-sha256;x-amz-date`
+  const canonReq = [method, parsed.pathname, canonicalQS, canonHeaders, signedHdrs, bodyHash].join('\n')
+  const sts      = ['AWS4-HMAC-SHA256', amzDate, credScope, crypto.createHash('sha256').update(canonReq).digest('hex')].join('\n')
+  const hmac     = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
+  const sigKey   = hmac(hmac(hmac(hmac(`AWS4${process.env.B2_APPLICATION_KEY}`, dateStamp), region), service), 'aws4_request')
+  const sig      = crypto.createHmac('sha256', sigKey).update(sts).digest('hex')
+  return {
+    fullUrl,
+    headers: {
+      ...(contentType ? { 'Content-Type': contentType } : {}),
+      'x-amz-content-sha256': bodyHash,
+      'x-amz-date': amzDate,
+      'Authorization': `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credScope}, SignedHeaders=${signedHdrs}, Signature=${sig}`,
+    },
+  }
+}
+
+// List all objects under prefix in the main B2 bucket; returns [{key, size}]
+async function b2MediaListObjects(prefix) {
+  const emptyHash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+  const qs = `list-type=2&prefix=${encodeURIComponent(prefix)}&max-keys=1000`
+  const { fullUrl, headers } = b2MediaSign('GET', '', qs, '', emptyHash)
+  const res = await fetch(fullUrl, { headers })
+  if (!res.ok) throw new Error(`b2MediaList prefix=${prefix} HTTP ${res.status}`)
+  const xml = await res.text()
+  const keys  = [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map(m => m[1])
+  const sizes = [...xml.matchAll(/<Size>([^<]+)<\/Size>/g)].map(m => parseInt(m[1], 10))
+  return keys.map((key, i) => ({ key, size: sizes[i] || 0 }))
+}
+
+// Batch-delete keys from the main B2 bucket (S3 DeleteObjects, up to 1000/call)
+async function b2MediaDeleteObjects(keys) {
+  if (!keys.length) return
+  const body = '<Delete>' + keys.map(k => `<Object><Key>${k}</Key></Object>`).join('') + '</Delete>'
+  const bodyHash = crypto.createHash('sha256').update(body).digest('hex')
+  const { fullUrl, headers } = b2MediaSign('POST', '', 'delete', 'application/xml', bodyHash)
+  const res = await fetch(fullUrl, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Length': String(Buffer.byteLength(body)) },
+    body,
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`b2MediaDeleteObjects HTTP ${res.status}: ${text.slice(0, 300)}`)
+  }
+  const xml = await res.text().catch(() => '')
+  const errs = [...xml.matchAll(/<Error>[\s\S]*?<Key>([^<]+)<\/Key>[\s\S]*?<Message>([^<]+)<\/Message>[\s\S]*?<\/Error>/g)]
+  for (const m of errs) console.warn('[retention/b2] delete error', m[1], m[2])
+}
+
+// ── Media retention: Supabase Storage helpers ─────────────────────────────────
+// Returns objects relative to bucket root; name is the full path within the bucket.
+async function supabaseStorageList(bucket, prefix) {
+  const url = `${SUPABASE_URL}/storage/v1/object/list/${bucket}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { ...sbHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefix, limit: 1000, offset: 0, sortBy: { column: 'name', order: 'asc' } }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`supabaseStorageList ${bucket}/${prefix}: ${res.status} ${text.slice(0, 200)}`)
+  }
+  const items = await res.json()
+  return (Array.isArray(items) ? items : []).filter(item => item.id !== null)
+}
+
+// prefixes = full paths within the bucket (e.g. "userId/projectId/audio.mp3")
+async function supabaseStorageRemove(bucket, prefixes) {
+  if (!prefixes.length) return
+  const url = `${SUPABASE_URL}/storage/v1/object/${bucket}`
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { ...sbHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefixes }),
+  })
+  if (!res.ok && res.status !== 204) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`supabaseStorageRemove ${bucket}: ${res.status} ${text.slice(0, 200)}`)
+  }
+}
+
+// ── Media retention: main cleanup function ────────────────────────────────────
+// Cron: daily 04:00 UTC. Safe default: dry-run unless RETENTION_DRY_RUN=false.
+async function cleanupExpiredMedia() {
+  const DRY_RUN = process.env.RETENTION_DRY_RUN !== 'false'
+  const tag = DRY_RUN ? '[retention/dry]' : '[retention]'
+  console.log(`${tag} pass start, dry=${DRY_RUN}`)
+
+  // 1. Collect project_ids with active jobs (never touch these)
+  const activeProjectIds = new Set()
+  try {
+    const activeJobs = await sbGet('video_jobs', 'select=project_id&status=in.(pending,processing)')
+    activeJobs.forEach(j => { if (j.project_id) activeProjectIds.add(j.project_id) })
+    console.log(`${tag} active job projects: ${activeProjectIds.size}`)
+  } catch (e) {
+    console.error(`${tag} failed to fetch active jobs — aborting for safety:`, e.message)
+    return
+  }
+
+  const now = Date.now()
+  const iso = (d) => new Date(now - d * 86400_000).toISOString()
+
+  // 2A. Abandoned candidates: video_url IS NULL, not generating, older than free threshold
+  let abandoned = []
+  try {
+    abandoned = await sbGet('projects',
+      `select=id,user_id,created_at,status,profiles!inner(plan)` +
+      `&video_url=is.null` +
+      `&status=not.like.generating_*` +
+      `&created_at=lt.${iso(RETENTION_DAYS.free.abandoned)}` +
+      `&limit=500`
+    )
+  } catch (e) { console.error(`${tag} abandoned query:`, e.message) }
+
+  // 2B. Completed candidates: video_url IS NOT NULL, older than free threshold
+  //     Anchor: completed_at if set, otherwise updated_at (legacy rows)
+  let completed = []
+  try {
+    const ageFilter = `or=(completed_at.lt.${iso(RETENTION_DAYS.free.completed)},and(completed_at.is.null,updated_at.lt.${iso(RETENTION_DAYS.free.completed)}))`
+    completed = await sbGet('projects',
+      `select=id,user_id,completed_at,updated_at,status,profiles!inner(plan)` +
+      `&video_url=not.is.null` +
+      `&${ageFilter}` +
+      `&limit=500`
+    )
+  } catch (e) { console.error(`${tag} completed query:`, e.message) }
+
+  // 3. Apply plan-specific thresholds and exclude active-job projects
+  const candidates = []
+  for (const p of abandoned) {
+    if (activeProjectIds.has(p.id)) continue
+    const plan = p.profiles?.plan ?? 'free'
+    const tier = retentionTier(plan)
+    const ageDays = (now - new Date(p.created_at).getTime()) / 86400_000
+    if (ageDays >= RETENTION_DAYS[tier].abandoned) {
+      candidates.push({ ...p, _category: 'abandoned', _ageDays: ageDays.toFixed(1), _tier: tier })
+    }
+  }
+  for (const p of completed) {
+    if (activeProjectIds.has(p.id)) continue
+    const plan = p.profiles?.plan ?? 'free'
+    const tier = retentionTier(plan)
+    const anchor = p.completed_at ?? p.updated_at
+    const ageDays = (now - new Date(anchor).getTime()) / 86400_000
+    if (ageDays >= RETENTION_DAYS[tier].completed) {
+      candidates.push({ ...p, _category: 'completed', _ageDays: ageDays.toFixed(1), _tier: tier })
+    }
+  }
+  console.log(`${tag} ${candidates.length} candidate(s)`)
+
+  // 4. Process each candidate
+  let totalBytes = 0
+  const counts = { abandoned: { free: 0, paid: 0 }, completed: { free: 0, paid: 0 } }
+
+  for (const project of candidates) {
+    const { id: pid, user_id: uid, _category: cat, _ageDays: age, _tier: tier } = project
+    console.log(`${tag} project=${pid} cat=${cat} tier=${tier} age=${age}d`)
+    let projectBytes = 0
+
+    // 4A. Supabase audio bucket
+    try {
+      const audioItems = await supabaseStorageList('audio', `${uid}/${pid}`)
+      if (audioItems.length) {
+        projectBytes += audioItems.reduce((s, f) => s + (f.metadata?.size || 0), 0)
+        const paths = audioItems.map(f => `${uid}/${pid}/${f.name}`)
+        if (DRY_RUN) {
+          console.log(`${tag} would remove audio: ${paths.length} file(s)`)
+        } else {
+          await supabaseStorageRemove('audio', paths)
+          console.log(`${tag} removed audio: ${paths.length} file(s)`)
+        }
+      }
+    } catch (e) { console.error(`${tag} audio error ${pid}:`, e.message) }
+
+    // 4B. Supabase images bucket
+    try {
+      const imageItems = await supabaseStorageList('images', `${uid}/${pid}`)
+      if (imageItems.length) {
+        projectBytes += imageItems.reduce((s, f) => s + (f.metadata?.size || 0), 0)
+        const paths = imageItems.map(f => `${uid}/${pid}/${f.name}`)
+        if (DRY_RUN) {
+          console.log(`${tag} would remove images: ${paths.length} file(s)`)
+        } else {
+          await supabaseStorageRemove('images', paths)
+          console.log(`${tag} removed images: ${paths.length} file(s)`)
+        }
+      }
+    } catch (e) { console.error(`${tag} images error ${pid}:`, e.message) }
+
+    // 4C. B2 main bucket (video + any per-project temp files)
+    try {
+      const b2Objects = await b2MediaListObjects(`users/${uid}/${pid}/`)
+      if (b2Objects.length) {
+        const b2Bytes = b2Objects.reduce((s, o) => s + o.size, 0)
+        projectBytes += b2Bytes
+        if (DRY_RUN) {
+          console.log(`${tag} would delete B2: ${b2Objects.length} object(s), ${(b2Bytes / 1024 / 1024).toFixed(2)} MB`)
+        } else {
+          const keys = b2Objects.map(o => o.key)
+          for (let i = 0; i < keys.length; i += 1000) {
+            await b2MediaDeleteObjects(keys.slice(i, i + 1000))
+          }
+          console.log(`${tag} deleted B2: ${b2Objects.length} object(s)`)
+        }
+      }
+    } catch (e) { console.error(`${tag} B2 error ${pid}:`, e.message) }
+
+    // 4D. DB cleanup — delete project row + its video_jobs
+    if (!DRY_RUN) {
+      try {
+        const hdrs = sbHeaders()
+        await fetch(`${SUPABASE_URL}/rest/v1/video_jobs?project_id=eq.${pid}`, { method: 'DELETE', headers: hdrs })
+        await fetch(`${SUPABASE_URL}/rest/v1/projects?id=eq.${pid}`, { method: 'DELETE', headers: hdrs })
+        console.log(`${tag} deleted project row ${pid}`)
+      } catch (e) { console.error(`${tag} DB delete ${pid}:`, e.message) }
+    }
+
+    totalBytes += projectBytes
+    counts[cat][tier === 'free' ? 'free' : 'paid']++
+  }
+
+  // 5. Summary + Telegram alert
+  const mbStr = (totalBytes / 1024 / 1024).toFixed(2)
+  const actionPrefix = DRY_RUN ? '🔍 [DRY RUN] БЫЛО БЫ удалено' : '🗑 Удалено'
+  const summary =
+    `${actionPrefix}:\n` +
+    `├ Брошенных: ${counts.abandoned.free} free + ${counts.abandoned.paid} paid\n` +
+    `├ Завершённых: ${counts.completed.free} free + ${counts.completed.paid} paid\n` +
+    `└ Итого: ${candidates.length} проектов, ~${mbStr} МБ`
+
+  console.log(`${tag}`, summary.replace(/[├└─🔍🗑]/g, '').trim())
+
+  if (OWNER_ID) {
+    await tgApi('sendMessage', {
+      chat_id: OWNER_ID,
+      text: `📦 *Retention cleanup*\n\n\`\`\`\n${summary}\n\`\`\``,
+      parse_mode: 'Markdown',
+    }).catch(e => console.error(`${tag} tg alert failed:`, e.message))
+  }
+}
+
 // ── Daily DB backup cron — 03:00 UTC ─────────────────────────────────────────
 cron.schedule('0 3 * * *', async () => {
   console.log('[cron] daily db backup')
@@ -1950,6 +2220,12 @@ cron.schedule('0 3 * * *', async () => {
     console.error('[cron/backup]', err.message)
     Sentry.captureException(err, { extra: { cron: 'backupDatabase' } })
   }
+}, { timezone: 'UTC' })
+
+// ── Daily media retention cron — 04:00 UTC (after 03:00 backup) ──────────────
+cron.schedule('0 4 * * *', async () => {
+  console.log('[cron] media retention cleanup')
+  try { await cleanupExpiredMedia() } catch (err) { console.error('[cron/retention]', err.message); Sentry.captureException(err, { extra: { cron: 'cleanupExpiredMedia' } }) }
 }, { timezone: 'UTC' })
 
 // ── Weekly stats cron — Monday 10:00 UTC ─────────────────────────────────────
