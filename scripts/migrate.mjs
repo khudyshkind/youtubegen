@@ -103,6 +103,14 @@ const MIGRATIONS = [
       GRANT SELECT ON public.analytics_events TO authenticated;
     `.trim(),
   },
+  {
+    name: 'projects: completed_at column + retention indexes',
+    sql: `
+      ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+      CREATE INDEX IF NOT EXISTS projects_created_at_idx   ON public.projects(created_at);
+      CREATE INDEX IF NOT EXISTS projects_completed_at_idx ON public.projects(completed_at);
+    `.trim(),
+  },
 ]
 
 async function runQuery(sql) {

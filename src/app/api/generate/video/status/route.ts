@@ -83,6 +83,13 @@ export async function GET(request: NextRequest) {
       }
 
       if (bridged && bridged.length > 0) {
+        // Fix the first-completion timestamp once; never overwrite on re-generation.
+        await svc
+          .from('projects')
+          .update({ completed_at: new Date().toISOString() })
+          .eq('id', job.project_id)
+          .is('completed_at', null)
+
         // Won the write race → spend credits exactly once
         await spendCredits(user.id, 2, 'video', job.project_id)
         void trackEvent(user.id, 'step_completed', { step: 'video', project_id: job.project_id })

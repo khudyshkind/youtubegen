@@ -434,6 +434,11 @@ update public.profiles set credits = 30 where plan = 'free' and credits < 30;
 -- Migration: plan_sections for the new Plan step (Step 2, between Topic and Script)
 alter table public.projects add column if not exists plan_sections jsonb;
 
+-- Migration: completed_at (first video completion timestamp, retention anchor)
+alter table public.projects add column if not exists completed_at timestamptz;
+create index if not exists projects_created_at_idx   on public.projects(created_at);
+create index if not exists projects_completed_at_idx on public.projects(completed_at);
+
 -- Migration: Sentry webhook deduplication (prevents notification spam for same issue)
 create table if not exists public.sentry_alert_dedup (
   issue_id     text        primary key,
