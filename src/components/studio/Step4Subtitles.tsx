@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import type { SubtitleBlock } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
+import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
 import { useLang } from '@/hooks/useLang'
 
 function formatTime(sec: number) {
@@ -78,6 +79,7 @@ export default function Step4Subtitles() {
 
   async function handleGenerate() {
     if (!audioUrl) { setError(t('step4.no_audio')); return }
+    if (!confirmRegenIfCompleted(t('regen_confirm.message'))) return
     setError('')
     setLoading(true)
     try {

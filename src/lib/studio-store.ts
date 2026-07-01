@@ -44,6 +44,11 @@ interface StudioState {
   thumbnailTextMode: 'overlay' | 'ai' | 'none'
   setThumbnailTextMode: (mode: 'overlay' | 'ai' | 'none') => void
 
+  // Status of the project as it was when loaded from DB (null = new project).
+  // Used to detect a completed project being re-generated after opening for review.
+  projectStatus: string | null
+  setProjectStatus: (status: string | null) => void
+
   // Global credits (synced from /api/profile, updated after each generation)
   credits: number | null
   setCredits: (n: number) => void
@@ -131,6 +136,7 @@ const initialState = {
   thumbnailUrl: null,
   thumbnailBgUrl: null,
   thumbnailTextMode: 'overlay' as 'overlay' | 'ai' | 'none',
+  projectStatus: null as string | null,
   credits: null as number | null,
   isGenerating: false,
   generatingStep: null,
@@ -164,6 +170,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setThumbnailUrl: (url) => set({ thumbnailUrl: url }),
   setThumbnailBgUrl: (url) => set({ thumbnailBgUrl: url }),
   setThumbnailTextMode: (mode) => set({ thumbnailTextMode: mode }),
+  setProjectStatus: (status) => set({ projectStatus: status }),
   setCredits: (n) => set({ credits: n }),
   setGenerating: (isGenerating, step) =>
     set({ isGenerating, generatingStep: step ?? null }),

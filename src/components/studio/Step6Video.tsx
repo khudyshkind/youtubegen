@@ -5,6 +5,7 @@ import { useStudioStore } from '@/lib/studio-store'
 import { exportPrompts } from '@/lib/exportPrompts'
 import type { SubtitleBlock, SubtitleSize, SubtitleFont, SubtitlePosition } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
+import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
 import { useLang } from '@/hooks/useLang'
 
 type DownloadState = 'idle' | 'loading' | 'done' | 'error'
@@ -266,6 +267,7 @@ export default function Step6Video() {
 
   async function handleRender() {
     if (!audioUrl || !hasImages || !projectId) return
+    if (!confirmRegenIfCompleted(t('regen_confirm.message'))) return
     if (missingImageCount > 0) {
       setRenderError(`${missingImageCount} ${t('step6.broken_images')}`)
       setRenderState('error')

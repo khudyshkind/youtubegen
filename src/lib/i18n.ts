@@ -43,6 +43,8 @@ export const translations = {
     'dashboard.template_tutorial_desc':'Пошаговое объяснение темы',
     'dashboard.or_scratch':          'или начни с чистого листа',
 
+    'regen_confirm.message': 'Проект уже завершён. Перегенерация изменит его и вернёт в статус «в процессе». Продолжить?',
+
     // Status
     'status.draft':               'Черновик',
     'status.generating_script':   'Генерация...',
@@ -1058,6 +1060,8 @@ export const translations = {
     'dashboard.template_tutorial':   'Tutorial',
     'dashboard.template_tutorial_desc':'Step-by-step topic explanation',
     'dashboard.or_scratch':          'or start from scratch',
+
+    'regen_confirm.message': 'This project is already complete. Regenerating will reset it to in-progress status. Continue?',
 
     // Status
     'status.draft':               'Draft',

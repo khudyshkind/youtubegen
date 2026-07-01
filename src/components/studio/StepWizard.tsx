@@ -37,7 +37,7 @@ function StepWizardInner() {
   const { currentStep, reset, setStep, setProjectId, setScriptParams, setPlanSections, setScript,
     setVoiceId, setAudioUrl, setSubtitleBlocks, setSceneImages, setVideoUrl, setSeo,
     setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode,
-    setRenderJobId } = useStudioStore()
+    setRenderJobId, setProjectStatus } = useStudioStore()
 
   const { t } = useLang()
   const [restoring, setRestoring] = useState(!!projectParam)
@@ -117,6 +117,7 @@ function StepWizardInner() {
           } catch { /* non-fatal — Step6Video will show idle state */ }
         }
 
+        setProjectStatus(p.status)
         setStep(inferStep(p))
       } catch {
         if (!cancelled) setRestoreError('Ошибка загрузки проекта')

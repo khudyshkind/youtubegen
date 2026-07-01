@@ -5,6 +5,7 @@ import { useStudioStore } from '@/lib/studio-store'
 import type { VoiceStyleType, AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { CREDIT_COSTS, audioCost } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
+import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
 import { useLang } from '@/hooks/useLang'
 import type { ApihostVoice } from '@/app/api/voices/apihost/route'
 
@@ -712,6 +713,7 @@ export default function Step3Voice() {
 
   async function handleGenerateAudio() {
     if (!script) return
+    if (!confirmRegenIfCompleted(t('regen_confirm.message'))) return
     setError('')
     setLoading(true)
     try {

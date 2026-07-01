@@ -5,6 +5,7 @@ import { useStudioStore } from '@/lib/studio-store'
 import { CREDIT_COSTS } from '@/lib/types'
 import { SCRIPT_LANGUAGES } from '@/lib/languages'
 import { refreshCredits } from '@/lib/refresh-credits'
+import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
 import { useLang } from '@/hooks/useLang'
 
 const MODEL_COSTS: Record<string, number> = {
@@ -88,6 +89,7 @@ export default function Step2Script() {
   const creditCost = MODEL_COSTS[model] ?? 10
 
   async function handleGenerate() {
+    if (!confirmRegenIfCompleted(t('regen_confirm.message'))) return
     setError('')
     setLoading(true)
     try {

@@ -6,6 +6,7 @@ import { exportPrompts } from '@/lib/exportPrompts'
 import { CREDIT_COSTS, IMAGE_STYLES } from '@/lib/types'
 import type { SceneImage, ImageStyleKey } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
+import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
 import { useLang } from '@/hooks/useLang'
 
 const INTERVAL_PRESETS = [5, 8, 10, 15, 20] as const
@@ -322,6 +323,9 @@ export default function Step5Images() {
 
   async function handleGenerate(overrideEngine?: 'flux' | 'flux_schnell', overrideCount?: number) {
     if (!script?.trim()) { setError(t('step5.err_no_script')); return }
+
+    // Show confirmation only for the initial call (not the recursive modal override)
+    if (!overrideEngine && !confirmRegenIfCompleted(t('regen_confirm.message'))) return
 
     const effectiveEngine = overrideEngine ?? imageEngine
     const effectiveCount = overrideCount ?? imageCount
