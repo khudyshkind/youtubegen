@@ -1947,6 +1947,17 @@ async function backupDatabase() {
     console.warn('[backup] prune failed:', pruneErr.message)
     Sentry.captureException(pruneErr, { extra: { stage: 'backup_prune' } })
   }
+
+  // Record successful backup in bot_settings (read by admin panel)
+  try {
+    const sizeMb = (buffer.length / 1024 / 1024).toFixed(2)
+    await Promise.all([
+      setSetting('last_backup_at', new Date().toISOString()),
+      setSetting('last_backup_status', 'success'),
+      setSetting('last_backup_size_mb', sizeMb),
+    ])
+    console.log(`[backup] status written to bot_settings (${sizeMb} MB)`)
+  } catch (e) { console.warn('[backup] status write failed:', e.message) }
 }
 
 // ── Media retention: B2 helpers (main bucket, not backup) ────────────────────
@@ -2214,11 +2225,20 @@ async function cleanupExpiredMedia() {
 // ── Daily DB backup cron — 03:00 UTC ─────────────────────────────────────────
 cron.schedule('0 3 * * *', async () => {
   console.log('[cron] daily db backup')
+  const attemptAt = new Date().toISOString()
   try {
     await backupDatabase()
   } catch (err) {
     console.error('[cron/backup]', err.message)
     Sentry.captureException(err, { extra: { cron: 'backupDatabase' } })
+    // Write failure status; last_backup_at (success date) intentionally NOT overwritten
+    try {
+      await Promise.all([
+        setSetting('last_backup_status', 'failed'),
+        setSetting('last_backup_error', String(err.message || err).slice(0, 200)),
+        setSetting('last_backup_attempt_at', attemptAt),
+      ])
+    } catch (e) { console.warn('[cron/backup] status write failed:', e.message) }
   }
 }, { timezone: 'UTC' })
 

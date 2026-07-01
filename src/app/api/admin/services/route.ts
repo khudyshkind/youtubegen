@@ -484,6 +484,83 @@ async function checkVercel(): Promise<ServiceResult> {
   }
 }
 
+async function checkBackup(): Promise<ServiceResult> {
+  const base = {
+    key: 'db_backup',
+    name: 'Бэкап БД',
+    icon: '💾',
+    link: 'https://railway.app',
+  }
+  try {
+    const supabase = createServiceClient()
+    const { data, error } = await supabase
+      .from('bot_settings')
+      .select('key, value')
+      .in('key', ['last_backup_at', 'last_backup_status', 'last_backup_size_mb', 'last_backup_attempt_at', 'last_backup_error'])
+    if (error) throw new Error(error.message)
+
+    const s = Object.fromEntries((data ?? []).map(r => [r.key as string, r.value as string]))
+    const lastSuccessAt = s['last_backup_at']        ?? null
+    const backupStatus  = s['last_backup_status']     ?? null
+    const sizeMb        = s['last_backup_size_mb']    ?? null
+    const attemptAt     = s['last_backup_attempt_at'] ?? null
+    const backupError   = s['last_backup_error']      ?? null
+
+    if (!lastSuccessAt && !backupStatus) {
+      return {
+        ...base, status: 'warn',
+        metrics: [{ label: 'Статус', value: '— Нет данных' }],
+        error: 'Бэкап ещё не запускался или данные ещё не записаны',
+      }
+    }
+
+    const successAgeH = lastSuccessAt
+      ? (Date.now() - new Date(lastSuccessAt).getTime()) / 3_600_000
+      : Infinity
+    const isFailed = backupStatus === 'failed'
+
+    const status: Status = !lastSuccessAt || isFailed || successAgeH > 49
+      ? 'error'
+      : successAgeH > 25
+      ? 'warn'
+      : 'ok'
+
+    const metrics: Metric[] = []
+
+    if (lastSuccessAt) {
+      const dateStr = new Date(lastSuccessAt).toLocaleString('ru-RU', {
+        day: '2-digit', month: '2-digit', year: '2-digit',
+        hour: '2-digit', minute: '2-digit',
+      })
+      const agoH = Math.round(successAgeH)
+      metrics.push({ label: 'Последний успешный', value: `${dateStr} (${agoH}ч назад)` })
+      if (sizeMb) metrics.push({ label: 'Размер', value: `${sizeMb} MB` })
+    }
+
+    if (isFailed) {
+      const attemptStr = attemptAt
+        ? new Date(attemptAt).toLocaleString('ru-RU', {
+            day: '2-digit', month: '2-digit', year: '2-digit',
+            hour: '2-digit', minute: '2-digit',
+          })
+        : '—'
+      metrics.push({ label: 'Последняя попытка', value: `${attemptStr} — ✗ Ошибка` })
+    } else if (backupStatus === 'success') {
+      metrics.push({ label: 'Статус', value: '✓ Успешен' })
+    }
+
+    return {
+      ...base, status, metrics,
+      ...(isFailed && backupError ? { error: backupError } : {}),
+    }
+  } catch (err) {
+    return {
+      ...base, status: 'error', metrics: [],
+      error: err instanceof Error ? err.message : 'Ошибка чтения Supabase',
+    }
+  }
+}
+
 // ─── Route ─────────────────────────────────────────────────────────────────────
 
 export async function GET() {
@@ -501,6 +578,7 @@ export async function GET() {
     checkYouTubeAPI(),
     checkApihost(),
     checkGoogleCloud(),
+    checkBackup(),
   ])
 
   const FALLBACKS: Pick<ServiceResult, 'key' | 'name' | 'icon' | 'link'>[] = [
@@ -517,6 +595,7 @@ export async function GET() {
     { key: 'youtube_api',  name: 'YouTube Data API v3', icon: '▶️', link: 'https://console.cloud.google.com/apis/api/youtube.googleapis.com' },
     { key: 'apihost',      name: 'APIHOST.RU (TTS)',    icon: '🎙️', link: 'https://apihost.ru' },
     { key: 'google_cloud', name: 'Google Cloud (TTS)',  icon: '☁️', link: 'https://console.cloud.google.com' },
+    { key: 'db_backup',    name: 'Бэкап БД',           icon: '💾', link: 'https://railway.app' },
   ]
 
   const services: ServiceResult[] = results.map((r, i) => {

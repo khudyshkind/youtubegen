@@ -236,7 +236,7 @@ export default function AdminServicesPage() {
       {/* Cards grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {loading
-          ? Array.from({ length: 13 }).map((_, i) => <SkeletonCard key={i} />)
+          ? Array.from({ length: 14 }).map((_, i) => <SkeletonCard key={i} />)
           : data?.services.map((svc) => <ServiceCard key={svc.key} svc={svc} />)
         }
       </div>
