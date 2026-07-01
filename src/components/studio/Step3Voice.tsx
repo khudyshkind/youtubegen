@@ -747,6 +747,18 @@ export default function Step3Voice() {
           } : {}),
         }),
       })
+      if (!res.ok) {
+        if (res.status === 504 || res.status === 524) {
+          throw new Error('Синтез занял слишком долго. Попробуйте текст короче или другой движок.')
+        }
+        const errText = await res.text().catch(() => '')
+        try {
+          const errJson = JSON.parse(errText) as { error?: string }
+          throw new Error(errJson.error || `Ошибка сервера (${res.status})`)
+        } catch {
+          throw new Error(`Ошибка сервера (${res.status})`)
+        }
+      }
       const json = await res.json()
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') { setError(t('step3.err_credits')); return }

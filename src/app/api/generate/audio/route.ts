@@ -7,7 +7,7 @@ import { audioCost } from '@/lib/types'
 import type { AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { env } from '@/lib/env'
 
-export const maxDuration = 300
+export const maxDuration = 800
 
 const ELEVENLABS_BASE = 'https://api.elevenlabs.io'
 
