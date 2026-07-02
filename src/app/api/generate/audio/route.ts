@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import Anthropic from '@anthropic-ai/sdk'
 import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
@@ -39,6 +40,9 @@ interface AudioRequest {
   text: string
   voice_id: string
   project_id?: string
+  // ownScript=true → text was typed by user (not AI-generated), apply TTS normalization
+  own_script?: boolean
+  script_lang?: string
   // ElevenLabs-specific
   stability?: number
   similarity_boost?: number
@@ -71,6 +75,112 @@ function stripSectionMarkers(text: string): string {
     // Collapse 3+ consecutive newlines down to 2 (paragraph break)
     .replace(/\n{3,}/g, '\n\n')
     .trim()
+}
+
+// --- TTS Text Normalization (ownScript path only) ---
+// Applied only when own_script=true (user-typed text). AI-generated scripts are already
+// TTS-friendly from the script-generation prompt — no need to run Haiku on them.
+//
+// Pipeline: regex (fast, lang-specific) → Haiku (contextual numbers/dates).
+// Regex runs first so Haiku sees "299 рублей" not "299₽" — cleaner number context.
+// Haiku is skipped when no digits remain (nothing left to expand).
+// On Haiku failure the regex-only result is used — normalization never blocks synthesis.
+
+function applyRegexNormalization(text: string, lang: string): string {
+  let t = text
+
+  if (lang === 'ru') {
+    // Compound abbreviations first (longer patterns must precede shorter)
+    t = t
+      .replace(/\bи т\.д\.\b/g, 'и так далее')
+      .replace(/\bи т\.п\.\b/g, 'и тому подобное')
+      .replace(/\bт\.к\.\b/g, 'так как')
+      .replace(/\bт\.е\.\b/g, 'то есть')
+      .replace(/\bнапр\.\b/g, 'например')
+      .replace(/\bдр\.\b/g, 'другие')
+      .replace(/\bок\.\b/g, 'около')
+      .replace(/\bруб\.\b/g, 'рублей')
+      .replace(/\bкоп\.\b/g, 'копеек')
+      // Symbols → Russian words (done before Haiku so it sees "45 процентов", not "45%")
+      .replace(/№\s*(\d)/g, 'номер $1')
+      .replace(/(\d)\s*%/g, '$1 процентов')
+      .replace(/(\d)\s*₽/g, '$1 рублей')
+      .replace(/(\d)\s*\$/g, '$1 долларов')
+      .replace(/(\d)\s*€/g, '$1 евро')
+      .replace(/\s+&\s+/g, ' и ')
+  }
+  // Non-RU: skip symbol regex; Haiku normalizes numbers AND symbols in the correct language
+
+  // Universal: leftover Markdown italic (bold/headings already stripped by stripSectionMarkers)
+  t = t
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/_([^_\n]+)_/g, '$1')
+
+  return t
+}
+
+async function normalizeTtsText(text: string, lang: string): Promise<string> {
+  const intermediate = applyRegexNormalization(text, lang)
+
+  // Skip Haiku when no digits remain — nothing left to expand
+  if (!/\d/.test(intermediate)) return intermediate
+
+  const apiKey = env('ANTHROPIC_API_KEY')
+  if (!apiKey) return intermediate
+
+  const isRu = lang === 'ru'
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15_000)
+
+  const system = isRu
+    ? [
+        'Ты — нормализатор текста для синтеза речи (TTS).',
+        'ЗАДАЧА: заменить числа, даты, суммы, количества и их комбинации на произносимые слова на русском языке с правильными падежами.',
+        '',
+        'СТРОГИЕ ПРАВИЛА:',
+        '— Меняй ТОЛЬКО числа → слова (с учётом падежа и рода по контексту)',
+        '— НЕ меняй смысл, структуру, стиль или порядок слов',
+        '— НЕ добавляй и НЕ убирай слова, кроме числовой нормализации',
+        '— НЕ переформулируй предложения',
+        '— Верни ТОЛЬКО нормализованный текст, без пояснений и комментариев',
+        '',
+        'Примеры:',
+        '"в 2026 году" → "в две тысячи двадцать шестом году"',
+        '"5 млн пользователей" → "пять миллионов пользователей"',
+        '"10,5 процентов" → "десять с половиной процентов"',
+        '"за 3 месяца" → "за три месяца"',
+        '"прирост в 2.3 раза" → "прирост в два целых три десятых раза"',
+      ].join('\n')
+    : [
+        'You are a TTS text normalizer.',
+        'TASK: Replace all numbers, dates, amounts, quantities, and currency symbols with their spoken-word equivalents in the language of the input text.',
+        '',
+        'STRICT RULES:',
+        '— ONLY expand numbers/dates/currency → words (in the language of the text)',
+        '— Do NOT change meaning, structure, style, or word order',
+        '— Do NOT add or remove any content except for number expansion',
+        '— Return ONLY the normalized text, no explanations',
+      ].join('\n')
+
+  try {
+    const anthropic = new Anthropic({ apiKey })
+    const response = await anthropic.messages.create(
+      {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: Math.min(4096, Math.ceil(intermediate.length * 1.6)),
+        system,
+        messages: [{ role: 'user', content: intermediate }],
+      },
+      { signal: controller.signal }
+    )
+    clearTimeout(timer)
+    const block = response.content[0]
+    return block.type === 'text' ? block.text.trim() : intermediate
+  } catch (e) {
+    clearTimeout(timer)
+    console.warn('[normalize-tts] Haiku unavailable, using regex-only output:', e instanceof Error ? e.message : String(e))
+    return intermediate
+  }
 }
 
 // Strip the ID3v2 tag from the start of an MP3 buffer.
@@ -391,6 +501,8 @@ export async function POST(request: NextRequest) {
       text,
       voice_id,
       project_id,
+      own_script = false,
+      script_lang = 'ru',
       stability = 0.5,
       similarity_boost = 0.75,
       speech_rate = 1.0,
@@ -439,7 +551,12 @@ export async function POST(request: NextRequest) {
     // Strip structural markers before TTS — they must not be spoken aloud.
     // Cost was already calculated from the original text length (correct behaviour:
     // user pays for the script they wrote, not the stripped version).
-    const ttsText = stripSectionMarkers(text)
+    const stripped = stripSectionMarkers(text)
+    // Normalize abbreviations, symbols, and numbers — only for user-typed text (own_script).
+    // AI-generated scripts already pass through TTS-friendly rules in the script prompt.
+    const ttsText = own_script
+      ? await normalizeTtsText(stripped, script_lang)
+      : stripped
 
     let audioBuffer: Buffer
     const { maxChars, measureBytes } = CHUNK_LIMITS[engine]

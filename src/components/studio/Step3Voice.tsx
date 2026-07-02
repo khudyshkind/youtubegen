@@ -378,7 +378,7 @@ function Toggle({ checked, onChange, label, hint }: {
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function Step3Voice() {
-  const { script, projectId, voiceSettings, audioUrl, subtitleBlocks, setVoiceSettings, setAudioUrl, setStep } = useStudioStore()
+  const { script, projectId, voiceSettings, audioUrl, subtitleBlocks, ownScript, scriptParams, setVoiceSettings, setAudioUrl, setStep } = useStudioStore()
   const { t } = useLang()
 
   const ENGINES: { id: AudioEngine; medal: string; name: string; quality: string; meta: string; costLabel: string; soon?: boolean; premiumOnly?: boolean }[] = [
@@ -729,6 +729,8 @@ export default function Step3Voice() {
           text: script,
           voice_id: voiceIdToUse,
           project_id: projectId,
+          own_script: ownScript,
+          script_lang: scriptParams.language,
           ...((engine === 'elevenlabs' || engine === 'secretvoicer' || engine === 'voicer') ? {
             stability: voiceSettings.stability,
             similarity_boost: voiceSettings.similarityBoost,
