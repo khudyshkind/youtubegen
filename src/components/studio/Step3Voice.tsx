@@ -556,16 +556,13 @@ export default function Step3Voice() {
 
   useEffect(() => { loadSvVoices() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Switch default engine to ElevenLabs for paid plans — only if user hasn't touched the selector
+  // Fetch plan to unlock premium engines (Voicer). SecretVoicer is default for all plans.
   useEffect(() => {
     fetch('/api/profile')
       .then((r) => r.json())
       .then((json: { ok: boolean; plan?: string }) => {
         if (json.ok && json.plan) {
           setUserPlan(json.plan)
-          if (json.plan !== 'free' && !engineTouchedRef.current) {
-            setEngine('elevenlabs')
-          }
         }
       })
       .catch(() => {})

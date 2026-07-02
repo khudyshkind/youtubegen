@@ -387,7 +387,7 @@ export async function POST(request: NextRequest) {
 
     const body: AudioRequest = await request.json()
     const {
-      engine = 'elevenlabs',
+      engine = 'secretvoicer',
       text,
       voice_id,
       project_id,

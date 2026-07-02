@@ -98,7 +98,7 @@ const defaultScriptParams: ScriptParams = {
 }
 
 const defaultVoiceSettings: VoiceSettings = {
-  voiceId: 'EXAVITQu4vr4xnSDxMaL',
+  voiceId: 'EXAVITQu4vr4xnSDxMaL', // ElevenLabs voice; used only when user switches to ElevenLabs engine
   speechRate: 1.0,
   stability: 0.5,
   similarityBoost: 0.75,
