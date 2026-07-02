@@ -56,7 +56,7 @@ function ServiceCard({ svc }: { svc: ServiceResult }) {
               className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full text-xs font-medium border ${STATUS_BADGE[svc.status] ?? STATUS_BADGE.unconfigured}`}
             >
               <StatusDot status={svc.status} />
-              {STATUS_LABEL[svc.status] ?? svc.status}
+              {svc.statusLabel ?? STATUS_LABEL[svc.status] ?? svc.status}
             </span>
           </div>
         </div>

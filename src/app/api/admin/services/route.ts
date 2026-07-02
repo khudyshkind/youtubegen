@@ -20,6 +20,7 @@ export interface ServiceResult {
   icon: string
   link: string
   status: Status
+  statusLabel?: string
   metrics: Metric[]
   error?: string
 }
@@ -121,12 +122,15 @@ async function checkElevenLabs(): Promise<ServiceResult> {
     const limit = sub.character_limit ?? 0
     const pct = limit > 0 ? Math.round((used / limit) * 100) : 0
     const remaining = limit - used
-    const status: Status = pct > 90 ? 'error' : pct > 70 ? 'warn' : 'ok'
+    const remainingPct = 100 - pct
+    // 'error' only from API failures (401/catch branches). Resource depletion = warn.
+    const status: Status = remainingPct < 30 ? 'warn' : 'ok'
+    const statusLabel = remainingPct < 10 ? 'Баланс на исходе' : remainingPct < 30 ? 'Баланс низкий' : undefined
     const resetDate = sub.next_character_count_reset_unix
       ? new Date(sub.next_character_count_reset_unix * 1000).toLocaleDateString('ru-RU')
       : '—'
     return {
-      ...base, status,
+      ...base, status, ...(statusLabel ? { statusLabel } : {}),
       metrics: [
         { label: 'Символов использовано', value: `${used.toLocaleString('ru')} / ${limit.toLocaleString('ru')}` },
         { label: 'Осталось', value: `${remaining.toLocaleString('ru')} (${100 - pct}%)` },
@@ -255,9 +259,12 @@ async function checkSupabase(): Promise<ServiceResult> {
     }
     const totalMB = stats.reduce((s, b) => s + b.sizeMB, 0)
     const usedPct = Math.round((totalMB / 1024) * 100)
-    const status: Status = usedPct > 80 ? 'error' : usedPct > 60 ? 'warn' : 'ok'
+    // >90% = error: storage won't accept new writes → service breaks (unlike TTS quota, this doesn't reset).
+    // >60% = warn: still working, but trending toward full.
+    const status: Status = usedPct > 90 ? 'error' : usedPct > 60 ? 'warn' : 'ok'
+    const statusLabel = usedPct > 90 ? 'Хранилище почти заполнено' : usedPct > 60 ? 'Хранилище заполняется' : undefined
     return {
-      ...base, status,
+      ...base, status, ...(statusLabel ? { statusLabel } : {}),
       metrics: [
         ...(profileCount !== null ? [{ label: 'Пользователей (DB)', value: profileCount.toLocaleString('ru') }] : []),
         ...(projectCount !== null ? [{ label: 'Проектов (DB)', value: projectCount.toLocaleString('ru') }] : []),
