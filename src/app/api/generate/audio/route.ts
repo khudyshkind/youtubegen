@@ -23,7 +23,7 @@ const STYLE_EXAGGERATION: Record<string, number> = {
 // ElevenLabs/OpenAI/APIHOST: Unicode character count (JS .length)
 // Google: UTF-8 byte count (Cyrillic = 2 bytes/char, limit is 5000 bytes)
 const CHUNK_LIMITS: Record<AudioEngine, { maxChars: number; measureBytes: boolean }> = {
-  secretvoicer: { maxChars: 295000, measureBytes: false }, // server handles large text natively; single chunk
+  secretvoicer: { maxChars: 3000, measureBytes: false }, // parallel chunked synthesis; each chunk ≈ 1-2 min audio
   elevenlabs:   { maxChars: 4800, measureBytes: false }, // API limit 5000 chars
   openai:       { maxChars: 4000, measureBytes: false }, // API limit 4096 chars
   google:       { maxChars: 2300, measureBytes: true  }, // API limit 5000 bytes; Cyrillic 2 bytes/char
@@ -247,6 +247,22 @@ function splitTextIntoChunks(text: string, maxChars: number, measureBytes: boole
   }
   if (current.trim()) chunks.push(current.trim())
   return chunks.filter(Boolean)
+}
+
+// Run up to `limit` async tasks concurrently, preserving result order by index.
+// Works identically for sync synthesizers (direct HTTP) and async ones (submit+poll),
+// since both expose the same interface: () => Promise<Buffer>.
+async function runLimited<T>(fns: Array<() => Promise<T>>, limit: number): Promise<T[]> {
+  const results: T[] = new Array(fns.length)
+  let next = 0
+  async function worker() {
+    while (next < fns.length) {
+      const i = next++
+      results[i] = await fns[i]()
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, fns.length) }, worker))
+  return results
 }
 
 // ── Per-engine single-chunk synthesizers ────────────────────────────────────
@@ -672,21 +688,42 @@ export async function POST(request: NextRequest) {
       if (!svKey) {
         return NextResponse.json({ ok: false, error: 'SecretVoicer API key не настроен' }, { status: 503 })
       }
+      // Soft limit: texts above 25k chars need async Railway processing (not yet live).
+      // Remove once async audio worker is deployed.
+      if (ttsText.length > 25_000) {
+        return NextResponse.json({
+          ok: false,
+          error: 'Озвучка пока поддерживает тексты до ~25 000 символов (~25 мин). ' +
+                 'Обработка длинных текстов появится скоро. / ' +
+                 'Audio synthesis currently supports texts up to ~25 min. Long-text async mode coming soon.',
+        }, { status: 422 })
+      }
       const styleExaggeration = typeof voice_style === 'number'
         ? voice_style
         : STYLE_EXAGGERATION[voice_style] ?? 0
+      // synthesizeSecretVoicerChunk encapsulates submit+poll internally — externally it's
+      // just async () => Buffer, same interface as sync engines. runLimited works identically.
+      const svSettings = { stability, similarity: similarity_boost, style: styleExaggeration, speechRate: speech_rate }
+      const svTasks = chunks.map((chunk, idx) => async (): Promise<Buffer> => {
+        for (let attempt = 0; attempt <= 1; attempt++) {
+          try {
+            return await synthesizeSecretVoicerChunk(chunk, voice_id, svSettings)
+          } catch (e) {
+            if (attempt === 1) throw e
+            console.warn(`[generate/audio] SV chunk ${idx + 1}/${chunks.length} retry:`, e instanceof Error ? e.message : String(e))
+          }
+        }
+        throw new Error('unreachable') // satisfies TS: loop above always returns or throws
+      })
+      let svBuffers: Buffer[]
       try {
-        audioBuffer = await synthesizeSecretVoicerChunk(ttsText, voice_id, {
-          stability,
-          similarity: similarity_boost,
-          style: styleExaggeration,
-          speechRate: speech_rate,
-        })
+        svBuffers = await runLimited(svTasks, 4)
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[generate/audio] SecretVoicer failed:', msg)
         return NextResponse.json({ ok: false, error: `Ошибка синтеза речи SecretVoicer: ${msg.slice(0, 200)}` }, { status: 502 })
       }
+      audioBuffer = Buffer.concat(svBuffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
 
     } else if (engine === 'voicer') {
       const voicerKey = env('VOICER_API_KEY')
