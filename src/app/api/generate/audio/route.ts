@@ -279,7 +279,7 @@ async function synthesizeSecretVoicerChunk(
   if (!taskId) throw new Error('SecretVoicer: no task_id in response')
 
   const POLL_MS = 2500
-  const TIMEOUT_MS = 240_000
+  const TIMEOUT_MS = 275_000 // 275s: fits under 300s Lambda (maxDuration=300) with 25s headroom
   const deadline = Date.now() + TIMEOUT_MS
 
   while (Date.now() < deadline) {
