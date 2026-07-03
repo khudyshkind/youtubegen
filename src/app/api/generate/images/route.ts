@@ -626,9 +626,17 @@ export async function POST(request: NextRequest) {
         const hasSubtitles = Array.isArray(subtitle_blocks) && subtitle_blocks.length > 0
         console.log(`[images] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
 
+        // Derive a short clean topic label from the script instead of using raw user input.
+        // scriptParams.topic may contain thousands of chars of pasted source material
+        // (research text the user entered to generate the script), which dominates Haiku's
+        // context window and causes wrong-season prompts and language mixing.
+        // The script already encodes the correct topic — its first ~20 words are sufficient.
+        const effectiveTopic = script.split(/\s+/).slice(0, 20).join(' ').trim()
+          || topic.slice(0, 150)
+
         const scenes = hasSubtitles
-          ? await generateScenesFromSubtitles(topic, count, duration_sec, subtitle_blocks!, styleConfig)
-          : await generateScenesFromScript(script, topic, duration_sec, count, styleConfig)
+          ? await generateScenesFromSubtitles(effectiveTopic, count, duration_sec, subtitle_blocks!, styleConfig)
+          : await generateScenesFromScript(script, effectiveTopic, duration_sec, count, styleConfig)
 
         console.log(`[images] scenes generated: ${scenes.length}`)
 
