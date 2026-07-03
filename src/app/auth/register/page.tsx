@@ -4,6 +4,7 @@ import { Suspense, useState, useMemo, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { useLang } from '@/hooks/useLang'
 
 function RegisterForm() {
   const router = useRouter()
@@ -18,6 +19,7 @@ function RegisterForm() {
   const [loading, setLoading] = useState(false)
 
   const supabase = useMemo(() => createClient(), [])
+  const { t } = useLang()
 
   async function applyReferralClient(userId: string) {
     if (!refCode) return
@@ -134,7 +136,7 @@ function RegisterForm() {
 
         {refCode && (
           <div className="mb-4 bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-sm text-violet-700 text-center">
-            🎁 Вас пригласил друг — после регистрации вы получите <strong>+5 кредитов</strong> бонусом!
+            {t('auth.ref_bonus_note')}
           </div>
         )}
 

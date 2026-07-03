@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { PLAN_CREDITS, PLAN_ORDER, TOPUP_PACKAGES } from '@/lib/types'
+import { CREDIT_COSTS, PLAN_CREDITS, PLAN_ORDER, TOPUP_PACKAGES } from '@/lib/types'
 import { useLang } from '@/hooks/useLang'
 import type { Profile, Plan } from '@/lib/types'
 
@@ -64,12 +64,12 @@ export default function BillingPage() {
   ]
 
   const CREDIT_COST_INFO = [
-    { operation: t('billing.op_script'),    credits: '4–7',     icon: '✍️' },
-    { operation: t('billing.op_voice'),     credits: '1–18/1к', icon: '🎙' },
-    { operation: t('billing.op_subtitles'), credits: '2/мин',   icon: '📋' },
-    { operation: t('billing.op_image'),     credits: 7,         icon: '🎨' },
-    { operation: t('billing.op_video'),     credits: 1,         icon: '🎬' },
-    { operation: t('billing.op_seo'),       credits: 2,         icon: '🔍' },
+    { operation: t('billing.op_script'),    credits: `${CREDIT_COSTS.script_sonnet}–${CREDIT_COSTS.script_opus}`,                                icon: '✍️' },
+    { operation: t('billing.op_voice'),     credits: `${CREDIT_COSTS.audio_secretvoicer_per_1000}–${CREDIT_COSTS.audio_elevenlabs_per_1000}/1к`, icon: '🎙' },
+    { operation: t('billing.op_subtitles'), credits: `${CREDIT_COSTS.subtitles_per_minute}/мин`,                                                 icon: '📋' },
+    { operation: t('billing.op_image'),     credits: CREDIT_COSTS.image,                                                                         icon: '🎨' },
+    { operation: t('billing.op_video'),     credits: `${CREDIT_COSTS.video}/мин`,                                                                icon: '🎬' },
+    { operation: t('billing.op_seo'),       credits: CREDIT_COSTS.seo,                                                                           icon: '🔍' },
   ]
 
   useEffect(() => {

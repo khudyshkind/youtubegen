@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import { exportPrompts } from '@/lib/exportPrompts'
+import { CREDIT_COSTS } from '@/lib/types'
 import type { SubtitleBlock, SubtitleSize, SubtitleFont, SubtitlePosition } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
@@ -144,6 +145,15 @@ export default function Step6Video() {
   const hasImages = sceneImages.length > 0
   const hasSubs = subtitleBlocks.length > 0
   const missingImageCount = sceneImages.filter((img) => !img.url).length
+
+  // Video cost preview — mirrors server formula in render/route.ts
+  const validImageCount = sceneImages.filter((img) => !!img.url).length
+  const durationSec =
+    subtitleBlocks.length > 0
+      ? subtitleBlocks[subtitleBlocks.length - 1].end
+      : validImageCount * imageInterval
+  const videoDurationMin = Math.max(1, Math.ceil(durationSec / 60))
+  const videoCostEstimate = videoDurationMin * CREDIT_COSTS.video
 
   function toggleEffect(id: string) {
     setEffects((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
@@ -692,6 +702,11 @@ export default function Step6Video() {
             >
               {t('step6.render_btn')}
             </button>
+            {hasAudio && hasImages && missingImageCount === 0 && (
+              <p className="text-xs text-slate-500 mt-2 text-center">
+                ~{videoDurationMin} мин · {videoCostEstimate.toLocaleString('ru-RU')} кредитов
+              </p>
+            )}
             {(!hasAudio || !hasImages || missingImageCount > 0) && (
               <p className="text-xs text-slate-500 mt-2 text-center">
                 {!hasAudio

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 
@@ -273,7 +274,7 @@ export async function POST(req: NextRequest) {
 
     console.log('[trends] analysis merged ok, trends count:', analysis.trends.length)
 
-    await spendCredits(user.id, 5, 'trends')
+    await spendCredits(user.id, CREDIT_COSTS.trends, 'trends')
 
     try {
       await svc.from('analytics_cache').upsert({

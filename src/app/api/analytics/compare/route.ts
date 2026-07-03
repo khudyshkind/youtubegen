@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 
@@ -319,7 +320,7 @@ ${channelBlocks}
       steal_ideas:        insights.steal_ideas     ?? [],
     }
 
-    await spendCredits(user.id, 10, 'channels_compare')
+    await spendCredits(user.id, CREDIT_COSTS.channels_compare, 'channels_compare')
 
     const svc = createServiceClient()
     try {

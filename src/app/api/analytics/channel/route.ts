@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 
@@ -337,7 +338,7 @@ export async function POST(req: NextRequest) {
 
     console.log('[channel] analysis merged ok')
 
-    await spendCredits(user.id, 15, 'channel_analysis')
+    await spendCredits(user.id, CREDIT_COSTS.channel_analysis, 'channel_analysis')
 
     try {
       await svc.from('analytics_cache').upsert({

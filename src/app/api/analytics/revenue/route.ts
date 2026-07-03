@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 
@@ -118,7 +119,7 @@ export async function POST(req: NextRequest) {
       annual: { min: monthly_min * 12, max: monthly_max * 12, avg: monthly_avg * 12 },
     }
 
-    await spendCredits(user.id, 3, 'revenue_calc')
+    await spendCredits(user.id, CREDIT_COSTS.revenue_calc, 'revenue_calc')
 
     // Save to history (non-fatal)
     const svc = createServiceClient()

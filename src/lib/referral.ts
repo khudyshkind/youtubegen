@@ -1,9 +1,5 @@
 import { createServiceClient } from './supabase-server'
-import { addCredits } from './credits'
-import { sendReferralBonusEmail } from './email'
-
-const REFERRER_BONUS = 20  // credits for the user who shared the link
-const REFEREE_BONUS = 10   // extra credits for the newly registered user
+import { REFERRER_BONUS, REFEREE_BONUS } from './referral-config'
 
 export async function applyReferral(
   newUserId: string,
@@ -25,7 +21,7 @@ export async function applyReferral(
   // Find referrer
   const { data: referrer } = await supabase
     .from('profiles')
-    .select('id, email, full_name, referral_count, referral_credits_earned, credits')
+    .select('id, referral_count')
     .eq('referral_code', code)
     .single()
 
@@ -38,37 +34,24 @@ export async function applyReferral(
     .update({ referred_by: code })
     .eq('id', newUserId)
 
-  // Credit both parties in parallel
-  await Promise.all([
-    addCredits(newUserId, REFEREE_BONUS, 'referral_bonus'),
-    addCredits(referrer.id, REFERRER_BONUS, 'referral_reward'),
-  ])
+  // Stage 1: give new user signup bonus immediately.
+  // Uses RPC directly to bypass PLAN_MAX_CREDITS cap in addCredits()
+  // (free user starts at 10 000 = cap, so JS wrapper would give 0).
+  await supabase.rpc('add_credits', {
+    p_user_id:    newUserId,
+    p_amount:     REFEREE_BONUS,
+    p_operation:  'referral_bonus',
+    p_project_id: null,
+  })
 
-  // Update referrer stats (display only — credits are already atomic)
+  // Increment referrer's invite counter (invited count, not conversion count)
   await supabase
     .from('profiles')
-    .update({
-      referral_count: (referrer.referral_count ?? 0) + 1,
-      referral_credits_earned: (referrer.referral_credits_earned ?? 0) + REFERRER_BONUS,
-    })
+    .update({ referral_count: (referrer.referral_count ?? 0) + 1 })
     .eq('id', referrer.id)
 
-  // Fire-and-forget: notify referrer about the bonus
-  if (referrer.email) {
-    const newUserProfile = await supabase
-      .from('profiles')
-      .select('email')
-      .eq('id', newUserId)
-      .single()
-    const newUserEmail = newUserProfile.data?.email ?? '—'
-    const newBalance = (referrer.credits ?? 0) + REFERRER_BONUS
-    void sendReferralBonusEmail(
-      { email: referrer.email, name: referrer.full_name },
-      newUserEmail,
-      REFERRER_BONUS,
-      newBalance,
-    )
-  }
+  // Stage 2 (referrer gets REFERRER_BONUS when this user first converts to paid)
+  // is handled atomically by DB trigger on_profile_plan_upgraded.
 
   return { ok: true }
 }

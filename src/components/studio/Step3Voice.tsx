@@ -387,7 +387,7 @@ export default function Step3Voice() {
     { id: 'voicer',       medal: '💎', name: 'Премиум-озвучка',  quality: 'ElevenLabs качество',    meta: 'Мультиязычный, быстрый', costLabel: `${CREDIT_COSTS.audio_voicer_per_1000} ${t('step3.cr_per_k')}`, premiumOnly: true },
     { id: 'openai',       medal: '🥈', name: 'OpenAI TTS',       quality: t('voice.openai_quality'), meta: t('voice.openai_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}` },
     { id: 'apihost',      medal: '🏠', name: 'APIHOST RU',       quality: t('voice.apihost_quality'),meta: t('voice.apihost_meta'),costLabel: t('voice.apihost_cost') },
-    { id: 'google',       medal: '🥉', name: 'Google TTS',       quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}`, soon: true },
+    { id: 'google',       medal: '🥉', name: 'Google TTS',       quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${CREDIT_COSTS.audio_google_per_1000} ${t('step3.cr_per_k')}`, soon: true },
   ]
 
   const OPENAI_VOICES = [
@@ -1262,7 +1262,7 @@ export default function Step3Voice() {
 
           <div className="rounded-xl px-4 py-3" style={cardStyle}>
             <p className="text-xs text-slate-500">
-              Google WaveNet — {t('voice.google_quality')}. Standard — base voices. {CREDIT_COSTS.audio_openai_per_1000} {t('step3.cr_per_k')}.
+              Google WaveNet — {t('voice.google_quality')}. Standard — base voices. {CREDIT_COSTS.audio_google_per_1000} {t('step3.cr_per_k')}.
             </p>
           </div>
         </div>

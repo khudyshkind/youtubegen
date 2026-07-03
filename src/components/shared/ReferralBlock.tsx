@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useLang } from '@/hooks/useLang'
+import { REFERRER_BONUS } from '@/lib/referral-config'
 
 interface Props {
   referralCode: string
@@ -12,6 +13,7 @@ interface Props {
 export default function ReferralBlock({ referralCode, referralCount, referralCreditsEarned }: Props) {
   const { t } = useLang()
   const [copied, setCopied] = useState(false)
+  const paidCount = referralCreditsEarned > 0 ? Math.round(referralCreditsEarned / REFERRER_BONUS) : 0
   const [referralUrl, setReferralUrl] = useState(
     `https://youtubegen.vercel.app/auth/register?ref=${referralCode}`
   )
@@ -107,6 +109,11 @@ export default function ReferralBlock({ referralCode, referralCount, referralCre
             <div className="text-center">
               <p className="text-2xl font-extrabold text-violet-400">{referralCount}</p>
               <p className="text-xs text-slate-500 mt-0.5">{t('referral.invited')}</p>
+            </div>
+            <div className="w-px h-8" style={{ background: 'rgba(124,58,237,0.3)' }} />
+            <div className="text-center">
+              <p className="text-2xl font-extrabold text-violet-400">{paidCount}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{t('referral.paid')}</p>
             </div>
             <div className="w-px h-8" style={{ background: 'rgba(124,58,237,0.3)' }} />
             <div className="text-center">

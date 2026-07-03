@@ -7,56 +7,57 @@ export interface PlanSection {
 
 export const CREDIT_COSTS = {
   // Plan
-  plan: 1,
+  plan: 400,
 
   // Script
-  script_sonnet: 4,
-  script_opus:   7,
-  script_gpt:    6,
+  script_sonnet: 550,
+  script_opus:   900,
+  script_gpt:    550,
 
   // Audio (per 1 000 chars)
-  audio_secretvoicer_per_1000:    3,
-  audio_openai_per_1000:          4,
-  audio_elevenlabs_per_1000:     79,
-  audio_apihost_basic_per_1000:   2,
-  audio_apihost_standard_per_1000: 5,
-  audio_apihost_pro_per_1000:    10,
-  audio_apihost_studio_per_1000: 18,
-  audio_voicer_per_1000:          4,
+  audio_secretvoicer_per_1000:     270,
+  audio_openai_per_1000:           450,
+  audio_google_per_1000:           480,
+  audio_elevenlabs_per_1000:      6600,
+  audio_apihost_basic_per_1000:    200,
+  audio_apihost_standard_per_1000: 1320,
+  audio_apihost_pro_per_1000:      2160,
+  audio_apihost_studio_per_1000:   5010,
+  audio_voicer_per_1000:           300,
 
   // Subtitles (per minute of audio)
-  subtitles_per_minute: 2,
+  subtitles_per_minute: 180,
 
   // Images
-  image: 7,           // legacy alias → Flux
-  image_flux: 7,
-  image_flux_schnell: 4,
-  image_gpt_mini: 2,
-  style_analysis: 2,
+  image: 780,           // legacy alias → Flux
+  image_flux: 780,
+  image_flux_schnell: 100,
+  image_gpt_mini: 1230, // gpt-image-2 medium 1536×1024 @ $0.041
+  style_analysis: 60,
 
-  // Video
-  video: 1,
+  // Video (per-minute rate; billing logic updated separately)
+  video: 300,
 
   // SEO / thumbnail
-  seo:       2,
-  thumbnail: 7,
+  seo:       750,
+  thumbnail: 870,
 
   // Text tools
-  humanize:  3,
-  uniqueize: 3,
-  enhance:   3,
+  humanize:  660,
+  uniqueize: 660,
+  enhance:   630,
 
   // YouTube analytics
-  niche_analysis:    4,
-  niche_finder:      6,
-  channel_plan:      8,
-  trends:            3,
-  channel_analysis:  6,
-  revenue_calc:      2,
-  comments_analysis: 4,
-  keywords_analysis: 3,
-  channels_compare:  6,
-  rising_stars:      6,
+  niche_analysis:    1800,
+  niche_finder:      7000,
+  channel_plan:     12000,
+  trends:            1500,
+  channel_analysis:  2000,
+  revenue_calc:       600,
+  comments_analysis: 1800,
+  keywords_analysis: 4000,
+  channels_compare:  2400,
+  rising_stars:      3000,
 } as const
 
 export type AudioEngine = 'secretvoicer' | 'elevenlabs' | 'openai' | 'google' | 'apihost' | 'voicer'
@@ -78,16 +79,16 @@ export function audioCost(chars: number, engine: AudioEngine, apihostVoiceType?:
     engine === 'elevenlabs' ? CREDIT_COSTS.audio_elevenlabs_per_1000 :
     engine === 'openai'     ? CREDIT_COSTS.audio_openai_per_1000     :
     engine === 'voicer'     ? CREDIT_COSTS.audio_voicer_per_1000     :
-    CREDIT_COSTS.audio_openai_per_1000  // google same as openai
+    CREDIT_COSTS.audio_google_per_1000  // google
   return Math.max(1, blocks * rate)
 }
 
 export const PLAN_CREDITS: Record<Plan, number> = {
-  free:    30,
-  basic:   800,
-  starter: 2000,
-  pro:     5000,
-  agency:  15000,
+  free:      10000,
+  basic:     80000,
+  starter:  200000,
+  pro:      500000,
+  agency:  1500000,
 }
 
 export const PLAN_PRICES: Record<Exclude<Plan, 'free'>, number> = {
@@ -99,17 +100,17 @@ export const PLAN_PRICES: Record<Exclude<Plan, 'free'>, number> = {
 
 // Maximum accumulated balance (2× monthly allocation)
 export const PLAN_MAX_CREDITS: Record<Plan, number> = {
-  free:    30,
-  basic:   1600,
-  starter: 4000,
-  pro:     10000,
-  agency:  30000,
+  free:      10000,
+  basic:    160000,
+  starter:  400000,
+  pro:     1000000,
+  agency:  3000000,
 }
 
 export const TOPUP_PACKAGES = [
-  { credits: 500,  price: 7,  label: '500 кредитов'  },
-  { credits: 2000, price: 26, label: '2000 кредитов' },
-  { credits: 5000, price: 60, label: '5000 кредитов' },
+  { credits:  50000, price: 7,  label: '50 000 кредитов'  },
+  { credits: 200000, price: 26, label: '200 000 кредитов' },
+  { credits: 500000, price: 60, label: '500 000 кредитов' },
 ] as const
 
 export const PLAN_ORDER: Plan[] = ['free', 'basic', 'starter', 'pro', 'agency']

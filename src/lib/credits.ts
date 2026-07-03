@@ -4,7 +4,7 @@ import { sendLowCreditsEmail } from './email'
 import type { ApiResponse, Plan } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-const LOW_CREDITS_THRESHOLD = 5
+const LOW_CREDITS_THRESHOLD = 500
 
 export async function hasCredits(
   userId: string,

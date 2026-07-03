@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase } from '@/lib/supabase-server'
-import { requireCredits } from '@/lib/credits'
+import { requireCreditsAmount, spendCredits } from '@/lib/credits'
+import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import type { SceneImage, SubtitleBlock, SubtitleStyle } from '@/lib/types'
 
@@ -33,14 +34,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const check = await requireCredits(user.id, 'video', supabase)
-    if (!check.ok) {
-      return NextResponse.json(check, { status: 402 })
-    }
-
     const body: RenderRequest = await request.json()
     const { project_id, audio_url, image_interval, images, subtitle_blocks, subtitle_style,
             transition, transition_duration, effects } = body
+
+    // Derive exact duration from request body — known upfront unlike subtitles
+    const durationSec =
+      subtitle_blocks && subtitle_blocks.length > 0
+        ? subtitle_blocks[subtitle_blocks.length - 1].end
+        : (images?.length ?? 0) * image_interval
+    const videoCost = Math.max(CREDIT_COSTS.video, Math.ceil(durationSec / 60) * CREDIT_COSTS.video)
+
+    const check = await requireCreditsAmount(user.id, videoCost, supabase)
+    if (!check.ok) {
+      return NextResponse.json(check, { status: 402 })
+    }
 
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, stage: 'video_render', image_count: images?.length })
@@ -105,6 +113,7 @@ export async function POST(request: NextRequest) {
 
     const { job_id } = (await renderRes.json()) as { job_id: string }
 
+    await spendCredits(user.id, videoCost, 'video', project_id)
     Sentry.setContext('generate', { project_id, stage: 'video_render', job_id, image_count: images?.length })
     return NextResponse.json({ ok: true, data: { job_id } })
   } catch (error) {

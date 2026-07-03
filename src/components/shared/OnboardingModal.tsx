@@ -40,10 +40,10 @@ export default function OnboardingModal({ initialShow }: Props) {
   const CREDIT_ROWS = [
     { label: `${t('billing.op_script')} (Sonnet)`, cost: CREDIT_COSTS.script_sonnet },
     { label: `${t('billing.op_script')} (Opus)`,   cost: CREDIT_COSTS.script_opus },
-    { label: t('billing.op_voice'),                 cost: '2–18/1к зн' },
+    { label: t('billing.op_voice'),                 cost: `${CREDIT_COSTS.audio_secretvoicer_per_1000}–${CREDIT_COSTS.audio_elevenlabs_per_1000}/1к` },
     { label: `${t('billing.op_subtitles')}`,        cost: `${CREDIT_COSTS.subtitles_per_minute}/мин` },
     { label: t('billing.op_image'),                 cost: CREDIT_COSTS.image },
-    { label: t('billing.op_video'),                 cost: CREDIT_COSTS.video },
+    { label: t('billing.op_video'),                 cost: `${CREDIT_COSTS.video}/мин` },
     { label: t('billing.op_seo'),                   cost: CREDIT_COSTS.seo },
   ]
 

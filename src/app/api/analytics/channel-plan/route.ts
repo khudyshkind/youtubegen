@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { resolveUserLang, langNote } from '@/lib/user-lang'
 import { verifyHandle, resolveChannelId, fetchRecentVideoTitles } from '@/lib/youtube-channel'
@@ -424,7 +425,7 @@ export async function POST(req: NextRequest) {
       seo_keywords: style.seo_keywords ?? { channel_description: [], video_tags: [], hashtags: [] },
     }
 
-    await spendCredits(user.id, 8, 'channel_plan')
+    await spendCredits(user.id, CREDIT_COSTS.channel_plan, 'channel_plan')
 
     console.log('[channel-plan] saving report...')
     try {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { resolveUserLang, langNote } from '@/lib/user-lang'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
@@ -247,7 +248,7 @@ export async function POST(req: NextRequest) {
       user_profile: { interests, skills, time_per_week, goal },
     }
 
-    await spendCredits(user.id, 6, 'niche_finder')
+    await spendCredits(user.id, CREDIT_COSTS.niche_finder, 'niche_finder')
 
     // Save to reports (non-fatal)
     console.log('[niche-finder] saving report...')

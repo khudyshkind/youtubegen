@@ -657,7 +657,7 @@ function NicheTab({ externalResult, onClearExternal, onAnalyzeChannel, initialTo
             <button onClick={() => void handleAnalyze()} disabled={loading}
               className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
               {loading ? <Spinner /> : null}
-              {t('analytics.analyze_btn')} · {t('analytics.niche_cost')}
+              {t('analytics.analyze_btn')} · −{CREDIT_COSTS.niche_analysis} {t('analytics.credits_short')}
             </button>
           </div>
         </Card>
@@ -1018,7 +1018,7 @@ function NicheFinderTab({ onGoToNiche, onGoToPlan, externalResult, onClearExtern
           <button onClick={() => void handleFind()} disabled={loading}
             className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
             {loading ? <Spinner /> : null}
-            {t('analytics.nf_btn')} · {t('analytics.niche_finder_cost')}
+            {t('analytics.nf_btn')} · −{CREDIT_COSTS.niche_finder} {t('analytics.credits_short')}
           </button>
         </div>
       </Card>
@@ -1575,7 +1575,7 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
           <button onClick={() => void handleGenerate()} disabled={loading}
             className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
             {loading ? <Spinner /> : null}
-            {uiLang === 'en' ? '🚀 Create Launch Plan' : '🚀 Составить план запуска'} · {t('analytics.channel_plan_cost')}
+            {uiLang === 'en' ? '🚀 Create Launch Plan' : '🚀 Составить план запуска'} · −{CREDIT_COSTS.channel_plan} {t('analytics.credits_short')}
           </button>
         </div>
       </Card>
@@ -1748,7 +1748,7 @@ function TrendsTab({ externalResult, onClearExternal }: {
             <button onClick={() => void handleFind()} disabled={loading}
               className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
               {loading ? <Spinner /> : '🔥'}
-              {t('analytics.find_trends_btn')} · {t('analytics.trends_cost')}
+              {t('analytics.find_trends_btn')} · −{CREDIT_COSTS.trends} {t('analytics.credits_short')}
             </button>
           </div>
         </Card>
@@ -1937,7 +1937,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
             <button onClick={() => void handleAnalyze()} disabled={loading}
               className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
               {loading ? <Spinner /> : '📊'}
-              {t('analytics.analyze_channel_btn')} · {t('analytics.channel_cost')}
+              {t('analytics.analyze_channel_btn')} · −{CREDIT_COSTS.channel_analysis} {t('analytics.credits_short')}
             </button>
           </div>
         </Card>
