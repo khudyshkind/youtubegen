@@ -806,7 +806,12 @@ export async function POST(request: NextRequest) {
     if (project_id) {
       await supabase
         .from('projects')
-        .update({ audio_url: publicUrl, voice_id, status: 'generating_subtitles' })
+        .update({
+          audio_url: publicUrl,
+          voice_id,
+          status: 'generating_subtitles',
+          ...(own_script && text ? { script: text } : {}),
+        })
         .eq('id', project_id)
         .eq('user_id', user.id)
     }

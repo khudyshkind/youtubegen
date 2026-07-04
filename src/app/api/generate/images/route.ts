@@ -614,16 +614,32 @@ export async function POST(request: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      let generationSucceeded = false
       try {
         if (project_id) {
           await supabase
             .from('projects')
-            .update({ scene_images: [] })
+            .update({ scene_images: [], status: 'generating_images' })
             .eq('id', project_id)
             .eq('user_id', user.id)
         }
 
-        const hasSubtitles = Array.isArray(subtitle_blocks) && subtitle_blocks.length > 0
+        // Read subtitle_blocks from DB — source of truth, avoids stale/empty client state
+        // on page reload, and scales to 2000+ blocks for hour-long videos.
+        let resolvedSubtitleBlocks: SubtitleBlock[] | null = null
+        if (project_id) {
+          const { data: projData } = await supabase
+            .from('projects')
+            .select('subtitle_blocks')
+            .eq('id', project_id)
+            .eq('user_id', user.id)
+            .single()
+          resolvedSubtitleBlocks = (projData?.subtitle_blocks as SubtitleBlock[] | null) ?? null
+        }
+        // Fallback: client-supplied (for project_id-less calls, e.g. single-scene preview)
+        if (!resolvedSubtitleBlocks?.length) resolvedSubtitleBlocks = subtitle_blocks ?? null
+
+        const hasSubtitles = Array.isArray(resolvedSubtitleBlocks) && resolvedSubtitleBlocks.length > 0
         console.log(`[images] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
 
         // Derive a short clean topic label from the script instead of using raw user input.
@@ -635,7 +651,7 @@ export async function POST(request: NextRequest) {
           || topic.slice(0, 150)
 
         const scenes = hasSubtitles
-          ? await generateScenesFromSubtitles(effectiveTopic, count, duration_sec, subtitle_blocks!, styleConfig)
+          ? await generateScenesFromSubtitles(effectiveTopic, count, duration_sec, resolvedSubtitleBlocks!, styleConfig)
           : await generateScenesFromScript(script, effectiveTopic, duration_sec, count, styleConfig)
 
         console.log(`[images] scenes generated: ${scenes.length}`)
@@ -711,6 +727,7 @@ export async function POST(request: NextRequest) {
             .eq('id', project_id)
             .eq('user_id', user.id)
         }
+        generationSucceeded = true
 
         controller.enqueue(send({
           type: 'done',
@@ -726,6 +743,16 @@ export async function POST(request: NextRequest) {
           controller.enqueue(send({ type: 'error', error: 'Ошибка генерации иллюстраций' }))
           controller.close()
         } catch { /* controller may already be closed on a second error */ }
+      } finally {
+        if (!generationSucceeded && project_id) {
+          try {
+            await supabase
+              .from('projects')
+              .update({ status: 'failed' })
+              .eq('id', project_id)
+              .eq('user_id', user.id)
+          } catch { /* best-effort — stream already failed */ }
+        }
       }
     },
   })
