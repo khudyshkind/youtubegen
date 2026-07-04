@@ -500,6 +500,26 @@ async function pollApihostJob(processId: string, headers: Record<string, string>
   throw new Error(`APIHOST: timeout waiting for job ${processId}`)
 }
 
+async function uploadTextToStorage(text: string, userId: string, projectId: string): Promise<string> {
+  const serviceClient = createServiceClient()
+  const storagePath = `${userId}/${projectId}/tts-input.txt`
+
+  const { error } = await serviceClient.storage
+    .from('audio')
+    .upload(storagePath, Buffer.from(text, 'utf-8'), {
+      contentType: 'text/plain; charset=utf-8',
+      upsert: true,
+    })
+
+  if (error) throw new Error(`Text upload to Storage failed: ${error.message}`)
+
+  const { data: { publicUrl } } = serviceClient.storage
+    .from('audio')
+    .getPublicUrl(storagePath)
+
+  return publicUrl
+}
+
 // ── Main route ───────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -563,6 +583,72 @@ export async function POST(request: NextRequest) {
     if (!check.ok) {
       return NextResponse.json(check, { status: 402 })
     }
+
+    // ── Async path: SV/Voicer → Railway worker ───────────────────────────────
+    // requireCreditsAmount already checked above; credits spent after job is confirmed
+    if (engine === 'secretvoicer' || engine === 'voicer') {
+      if (!project_id) {
+        return NextResponse.json(
+          { ok: false, error: 'project_id обязателен для async-озвучки' },
+          { status: 400 }
+        )
+      }
+
+      const styleExaggeration = typeof voice_style === 'number'
+        ? voice_style
+        : (STYLE_EXAGGERATION[voice_style] ?? 0)
+
+      // A. Upload raw script text — worker downloads via text_url and strips markers itself
+      const textUrl = await uploadTextToStorage(text, user.id, project_id)
+
+      // B. Write dispatch inputs to projects; worker writes only result (audio_url + generating_subtitles)
+      await supabase.from('projects').update({
+        voice_id,
+        status:  'generating_audio',
+        ...(own_script && text ? { script: text } : {}),
+      }).eq('id', project_id).eq('user_id', user.id)
+
+      // C. Submit job to Railway worker
+      const railwayUrl    = env('RAILWAY_VIDEO_SERVER_URL').replace(/\/$/, '')
+      const railwaySecret = env('RAILWAY_API_SECRET')
+      const workerRes = await fetch(`${railwayUrl}/synthesize-audio`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-secret': railwaySecret },
+        body: JSON.stringify({
+          user_id:          user.id,
+          project_id,
+          engine,
+          voice_id,
+          text_url:         textUrl,
+          own_script,
+          voice_style:      styleExaggeration,
+          stability,
+          similarity_boost,
+          speech_rate,
+        }),
+      })
+      if (!workerRes.ok) {
+        const errBody = await workerRes.text().catch(() => '')
+        console.error('[generate/audio] Railway worker error:', workerRes.status, errBody.slice(0, 200))
+        return NextResponse.json(
+          { ok: false, error: `Ошибка запуска синтеза (${workerRes.status})` },
+          { status: 502 }
+        )
+      }
+      const { job_id } = await workerRes.json() as { job_id: string }
+      if (!job_id) throw new Error('Railway /synthesize-audio: no job_id in response')
+
+      // D. Spend credits after job confirmed created — mirrors sync (spend after Storage upload)
+      await spendCredits(user.id, cost, `audio_${engine}`, project_id)
+
+      // E. Record credits_charged for future refund if worker reports failure (handled in Step 4-5)
+      const asyncServiceClient = createServiceClient()
+      await asyncServiceClient.from('audio_jobs').update({ credits_charged: cost }).eq('id', job_id)
+
+      void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id, async: true })
+      return NextResponse.json({ ok: true, job_id, status: 'pending' })
+    }
+    // ── Sync path: ElevenLabs / OpenAI / Google / APIHOST ────────────────────
 
     // Strip structural markers before TTS — they must not be spoken aloud.
     // Cost was already calculated from the original text length (correct behaviour:
@@ -681,79 +767,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: false, error: `Ошибка загрузки аудио с APIHOST (${msg})` }, { status: 502 })
       }
 
-      audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
-
-    } else if (engine === 'secretvoicer') {
-      const svKey = env('SECRETVOICER_API_KEY')
-      if (!svKey) {
-        return NextResponse.json({ ok: false, error: 'SecretVoicer API key не настроен' }, { status: 503 })
-      }
-      // Soft limit: texts above 25k chars need async Railway processing (not yet live).
-      // Remove once async audio worker is deployed.
-      if (ttsText.length > 25_000) {
-        return NextResponse.json({
-          ok: false,
-          error: 'Озвучка пока поддерживает тексты до ~25 000 символов (~25 мин). ' +
-                 'Обработка длинных текстов появится скоро. / ' +
-                 'Audio synthesis currently supports texts up to ~25 min. Long-text async mode coming soon.',
-        }, { status: 422 })
-      }
-      const styleExaggeration = typeof voice_style === 'number'
-        ? voice_style
-        : STYLE_EXAGGERATION[voice_style] ?? 0
-      // synthesizeSecretVoicerChunk encapsulates submit+poll internally — externally it's
-      // just async () => Buffer, same interface as sync engines. runLimited works identically.
-      const svSettings = { stability, similarity: similarity_boost, style: styleExaggeration, speechRate: speech_rate }
-      const svTasks = chunks.map((chunk, idx) => async (): Promise<Buffer> => {
-        for (let attempt = 0; attempt <= 1; attempt++) {
-          try {
-            return await synthesizeSecretVoicerChunk(chunk, voice_id, svSettings)
-          } catch (e) {
-            if (attempt === 1) throw e
-            console.warn(`[generate/audio] SV chunk ${idx + 1}/${chunks.length} retry:`, e instanceof Error ? e.message : String(e))
-          }
-        }
-        throw new Error('unreachable') // satisfies TS: loop above always returns or throws
-      })
-      let svBuffers: Buffer[]
-      try {
-        svBuffers = await runLimited(svTasks, 4)
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        console.error('[generate/audio] SecretVoicer failed:', msg)
-        return NextResponse.json({ ok: false, error: `Ошибка синтеза речи SecretVoicer: ${msg.slice(0, 200)}` }, { status: 502 })
-      }
-      audioBuffer = Buffer.concat(svBuffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
-
-    } else if (engine === 'voicer') {
-      const voicerKey = env('VOICER_API_KEY')
-      if (!voicerKey) {
-        return NextResponse.json({ ok: false, error: 'Voicer API key не настроен' }, { status: 503 })
-      }
-      const styleExaggeration = typeof voice_style === 'number'
-        ? voice_style
-        : STYLE_EXAGGERATION[voice_style] ?? 0
-      const buffers: Buffer[] = []
-      for (let i = 0; i < chunks.length; i++) {
-        try {
-          buffers.push(await synthesizeVoicerChunk(chunks[i], voice_id, {
-            stability,
-            similarity: similarity_boost,
-            style: styleExaggeration,
-            speechRate: speech_rate,
-          }))
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e)
-          console.error(`[generate/audio] Voicer chunk ${i + 1}/${chunks.length} failed:`, msg)
-          const isTimeout = msg.includes('timeout after')
-          return NextResponse.json({
-            ok: false,
-            error: isTimeout
-              ? 'Премиум-озвучка не успела обработать текст такой длины. Попробуйте более короткий текст или другой движок озвучки.'
-              : `Ошибка синтеза речи Voicer: ${msg.slice(0, 200)}`,
-          }, { status: 502 })
-        }
-      }
       audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
 
     } else {

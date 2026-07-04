@@ -461,6 +461,12 @@ export default function Step3Voice() {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const audioFileRef = useRef<HTMLInputElement>(null)
+  const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollTickRef  = useRef<(() => Promise<void>) | null>(null)
+
+  // Generation polling state
+  const [audioPolling, setAudioPolling] = useState(false)
+  const [audioProgress, setAudioProgress] = useState<number | null>(null)
 
   // Dynamic cost
   const scriptChars = script?.length ?? 0
@@ -583,6 +589,67 @@ export default function Step3Voice() {
       loadApihostVoices()
     }
   }, [engine]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function startAudioPolling(jobId: string) {
+    setAudioPolling(true)
+    setAudioProgress(null)
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/generate/audio/status?job_id=${jobId}`)
+        const json = await res.json() as {
+          ok: boolean; status?: string; progress?: number | null
+          result_url?: string | null; error?: string | null
+        }
+        if (!res.ok || !json.ok) return
+
+        if (typeof json.progress === 'number') setAudioProgress(json.progress)
+
+        if (json.status === 'completed' && json.result_url) {
+          clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
+          setAudioPolling(false); setAudioProgress(null); setLoading(false)
+          setAudioUrl(json.result_url); void refreshCredits()
+        } else if (json.status === 'failed') {
+          clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
+          setAudioPolling(false); setAudioProgress(null); setLoading(false)
+          setError(json.error ?? 'Ошибка синтеза')
+        }
+      } catch (_) {}
+    }
+    pollTickRef.current = tick
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = setInterval(() => { void tick() }, 3000)
+  }
+
+  // Stop polling on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+
+  // Immediate tick when tab becomes visible — catches "finished in background"
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === 'visible' && pollTickRef.current) {
+        void pollTickRef.current()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
+
+  // Resume polling after page reload if a job is still in-progress
+  useEffect(() => {
+    if (!projectId || audioUrl) return
+    fetch(`/api/generate/audio/status?project_id=${projectId}`)
+      .then((r) => r.json())
+      .then((json: { ok: boolean; status?: string; job_id?: string; result_url?: string | null }) => {
+        if (!json.ok) return
+        if (json.status === 'completed' && json.result_url) {
+          setAudioUrl(json.result_url)
+        } else if ((json.status === 'pending' || json.status === 'processing') && json.job_id) {
+          setLoading(true)
+          startAudioPolling(json.job_id)
+        }
+      })
+      .catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleELLanguageChange(lang: string) {
     setVoiceLanguage(lang)
@@ -762,12 +829,16 @@ export default function Step3Voice() {
         if (json.code === 'NO_CREDITS') { setError(t('step3.err_credits')); return }
         throw new Error(json.error)
       }
+      if (json.job_id) {
+        startAudioPolling(json.job_id as string)
+        return
+      }
       setAudioUrl(json.data.audio_url)
       void refreshCredits()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step3.err_audio'))
     } finally {
-      setLoading(false)
+      if (!pollRef.current) setLoading(false)
     }
   }
 
@@ -1328,6 +1399,14 @@ export default function Step3Voice() {
           `🎙 ${t('step3.generate_btn')} · −${cost} ${t('nav.credits_suffix')}`
         )}
       </button>
+
+      {audioPolling && (
+        <p className="text-xs text-violet-400/80 text-center -mt-2">
+          {audioProgress !== null
+            ? `Синтез в фоне — ${audioProgress}%`
+            : 'Синтез идёт в фоне — можно не закрывать вкладку'}
+        </p>
+      )}
 
       {/* APIHOST dynamic cost breakdown */}
       {engine === 'apihost' && scriptChars > 0 && (
