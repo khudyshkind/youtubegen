@@ -3569,6 +3569,417 @@ app.get('/status/:jobId', verifySecret, async (req, res) => {
   }
 })
 
+app.post('/synthesize-audio', verifySecret, async (req, res) => {
+  const {
+    user_id, project_id, engine, voice_id, text_url,
+    own_script, voice_style, stability, similarity_boost, speech_rate,
+  } = req.body
+
+  // Only async-capable engines — sync engines (ElevenLabs/OpenAI/Google/APIHOST) stay on Vercel Lambda
+  if (!['secretvoicer', 'voicer'].includes(engine)) {
+    return res.status(400).json({ ok: false, error: `engine '${engine}' is sync-only — run on Vercel Lambda, not this worker` })
+  }
+  if (!user_id || !project_id || !voice_id || !text_url) {
+    return res.status(400).json({ ok: false, error: 'Missing required fields: user_id, project_id, voice_id, text_url' })
+  }
+
+  let job
+  try {
+    const rows = await sbPost('audio_jobs', {
+      user_id,
+      project_id,
+      engine,
+      voice_id,
+      text_url,
+      own_script:       own_script       ?? false,
+      voice_style:      voice_style      ?? 0,
+      stability:        stability        ?? 0.5,
+      similarity_boost: similarity_boost ?? 0.75,
+      speech_rate:      speech_rate      ?? 1.0,
+      status:           'pending',
+    })
+    job = Array.isArray(rows) ? rows[0] : rows
+    if (!job?.id) throw new Error('no id returned from audio_jobs insert')
+  } catch (err) {
+    console.error('[synthesize-audio] create job failed:', err.message)
+    Sentry.captureException(err, { extra: { project_id, user_id, engine, stage: 'job_create' } })
+    return res.status(500).json({ ok: false, error: 'Failed to create audio job' })
+  }
+
+  // Fire-and-forget: synthesize in background without blocking the HTTP response
+  setImmediate(() => {
+    processAudioJob(job).catch((err) => {
+      console.error(`[audio-job:${job.id}] unhandled:`, err.message)
+      Sentry.captureException(err, { extra: { jobId: job.id, stage: 'processAudioJob_unhandled' } })
+    })
+  })
+
+  return res.json({ ok: true, job_id: job.id, status: 'pending' })
+})
+
+// ── Supabase Storage / Audio-job helpers ──────────────────────────────────────
+async function uploadToSupabaseStorage(buffer, userId, projectId) {
+  const storagePath = `${userId}/${projectId}/audio.mp3`
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/audio/${storagePath}`, {
+    method: 'POST',
+    headers: {
+      'apikey':        SUPABASE_SERVICE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+      'Content-Type':  'audio/mpeg',
+      'x-upsert':      'true',
+    },
+    body: buffer,
+  })
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    throw new Error(`Storage upload failed: ${res.status} ${errText.slice(0, 200)}`)
+  }
+  return `${SUPABASE_URL}/storage/v1/object/public/audio/${storagePath}`
+}
+
+async function updateAudioJob(jobId, fields) {
+  try {
+    await sbPatch('audio_jobs', `id=eq.${jobId}`, { ...fields, updated_at: new Date().toISOString() })
+  } catch (e) {
+    console.error(`[audio-job:${jobId}] updateAudioJob failed:`, e.message)
+    Sentry.captureException(e, { extra: { jobId, fields } })
+  }
+}
+
+// ── TTS: SecretVoicer + Voicer synthesis helpers ──────────────────────────────
+
+const SV_BASE       = 'https://secret-voicer.ru/api/v1'
+const VOICER_DOMAIN = 'https://voicer.mat3u.com'
+const VOICER_BASE   = `${VOICER_DOMAIN}/api/v1`
+
+// Per-engine text chunk limits (chars). Voicer splits internally via split_type:'smart'.
+const TTS_CHUNK_LIMITS = {
+  secretvoicer: { maxChars: 3000,   measureBytes: false },
+  voicer:       { maxChars: 195000, measureBytes: false },
+}
+
+// Strip ID3v2 tag from start of MP3 buffer.
+// Applied to all non-first chunks before Buffer.concat to prevent PTS-reset drift
+// that causes audio-video sync loss in the final video.
+function stripId3Tag(buf) {
+  if (buf.length >= 10 && buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) {
+    const tagSize = ((buf[6] & 0x7f) << 21)
+                 | ((buf[7] & 0x7f) << 14)
+                 | ((buf[8] & 0x7f) <<  7)
+                 |  (buf[9] & 0x7f)
+    const end = 10 + tagSize
+    if (end < buf.length) return buf.subarray(end)
+  }
+  return buf
+}
+
+// Split text into chunks fitting within per-engine char/byte limit.
+// Splits at paragraph → sentence boundaries; word-split as last resort.
+function splitTextIntoChunks(text, maxChars, measureBytes) {
+  const measure = (s) => measureBytes ? Buffer.byteLength(s, 'utf8') : s.length
+  if (measure(text) <= maxChars) return [text]
+
+  const sentences = text
+    .split(/\n{2,}/)
+    .flatMap(para => para.split(/(?<=[.!?…])\s+/))
+    .map(s => s.trim())
+    .filter(Boolean)
+
+  const chunks = []
+  let current = ''
+
+  for (const sentence of sentences) {
+    const candidate = current ? `${current} ${sentence}` : sentence
+    if (measure(candidate) <= maxChars) {
+      current = candidate
+    } else {
+      if (current) chunks.push(current)
+      if (measure(sentence) > maxChars) {
+        const words = sentence.split(/\s+/)
+        let wordBuf = ''
+        for (const word of words) {
+          const wCand = wordBuf ? `${wordBuf} ${word}` : word
+          if (measure(wCand) <= maxChars) {
+            wordBuf = wCand
+          } else {
+            if (wordBuf) chunks.push(wordBuf)
+            wordBuf = word
+          }
+        }
+        current = wordBuf
+      } else {
+        current = sentence
+      }
+    }
+  }
+  if (current.trim()) chunks.push(current.trim())
+  return chunks.filter(Boolean)
+}
+
+// Run up to `limit` async tasks concurrently, preserving result order by index.
+async function runLimited(fns, limit) {
+  const results = new Array(fns.length)
+  let next = 0
+  async function worker() {
+    while (next < fns.length) {
+      const i = next++
+      results[i] = await fns[i]()
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, fns.length) }, worker))
+  return results
+}
+
+// Submit one text chunk to SecretVoicer; poll until COMPLETED.
+// Returns Buffer (MP3). Throws on failure or timeout.
+async function synthesizeSecretVoicerChunk(text, voiceId, settings) {
+  const apiKey = process.env.SECRETVOICER_API_KEY
+  const res = await fetch(`${SV_BASE}/synthesize`, {
+    method: 'POST',
+    headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      voice_id:         voiceId,
+      mode:             'standard',
+      stability:        settings.stability,
+      similarity_boost: settings.similarity,
+      style:            settings.style,
+      rate:             settings.speechRate,
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`SecretVoicer HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+  const j = await res.json()
+  const taskId = j.task_id
+  if (!taskId) throw new Error('SecretVoicer: no task_id in response')
+
+  const POLL_MS    = 2500
+  const TIMEOUT_MS = 275_000 // retained from Vercel; Railway has no Lambda limit — raise if needed
+  const deadline   = Date.now() + TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_MS))
+    let status
+    try {
+      const pollRes = await fetch(`${SV_BASE}/task/${taskId}`, {
+        headers: { 'X-API-Key': apiKey },
+      })
+      if (!pollRes.ok) continue
+      status = await pollRes.json()
+    } catch {
+      continue
+    }
+    if (status.status === 'COMPLETED') {
+      if (!status.audio_url) throw new Error('SecretVoicer: COMPLETED but no audio_url')
+      const dlRes = await fetch(status.audio_url)
+      if (!dlRes.ok) throw new Error(`SecretVoicer download HTTP ${dlRes.status}`)
+      return Buffer.from(await dlRes.arrayBuffer())
+    }
+    if (status.status === 'FAILED') {
+      throw new Error(`SecretVoicer FAILED: ${status.error_message ?? 'unknown'}`)
+    }
+    // PENDING / LOCAL_PROCESSING → continue polling
+  }
+  throw new Error(`SecretVoicer: timeout after ${TIMEOUT_MS / 1000}s`)
+}
+
+// Submit one text chunk to Voicer; poll until completed.
+// Returns Buffer (MP3). Throws on failure, timeout, or content-block.
+async function synthesizeVoicerChunk(text, voiceId, settings) {
+  const apiKey     = process.env.VOICER_API_KEY
+  const authHeader = `Bearer ${apiKey}`
+
+  const res = await fetch(`${VOICER_BASE}/voice/synthesize`, {
+    method: 'POST',
+    headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      voice_id:         voiceId,
+      model_id:         'eleven_turbo_v2_5',
+      split_type:       'smart',
+      max_chunk_length: 2500,
+      voice_settings: {
+        stability:        settings.stability,
+        similarity_boost: settings.similarity,
+        style:            settings.style,
+        speed:            Math.min(1.2, Math.max(0.7, settings.speechRate ?? 1.0)),
+      },
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Voicer HTTP ${res.status}: ${body.slice(0, 300)}`)
+  }
+  const j = await res.json()
+  const taskId = j.task_id
+  if (!taskId) throw new Error('Voicer: no task_id in response')
+
+  const POLL_MS    = 2500
+  const TIMEOUT_MS = 280_000 // retained from Vercel; Railway has no Lambda limit — raise if needed
+  const deadline   = Date.now() + TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_MS))
+    let status
+    try {
+      const pollRes = await fetch(`${VOICER_BASE}/voice/status/${taskId}`, {
+        headers: { Authorization: authHeader },
+      })
+      if (!pollRes.ok) continue
+      status = await pollRes.json()
+    } catch {
+      continue
+    }
+    if (status.status === 'completed') {
+      if (!status.download_url) throw new Error('Voicer: completed but no download_url')
+      const dlRes = await fetch(`${VOICER_DOMAIN}${status.download_url}`, {
+        headers: { Authorization: authHeader },
+      })
+      if (!dlRes.ok) throw new Error(`Voicer download HTTP ${dlRes.status}`)
+      return Buffer.from(await dlRes.arrayBuffer())
+    }
+    if (status.status === 'failed') {
+      throw new Error(`Voicer FAILED: ${status.error_message ?? 'unknown'}`)
+    }
+    if (status.status === 'censored') {
+      throw new Error(`Voicer CENSORED: ${status.error_message ?? 'content blocked by ElevenLabs filter'}`)
+    }
+    // pending / processing → continue polling
+  }
+  throw new Error(`Voicer: timeout after ${TIMEOUT_MS / 1000}s`)
+}
+
+// ── Async audio worker ────────────────────────────────────────────────────────
+
+// Map voice_style string labels to numeric style exaggeration (ElevenLabs scale 0–1).
+const STYLE_EXAGGERATION_MAP = {
+  neutral: 0, conversational: 0.2, documentary: 0.3, emotional: 0.8,
+}
+
+// Process one audio_jobs record: download text → split → synthesize → concat → upload → update DB.
+// Mirrors synchronous audio/route.ts, but runs as a long-lived background task on Railway.
+// Writes ONLY the result to projects (audio_url + status).
+// Inputs (voice_id, script, status:'generating_audio') are written by the Vercel dispatch Lambda.
+async function processAudioJob(job) {
+  const jobId = job.id
+  console.log(`[audio-job:${jobId}] start engine=${job.engine} project=${job.project_id}`)
+
+  try {
+    // 1. Mark job as in-progress
+    await updateAudioJob(jobId, { status: 'processing' })
+
+    // 2. Download text from URL stored by the Vercel dispatch endpoint
+    const textRes = await fetch(job.text_url, { signal: AbortSignal.timeout(30_000) })
+    if (!textRes.ok) throw new Error(`text download HTTP ${textRes.status}`)
+    const text = await textRes.text()
+    if (!text.trim()) throw new Error('downloaded text is empty')
+    console.log(`[audio-job:${jobId}] text: ${text.length} chars`)
+
+    // 3. Strip scene/section markers so TTS doesn't pronounce them literally.
+    //    own_script normalization (Haiku) skipped on first iteration — text used as-is.
+    const ttsText = text
+      .replace(/\[(?:Сцена|Scene|Секция|Section)\s+\d+[^\]]*\]\s*/gi, '')
+      .replace(/\[\s*(?:\.{2,}|…+)\s*\]\s*/g, '')
+      .replace(/^#{1,6}\s+.+$/gm, '')
+      .replace(/^(?:-{3,}|\*{3,}|_{3,})\s*$/gm, '')
+      .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+      .replace(/__([^_\n]+)__/g, '$1')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+
+    // 4. Split into per-engine chunks
+    const { maxChars, measureBytes } = TTS_CHUNK_LIMITS[job.engine] ?? TTS_CHUNK_LIMITS.secretvoicer
+    const chunks = splitTextIntoChunks(ttsText, maxChars, measureBytes)
+    console.log(`[audio-job:${jobId}] ${chunks.length} chunk(s) for ${ttsText.length} chars`)
+
+    // 5. Resolve voice settings (job fields mirror audio/route.ts request body)
+    const voiceStyle = typeof job.voice_style === 'number'
+      ? job.voice_style
+      : (STYLE_EXAGGERATION_MAP[job.voice_style] ?? 0)
+    const settings = {
+      stability:  job.stability        ?? 0.5,
+      similarity: job.similarity_boost ?? 0.75,
+      style:      voiceStyle,
+      speechRate: job.speech_rate      ?? 1.0,
+    }
+
+    // 6. Select synthesizer.
+    //    SecretVoicer: 1 retry per chunk (mirrors Vercel caller pattern).
+    //    Voicer: no retry — Voicer queues are stable; timeout is the safety net.
+    //    Sync-only engines (ElevenLabs/OpenAI/Google/APIHOST) must not reach here.
+    let synthesizeFn
+    if (job.engine === 'secretvoicer') {
+      synthesizeFn = async (chunk, idx) => {
+        for (let attempt = 0; attempt <= 1; attempt++) {
+          try {
+            return await synthesizeSecretVoicerChunk(chunk, job.voice_id, settings)
+          } catch (e) {
+            if (attempt === 1) throw e
+            console.warn(`[audio-job:${jobId}] SV chunk ${idx + 1}/${chunks.length} retry:`, e.message)
+          }
+        }
+      }
+    } else if (job.engine === 'voicer') {
+      synthesizeFn = (chunk) => synthesizeVoicerChunk(chunk, job.voice_id, settings)
+    } else {
+      throw new Error(`engine '${job.engine}' is sync-only and must run on Vercel Lambda, not the async worker`)
+    }
+
+    // 7. Synthesize all chunks in parallel (max 4 concurrent), order preserved by runLimited
+    const tasks = chunks.map((chunk, idx) => async () => {
+      console.log(`[audio-job:${jobId}] chunk ${idx + 1}/${chunks.length} start`)
+      const buf = await synthesizeFn(chunk, idx)
+      console.log(`[audio-job:${jobId}] chunk ${idx + 1}/${chunks.length} done (${buf.byteLength} B)`)
+      return buf
+    })
+    const buffers = await runLimited(tasks, 4)
+
+    // 8. Concat in memory — first chunk keeps ID3 header, rest stripped to prevent PTS drift
+    const finalBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
+    console.log(`[audio-job:${jobId}] concat: ${(finalBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`)
+    if (finalBuffer.byteLength === 0) throw new Error('empty audio buffer after synthesis')
+
+    // 9. Upload to Supabase Storage → deterministic public URL
+    const publicUrl = await uploadToSupabaseStorage(finalBuffer, job.user_id, job.project_id)
+    console.log(`[audio-job:${jobId}] uploaded: ${publicUrl.slice(0, 100)}`)
+
+    // 10. Mark audio_jobs completed (client polls this for real-time status)
+    await updateAudioJob(jobId, {
+      status:       'completed',
+      result_url:   publicUrl,
+      completed_at: new Date().toISOString(),
+    })
+
+    // 11. Update projects with RESULT ONLY — mirrors synchronous audio/route.ts status transition.
+    //     voice_id and script are written by the Vercel dispatch Lambda (inputs, not results).
+    //     Non-fatal: audio_jobs.result_url is the source of truth; projects drives the UI chain.
+    try {
+      await sbPatch(
+        'projects',
+        `id=eq.${job.project_id}&user_id=eq.${job.user_id}`,
+        {
+          audio_url: publicUrl,
+          status:    'generating_subtitles',
+        }
+      )
+      console.log(`[audio-job:${jobId}] projects.audio_url written`)
+    } catch (projErr) {
+      console.warn(`[audio-job:${jobId}] projects update non-fatal:`, projErr.message)
+      Sentry.captureException(projErr, { extra: { jobId, project_id: job.project_id, stage: 'projects_audio_url' } })
+    }
+
+    console.log(`[audio-job:${jobId}] DONE`)
+
+  } catch (err) {
+    const msg = err.message ?? String(err)
+    console.error(`[audio-job:${jobId}] FAILED:`, msg)
+    Sentry.captureException(err, { extra: { jobId, engine: job.engine, project_id: job.project_id } })
+    // Credit refund is handled by the Vercel dispatch endpoint watching job status — not here
+    await updateAudioJob(jobId, { status: 'failed', error: msg })
+  }
+}
 
 // Must be added AFTER all routes
 Sentry.setupExpressErrorHandler(app)
