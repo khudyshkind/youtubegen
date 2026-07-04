@@ -6,8 +6,10 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
-import type { ScriptParams, PlanSection } from '@/lib/types'
+import type { ScriptParams, PlanSection, ScriptModel } from '@/lib/types'
 import { CREDIT_COSTS } from '@/lib/types'
+
+export const maxDuration = 300
 
 interface ScriptRequest extends ScriptParams {
   project_id?: string
@@ -129,9 +131,11 @@ function modelCost(model: string): number {
 }
 
 // Dynamic token budget: 130 words/min × 2 tokens/word (Cyrillic-safe) × 1.3 buffer.
-// Capped at 8192 — safe max output for Claude 4 Sonnet/Opus and GPT-4o.
-function calcMaxTokens(durationMinutes: number): number {
-  return Math.min(8192, Math.max(2048, Math.ceil(durationMinutes * 130 * 2 * 1.3)))
+// Cap is model-specific: GPT-4o max output = 16 384; Claude Sonnet 4.6 = 64 K, Opus 4.5 = 32 K → capped at 32 768.
+function calcMaxTokens(durationMinutes: number, model: ScriptModel): number {
+  const raw = Math.max(2048, Math.ceil(durationMinutes * 130 * 2 * 1.3))
+  const cap  = model === 'gpt-4o' ? 16_384 : 32_768
+  return Math.min(cap, raw)
 }
 
 async function generateWithClaude(prompt: string, opus: boolean, maxTokens: number): Promise<string> {
@@ -181,7 +185,7 @@ export async function POST(request: NextRequest) {
     }
 
     const prompt = buildPrompt(scriptParams, plan_sections)
-    const maxTokens = calcMaxTokens(scriptParams.duration_minutes)
+    const maxTokens = calcMaxTokens(scriptParams.duration_minutes, model)
     console.log(`[generate/script] duration=${scriptParams.duration_minutes}min max_tokens=${maxTokens}`)
 
     let script: string
