@@ -2222,6 +2222,110 @@ async function cleanupExpiredMedia() {
   }
 }
 
+// ── fal.ai balance monitoring ─────────────────────────────────────────────────
+const FAL_ADMIN_KEY = process.env.FAL_ADMIN_KEY || process.env.FAL_KEY || ''
+const FAL_BALANCE_THRESHOLD = parseFloat(process.env.FAL_BALANCE_ALERT_THRESHOLD ?? '10')
+
+async function fetchFalBalance() {
+  if (!FAL_ADMIN_KEY) return { error: 'no_key' }
+  const controller = new AbortController()
+  const t = setTimeout(() => controller.abort(), 10_000)
+  try {
+    const res = await fetch('https://api.fal.ai/v1/account/billing?expand=credits', {
+      headers: { Authorization: `Key ${FAL_ADMIN_KEY}` },
+      signal: controller.signal,
+    })
+    if (res.status === 401 || res.status === 403) return { error: 'unauthorized' }
+    if (!res.ok) return { error: 'unavailable' }
+    const data = await res.json()
+    const balance = data?.credits?.current_balance
+    const currency = data?.credits?.currency ?? 'USD'
+    if (typeof balance !== 'number') return { error: 'unavailable' }
+    return { balance, currency }
+  } catch {
+    return { error: 'unavailable' }
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+async function checkFalBalance() {
+  const tag = '[fal/balance]'
+  const result = await fetchFalBalance()
+
+  if ('balance' in result) {
+    await setSetting('fal_balance',          String(result.balance))
+    await setSetting('fal_balance_currency', result.currency ?? 'USD')
+    await setSetting('fal_balance_ts',       new Date().toISOString())
+    console.log(`${tag} balance=${result.balance} ${result.currency}`)
+  }
+
+  if (!OWNER_ID) return
+
+  const alertState      = await getSetting('fal_balance_alert_state') // 'low' | 'unauthorized' | ''
+  const alertAt         = await getSetting('fal_balance_alert_at')
+  const hoursSinceAlert = alertAt
+    ? (Date.now() - new Date(alertAt).getTime()) / 3_600_000
+    : Infinity
+
+  // Needs admin key
+  if (result.error === 'unauthorized' || result.error === 'no_key') {
+    if (alertState !== 'unauthorized') {
+      await tgApi('sendMessage', {
+        chat_id: OWNER_ID,
+        text: `⚙️ *fal\\.ai мониторинг*\n\nНе удаётся получить баланс — нужен admin API ключ\\.\nДобавь \`FAL_ADMIN_KEY\` в переменные Railway\\.\n\n[Создать ключ](https://fal.ai/dashboard/keys)`,
+        parse_mode: 'MarkdownV2',
+        disable_web_page_preview: true,
+      }).catch(e => console.error(`${tag} tg alert failed:`, e.message))
+      await setSetting('fal_balance_alert_state', 'unauthorized')
+      await setSetting('fal_balance_alert_at',    new Date().toISOString())
+    }
+    return
+  }
+
+  // API unavailable (network error / 5xx) — skip alert, don't spam
+  if (result.error === 'unavailable') {
+    console.warn(`${tag} API unavailable, skipping alert`)
+    return
+  }
+
+  const { balance, currency } = result
+
+  if (balance < FAL_BALANCE_THRESHOLD) {
+    const shouldAlert = alertState !== 'low' || hoursSinceAlert >= 24
+    if (shouldAlert) {
+      await tgApi('sendMessage', {
+        chat_id: OWNER_ID,
+        text: `⚠️ *fal\\.ai баланс низкий\\!*\n\nТекущий баланс: *\\$${balance.toFixed(2)}* ${currency}\nПорог: \\$${FAL_BALANCE_THRESHOLD.toFixed(2)}\n\n[Пополнить баланс](https://fal.ai/dashboard/billing)`,
+        parse_mode: 'MarkdownV2',
+        disable_web_page_preview: true,
+      }).catch(e => console.error(`${tag} tg alert failed:`, e.message))
+      await setSetting('fal_balance_alert_state', 'low')
+      await setSetting('fal_balance_alert_at',    new Date().toISOString())
+    }
+    return
+  }
+
+  // Balance above threshold
+  if (alertState === 'low') {
+    await tgApi('sendMessage', {
+      chat_id: OWNER_ID,
+      text: `✅ *fal\\.ai баланс восстановлен*\n\nТекущий баланс: *\\$${balance.toFixed(2)}* ${currency}`,
+      parse_mode: 'MarkdownV2',
+    }).catch(e => console.error(`${tag} tg restored alert failed:`, e.message))
+  }
+  if (alertState === 'low' || alertState === 'unauthorized') {
+    await setSetting('fal_balance_alert_state', '')
+    await setSetting('fal_balance_alert_at',    '')
+  }
+}
+
+// ── fal.ai balance check — every 30 minutes ───────────────────────────────────
+cron.schedule('*/30 * * * *', async () => {
+  console.log('[cron] fal.ai balance check')
+  try { await checkFalBalance() } catch (err) { console.error('[cron/fal-balance]', err.message); Sentry.captureException(err, { extra: { cron: 'checkFalBalance' } }) }
+}, { timezone: 'UTC' })
+
 // ── Daily DB backup cron — 03:00 UTC ─────────────────────────────────────────
 cron.schedule('0 3 * * *', async () => {
   console.log('[cron] daily db backup')

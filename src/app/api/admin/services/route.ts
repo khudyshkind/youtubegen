@@ -146,13 +146,79 @@ async function checkElevenLabs(): Promise<ServiceResult> {
 
 async function checkFal(): Promise<ServiceResult> {
   const base = { key: 'fal', name: 'fal.ai (Flux / Изображения)', icon: '🎨', link: 'https://fal.ai/dashboard' }
-  const apiKey = env('FAL_KEY')
-  if (!apiKey) return unconfigured(base, 'FAL_KEY')
-  // fal.ai doesn't expose a public balance REST endpoint — just confirm key is set
+  const adminKey  = process.env.FAL_ADMIN_KEY ?? process.env.FAL_KEY ?? ''
+  const threshold = parseFloat(process.env.FAL_BALANCE_ALERT_THRESHOLD ?? '10')
+
+  if (!adminKey) return unconfigured(base, 'FAL_KEY')
+
+  // Try live billing call (requires FAL_ADMIN_KEY; FAL_KEY returns 401)
+  let liveBalance: number | null = null
+  let liveCurrency = 'USD'
+  let unauthorized = false
+  try {
+    const res = await safeFetch(
+      'https://api.fal.ai/v1/account/billing?expand=credits',
+      { headers: { Authorization: `Key ${adminKey}` } },
+      10_000,
+    )
+    if (res.status === 401 || res.status === 403) {
+      unauthorized = true
+    } else if (res.ok) {
+      const data = await res.json() as { credits?: { current_balance?: number; currency?: string } }
+      const b = data?.credits?.current_balance
+      if (typeof b === 'number') { liveBalance = b; liveCurrency = data?.credits?.currency ?? 'USD' }
+    }
+  } catch { /* timeout / network — fall through to cached */ }
+
+  // Fallback: read balance cached by Railway cron (written to bot_settings every 30 min)
+  let cachedBalance: number | null = null
+  let cachedTs: string | null = null
+  let cachedCurrency = 'USD'
+  if (liveBalance === null) {
+    try {
+      const svc = createServiceClient()
+      const { data } = await svc
+        .from('bot_settings')
+        .select('key, value')
+        .in('key', ['fal_balance', 'fal_balance_ts', 'fal_balance_currency'])
+      const s = Object.fromEntries((data ?? []).map(r => [r.key as string, r.value as string]))
+      if (s['fal_balance'])          cachedBalance   = parseFloat(s['fal_balance'])
+      if (s['fal_balance_ts'])       cachedTs        = s['fal_balance_ts']
+      if (s['fal_balance_currency']) cachedCurrency  = s['fal_balance_currency']
+    } catch { /* ignore — show what we have */ }
+  }
+
+  const balance  = liveBalance  ?? cachedBalance
+  const currency = liveBalance !== null ? liveCurrency : cachedCurrency
+  const fromCache = liveBalance === null && cachedBalance !== null
+
+  if (unauthorized && balance === null) {
+    return {
+      ...base, status: 'warn', statusLabel: 'Нужен admin-ключ',
+      metrics: [
+        { label: 'Статус', value: '⚠ FAL_ADMIN_KEY не задан — баланс недоступен' },
+        { label: 'Биллинг', value: '↗ fal.ai Billing', url: 'https://fal.ai/dashboard/billing' },
+      ],
+    }
+  }
+
+  if (balance === null) {
+    return { ...base, status: 'error', metrics: [], error: 'Не удалось получить баланс' }
+  }
+
+  const status: Status      = balance < threshold ? 'warn' : 'ok'
+  const statusLabel         = balance < threshold ? 'Баланс на исходе' : undefined
+  const cacheNote           = fromCache && cachedTs
+    ? ` (кэш ${new Date(cachedTs).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })})`
+    : ''
+
   return {
-    ...base, status: 'ok',
+    ...base,
+    status,
+    ...(statusLabel ? { statusLabel } : {}),
     metrics: [
-      { label: 'Статус', value: '✓ Ключ настроен' },
+      { label: 'Баланс', value: `$${balance.toFixed(2)} ${currency}${cacheNote}` },
+      { label: 'Порог алерта', value: `$${threshold.toFixed(2)}` },
       { label: 'Биллинг', value: '↗ fal.ai Billing', url: 'https://fal.ai/dashboard/billing' },
     ],
   }
