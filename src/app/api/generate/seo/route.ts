@@ -4,7 +4,6 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
-import { resolveUserLang, langNote } from '@/lib/user-lang'
 import type { SeoData, SubtitleBlock } from '@/lib/types'
 
 interface SeoRequest {
@@ -130,7 +129,6 @@ export async function POST(request: NextRequest) {
 
     const { script, topic, project_id, duration_minutes = 5, subtitle_blocks, lang }: SeoRequest =
       await request.json()
-    const userLang = resolveUserLang(request, lang)
 
     // Build timeline: real subtitles take priority over estimated scene markers
     const hasRealSubtitles = subtitle_blocks && subtitle_blocks.length > 0
@@ -151,7 +149,7 @@ export async function POST(request: NextRequest) {
 
 Сценарий (первые 2500 символов):
 ${script.slice(0, 2500)}
-${chaptersBlock}${langNote(userLang)}`
+${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, description, hashtags, tags) strictly in ${lang}.` : ''}`
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const message = await anthropic.messages.create({

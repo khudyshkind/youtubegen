@@ -27,7 +27,7 @@ function CopyButton({ text }: { text: string }) {
 }
 
 export default function Step6Seo() {
-  const { script, scriptParams, projectId, seo, setSeo, setStep, reset } = useStudioStore()
+  const { script, scriptParams, ownScript, projectId, seo, setSeo, setStep, reset } = useStudioStore()
   const [localSeo, setLocalSeo] = useState<SeoData | null>(seo)
   const [newTag, setNewTag] = useState('')
   const [loading, setLoading] = useState(false)
@@ -46,6 +46,7 @@ export default function Step6Seo() {
           script,
           topic: scriptParams.topic,
           project_id: projectId,
+          ...(ownScript ? {} : { lang: scriptParams.language }),
         }),
       })
       const json = await res.json()

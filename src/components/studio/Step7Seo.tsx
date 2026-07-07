@@ -508,7 +508,7 @@ function appendHashtags(body: string, tags: string[]): string {
 
 export default function Step7Seo() {
   const { t } = useLang()
-  const { script, scriptParams, subtitleBlocks, sceneImages, audioUrl, videoUrl, projectId, seo, setSeo, setStep, reset } = useStudioStore()
+  const { script, scriptParams, ownScript, subtitleBlocks, sceneImages, audioUrl, videoUrl, projectId, seo, setSeo, setStep, reset } = useStudioStore()
   const [localSeo, setLocalSeo] = useState<SeoData | null>(seo)
   const [newTag, setNewTag] = useState('')
   const [newHashtag, setNewHashtag] = useState('')
@@ -547,6 +547,7 @@ export default function Step7Seo() {
           project_id: projectId,
           duration_minutes: scriptParams.duration_minutes,
           subtitle_blocks: subtitleBlocks.length > 0 ? subtitleBlocks : undefined,
+          ...(ownScript ? {} : { lang: scriptParams.language }),
         }),
       })
       const json = await res.json()
