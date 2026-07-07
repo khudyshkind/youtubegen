@@ -193,12 +193,19 @@ function Pill({
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
-export default function Step1Topic() {
-  const { scriptParams, setScriptParams, setStep, setProjectId, projectId, setOwnScript: setStoreOwnScript } = useStudioStore()
+interface Step1TopicProps {
+  onRegisterSubmit?: (fn: () => void) => void
+}
+
+export default function Step1Topic({ onRegisterSubmit }: Step1TopicProps) {
+  const { scriptParams, setScriptParams, setStep, setProjectId, projectId, ownScript, setOwnScript: setStoreOwnScript } = useStudioStore()
   const { t } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [ownScript, setOwnScript] = useState(false)
+  const submitCoreRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    onRegisterSubmit?.(() => { void submitCoreRef.current() })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const MODELS = MODELS_BASE.map((m) => ({
     ...m,
@@ -238,14 +245,10 @@ export default function Step1Topic() {
 
   const selectedModel = MODELS.find((m) => m.value === scriptParams.model)!
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
+  async function handleSubmitCore() {
     if (!ownScript && !scriptParams.topic.trim()) { setError(t('step1.err_topic')); return }
-
     setStoreOwnScript(ownScript)
-
     if (projectId) { setStep(2); return }
-
     setError('')
     setLoading(true)
     const topic = scriptParams.topic.trim() || 'Свой текст'
@@ -270,7 +273,13 @@ export default function Step1Topic() {
     }
   }
 
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    await handleSubmitCore()
+  }
+
   const canSubmit = ownScript || !!scriptParams.topic.trim()
+  submitCoreRef.current = handleSubmitCore
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -296,7 +305,7 @@ export default function Step1Topic() {
         </div>
         <button
           type="button"
-          onClick={() => { setOwnScript((v) => !v); if (ownScript) setScriptParams({ topic: '' }) }}
+          onClick={() => { setStoreOwnScript(!ownScript); if (ownScript) setScriptParams({ topic: '' }) }}
           className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0"
           style={{ background: ownScript ? '#7C3AED' : 'rgba(255,255,255,0.1)' }}
         >

@@ -45,6 +45,10 @@ function StepWizardInner() {
 
   const { t } = useLang()
   const router = useRouter()
+  const step1SubmitRef = useRef<(() => void) | null>(null)
+  const registerStep1Submit = useCallback((fn: () => void) => { step1SubmitRef.current = fn }, [])
+  const step3NextRef = useRef<(() => void) | null>(null)
+  const registerStep3Next = useCallback((fn: () => void) => { step3NextRef.current = fn }, [])
   const seoFinishRef = useRef<(() => void) | null>(null)
   const registerSeoFinish = useCallback((fn: () => void) => { seoFinishRef.current = fn }, [])
 
@@ -252,9 +256,9 @@ function StepWizardInner() {
             border: '1px solid rgba(255,255,255,0.08)',
           }}
         >
-          {currentStep === 1 && <Step1Topic />}
+          {currentStep === 1 && <Step1Topic onRegisterSubmit={registerStep1Submit} />}
           {currentStep === 2 && <Step2Plan />}
-          {currentStep === 3 && <Step2Script />}
+          {currentStep === 3 && <Step2Script onRegisterNext={registerStep3Next} />}
           {currentStep === 4 && <Step3Voice />}
           {currentStep === 5 && <Step4Subtitles />}
           {currentStep === 6 && <Step5Images />}
@@ -267,8 +271,8 @@ function StepWizardInner() {
               stepLabel={t('studio.step1')}
               costLine={ownScript ? undefined : `Генерация сценария: −${scriptCost} кр.`}
               primaryLabel={t('step1.next')}
-              primaryDisabled={!projectId}
-              onPrimary={() => setStep(2)}
+              primaryDisabled={!(ownScript || !!scriptParams.topic.trim())}
+              onPrimary={() => step1SubmitRef.current?.()}
             />
           )}
           {currentStep === 2 && (
@@ -287,7 +291,7 @@ function StepWizardInner() {
               costLine={`Перегенерация: −${scriptCost} кр.`}
               primaryLabel={t('step2.next')}
               primaryDisabled={!script?.trim()}
-              onPrimary={() => setStep(4)}
+              onPrimary={() => step3NextRef.current?.()}
               secondaryLabel={t('step2.back')}
               onSecondary={() => setStep(2)}
             />

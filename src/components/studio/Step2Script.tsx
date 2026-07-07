@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import { CREDIT_COSTS } from '@/lib/types'
 import { SCRIPT_LANGUAGES } from '@/lib/languages'
@@ -54,7 +54,11 @@ function EnhanceToggle({ checked, onChange, label, hint }: {
   )
 }
 
-export default function Step2Script() {
+interface Step2ScriptProps {
+  onRegisterNext?: (fn: () => void) => void
+}
+
+export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
   const { scriptParams, setScriptParams, projectId, planSections, script, setScript, setStep, ownScript } = useStudioStore()
   const { t } = useLang()
   const [loading, setLoading] = useState(false)
@@ -71,6 +75,10 @@ export default function Step2Script() {
   const [enhancePauses, setEnhancePauses] = useState(false)
   const [enhancing, setEnhancing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const nextRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    onRegisterNext?.(() => { nextRef.current() })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const MODEL_LABELS: Record<string, string> = {
     'claude-sonnet': t('model.standard'),
@@ -271,6 +279,7 @@ export default function Step2Script() {
   const words = script ? countWords(script) : 0
   const estimatedMin = Math.max(1, Math.round(words / 130))
   const hasScript = script !== null && script.trim().length > 0
+  nextRef.current = handleNext
 
   return (
     <div className="flex flex-col gap-6">
