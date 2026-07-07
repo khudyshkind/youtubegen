@@ -506,7 +506,11 @@ function appendHashtags(body: string, tags: string[]): string {
 
 // ─── Component ─────────────────────────────────────────────────────────────────
 
-export default function Step7Seo() {
+interface Step7SeoProps {
+  onRegisterFinish?: (fn: () => void) => void
+}
+
+export default function Step7Seo({ onRegisterFinish }: Step7SeoProps) {
   const { t } = useLang()
   const { script, scriptParams, ownScript, subtitleBlocks, sceneImages, audioUrl, videoUrl, projectId, seo, setSeo, setStep, reset } = useStudioStore()
   const [localSeo, setLocalSeo] = useState<SeoData | null>(seo)
@@ -516,6 +520,15 @@ export default function Step7Seo() {
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
   const [dlState, setDlState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+
+  // Panel integration: register a finish handler so StepWizard panel calls the same action
+  const localSeoRef = useRef<SeoData | null>(localSeo)
+  useEffect(() => { localSeoRef.current = localSeo }, [localSeo])
+  useEffect(() => {
+    onRegisterFinish?.(() => {
+      if (localSeoRef.current) { setSeo(localSeoRef.current); setDone(true) }
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleDownloadAll() {
     setDlState('loading')

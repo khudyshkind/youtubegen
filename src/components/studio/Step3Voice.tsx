@@ -378,7 +378,7 @@ function Toggle({ checked, onChange, label, hint }: {
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function Step3Voice() {
-  const { script, projectId, voiceSettings, audioUrl, subtitleBlocks, ownScript, scriptParams, setVoiceSettings, setAudioUrl, setStep } = useStudioStore()
+  const { script, projectId, voiceSettings, audioUrl, subtitleBlocks, ownScript, scriptParams, setVoiceSettings, setAudioUrl, setStep, setAudioCostEstimate } = useStudioStore()
   const { t } = useLang()
 
   const ENGINES: { id: AudioEngine; medal: string; name: string; quality: string; meta: string; costLabel: string; soon?: boolean; premiumOnly?: boolean }[] = [
@@ -473,6 +473,12 @@ export default function Step3Voice() {
   const cost = engine === 'apihost'
     ? audioCost(scriptChars, 'apihost', apihostVoiceType)
     : Math.max(1, audioCost(scriptChars, engine))
+
+  // Sync to store so StepWizard panel shows the same value as the cost block here
+  useEffect(() => {
+    setAudioCostEstimate(scriptChars > 0 ? cost : null)
+    return () => { setAudioCostEstimate(null) }
+  }, [cost, scriptChars]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // APIHOST voice-language mismatch detection.
   // Script is considered Russian if >15% of non-space chars are Cyrillic.

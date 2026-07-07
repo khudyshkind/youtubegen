@@ -1,10 +1,10 @@
 'use client'
 
-import React, { Suspense, useEffect, useState } from 'react'
+import React, { Suspense, useEffect, useState, useRef, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useStudioStore } from '@/lib/studio-store'
 import type { Project } from '@/lib/types'
-import { CREDIT_COSTS, audioCost } from '@/lib/types'
+import { CREDIT_COSTS } from '@/lib/types'
 import Step1Topic from './Step1Topic'
 import Step2Plan from './Step2Plan'
 import Step2Script from './Step2Script'
@@ -41,17 +41,17 @@ function StepWizardInner() {
     setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode,
     setRenderJobId, setProjectStatus,
     script, scriptParams, subtitleBlocks, audioUrl, seo, projectId, ownScript,
-    imageEngine, imageInterval } = useStudioStore()
+    imageEngine, imageInterval, audioCostEstimate } = useStudioStore()
 
   const { t } = useLang()
   const router = useRouter()
+  const seoFinishRef = useRef<(() => void) | null>(null)
+  const registerSeoFinish = useCallback((fn: () => void) => { seoFinishRef.current = fn }, [])
 
   // ── Panel computed values ─────────────────────────────────────────────────
   const scriptCost = scriptParams.model === 'claude-opus' ? CREDIT_COSTS.script_opus
     : scriptParams.model === 'gpt-4o' ? CREDIT_COSTS.script_gpt
     : CREDIT_COSTS.script_sonnet
-  const scriptChars = script?.length ?? 0
-  const audioEstimate = scriptChars > 0 ? Math.max(1, audioCost(scriptChars, 'secretvoicer')) : 0
   const durationSec = subtitleBlocks.length > 0
     ? Math.ceil(subtitleBlocks[subtitleBlocks.length - 1].end)
     : scriptParams.duration_minutes * 60
@@ -259,7 +259,7 @@ function StepWizardInner() {
           {currentStep === 5 && <Step4Subtitles />}
           {currentStep === 6 && <Step5Images />}
           {currentStep === 7 && <Step6Video />}
-          {currentStep === 8 && <Step7Seo />}
+          {currentStep === 8 && <Step7Seo onRegisterFinish={registerSeoFinish} />}
         </div>
         <div className="hidden lg:block">
           {currentStep === 1 && (
@@ -295,7 +295,7 @@ function StepWizardInner() {
           {currentStep === 4 && (
             <StickyActionPanel
               stepLabel={t('studio.step4')}
-              costLine={scriptChars > 0 ? `Озвучка: ${audioEstimate} кр.` : undefined}
+              costLine={audioCostEstimate ? `Озвучка: ${audioCostEstimate} кр.` : undefined}
               primaryLabel={t('step3.next')}
               primaryDisabled={!audioUrl}
               onPrimary={() => setStep(5)}
@@ -307,6 +307,7 @@ function StepWizardInner() {
             <StickyActionPanel
               stepLabel={t('studio.step5')}
               primaryLabel={t('step4.next')}
+              primaryDisabled={subtitleBlocks.length === 0}
               onPrimary={() => setStep(6)}
               secondaryLabel={t('step4.back')}
               onSecondary={() => setStep(4)}
@@ -339,7 +340,7 @@ function StepWizardInner() {
               costLine={`SEO: −${CREDIT_COSTS.seo} кр.`}
               primaryLabel={t('step7.finish')}
               primaryDisabled={!seo}
-              onPrimary={() => router.push('/dashboard')}
+              onPrimary={() => seoFinishRef.current?.()}
               secondaryLabel={t('step7.back')}
               onSecondary={() => setStep(7)}
             />
