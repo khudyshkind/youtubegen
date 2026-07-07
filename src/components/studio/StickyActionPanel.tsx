@@ -6,8 +6,8 @@ interface StickyActionPanelProps {
   primaryLabel: string
   primaryDisabled?: boolean
   onPrimary: () => void
-  secondaryLabel: string
-  onSecondary: () => void
+  secondaryLabel?: string
+  onSecondary?: () => void
 }
 
 export default function StickyActionPanel({
@@ -43,13 +43,15 @@ export default function StickyActionPanel({
       >
         {primaryLabel}
       </button>
-      <button
-        type="button"
-        onClick={onSecondary}
-        className="w-full py-2.5 btn-ghost-dark font-medium rounded-xl text-sm"
-      >
-        {secondaryLabel}
-      </button>
+      {secondaryLabel && onSecondary && (
+        <button
+          type="button"
+          onClick={onSecondary}
+          className="w-full py-2.5 btn-ghost-dark font-medium rounded-xl text-sm"
+        >
+          {secondaryLabel}
+        </button>
+      )}
     </div>
   )
 }

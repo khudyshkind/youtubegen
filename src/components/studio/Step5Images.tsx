@@ -179,12 +179,11 @@ function AudioSyncPlayer({
 export default function Step5Images() {
   const {
     script, scriptParams, subtitleBlocks, projectId, audioUrl,
-    sceneImages, imageInterval, imageStyle,
-    setSceneImages, setImageInterval, setStep, setImageStyle,
+    sceneImages, imageInterval, imageStyle, imageEngine,
+    setSceneImages, setImageInterval, setStep, setImageStyle, setImageEngine,
   } = useStudioStore()
 
   const { t } = useLang()
-  const [imageEngine, setImageEngine] = useState<'flux' | 'flux_schnell' | 'gpt_mini'>('flux')
   const [showGptLimitModal, setShowGptLimitModal] = useState(false)
   // Overrides imageCount for display/cost when user picks "Reduce to 20" from modal
   const [gptCountOverride, setGptCountOverride] = useState<number | null>(null)

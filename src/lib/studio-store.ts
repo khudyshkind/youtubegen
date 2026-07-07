@@ -32,6 +32,7 @@ interface StudioState {
   sceneImages: SceneImage[]
   imageInterval: number  // seconds per scene (3–30)
   imageStyle: string | null
+  imageEngine: 'flux' | 'flux_schnell' | 'gpt_mini'
 
   // Step 6: Video
   videoUrl: string | null
@@ -72,6 +73,7 @@ interface StudioState {
   setSceneImages: (images: SceneImage[]) => void
   setImageInterval: (interval: number) => void
   setImageStyle: (style: string | null) => void
+  setImageEngine: (engine: 'flux' | 'flux_schnell' | 'gpt_mini') => void
   setVideoUrl: (url: string | null) => void
   setRenderJobId: (id: string | null) => void
   setSeo: (seo: SeoData) => void
@@ -130,6 +132,7 @@ const initialState = {
   sceneImages: [],
   imageInterval: 10,
   imageStyle: null,
+  imageEngine: 'flux' as 'flux' | 'flux_schnell' | 'gpt_mini',
   videoUrl: null,
   renderJobId: null,
   seo: null,
@@ -164,6 +167,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setSceneImages: (images) => set({ sceneImages: images }),
   setImageInterval: (interval) => set({ imageInterval: Math.max(3, Math.min(30, interval)) }),
   setImageStyle: (style) => set({ imageStyle: style }),
+  setImageEngine: (engine) => set({ imageEngine: engine }),
   setVideoUrl: (url) => set({ videoUrl: url ?? null }),
   setRenderJobId: (id) => set({ renderJobId: id }),
   setSeo: (seo) => set({ seo }),

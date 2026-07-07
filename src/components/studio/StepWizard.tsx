@@ -1,9 +1,10 @@
 'use client'
 
 import React, { Suspense, useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { useStudioStore } from '@/lib/studio-store'
 import type { Project } from '@/lib/types'
+import { CREDIT_COSTS, audioCost } from '@/lib/types'
 import Step1Topic from './Step1Topic'
 import Step2Plan from './Step2Plan'
 import Step2Script from './Step2Script'
@@ -38,9 +39,34 @@ function StepWizardInner() {
   const { currentStep, reset, setStep, setProjectId, setScriptParams, setPlanSections, setScript,
     setVoiceId, setAudioUrl, setSubtitleBlocks, sceneImages, setSceneImages, setVideoUrl, setSeo,
     setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode,
-    setRenderJobId, setProjectStatus } = useStudioStore()
+    setRenderJobId, setProjectStatus,
+    script, scriptParams, subtitleBlocks, audioUrl, seo, projectId, ownScript,
+    imageEngine, imageInterval } = useStudioStore()
 
   const { t } = useLang()
+  const router = useRouter()
+
+  // ── Panel computed values ─────────────────────────────────────────────────
+  const scriptCost = scriptParams.model === 'claude-opus' ? CREDIT_COSTS.script_opus
+    : scriptParams.model === 'gpt-4o' ? CREDIT_COSTS.script_gpt
+    : CREDIT_COSTS.script_sonnet
+  const scriptChars = script?.length ?? 0
+  const audioEstimate = scriptChars > 0 ? Math.max(1, audioCost(scriptChars, 'secretvoicer')) : 0
+  const durationSec = subtitleBlocks.length > 0
+    ? Math.ceil(subtitleBlocks[subtitleBlocks.length - 1].end)
+    : scriptParams.duration_minutes * 60
+  const imgCount = Math.max(1, Math.ceil(durationSec / imageInterval))
+  const costPerImg = imageEngine === 'gpt_mini' ? CREDIT_COSTS.image_gpt_mini
+    : imageEngine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell
+    : CREDIT_COSTS.image_flux
+  const totalImgCost = imgCount * costPerImg
+  const validImgCount = sceneImages.filter((img) => !!img.url).length
+  const videoSec = subtitleBlocks.length > 0
+    ? subtitleBlocks[subtitleBlocks.length - 1].end
+    : validImgCount * imageInterval
+  const videoCost = Math.max(1, Math.ceil(videoSec / 60)) * CREDIT_COSTS.video
+  // ─────────────────────────────────────────────────────────────────────────
+
   const [restoring, setRestoring] = useState(!!projectParam)
   const [restoreError, setRestoreError] = useState('')
 
@@ -218,29 +244,7 @@ function StepWizardInner() {
       </div>
 
       {/* Step content */}
-      {currentStep === 6 ? (
-        <div className="lg:grid lg:grid-cols-[1fr_320px] lg:gap-6 lg:items-start">
-          <div
-            className="rounded-2xl p-6"
-            style={{
-              background: 'rgba(255,255,255,0.02)',
-              border: '1px solid rgba(255,255,255,0.08)',
-            }}
-          >
-            <Step5Images />
-          </div>
-          <div className="hidden lg:block">
-            <StickyActionPanel
-              stepLabel={t('studio.step6')}
-              primaryLabel={t('step5.next')}
-              primaryDisabled={sceneImages.length === 0 || sceneImages.some((img) => !img.url)}
-              onPrimary={() => setStep(7)}
-              secondaryLabel={t('step5.back')}
-              onSecondary={() => setStep(5)}
-            />
-          </div>
-        </div>
-      ) : (
+      <div className="lg:grid lg:grid-cols-[1fr_320px] lg:gap-6 lg:items-start">
         <div
           className="rounded-2xl p-6"
           style={{
@@ -253,10 +257,95 @@ function StepWizardInner() {
           {currentStep === 3 && <Step2Script />}
           {currentStep === 4 && <Step3Voice />}
           {currentStep === 5 && <Step4Subtitles />}
+          {currentStep === 6 && <Step5Images />}
           {currentStep === 7 && <Step6Video />}
           {currentStep === 8 && <Step7Seo />}
         </div>
-      )}
+        <div className="hidden lg:block">
+          {currentStep === 1 && (
+            <StickyActionPanel
+              stepLabel={t('studio.step1')}
+              costLine={ownScript ? undefined : `Генерация сценария: −${scriptCost} кр.`}
+              primaryLabel={t('step1.next')}
+              primaryDisabled={!projectId}
+              onPrimary={() => setStep(2)}
+            />
+          )}
+          {currentStep === 2 && (
+            <StickyActionPanel
+              stepLabel={t('studio.step2')}
+              costLine={ownScript ? undefined : `План: −${CREDIT_COSTS.plan} кр.`}
+              primaryLabel={t('plan.next')}
+              onPrimary={() => setStep(3)}
+              secondaryLabel={t('plan.back')}
+              onSecondary={() => setStep(1)}
+            />
+          )}
+          {currentStep === 3 && (
+            <StickyActionPanel
+              stepLabel={t('studio.step3')}
+              costLine={`Перегенерация: −${scriptCost} кр.`}
+              primaryLabel={t('step2.next')}
+              primaryDisabled={!script?.trim()}
+              onPrimary={() => setStep(4)}
+              secondaryLabel={t('step2.back')}
+              onSecondary={() => setStep(2)}
+            />
+          )}
+          {currentStep === 4 && (
+            <StickyActionPanel
+              stepLabel={t('studio.step4')}
+              costLine={scriptChars > 0 ? `Озвучка: ${audioEstimate} кр.` : undefined}
+              primaryLabel={t('step3.next')}
+              primaryDisabled={!audioUrl}
+              onPrimary={() => setStep(5)}
+              secondaryLabel={t('step3.back')}
+              onSecondary={() => setStep(3)}
+            />
+          )}
+          {currentStep === 5 && (
+            <StickyActionPanel
+              stepLabel={t('studio.step5')}
+              primaryLabel={t('step4.next')}
+              onPrimary={() => setStep(6)}
+              secondaryLabel={t('step4.back')}
+              onSecondary={() => setStep(4)}
+            />
+          )}
+          {currentStep === 6 && (
+            <StickyActionPanel
+              stepLabel={t('studio.step6')}
+              costLine={`Итого: ${totalImgCost} кр.`}
+              primaryLabel={t('step5.next')}
+              primaryDisabled={sceneImages.length === 0 || sceneImages.some((img) => !img.url)}
+              onPrimary={() => setStep(7)}
+              secondaryLabel={t('step5.back')}
+              onSecondary={() => setStep(5)}
+            />
+          )}
+          {currentStep === 7 && (
+            <StickyActionPanel
+              stepLabel={t('studio.step7')}
+              costLine={`Сборка: ~${videoCost} кр.`}
+              primaryLabel={t('step6.next')}
+              onPrimary={() => setStep(8)}
+              secondaryLabel={t('step6.back')}
+              onSecondary={() => setStep(6)}
+            />
+          )}
+          {currentStep === 8 && (
+            <StickyActionPanel
+              stepLabel={t('studio.step8')}
+              costLine={`SEO: −${CREDIT_COSTS.seo} кр.`}
+              primaryLabel={t('step7.finish')}
+              primaryDisabled={!seo}
+              onPrimary={() => router.push('/dashboard')}
+              secondaryLabel={t('step7.back')}
+              onSecondary={() => setStep(7)}
+            />
+          )}
+        </div>
+      </div>
 
       {currentStep > 1 && (
         <div className="text-center mt-4">
