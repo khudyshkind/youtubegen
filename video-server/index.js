@@ -2381,6 +2381,91 @@ cron.schedule('0 * * * *', async () => {
   try { await postFromQueue() } catch (err) { console.error('[cron/plan]', err.message); Sentry.captureException(err, { extra: { cron: 'postFromQueue' } }) }
 }, { timezone: 'UTC' })
 
+// ── Watchdog: stuck projects / audio_jobs ─────────────────────────────────────
+const WATCHDOG_DRY_RUN            = process.env.WATCHDOG_DRY_RUN !== 'false'
+const WATCHDOG_IMAGES_TIMEOUT_MIN = parseInt(process.env.WATCHDOG_IMAGES_TIMEOUT_MIN || '15', 10)
+const WATCHDOG_VIDEO_TIMEOUT_MIN  = parseInt(process.env.WATCHDOG_VIDEO_TIMEOUT_MIN  || '40', 10)
+const WATCHDOG_AUDIO_TIMEOUT_MIN  = parseInt(process.env.WATCHDOG_AUDIO_TIMEOUT_MIN  || '20', 10)
+
+async function runWatchdog() {
+  const tag = WATCHDOG_DRY_RUN ? '[watchdog/dry]' : '[watchdog]'
+  const now = Date.now()
+  const cutoffImages = new Date(now - WATCHDOG_IMAGES_TIMEOUT_MIN * 60_000).toISOString()
+  const cutoffVideo  = new Date(now - WATCHDOG_VIDEO_TIMEOUT_MIN  * 60_000).toISOString()
+  const cutoffAudio  = new Date(now - WATCHDOG_AUDIO_TIMEOUT_MIN  * 60_000).toISOString()
+
+  const resets = []
+
+  try {
+    const rows = await sbGet('projects',
+      `status=eq.generating_images&updated_at=lt.${cutoffImages}&select=id,updated_at`)
+    for (const row of rows) {
+      const ageMin = Math.round((now - new Date(row.updated_at).getTime()) / 60_000)
+      console.log(`${tag} project ${row.id} stuck in generating_images ${ageMin} min`)
+      if (!WATCHDOG_DRY_RUN) await sbPatch('projects', `id=eq.${row.id}`, { status: 'failed' })
+      resets.push({ type: 'images', id: row.id, ageMin })
+    }
+  } catch (e) { console.warn(`${tag} images query failed:`, e.message) }
+
+  try {
+    const rows = await sbGet('projects',
+      `status=eq.generating_video&updated_at=lt.${cutoffVideo}&select=id,updated_at`)
+    for (const row of rows) {
+      const ageMin = Math.round((now - new Date(row.updated_at).getTime()) / 60_000)
+      console.log(`${tag} project ${row.id} stuck in generating_video ${ageMin} min`)
+      if (!WATCHDOG_DRY_RUN) await sbPatch('projects', `id=eq.${row.id}`, { status: 'failed' })
+      resets.push({ type: 'video', id: row.id, ageMin })
+    }
+  } catch (e) { console.warn(`${tag} video query failed:`, e.message) }
+
+  try {
+    const rows = await sbGet('audio_jobs',
+      `status=in.(pending,processing)&updated_at=lt.${cutoffAudio}&select=id,project_id,status,updated_at`)
+    for (const row of rows) {
+      const ageMin = Math.round((now - new Date(row.updated_at).getTime()) / 60_000)
+      console.log(`${tag} audio_job ${row.id} stuck in ${row.status} ${ageMin} min (project ${row.project_id})`)
+      if (!WATCHDOG_DRY_RUN) {
+        await updateAudioJob(row.id, { status: 'failed', error: `watchdog: stuck in '${row.status}' for ${ageMin} min` })
+        if (row.project_id) await sbPatch('projects', `id=eq.${row.project_id}`, { status: 'failed' })
+      }
+      resets.push({ type: 'audio', id: row.id, project_id: row.project_id, jobStatus: row.status, ageMin })
+    }
+  } catch (e) { console.warn(`${tag} audio query failed:`, e.message) }
+
+  if (resets.length === 0) { console.log(`${tag} clean`); return }
+
+  if (!OWNER_ID) return
+  const dryLabel = WATCHDOG_DRY_RUN ? ' [DRY RUN]' : ''
+  if (resets.length <= 5) {
+    for (const r of resets) {
+      const emoji   = r.type === 'audio' ? '🔊' : r.type === 'video' ? '🎬' : '🖼'
+      const subject = r.type === 'audio'
+        ? `audio_job ${r.id.slice(0, 8)} (${r.jobStatus}, project ${(r.project_id ?? '?').slice(0, 8)})`
+        : `project ${r.id.slice(0, 8)} (generating_${r.type})`
+      const msg = `${emoji} Watchdog${dryLabel}\n${subject} stuck ${r.ageMin} min → reset to failed`
+      await tgApi('sendMessage', { chat_id: OWNER_ID, text: msg })
+        .catch(e => console.warn(`${tag} tg notify failed:`, e.message))
+    }
+  } else {
+    const imgs   = resets.filter(r => r.type === 'images').length
+    const vids   = resets.filter(r => r.type === 'video').length
+    const audios = resets.filter(r => r.type === 'audio').length
+    const lines  = [
+      imgs   ? `🖼 generating_images: ${imgs}`  : '',
+      vids   ? `🎬 generating_video: ${vids}`   : '',
+      audios ? `🔊 audio_jobs: ${audios}`        : '',
+    ].filter(Boolean).join('\n')
+    await tgApi('sendMessage', { chat_id: OWNER_ID, text: `⚠️ Watchdog${dryLabel}\nСброшено ${resets.length} задач:\n${lines}` })
+      .catch(e => console.warn(`${tag} tg notify failed:`, e.message))
+  }
+}
+
+// ── Watchdog cron — every 10 minutes ─────────────────────────────────────────
+cron.schedule('*/10 * * * *', async () => {
+  console.log('[cron] watchdog')
+  try { await runWatchdog() } catch (err) { console.error('[cron/watchdog]', err.message); Sentry.captureException(err, { extra: { cron: 'runWatchdog' } }) }
+}, { timezone: 'UTC' })
+
 // ── Vercel deployment polling ─────────────────────────────────────────────────
 async function checkVercelDeploy() {
   if (!VERCEL_TOKEN) { console.log('[vercel] VERCEL_TOKEN not set, skipping'); return }
