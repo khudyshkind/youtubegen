@@ -4071,6 +4071,13 @@ async function processAudioJob(job) {
     const ttsText = text
       .replace(/\[(?:Сцена|Scene|Секция|Section)\s+\d+[^\]]*\]\s*/gi, '')
       .replace(/\[\s*(?:\.{2,}|…+)\s*\]\s*/g, '')
+      // Bare heading lines: «Сцена 1:», «Глава 3.», «Part 2 — Title», «СЦЕНА 4», etc.
+      // Short tail (≤60 chars) → delete whole line; long tail → strip prefix, keep content.
+      // [ \t]* (not \s*) prevents consuming the newline into the captured tail.
+      .replace(
+        /^(?:Сцена|Секция|Глава|Часть|Scene|Section|Chapter|Part)[ \t]+\d+[ \t]*[:.\-–—]?[ \t]*(.*)$/gim,
+        (_, tail) => (tail.trim().length <= 60 ? '' : tail.trim()),
+      )
       .replace(/^#{1,6}\s+.+$/gm, '')
       .replace(/^(?:-{3,}|\*{3,}|_{3,})\s*$/gm, '')
       .replace(/\*\*([^*\n]+)\*\*/g, '$1')
