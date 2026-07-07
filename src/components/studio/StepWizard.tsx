@@ -12,6 +12,7 @@ import Step4Subtitles from './Step4Subtitles'
 import Step5Images from './Step5Images'
 import Step6Video from './Step6Video'
 import Step7Seo from './Step7Seo'
+import StickyActionPanel from './StickyActionPanel'
 import { useLang } from '@/hooks/useLang'
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
@@ -35,7 +36,7 @@ function StepWizardInner() {
   const projectParam = searchParams.get('project')
 
   const { currentStep, reset, setStep, setProjectId, setScriptParams, setPlanSections, setScript,
-    setVoiceId, setAudioUrl, setSubtitleBlocks, setSceneImages, setVideoUrl, setSeo,
+    setVoiceId, setAudioUrl, setSubtitleBlocks, sceneImages, setSceneImages, setVideoUrl, setSeo,
     setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode,
     setRenderJobId, setProjectStatus } = useStudioStore()
 
@@ -217,22 +218,45 @@ function StepWizardInner() {
       </div>
 
       {/* Step content */}
-      <div
-        className="rounded-2xl p-6"
-        style={{
-          background: 'rgba(255,255,255,0.02)',
-          border: '1px solid rgba(255,255,255,0.08)',
-        }}
-      >
-        {currentStep === 1 && <Step1Topic />}
-        {currentStep === 2 && <Step2Plan />}
-        {currentStep === 3 && <Step2Script />}
-        {currentStep === 4 && <Step3Voice />}
-        {currentStep === 5 && <Step4Subtitles />}
-        {currentStep === 6 && <Step5Images />}
-        {currentStep === 7 && <Step6Video />}
-        {currentStep === 8 && <Step7Seo />}
-      </div>
+      {currentStep === 6 ? (
+        <div className="lg:grid lg:grid-cols-[1fr_320px] lg:gap-6 lg:items-start">
+          <div
+            className="rounded-2xl p-6"
+            style={{
+              background: 'rgba(255,255,255,0.02)',
+              border: '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
+            <Step5Images />
+          </div>
+          <div className="hidden lg:block">
+            <StickyActionPanel
+              stepLabel={t('studio.step6')}
+              primaryLabel={t('step5.next')}
+              primaryDisabled={sceneImages.length === 0 || sceneImages.some((img) => !img.url)}
+              onPrimary={() => setStep(7)}
+              secondaryLabel={t('step5.back')}
+              onSecondary={() => setStep(5)}
+            />
+          </div>
+        </div>
+      ) : (
+        <div
+          className="rounded-2xl p-6"
+          style={{
+            background: 'rgba(255,255,255,0.02)',
+            border: '1px solid rgba(255,255,255,0.08)',
+          }}
+        >
+          {currentStep === 1 && <Step1Topic />}
+          {currentStep === 2 && <Step2Plan />}
+          {currentStep === 3 && <Step2Script />}
+          {currentStep === 4 && <Step3Voice />}
+          {currentStep === 5 && <Step4Subtitles />}
+          {currentStep === 7 && <Step6Video />}
+          {currentStep === 8 && <Step7Seo />}
+        </div>
+      )}
 
       {currentStep > 1 && (
         <div className="text-center mt-4">

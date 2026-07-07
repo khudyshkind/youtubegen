@@ -930,7 +930,7 @@ export default function Step5Images() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
               {sceneImages.map((img, arrayIdx) => {
                 const isLoading = regenLoading.has(img.scene_index)
                 const isEditing = editingIdx === img.scene_index
@@ -941,7 +941,7 @@ export default function Step5Images() {
                 return (
                   <div
                     key={img.scene_index}
-                    className={`flex flex-col gap-2 rounded-xl transition-all ${isEditing ? 'col-span-2 sm:col-span-3' : ''} ${canSeek ? 'cursor-pointer' : ''}`}
+                    className={`flex flex-col gap-2 rounded-xl transition-all ${isEditing ? 'col-span-full' : ''} ${canSeek ? 'cursor-pointer' : ''}`}
                     onClick={canSeek ? () => seekAndPlay(img.timecode_start) : undefined}
                     style={
                       !img.url && !isEditing
