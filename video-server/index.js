@@ -4124,10 +4124,16 @@ async function processAudioJob(job) {
     }
 
     // 7. Synthesize all chunks in parallel (max 4 concurrent), order preserved by runLimited
+    let doneChunks = 0
     const tasks = chunks.map((chunk, idx) => async () => {
       console.log(`[audio-job:${jobId}] chunk ${idx + 1}/${chunks.length} start`)
       const buf = await synthesizeFn(chunk, idx)
+      doneChunks++
       console.log(`[audio-job:${jobId}] chunk ${idx + 1}/${chunks.length} done (${buf.byteLength} B)`)
+      if (chunks.length > 1) {
+        const pct = Math.round(doneChunks / chunks.length * 100)
+        await updateAudioJob(jobId, { progress: pct })
+      }
       return buf
     })
     const buffers = await runLimited(tasks, 4)
