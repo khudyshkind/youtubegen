@@ -756,7 +756,7 @@ export async function POST(request: NextRequest) {
         if (project_id) {
           await supabase
             .from('projects')
-            .update({ scene_images: validImages, image_interval: interval, image_style: image_style ?? null, status: 'generating_video' })
+            .update({ scene_images: validImages, image_interval: interval, image_style: image_style ?? null, status: 'draft' })
             .eq('id', project_id)
             .eq('user_id', user.id)
         }

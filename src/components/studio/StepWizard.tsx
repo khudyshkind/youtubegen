@@ -41,7 +41,7 @@ function StepWizardInner() {
     setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode,
     setRenderJobId, setProjectStatus,
     script, scriptParams, subtitleBlocks, audioUrl, seo, projectId, ownScript,
-    imageEngine, imageInterval, audioCostEstimate } = useStudioStore()
+    imageEngine, imageInterval, audioCostEstimate, setOwnScript } = useStudioStore()
 
   const { t } = useLang()
   const router = useRouter()
@@ -118,6 +118,8 @@ function StepWizardInner() {
         console.log('[studio] loaded data:', p.topic)
         setProjectId(p.id)
         setScriptParams({ topic: p.topic, duration_minutes: p.duration_minutes, ...(p.language ? { language: p.language as import('@/lib/types').ScriptLanguage } : {}) })
+        // 'Свой текст' is a hardcoded sentinel (Step1Topic.tsx:254), not localized
+        if (p.topic === 'Свой текст') setOwnScript(true)
         if (p.plan_sections) setPlanSections(p.plan_sections)
         if (p.script) setScript(p.script)
         if (p.voice_id) setVoiceId(p.voice_id)

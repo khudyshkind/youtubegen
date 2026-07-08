@@ -83,6 +83,7 @@ export async function PATCH(
     const { title, generate_from } = body
 
     let finalTitle: string | undefined
+    let detectedLanguage: string | null = null
 
     if (generate_from?.trim()) {
       const textSnippet = generate_from.trim().slice(0, 1500)
@@ -91,15 +92,23 @@ export async function PATCH(
         const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
         const msg = await client.messages.create({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 30,
+          max_tokens: 60,
           messages: [{
             role: 'user',
-            content: `Придумай краткое название для видео по этому тексту (3-6 слов). Верни ТОЛЬКО название, без кавычек, без пояснений.\n\nТекст:\n${textSnippet}`,
+            content: `Analyze this video script. Return ONLY valid JSON, no markdown:\n{"title":"<3-6 word video title in the script language>","language":"<ISO 639-1 code, e.g. en, ru, es>"}\n\nScript:\n${textSnippet}`,
           }],
         })
-        const generated = msg.content[0].type === 'text' ? msg.content[0].text.trim() : ''
-        finalTitle = generated || fallback
-      } catch {
+        const raw = msg.content[0].type === 'text' ? msg.content[0].text.trim() : ''
+        try {
+          const parsed = JSON.parse(raw) as { title?: string; language?: string }
+          finalTitle = (parsed.title?.trim()) || fallback
+          detectedLanguage = parsed.language?.toLowerCase().slice(0, 5) ?? null
+          console.log(`[projects/:id PATCH] detected title="${finalTitle}" language="${detectedLanguage}"`)
+        } catch {
+          finalTitle = raw.replace(/^["{]|["}]$/g, '').trim() || fallback
+        }
+      } catch (e) {
+        console.error('[projects/:id PATCH] Haiku failed, using fallback title:', e instanceof Error ? e.message : e)
         finalTitle = fallback
       }
     } else if (title?.trim()) {
@@ -112,9 +121,12 @@ export async function PATCH(
 
     if (finalTitle.length > 100) finalTitle = finalTitle.slice(0, 97) + '…'
 
+    const updatePayload: Record<string, unknown> = { title: finalTitle }
+    if (detectedLanguage) updatePayload.language = detectedLanguage
+
     const { error } = await supabase
       .from('projects')
-      .update({ title: finalTitle })
+      .update(updatePayload)
       .eq('id', id)
       .eq('user_id', user.id)
 
@@ -122,7 +134,7 @@ export async function PATCH(
       return NextResponse.json({ ok: false, error: 'Ошибка обновления проекта' }, { status: 500 })
     }
 
-    return NextResponse.json({ ok: true, data: { title: finalTitle } })
+    return NextResponse.json({ ok: true, data: { title: finalTitle, language: detectedLanguage } })
   } catch (err) {
     console.error('[projects/:id PATCH]', err)
     return NextResponse.json({ ok: false, error: 'Внутренняя ошибка' }, { status: 500 })

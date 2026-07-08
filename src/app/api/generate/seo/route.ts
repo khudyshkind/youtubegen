@@ -127,8 +127,18 @@ export async function POST(request: NextRequest) {
     const check = await requireCredits(user.id, 'seo', supabase)
     if (!check.ok) return NextResponse.json(check, { status: 402 })
 
-    const { script, topic, project_id, duration_minutes = 5, subtitle_blocks, lang }: SeoRequest =
+    const { script, topic, project_id, duration_minutes = 5, subtitle_blocks, lang: clientLang }: SeoRequest =
       await request.json()
+
+    // Guard: if client sends lang but project has no confirmed language in DB, let model auto-detect
+    let lang = clientLang
+    if (clientLang && project_id) {
+      const { data: projRow } = await supabase.from('projects').select('language').eq('id', project_id).eq('user_id', user.id).single()
+      if (projRow !== null && projRow.language === null) {
+        console.log(`[seo] client lang=${clientLang} ignored: projects.language is null — model will auto-detect`)
+        lang = undefined
+      }
+    }
 
     // Build timeline: real subtitles take priority over estimated scene markers
     const hasRealSubtitles = subtitle_blocks && subtitle_blocks.length > 0
@@ -158,7 +168,7 @@ ${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, descrip
       system: [{ type: 'text', text: SEO_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: userMessage }],
     })
-    console.log('[seo] cache input:', message.usage.input_tokens, 'cache_read:', message.usage.cache_read_input_tokens ?? 0, 'cache_write:', message.usage.cache_creation_input_tokens ?? 0)
+    console.log(`[seo] lang=${lang ?? 'auto'} cache input:`, message.usage.input_tokens, 'cache_read:', message.usage.cache_read_input_tokens ?? 0, 'cache_write:', message.usage.cache_creation_input_tokens ?? 0)
 
     const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : ''
 
