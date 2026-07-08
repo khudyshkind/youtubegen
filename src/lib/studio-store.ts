@@ -32,7 +32,7 @@ interface StudioState {
   sceneImages: SceneImage[]
   imageInterval: number  // seconds per scene (3–30)
   imageStyle: string | null
-  imageEngine: 'flux' | 'flux_schnell' | 'gpt_mini'
+  imageEngine: 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana'
   audioCostEstimate: number | null
 
   // Step 6: Video
@@ -74,7 +74,7 @@ interface StudioState {
   setSceneImages: (images: SceneImage[]) => void
   setImageInterval: (interval: number) => void
   setImageStyle: (style: string | null) => void
-  setImageEngine: (engine: 'flux' | 'flux_schnell' | 'gpt_mini') => void
+  setImageEngine: (engine: 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana') => void
   setAudioCostEstimate: (v: number | null) => void
   setVideoUrl: (url: string | null) => void
   setRenderJobId: (id: string | null) => void
@@ -134,7 +134,7 @@ const initialState = {
   sceneImages: [],
   imageInterval: 10,
   imageStyle: null,
-  imageEngine: 'flux' as 'flux' | 'flux_schnell' | 'gpt_mini',
+  imageEngine: 'flux' as 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana',
   audioCostEstimate: null,
   videoUrl: null,
   renderJobId: null,

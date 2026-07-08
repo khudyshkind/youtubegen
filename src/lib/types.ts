@@ -32,7 +32,8 @@ export const CREDIT_COSTS = {
   image: 780,           // legacy alias → Flux
   image_flux: 780,
   image_flux_schnell: 100,
-  image_gpt_mini: 1230, // gpt-image-2 medium 1536×1024 @ $0.041
+  image_gpt_mini: 1230,    // gpt-image-2 medium 1536×1024 @ $0.041
+  image_nano_banana: 1170, // fal-ai/nano-banana @ $0.039
   style_analysis: 60,
 
   // Video (per-minute rate; billing logic updated separately)
@@ -40,7 +41,7 @@ export const CREDIT_COSTS = {
 
   // SEO / thumbnail
   seo:       750,
-  thumbnail: 870,
+  thumbnail: 2400, // nano-banana-2 @ $0.08 × 30000 = 2400
 
   // Text tools
   humanize:  660,
@@ -245,7 +246,7 @@ export interface SceneImage {
   scene?: string
   timecode_start?: string
   timecode_end?: string
-  engine?: 'flux' | 'flux_schnell' | 'gpt_mini'
+  engine?: 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana'
 }
 
 export interface SeoData {

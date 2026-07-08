@@ -166,6 +166,53 @@ Write a thumbnail image prompt where the title "${title}" is naturally integrate
   }
 }
 
+// ─── Cascade background generator: nano-banana-2 → nano-banana → flux/dev ────
+//
+// Mode A and C always use this cascade. Mode B (AI text baked in) is unchanged.
+// On each failure the next engine is tried and logged; flux/dev is the guaranteed
+// last-resort so the route can never fail due to a nano-banana outage.
+
+async function generateThumbnailBg(prompt: string): Promise<string> {
+  fal.config({ credentials: env('FAL_KEY') })
+
+  // Primary: nano-banana-2 ($0.08/img, best quality + text)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await (fal.subscribe as any)('fal-ai/nano-banana-2', {
+      input: { prompt, aspect_ratio: '16:9', resolution: '1K', num_images: 1, output_format: 'jpeg' },
+    }) as { data: { images: Array<{ url: string }> } }
+    const url = r.data?.images?.[0]?.url
+    if (!url) throw new Error('no image returned')
+    console.log('[thumbnail] nano-banana-2 succeeded')
+    return await fetchAsBase64(url)
+  } catch (e) {
+    console.warn('[thumbnail] nano-banana-2 failed, falling back to nano-banana:', e instanceof Error ? e.message : e)
+  }
+
+  // Secondary: nano-banana v1
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await (fal.subscribe as any)('fal-ai/nano-banana', {
+      input: { prompt, aspect_ratio: '16:9', num_images: 1, output_format: 'jpeg' },
+    }) as { data: { images: Array<{ url: string }> } }
+    const url = r.data?.images?.[0]?.url
+    if (!url) throw new Error('no image returned')
+    console.log('[thumbnail] nano-banana fallback succeeded')
+    return await fetchAsBase64(url)
+  } catch (e) {
+    console.warn('[thumbnail] nano-banana failed, falling back to flux/dev:', e instanceof Error ? e.message : e)
+  }
+
+  // Final: flux/dev (guaranteed)
+  const r = await fal.subscribe('fal-ai/flux/dev', {
+    input: { prompt, image_size: { width: 1280, height: 720 }, num_images: 1, num_inference_steps: 35 },
+  }) as { data: { images: Array<{ url: string }> } }
+  const url = r.data?.images?.[0]?.url
+  if (!url) throw new Error('Flux не вернул изображение')
+  console.log('[thumbnail] flux/dev fallback succeeded')
+  return await fetchAsBase64(url)
+}
+
 // ─── Mode A/C: background-only Flux prompt ────────────────────────────────────
 
 async function generateFluxPromptBackground(
@@ -529,21 +576,8 @@ export async function POST(request: NextRequest) {
           : await generateGptThumbnail(prompt)
       } else {
         const fluxPrompt = text_mode === 'ai' ? prompt : `${prompt}, NO TEXT, NO WATERMARKS`
-        console.log(`[thumbnail] mode=${text_mode} engine=flux prompt: ${fluxPrompt}`)
-
-        fal.config({ credentials: env('FAL_KEY') })
-        const result = await fal.subscribe('fal-ai/flux/dev', {
-          input: {
-            prompt: fluxPrompt,
-            image_size: { width: 1280, height: 720 },
-            num_images: 1,
-            num_inference_steps: 35,
-          },
-        }) as { data: FalImageResult }
-
-        const falUrl = result.data?.images?.[0]?.url
-        if (!falUrl) throw new Error('Flux не вернул изображение')
-        bgDataUrl = await fetchAsBase64(falUrl)
+        console.log(`[thumbnail] mode=${text_mode} engine=nano-banana-2 (cascade) prompt: ${fluxPrompt}`)
+        bgDataUrl = await generateThumbnailBg(fluxPrompt)
       }
 
       // Detect actual format to set correct content-type (GPT/Gemini return PNG, Flux JPEG)

@@ -60,8 +60,9 @@ function StepWizardInner() {
     ? Math.ceil(subtitleBlocks[subtitleBlocks.length - 1].end)
     : scriptParams.duration_minutes * 60
   const imgCount = Math.max(1, Math.ceil(durationSec / imageInterval))
-  const costPerImg = imageEngine === 'gpt_mini' ? CREDIT_COSTS.image_gpt_mini
+  const costPerImg = imageEngine === 'gpt_mini'    ? CREDIT_COSTS.image_gpt_mini
     : imageEngine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell
+    : imageEngine === 'nano_banana'  ? CREDIT_COSTS.image_nano_banana
     : CREDIT_COSTS.image_flux
   const totalImgCost = imgCount * costPerImg
   const validImgCount = sceneImages.filter((img) => !!img.url).length

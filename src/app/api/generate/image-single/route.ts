@@ -40,7 +40,7 @@ async function uploadFalToStorage(
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-type ImageEngine = 'flux' | 'flux_schnell' | 'gpt_mini'
+type ImageEngine = 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana'
 
 interface SingleImageRequest {
   project_id: string
@@ -126,6 +126,31 @@ async function generateFluxSchnell(
   return uploadFalToStorage(falUrl, storagePath, 'image/jpeg', serviceClient)
 }
 
+async function generateNanoBanana(
+  prompt: string,
+  userId: string,
+  projectId: string,
+  sceneIndex: number,
+  serviceClient: ReturnType<typeof createServiceClient>,
+): Promise<string> {
+  fal.config({ credentials: env('FAL_KEY') })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = await (fal.subscribe as any)('fal-ai/nano-banana', {
+    input: {
+      prompt: `${prompt}, NO TEXT, NO WATERMARKS`,
+      aspect_ratio: '16:9',
+      num_images: 1,
+      output_format: 'jpeg',
+    },
+  }) as { data: FalImageResult }
+
+  const falUrl = result.data?.images?.[0]?.url ?? null
+  if (!falUrl) throw new Error('Nano Banana: no image returned')
+
+  const storagePath = `${userId}/${projectId}/scene_nano_${sceneIndex}.jpg`
+  return uploadFalToStorage(falUrl, storagePath, 'image/jpeg', serviceClient)
+}
+
 async function generateGptMini(
   prompt: string,
   userId: string,
@@ -190,7 +215,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const costKey = engine === 'gpt_mini' ? 'image_gpt_mini' : engine === 'flux_schnell' ? 'image_flux_schnell' : 'image_flux'
+    const costKey = engine === 'gpt_mini'    ? 'image_gpt_mini'    :
+                   engine === 'flux_schnell' ? 'image_flux_schnell' :
+                   engine === 'nano_banana'  ? 'image_nano_banana'  :
+                   'image_flux'
     const cost = CREDIT_COSTS[costKey]
 
     const check = await requireCredits(user.id, costKey, supabase)
@@ -223,6 +251,8 @@ export async function POST(request: NextRequest) {
       ? await generateGptMini(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
       : engine === 'flux_schnell'
       ? await generateFluxSchnell(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
+      : engine === 'nano_banana'
+      ? await generateNanoBanana(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
       : await generateFlux(enhancedPrompt, styleConfig.negativePrompt, user.id, project_id, scene_index, serviceClient)
 
     const newImage: SceneImage = {

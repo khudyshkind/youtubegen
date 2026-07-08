@@ -11,6 +11,8 @@ import { useLang } from '@/hooks/useLang'
 
 const INTERVAL_PRESETS = [5, 8, 10, 15, 20] as const
 const MAX_GPT_MINI_SAFE = 20
+// Engines hidden from UI cards but still accepted by the server (backward-compat reserve)
+const HIDDEN_ENGINES = ['gpt_mini'] as const
 // Styles where Schnell (4 inference steps) produces visible artifacts on faces/hands
 const RISKY_STYLES_FOR_SCHNELL = ['realistic', 'cinematic'] as const
 
@@ -231,6 +233,7 @@ export default function Step5Images() {
   const costPerImage =
     imageEngine === 'gpt_mini'     ? CREDIT_COSTS.image_gpt_mini :
     imageEngine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell :
+    imageEngine === 'nano_banana'  ? CREDIT_COSTS.image_nano_banana :
     CREDIT_COSTS.image_flux
   // displayCount respects the "reduce to 20" override; actual imageCount is unaffected
   const displayCount = gptCountOverride ?? imageCount
@@ -570,10 +573,11 @@ export default function Step5Images() {
         <p className="text-sm font-semibold text-slate-300">{t('step5.engine_label')}</p>
         <div className="grid grid-cols-3 gap-2">
           {([
-            { id: 'flux',         name: t('step5.engine_flux_name'),     desc: t('step5.engine_flux_desc')     },
-            { id: 'flux_schnell', name: t('step5.engine_schnell_name'),   desc: t('step5.engine_schnell_desc')  },
-            { id: 'gpt_mini',     name: t('step5.engine_gpt_name'),       desc: t('step5.engine_gpt_desc')      },
-          ] as const).map((eng) => {
+            { id: 'flux',         name: t('step5.engine_flux_name'),     desc: t('step5.engine_flux_desc')    },
+            { id: 'flux_schnell', name: t('step5.engine_schnell_name'),  desc: t('step5.engine_schnell_desc') },
+            { id: 'nano_banana',  name: t('step5.engine_nano_name'),     desc: t('step5.engine_nano_desc')    },
+            { id: 'gpt_mini',     name: t('step5.engine_gpt_name'),      desc: t('step5.engine_gpt_desc')     },
+          ] as const).filter((eng) => !(HIDDEN_ENGINES as readonly string[]).includes(eng.id)).map((eng) => {
             const active = imageEngine === eng.id
             return (
               <button

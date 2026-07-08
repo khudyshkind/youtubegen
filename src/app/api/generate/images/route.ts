@@ -178,7 +178,7 @@ ${fullText.slice(0, 3000)}`,
   }
 }
 
-type ImageEngine = 'flux' | 'flux_schnell' | 'gpt_mini'
+type ImageEngine = 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana'
 
 interface ImagesRequest {
   script: string
@@ -458,6 +458,32 @@ async function generateImageFluxSchnell(
   return uploadFalToStorage(falUrl, storagePath, 'image/jpeg', serviceClient)
 }
 
+async function generateImageNanoBanana(
+  prompt: string,
+  userId: string,
+  projectId: string | undefined,
+  sceneIndex: number,
+  serviceClient: ReturnType<typeof createServiceClient>,
+): Promise<string | null> {
+  fal.config({ credentials: env('FAL_KEY') })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = await (fal.subscribe as any)('fal-ai/nano-banana', {
+    input: {
+      prompt: `${prompt}, NO TEXT, NO NUMBERS, NO DIGITS, NO WATERMARKS`,
+      aspect_ratio: '16:9',
+      num_images: 1,
+      output_format: 'jpeg',
+    },
+  }) as { data: FalImageResult }
+
+  const falUrl = result.data?.images?.[0]?.url ?? null
+  if (!falUrl) throw new Error('Nano Banana: no image returned')
+  if (!projectId) return falUrl
+
+  const storagePath = `${userId}/${projectId}/scene_nano_${sceneIndex}.jpg`
+  return uploadFalToStorage(falUrl, storagePath, 'image/jpeg', serviceClient)
+}
+
 async function generateImageFlux(
   prompt: string,
   negativePrompt: string,
@@ -587,6 +613,7 @@ export async function POST(request: NextRequest) {
   const costPerImage =
     engine === 'gpt_mini'     ? CREDIT_COSTS.image_gpt_mini :
     engine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell :
+    engine === 'nano_banana'  ? CREDIT_COSTS.image_nano_banana :
     CREDIT_COSTS.image_flux
   const totalCost = costPerImage * count
 
@@ -687,6 +714,8 @@ export async function POST(request: NextRequest) {
                   ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
                   : engine === 'flux_schnell'
                   ? await generateImageFluxSchnell(styledPrompt, user.id, project_id, i, serviceClient)
+                  : engine === 'nano_banana'
+                  ? await generateImageNanoBanana(styledPrompt, user.id, project_id, i, serviceClient)
                   : await generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient)
                 const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine }
                 sceneImages[i] = img
