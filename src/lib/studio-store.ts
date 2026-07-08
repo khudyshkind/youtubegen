@@ -6,6 +6,11 @@ import type {
 
 export type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 
+/** Append ?t=<ts> to a raw audio URL for cache-busting. Strips any existing ?t= first. */
+export function stampAudioUrl(rawUrl: string, ts: number): string {
+  return `${rawUrl.split('?')[0]}?t=${ts}`
+}
+
 interface StudioState {
   currentStep: Step
   projectId: string | null
@@ -27,6 +32,8 @@ interface StudioState {
   // Step 4: Subtitles
   subtitleBlocks: SubtitleBlock[]
   subtitleStyle: SubtitleStyle
+  // ?t= timestamp from audioUrl when subtitles were last generated (session-only)
+  subtitleAudioTs: number | null
 
   // Step 5: Illustrations
   sceneImages: SceneImage[]
@@ -70,6 +77,7 @@ interface StudioState {
   setVoiceId: (id: string) => void          // backwards-compat for DB restore
   setAudioUrl: (url: string) => void
   setSubtitleBlocks: (blocks: SubtitleBlock[]) => void
+  setSubtitleAudioTs: (ts: number | null) => void
   setSubtitleStyle: (style: Partial<SubtitleStyle>) => void
   setSceneImages: (images: SceneImage[]) => void
   setImageInterval: (interval: number) => void
@@ -131,6 +139,7 @@ const initialState = {
   audioUrl: null,
   subtitleBlocks: [],
   subtitleStyle: defaultSubtitleStyle,
+  subtitleAudioTs: null,
   sceneImages: [],
   imageInterval: 10,
   imageStyle: null,
@@ -165,6 +174,7 @@ export const useStudioStore = create<StudioState>((set) => ({
     set((s) => ({ voiceSettings: { ...s.voiceSettings, voiceId: id } })),
   setAudioUrl: (url) => set({ audioUrl: url }),
   setSubtitleBlocks: (blocks) => set({ subtitleBlocks: blocks }),
+  setSubtitleAudioTs: (ts) => set({ subtitleAudioTs: ts }),
   setSubtitleStyle: (style) =>
     set((s) => ({ subtitleStyle: { ...s.subtitleStyle, ...style } })),
   setSceneImages: (images) => set({ sceneImages: images }),

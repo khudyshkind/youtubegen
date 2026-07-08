@@ -721,7 +721,8 @@ export async function POST(request: NextRequest) {
                   : engine === 'nano_banana'
                   ? await generateImageNanoBanana(styledPrompt, user.id, project_id, i, serviceClient)
                   : await generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient)
-                const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine }
+                const audioFp = duration_sec != null ? Math.round(duration_sec) : undefined
+                const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine, audio_fingerprint: audioFp }
                 sceneImages[i] = img
                 successCount++
                 if (url) {
@@ -736,7 +737,7 @@ export async function POST(request: NextRequest) {
                 failCount++
                 const msg = err instanceof Error ? err.message : String(err)
                 console.error(`[images] scene ${i + 1} FAILED:`, msg)
-                sceneImages[i] = { scene_index: i, prompt: styledPrompt, url: null, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine }
+                sceneImages[i] = { scene_index: i, prompt: styledPrompt, url: null, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine, audio_fingerprint: duration_sec != null ? Math.round(duration_sec) : undefined }
               }
             })
           )

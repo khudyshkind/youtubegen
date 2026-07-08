@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect, useState, useRef, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { useStudioStore } from '@/lib/studio-store'
+import { useStudioStore, stampAudioUrl } from '@/lib/studio-store'
 import type { Project } from '@/lib/types'
 import { CREDIT_COSTS } from '@/lib/types'
 import Step1Topic from './Step1Topic'
@@ -123,7 +123,7 @@ function StepWizardInner() {
         if (p.plan_sections) setPlanSections(p.plan_sections)
         if (p.script) setScript(p.script)
         if (p.voice_id) setVoiceId(p.voice_id)
-        if (p.audio_url) setAudioUrl(p.audio_url)
+        if (p.audio_url) setAudioUrl(stampAudioUrl(p.audio_url, new Date(p.updated_at).getTime()))
         if (p.subtitle_blocks) setSubtitleBlocks(p.subtitle_blocks)
         if (p.scene_images) setSceneImages(p.scene_images)
         if (p.image_interval) setImageInterval(p.image_interval)

@@ -247,6 +247,7 @@ export interface SceneImage {
   timecode_start?: string
   timecode_end?: string
   engine?: 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana'
+  audio_fingerprint?: number
 }
 
 export interface SeoData {

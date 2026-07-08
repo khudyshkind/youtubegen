@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useStudioStore } from '@/lib/studio-store'
+import { useStudioStore, stampAudioUrl } from '@/lib/studio-store'
 import type { VoiceStyleType, AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { CREDIT_COSTS, audioCost } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
@@ -619,7 +619,7 @@ export default function Step3Voice() {
         if (json.status === 'completed' && json.result_url) {
           clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
           setAudioPolling(false); setAudioProgress(null); setAudioJobStatus(null); setLoading(false)
-          setAudioUrl(json.result_url); void refreshCredits()
+          setAudioUrl(stampAudioUrl(json.result_url, Date.now())); void refreshCredits()
         } else if (json.status === 'failed') {
           clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
           setAudioPolling(false); setAudioProgress(null); setAudioJobStatus(null); setLoading(false)
@@ -654,7 +654,7 @@ export default function Step3Voice() {
       .then((json: { ok: boolean; status?: string; job_id?: string; result_url?: string | null }) => {
         if (!json.ok) return
         if (json.status === 'completed' && json.result_url) {
-          setAudioUrl(json.result_url)
+          setAudioUrl(stampAudioUrl(json.result_url, Date.now()))
         } else if ((json.status === 'pending' || json.status === 'processing') && json.job_id) {
           setLoading(true)
           startAudioPolling(json.job_id)
@@ -761,7 +761,7 @@ export default function Step3Voice() {
         body: file,
       })
       if (!uploadRes.ok) throw new Error(t('step3.err_upload'))
-      setAudioUrl(access_url)
+      setAudioUrl(stampAudioUrl(access_url, Date.now()))
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : t('step3.err_upload'))
     } finally {
@@ -845,7 +845,7 @@ export default function Step3Voice() {
         startAudioPolling(json.job_id as string)
         return
       }
-      setAudioUrl(json.data.audio_url)
+      setAudioUrl(stampAudioUrl(json.data.audio_url, Date.now()))
       void refreshCredits()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step3.err_audio'))

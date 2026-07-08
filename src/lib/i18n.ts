@@ -600,6 +600,7 @@ export const translations = {
     'step4.bg_hint':     'Полупрозрачная подложка для лучшей читаемости',
     'step4.blocks':      'блоков субтитров',
     'step4.regenerating':'Распознавание речи…',
+    'step4.audio_changed': 'Озвучка обновилась после генерации субтитров — тайминги могли сдвинуться. Перегенерируйте субтитры.',
     'font.sans':  'Без засечек',
     'font.serif': 'С засечками',
     'font.mono':  'Моноширинный',
@@ -675,6 +676,7 @@ export const translations = {
     'step5.ref_btn':         '📤 Референс стиля (−60 кр)',
     'step5.ref_analyzing':   'Анализирую стиль...',
     'step5.ref_detected':    'Стиль:',
+    'step5.audio_changed':   'Озвучка изменилась после генерации иллюстраций — тайминги могли устареть. Перегенерируйте иллюстрации для точного соответствия.',
 
     // ── Step 7 (Video, formerly Step 6) ──────────────────────────────────────────
     'step6.title':          'Шаг 7: Сборка видео',
@@ -1624,6 +1626,7 @@ export const translations = {
     'step4.bg_hint':     'Semi-transparent backing for better readability',
     'step4.blocks':      'subtitle blocks',
     'step4.regenerating':'Transcribing…',
+    'step4.audio_changed': 'Audio was updated after subtitles were generated — timings may have shifted. Regenerate subtitles.',
     'font.sans':  'Sans-serif',
     'font.serif': 'Serif',
     'font.mono':  'Monospace',
@@ -1699,6 +1702,7 @@ export const translations = {
     'step5.ref_btn':         '📤 Style reference (−60 cr)',
     'step5.ref_analyzing':   'Analyzing style...',
     'step5.ref_detected':    'Style:',
+    'step5.audio_changed':   'Audio changed after illustrations were generated — timings may be stale. Regenerate illustrations for accurate sync.',
 
     // ── Step 7 (Video, formerly Step 6) ──────────────────────────────────────────
     'step6.title':          'Step 7: Video assembly',

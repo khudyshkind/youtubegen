@@ -2,6 +2,12 @@
 
 import { useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
+
+function extractAudioTs(url: string | null): number | null {
+  if (!url) return null
+  const m = url.match(/[?&]t=(\d+)/)
+  return m ? parseInt(m[1], 10) : null
+}
 import type { SubtitleBlock } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
@@ -48,8 +54,8 @@ function parseSrt(text: string): SubtitleBlock[] {
 
 export default function Step4Subtitles() {
   const {
-    audioUrl, projectId, scriptParams, subtitleBlocks,
-    setSubtitleBlocks, setStep,
+    audioUrl, projectId, scriptParams, subtitleBlocks, subtitleAudioTs,
+    setSubtitleBlocks, setSubtitleAudioTs, setStep,
   } = useStudioStore()
 
   const { t } = useLang()
@@ -94,6 +100,7 @@ export default function Step4Subtitles() {
         throw new Error(json.error)
       }
       setSubtitleBlocks(json.data.subtitle_blocks)
+      setSubtitleAudioTs(extractAudioTs(audioUrl))
       void refreshCredits()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step4.err_gen'))
@@ -128,6 +135,19 @@ export default function Step4Subtitles() {
         <h2 className="text-lg font-semibold text-slate-100 mb-1">{t('step4.title')}</h2>
         <p className="text-sm text-slate-500">{t('step4.subtitle')}</p>
       </div>
+
+      {subtitleAudioTs !== null && extractAudioTs(audioUrl) !== subtitleAudioTs && (
+        <div
+          className="flex items-start gap-2.5 rounded-xl px-4 py-3"
+          style={{ background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.3)' }}
+        >
+          <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <p className="text-xs text-yellow-300 leading-relaxed">{t('step4.audio_changed')}</p>
+        </div>
+      )}
 
       {subtitleBlocks.length === 0 ? (
         <div className="flex flex-col gap-4">
