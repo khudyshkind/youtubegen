@@ -467,6 +467,7 @@ export default function Step3Voice() {
   // Generation polling state
   const [audioPolling, setAudioPolling] = useState(false)
   const [audioProgress, setAudioProgress] = useState<number | null>(null)
+  const [audioJobStatus, setAudioJobStatus] = useState<string | null>(null)
 
   // Dynamic cost
   const scriptChars = script?.length ?? 0
@@ -599,6 +600,7 @@ export default function Step3Voice() {
   function startAudioPolling(jobId: string) {
     setAudioPolling(true)
     setAudioProgress(null)
+    setAudioJobStatus(null)
     const tick = async () => {
       try {
         const res = await fetch(`/api/generate/audio/status?job_id=${jobId}`)
@@ -608,15 +610,19 @@ export default function Step3Voice() {
         }
         if (!res.ok || !json.ok) return
 
-        if (typeof json.progress === 'number') setAudioProgress(json.progress)
+        if (json.status && json.status !== 'completed' && json.status !== 'failed') {
+          setAudioJobStatus(json.status)
+        }
+        // Only show progress percentage when the worker actually advances beyond 0
+        if (typeof json.progress === 'number' && json.progress > 0) setAudioProgress(json.progress)
 
         if (json.status === 'completed' && json.result_url) {
           clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
-          setAudioPolling(false); setAudioProgress(null); setLoading(false)
+          setAudioPolling(false); setAudioProgress(null); setAudioJobStatus(null); setLoading(false)
           setAudioUrl(json.result_url); void refreshCredits()
         } else if (json.status === 'failed') {
           clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
-          setAudioPolling(false); setAudioProgress(null); setLoading(false)
+          setAudioPolling(false); setAudioProgress(null); setAudioJobStatus(null); setLoading(false)
           setError(json.error ?? 'Ошибка синтеза')
         }
       } catch (_) {}
@@ -1397,7 +1403,11 @@ export default function Step3Voice() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
             </svg>
-            {engine === 'secretvoicer' ? t('voice.sv_synthesizing') : engine === 'voicer' ? 'Идёт премиум-синтез, несколько минут...' : t('step3.generating')}
+            {engine === 'secretvoicer'
+              ? `${t('voice.sv_synthesizing')} — ${scriptChars.toLocaleString()} ${t('step3.chars')}`
+              : engine === 'voicer'
+              ? `${t('voice.sv_synthesizing')} — ${scriptChars.toLocaleString()} ${t('step3.chars')}`
+              : t('step3.generating')}
           </>
         ) : audioUrl ? (
           `↺ ${t('step2.regenerate')} · −${cost} ${t('nav.credits_suffix')}`
@@ -1407,11 +1417,16 @@ export default function Step3Voice() {
       </button>
 
       {audioPolling && (
-        <p className="text-xs text-violet-400/80 text-center -mt-2">
-          {audioProgress !== null
-            ? `Синтез в фоне — ${audioProgress}%`
-            : 'Синтез идёт в фоне — можно не закрывать вкладку'}
-        </p>
+        <div className="flex flex-col items-center gap-0.5 -mt-2">
+          <p className="text-xs text-violet-400/80 text-center">
+            {audioProgress !== null && audioProgress > 0
+              ? `${t('voice.sv_processing')} — ${audioProgress}%`
+              : audioJobStatus === 'pending'
+              ? t('voice.sv_queue')
+              : t('voice.sv_processing')}
+          </p>
+          <p className="text-xs text-slate-500 text-center">{t('voice.sv_background_ok')}</p>
+        </div>
       )}
 
       {/* APIHOST dynamic cost breakdown */}
