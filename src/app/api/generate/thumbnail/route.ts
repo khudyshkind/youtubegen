@@ -541,7 +541,7 @@ export async function POST(request: NextRequest) {
     }
 
     const AI_TEXT_ENGINE_HINT = text_mode === 'ai'
-      ? (process.env.THUMBNAIL_AI_TEXT_ENGINE ?? 'gpt')
+      ? (process.env.THUMBNAIL_AI_TEXT_ENGINE ?? 'nano_banana_2')
       : 'overlay'
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, text_mode, engine: AI_TEXT_ENGINE_HINT })
@@ -578,9 +578,9 @@ export async function POST(request: NextRequest) {
           : await generateFluxPromptBackground(title, topic, ref_style, image_style)
       )
 
-      // Mode B: route to configured AI text engine; Mode A/C: always Flux
-      const AI_TEXT_ENGINE = (process.env.THUMBNAIL_AI_TEXT_ENGINE ?? 'gpt') as 'flux' | 'gpt' | 'gemini'
-      const usesExternalEngine = text_mode === 'ai' && AI_TEXT_ENGINE !== 'flux'
+      // Mode B: GPT/Gemini only if explicitly set via env; default → nano-banana-2 cascade
+      const AI_TEXT_ENGINE = (process.env.THUMBNAIL_AI_TEXT_ENGINE ?? 'nano_banana_2') as 'flux' | 'gpt' | 'gemini' | 'nano_banana_2'
+      const usesExternalEngine = text_mode === 'ai' && (AI_TEXT_ENGINE === 'gpt' || AI_TEXT_ENGINE === 'gemini')
 
       if (usesExternalEngine) {
         console.log(`[thumbnail] mode=ai engine=${AI_TEXT_ENGINE} prompt: ${prompt}`)
