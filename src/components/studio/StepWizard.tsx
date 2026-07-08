@@ -118,7 +118,7 @@ function StepWizardInner() {
         console.log('[studio] loaded data:', p.topic)
         setProjectId(p.id)
         setScriptParams({ topic: p.topic, duration_minutes: p.duration_minutes, ...(p.language ? { language: p.language as import('@/lib/types').ScriptLanguage } : {}) })
-        // 'Свой текст' is a hardcoded sentinel (Step1Topic.tsx:254), not localized
+        // SENTINEL 'Свой текст': НЕ локализовать и НЕ менять — по нему loadProject инферит ownScript.
         if (p.topic === 'Свой текст') setOwnScript(true)
         if (p.plan_sections) setPlanSections(p.plan_sections)
         if (p.script) setScript(p.script)

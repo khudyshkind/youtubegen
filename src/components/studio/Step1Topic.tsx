@@ -251,6 +251,7 @@ export default function Step1Topic({ onRegisterSubmit }: Step1TopicProps) {
     if (projectId) { setStep(2); return }
     setError('')
     setLoading(true)
+    // SENTINEL 'Свой текст': НЕ локализовать и НЕ менять — по нему loadProject инферит ownScript.
     const topic = scriptParams.topic.trim() || 'Свой текст'
     try {
       const res = await fetch('/api/projects', {
