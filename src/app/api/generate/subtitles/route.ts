@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
         .from('projects')
         .update({
           subtitle_blocks,
-          status: 'generating_images',
+          status: 'draft',
         })
         .eq('id', project_id)
         .eq('user_id', user.id)

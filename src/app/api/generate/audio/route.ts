@@ -829,7 +829,7 @@ export async function POST(request: NextRequest) {
         .update({
           audio_url: publicUrl,
           voice_id,
-          status: 'generating_subtitles',
+          status: 'draft',
           ...(own_script && text ? { script: text } : {}),
         })
         .eq('id', project_id)
