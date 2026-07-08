@@ -193,7 +193,7 @@ interface ImagesRequest {
 }
 
 interface FalImageResult {
-  images: Array<{ url: string }>
+  images: Array<{ url: string; width?: number; height?: number }>
 }
 
 interface SceneInfo {
@@ -476,8 +476,12 @@ async function generateImageNanoBanana(
     },
   }) as { data: FalImageResult }
 
-  const falUrl = result.data?.images?.[0]?.url ?? null
+  const img = result.data?.images?.[0]
+  const falUrl = img?.url ?? null
   if (!falUrl) throw new Error('Nano Banana: no image returned')
+  if (img?.width && img?.height) {
+    console.log(`[images] nano-banana scene ${sceneIndex} returned ${img.width}x${img.height} (ratio ${(img.width / img.height).toFixed(3)})`)
+  }
   if (!projectId) return falUrl
 
   const storagePath = `${userId}/${projectId}/scene_nano_${sceneIndex}.jpg`

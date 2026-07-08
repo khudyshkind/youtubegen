@@ -51,7 +51,7 @@ interface SingleImageRequest {
 }
 
 interface FalImageResult {
-  images: Array<{ url: string }>
+  images: Array<{ url: string; width?: number; height?: number }>
 }
 
 async function enhancePrompt(raw: string, styleHint: string): Promise<string> {
@@ -144,8 +144,12 @@ async function generateNanoBanana(
     },
   }) as { data: FalImageResult }
 
-  const falUrl = result.data?.images?.[0]?.url ?? null
+  const img = result.data?.images?.[0]
+  const falUrl = img?.url ?? null
   if (!falUrl) throw new Error('Nano Banana: no image returned')
+  if (img?.width && img?.height) {
+    console.log(`[image-single] nano-banana scene ${sceneIndex} returned ${img.width}x${img.height} (ratio ${(img.width / img.height).toFixed(3)})`)
+  }
 
   const storagePath = `${userId}/${projectId}/scene_nano_${sceneIndex}.jpg`
   return uploadFalToStorage(falUrl, storagePath, 'image/jpeg', serviceClient)

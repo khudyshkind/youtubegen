@@ -172,6 +172,19 @@ Write a thumbnail image prompt where the title "${title}" is naturally integrate
 // On each failure the next engine is tried and logged; flux/dev is the guaranteed
 // last-resort so the route can never fail due to a nano-banana outage.
 
+// 16:9 ratio tolerance: ±5%. Outside → wrong aspect, cascade to next engine.
+const THUMB_RATIO_TARGET = 16 / 9
+const THUMB_RATIO_TOL = 0.05
+
+function checkThumbRatio(w: number, h: number, model: string): void {
+  if (w <= 0 || h <= 0) return
+  const ratio = w / h
+  console.log(`[thumbnail] ${model} returned ${w}x${h} (ratio ${ratio.toFixed(4)})`)
+  if (Math.abs(ratio - THUMB_RATIO_TARGET) / THUMB_RATIO_TARGET > THUMB_RATIO_TOL) {
+    throw new Error(`${model} returned wrong aspect ${w}x${h} (ratio ${ratio.toFixed(3)}, expected ~1.778), falling back`)
+  }
+}
+
 async function generateThumbnailBg(prompt: string): Promise<string> {
   fal.config({ credentials: env('FAL_KEY') })
 
@@ -180,11 +193,11 @@ async function generateThumbnailBg(prompt: string): Promise<string> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const r = await (fal.subscribe as any)('fal-ai/nano-banana-2', {
       input: { prompt, aspect_ratio: '16:9', resolution: '1K', num_images: 1, output_format: 'jpeg' },
-    }) as { data: { images: Array<{ url: string }> } }
-    const url = r.data?.images?.[0]?.url
-    if (!url) throw new Error('no image returned')
-    console.log('[thumbnail] nano-banana-2 succeeded')
-    return await fetchAsBase64(url)
+    }) as { data: { images: Array<{ url: string; width?: number; height?: number }> } }
+    const img = r.data?.images?.[0]
+    if (!img?.url) throw new Error('no image returned')
+    checkThumbRatio(img.width ?? 0, img.height ?? 0, 'nano-banana-2')
+    return await fetchAsBase64(img.url)
   } catch (e) {
     console.warn('[thumbnail] nano-banana-2 failed, falling back to nano-banana:', e instanceof Error ? e.message : e)
   }
@@ -194,22 +207,22 @@ async function generateThumbnailBg(prompt: string): Promise<string> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const r = await (fal.subscribe as any)('fal-ai/nano-banana', {
       input: { prompt, aspect_ratio: '16:9', num_images: 1, output_format: 'jpeg' },
-    }) as { data: { images: Array<{ url: string }> } }
-    const url = r.data?.images?.[0]?.url
-    if (!url) throw new Error('no image returned')
-    console.log('[thumbnail] nano-banana fallback succeeded')
-    return await fetchAsBase64(url)
+    }) as { data: { images: Array<{ url: string; width?: number; height?: number }> } }
+    const img = r.data?.images?.[0]
+    if (!img?.url) throw new Error('no image returned')
+    checkThumbRatio(img.width ?? 0, img.height ?? 0, 'nano-banana')
+    return await fetchAsBase64(img.url)
   } catch (e) {
     console.warn('[thumbnail] nano-banana failed, falling back to flux/dev:', e instanceof Error ? e.message : e)
   }
 
-  // Final: flux/dev (guaranteed)
+  // Final: flux/dev (guaranteed 1280×720)
   const r = await fal.subscribe('fal-ai/flux/dev', {
     input: { prompt, image_size: { width: 1280, height: 720 }, num_images: 1, num_inference_steps: 35 },
   }) as { data: { images: Array<{ url: string }> } }
   const url = r.data?.images?.[0]?.url
   if (!url) throw new Error('Flux не вернул изображение')
-  console.log('[thumbnail] flux/dev fallback succeeded')
+  console.log('[thumbnail] flux/dev fallback succeeded (1280x720)')
   return await fetchAsBase64(url)
 }
 
