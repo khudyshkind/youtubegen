@@ -2420,15 +2420,21 @@ async function runWatchdog() {
 
   try {
     const rows = await sbGet('audio_jobs',
-      `status=in.(pending,processing)&updated_at=lt.${cutoffAudio}&select=id,project_id,status,updated_at`)
+      `status=in.(pending,processing)&updated_at=lt.${cutoffAudio}&select=id,project_id,user_id,status,updated_at,credits_charged,credits_refunded_at`)
     for (const row of rows) {
       const ageMin = Math.round((now - new Date(row.updated_at).getTime()) / 60_000)
       console.log(`${tag} audio_job ${row.id} stuck in ${row.status} ${ageMin} min (project ${row.project_id})`)
+      const needsRefund = !!(row.credits_charged > 0 && !row.credits_refunded_at)
       if (!WATCHDOG_DRY_RUN) {
         await updateAudioJob(row.id, { status: 'failed', error: `watchdog: stuck in '${row.status}' for ${ageMin} min` })
         if (row.project_id) await sbPatch('projects', `id=eq.${row.project_id}`, { status: 'failed' })
+        try {
+          await refundAudioJobCredits(row.id, row.user_id, row.project_id)
+        } catch (e) {
+          console.warn(`${tag} refund failed for ${row.id}: ${e.message}`)
+        }
       }
-      resets.push({ type: 'audio', id: row.id, project_id: row.project_id, jobStatus: row.status, ageMin })
+      resets.push({ type: 'audio', id: row.id, project_id: row.project_id, jobStatus: row.status, ageMin, creditsCharged: row.credits_charged ?? 0, needsRefund })
     }
   } catch (e) { console.warn(`${tag} audio query failed:`, e.message) }
 
@@ -2442,7 +2448,10 @@ async function runWatchdog() {
       const subject = r.type === 'audio'
         ? `audio_job ${r.id.slice(0, 8)} (${r.jobStatus}, project ${(r.project_id ?? '?').slice(0, 8)})`
         : `project ${r.id.slice(0, 8)} (generating_${r.type})`
-      const msg = `${emoji} Watchdog${dryLabel}\n${subject} stuck ${r.ageMin} min → reset to failed`
+      const refundNote = r.type === 'audio'
+        ? (r.needsRefund ? `, ${r.creditsCharged} кр. возвращены` : ', refund не потребовался')
+        : ''
+      const msg = `${emoji} Watchdog${dryLabel}\n${subject} stuck ${r.ageMin} min → reset to failed${refundNote}`
       await tgApi('sendMessage', { chat_id: OWNER_ID, text: msg })
         .catch(e => console.warn(`${tag} tg notify failed:`, e.message))
     }
