@@ -66,6 +66,16 @@ const APIHOST_TYPE_ICONS: Record<ApihostVoiceType, string> = {
   basic: '🟢', standard: '🔵', pro: '🟣', studio: '⭐',
 }
 
+function mapAudioError(raw: string, t: (k: string) => string): { headline: string; detail: string | null } {
+  if (/maintenance_mode|HTTP 503|Service Unavailable/i.test(raw)) {
+    return { headline: t('step3.err_provider_maintenance'), detail: raw }
+  }
+  if (/HTTP \d{3}|Voicer|Error:|failed:|is empty|sync-only/i.test(raw) && !/[А-Яа-яЁё]/u.test(raw)) {
+    return { headline: t('step3.err_provider_generic'), detail: raw }
+  }
+  return { headline: raw, detail: null }
+}
+
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
 function VoiceDropdown({
@@ -122,8 +132,8 @@ function VoiceDropdown({
         ) : selected ? (
           <span className="flex items-center gap-2 min-w-0">
             {genderBadge(selected.gender)}
-            <span className="font-medium shrink-0 text-slate-200">{selected.name}</span>
-            {selected.accent && <span className="text-slate-500 text-xs shrink-0">{selected.accent}</span>}
+            <span className="font-medium truncate text-slate-200">{selected.name}</span>
+            {selected.accent && <span className="text-slate-500 text-xs">{selected.accent}</span>}
             {selected.description && <span className="text-slate-500 text-xs truncate">— {selected.description}</span>}
           </span>
         ) : (
@@ -1486,12 +1496,18 @@ export default function Step3Voice() {
         </p>
       )}
 
-      {error && (
-        <p className="text-sm text-red-400 rounded-xl px-4 py-3"
-          style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-          {error}
-        </p>
-      )}
+      {error && (() => {
+        const { headline, detail } = mapAudioError(error, t)
+        return (
+          <div
+            className="flex flex-col gap-1.5 rounded-xl px-4 py-3"
+            style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}
+          >
+            <p className="text-sm text-red-400">{headline}</p>
+            {detail && <p className="text-xs text-red-700/60 font-mono break-all">{detail}</p>}
+          </div>
+        )
+      })()}
 
       {/* Audio result */}
       {audioUrl && (

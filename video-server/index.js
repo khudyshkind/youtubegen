@@ -3835,6 +3835,42 @@ async function updateAudioJob(jobId, fields) {
   }
 }
 
+// Server-side refund: runs immediately when a job fails, so users who close the
+// browser before the client poll sees status=failed still get their credits back.
+// credits_charged is written by Vercel AFTER job creation, so we re-read from DB.
+// The credits_refunded_at IS NULL guard ensures the Vercel poll fallback in
+// status/route.ts cannot double-refund even if it races with this function.
+async function refundAudioJobCredits(jobId, userId, projectId) {
+  try {
+    const rows = await sbGet('audio_jobs', `id=eq.${jobId}&select=credits_charged,credits_refunded_at`)
+    const row = Array.isArray(rows) ? rows[0] : null
+    if (!row || !(row.credits_charged > 0) || row.credits_refunded_at) return
+
+    const updated = await sbPatch(
+      'audio_jobs',
+      `id=eq.${jobId}&credits_refunded_at=is.null`,
+      { credits_refunded_at: new Date().toISOString() }
+    )
+    if (!Array.isArray(updated) || updated.length === 0) return
+
+    const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/add_credits`, {
+      method: 'POST',
+      headers: sbHeaders(),
+      body: JSON.stringify({
+        p_user_id:    userId,
+        p_amount:     row.credits_charged,
+        p_operation:  'audio_refund',
+        p_project_id: projectId ?? null,
+      }),
+    })
+    if (!rpcRes.ok) throw new Error(`add_credits RPC: ${rpcRes.status} ${await rpcRes.text().catch(() => '')}`)
+    console.log(`[audio-job:${jobId}] refunded ${row.credits_charged} credits to ${userId}`)
+  } catch (e) {
+    console.error(`[audio-job:${jobId}] refundAudioJobCredits failed:`, e.message)
+    Sentry.captureException(e, { extra: { jobId, userId, projectId } })
+  }
+}
+
 // ── TTS: SecretVoicer + Voicer synthesis helpers ──────────────────────────────
 
 const SV_BASE       = 'https://secret-voicer.ru/api/v1'
@@ -4178,8 +4214,8 @@ async function processAudioJob(job) {
     const msg = err.message ?? String(err)
     console.error(`[audio-job:${jobId}] FAILED:`, msg)
     Sentry.captureException(err, { extra: { jobId, engine: job.engine, project_id: job.project_id } })
-    // Credit refund is handled by the Vercel dispatch endpoint watching job status — not here
     await updateAudioJob(jobId, { status: 'failed', error: msg })
+    await refundAudioJobCredits(jobId, job.user_id, job.project_id)
   }
 }
 

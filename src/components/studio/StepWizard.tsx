@@ -253,7 +253,7 @@ function StepWizardInner() {
       {/* Step content */}
       <div className="lg:grid lg:grid-cols-[1fr_320px] lg:gap-6 lg:items-start">
         <div
-          className="rounded-2xl p-6"
+          className="rounded-2xl p-6 min-w-0"
           style={{
             background: 'rgba(255,255,255,0.02)',
             border: '1px solid rgba(255,255,255,0.08)',
