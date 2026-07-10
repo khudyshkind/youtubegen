@@ -2271,14 +2271,16 @@ async function checkFalBalance() {
   // Needs admin key
   if (result.error === 'unauthorized' || result.error === 'no_key') {
     if (alertState !== 'unauthorized') {
-      await tgApi('sendMessage', {
+      const tgResult = await tgApi('sendMessage', {
         chat_id: OWNER_ID,
-        text: `⚙️ *fal\\.ai мониторинг*\n\nНе удаётся получить баланс — нужен admin API ключ\\.\nДобавь \`FAL_ADMIN_KEY\` в переменные Railway\\.\n\n[Создать ключ](https://fal.ai/dashboard/keys)`,
-        parse_mode: 'MarkdownV2',
-        disable_web_page_preview: true,
-      }).catch(e => console.error(`${tag} tg alert failed:`, e.message))
-      await setSetting('fal_balance_alert_state', 'unauthorized')
-      await setSetting('fal_balance_alert_at',    new Date().toISOString())
+        text: `⚙️ fal.ai мониторинг\n\nНе удаётся получить баланс — нужен admin API ключ.\nДобавь FAL_ADMIN_KEY в переменные Railway.\n\nhttps://fal.ai/dashboard/keys`,
+      })
+      if (tgResult?.ok) {
+        await setSetting('fal_balance_alert_state', 'unauthorized')
+        await setSetting('fal_balance_alert_at',    new Date().toISOString())
+      } else {
+        console.error(`${tag} tg alert failed:`, JSON.stringify(tgResult))
+      }
     }
     return
   }
@@ -2294,27 +2296,33 @@ async function checkFalBalance() {
   if (balance < FAL_BALANCE_THRESHOLD) {
     const shouldAlert = alertState !== 'low' || hoursSinceAlert >= 24
     if (shouldAlert) {
-      await tgApi('sendMessage', {
+      const tgResult = await tgApi('sendMessage', {
         chat_id: OWNER_ID,
-        text: `⚠️ *fal\\.ai баланс низкий\\!*\n\nТекущий баланс: *\\$${balance.toFixed(2)}* ${currency}\nПорог: \\$${FAL_BALANCE_THRESHOLD.toFixed(2)}\n\n[Пополнить баланс](https://fal.ai/dashboard/billing)`,
-        parse_mode: 'MarkdownV2',
-        disable_web_page_preview: true,
-      }).catch(e => console.error(`${tag} tg alert failed:`, e.message))
-      await setSetting('fal_balance_alert_state', 'low')
-      await setSetting('fal_balance_alert_at',    new Date().toISOString())
+        text: `⚠️ fal.ai баланс низкий!\n\nТекущий баланс: $${balance.toFixed(2)} ${currency}\nПорог: $${FAL_BALANCE_THRESHOLD.toFixed(2)}\n\nПополнить: https://fal.ai/dashboard/billing`,
+      })
+      if (tgResult?.ok) {
+        await setSetting('fal_balance_alert_state', 'low')
+        await setSetting('fal_balance_alert_at',    new Date().toISOString())
+      } else {
+        console.error(`${tag} tg alert failed:`, JSON.stringify(tgResult))
+      }
     }
     return
   }
 
   // Balance above threshold
   if (alertState === 'low') {
-    await tgApi('sendMessage', {
+    const tgResult = await tgApi('sendMessage', {
       chat_id: OWNER_ID,
-      text: `✅ *fal\\.ai баланс восстановлен*\n\nТекущий баланс: *\\$${balance.toFixed(2)}* ${currency}`,
-      parse_mode: 'MarkdownV2',
-    }).catch(e => console.error(`${tag} tg restored alert failed:`, e.message))
-  }
-  if (alertState === 'low' || alertState === 'unauthorized') {
+      text: `✅ fal.ai баланс восстановлен\n\nТекущий баланс: $${balance.toFixed(2)} ${currency}`,
+    })
+    if (tgResult?.ok) {
+      await setSetting('fal_balance_alert_state', '')
+      await setSetting('fal_balance_alert_at',    '')
+    } else {
+      console.error(`${tag} tg restored alert failed:`, JSON.stringify(tgResult))
+    }
+  } else if (alertState === 'unauthorized') {
     await setSetting('fal_balance_alert_state', '')
     await setSetting('fal_balance_alert_at',    '')
   }
