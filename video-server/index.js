@@ -594,7 +594,7 @@ function cardPaymentText(planInfo, rubAmount) {
     `👤 Получатель: ${CARD_HOLDER}\n\n` +
     `После оплаты отправь сюда:\n` +
     `1. Скриншот перевода\n` +
-    `2. Свой email в YouTubeGen\n\n` +
+    `2. Свой email в Lefiro\n\n` +
     `Активируем в течение 1 часа ✅`
   )
 }
@@ -607,7 +607,7 @@ function cryptoPaymentText(planInfo) {
     `🔹 ERC20: \`${USDT_ERC20}\`\n\n` +
     `После оплаты отправь сюда:\n` +
     `1. Hash транзакции\n` +
-    `2. Свой email в YouTubeGen\n\n` +
+    `2. Свой email в Lefiro\n\n` +
     `Активируем в течение 1 часа ✅`
   )
 }
@@ -676,7 +676,7 @@ async function generatePost(topic) {
     messages: [{
       role: 'user',
       content:
-        'Ты SMM менеджер YouTube automation сервиса YouTubeGen.\n' +
+        'Ты SMM менеджер YouTube automation сервиса Lefiro.\n' +
         'Напиши engaging пост для Telegram канала на русском языке.\n' +
         `Тема: ${topic}\n\n` +
         'Правила:\n' +
@@ -698,7 +698,7 @@ async function generateIdea() {
     messages: [{
       role: 'user',
       content:
-        'Придумай одну конкретную и интересную тему поста для Telegram канала сервиса YouTubeGen ' +
+        'Придумай одну конкретную и интересную тему поста для Telegram канала сервиса Lefiro ' +
         '(SaaS для автоматического создания YouTube видео с AI). ' +
         'Верни только тему, без пояснений.',
     }],
@@ -832,7 +832,7 @@ async function generateDeployPost(commitMessage) {
     messages: [{
       role: 'user',
       content:
-        'Напиши пост для Telegram канала YouTubeGen об этом обновлении сервиса.\n\n' +
+        'Напиши пост для Telegram канала Lefiro об этом обновлении сервиса.\n\n' +
         `Описание изменений из git коммита: ${commitMessage}\n\n` +
         'Правила:\n' +
         '- Объясни обновление простым языком для блогеров\n' +
@@ -863,7 +863,7 @@ async function publishStats(toOwner = null) {
   if (!stats) { console.warn('[tg] stats unavailable'); return }
   const date = new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
   const text =
-    `📊 *Статистика YouTubeGen — ${date}*\n\n` +
+    `📊 *Статистика Lefiro — ${date}*\n\n` +
     `👥 Пользователей: *${stats.users}*\n` +
     `📁 Проектов: *${stats.projects}*\n` +
     `🎬 Видео готово: *${stats.videos}*\n\n` +
@@ -880,7 +880,7 @@ function hasKeyword(text) {
 
 const rssParser = new RssParser({
   timeout: 15000,
-  headers: { 'User-Agent': 'YouTubeGen-Bot/1.0' },
+  headers: { 'User-Agent': 'Lefiro-Bot/1.0' },
 })
 
 async function fetchRss(source) {
@@ -911,7 +911,7 @@ async function evaluateItem(item) {
       messages: [{
         role: 'user',
         content:
-          'Оцени эту статью/пост для Telegram канала YouTubeGen (сервис автоматизации YouTube через ИИ).\n\n' +
+          'Оцени эту статью/пост для Telegram канала Lefiro (сервис автоматизации YouTube через ИИ).\n\n' +
           `Заголовок: ${item.title}\nТекст: ${item.snippet}\n\n` +
           'Ответь строго JSON без markdown:\n' +
           '{"relevant":true/false,"score":1-10,"reason":"...","summary":"..."}\n\n' +
@@ -934,9 +934,9 @@ async function generateMonitorPost(item) {
     messages: [{
       role: 'user',
       content:
-        'На основе этой статьи напиши оригинальный пост для Telegram канала YouTubeGen.\n' +
+        'На основе этой статьи напиши оригинальный пост для Telegram канала Lefiro.\n' +
         'Не копируй текст — перескажи своими словами, добавь свою точку зрения, ' +
-        'упомяни YouTubeGen как инструмент для YouTube авторов. ' +
+        'упомяни Lefiro как инструмент для YouTube авторов. ' +
         'Стиль: живой, с эмодзи, максимум 500 символов.\n\n' +
         `Заголовок: ${item.title}\nТекст: ${item.snippet}`,
     }],
@@ -955,9 +955,9 @@ async function regenMonitorPost(chatId) {
       messages: [{
         role: 'user',
         content:
-          'Напиши другой вариант поста для Telegram канала YouTubeGen на эту тему. ' +
+          'Напиши другой вариант поста для Telegram канала Lefiro на эту тему. ' +
           'Стиль: живой, с эмодзи, максимум 500 символов. ' +
-          'Упомяни YouTubeGen как инструмент для YouTube авторов.\n\n' +
+          'Упомяни Lefiro как инструмент для YouTube авторов.\n\n' +
           `Тема: ${topic}`,
       }],
     }), 40000, 'monitor-regen')
@@ -1400,7 +1400,7 @@ async function handleCallback(cq) {
     await sendTo(chatId,
       `✅ *Активация тарифа ${planInfo.name}*\n\n` +
       `Пользователь: \`${userChatId}\`\n\n` +
-      `Введи email пользователя в YouTubeGen:`)
+      `Введи email пользователя в Lefiro:`)
 
   } else if (data.startsWith('sup_reply_')) {
     // sup_reply_{userChatId}_{ticketNumber}
@@ -1549,7 +1549,7 @@ app.post('/telegram/webhook', async (req, res) => {
       payStates.set(String(chatId), { step: 'method', username, firstName })
       await tgApi('sendMessage', {
         chat_id: chatId,
-        text: '👋 Привет! Для оплаты YouTubeGen из России\nвыбери удобный способ:',
+        text: '👋 Привет! Для оплаты Lefiro из России\nвыбери удобный способ:',
         parse_mode: 'Markdown',
         reply_markup: payMethodInline(),
       })
@@ -1569,7 +1569,7 @@ app.post('/telegram/webhook', async (req, res) => {
     await tgApi('sendMessage', {
       chat_id: userChatId,
       text:
-        `📩 *Ответ от поддержки YouTubeGen:*\n\n` +
+        `📩 *Ответ от поддержки Lefiro:*\n\n` +
         `${text}\n\n` +
         `_Если вопрос не решён — просто напиши нам снова._`,
       parse_mode: 'Markdown',
@@ -1592,7 +1592,7 @@ app.post('/telegram/webhook', async (req, res) => {
         text:
           `🎉 *Тариф активирован!*\n\n` +
           `Тариф *${planInfo.name}* успешно активирован на вашем аккаунте.\n\n` +
-          `Войдите в YouTubeGen: ${APP_URL}`,
+          `Войдите в Lefiro: ${APP_URL}`,
         parse_mode: 'Markdown',
       })
     } catch (err) {
@@ -1660,7 +1660,7 @@ app.post('/telegram/webhook', async (req, res) => {
     switch (true) {
       case (text === '/start' || text === '/help'):
         await sendTo(chatId,
-          '🤖 *YouTubeGen Bot*\n\n' +
+          '🤖 *Lefiro Bot*\n\n' +
           'Используй кнопки внизу или команды:\n' +
           '`/post [тема]` — сгенерировать и опубликовать\n' +
           '`/preview [тема]` — посмотреть перед публикацией\n' +
@@ -1868,7 +1868,7 @@ async function backupDatabase() {
   ]
 
   const hdrs = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` }
-  let sql = `-- YouTubeGen DB backup ${now.toISOString()}\n-- Source: Supabase REST API (service role)\n\n`
+  let sql = `-- Lefiro DB backup ${now.toISOString()}\n-- Source: Supabase REST API (service role)\n\n`
 
   for (const table of tables) {
     try {
@@ -2533,7 +2533,7 @@ async function checkVercelDeploy() {
       if (OWNER_ID) {
         await tgApi('sendMessage', {
           chat_id: OWNER_ID,
-          text: `🚀 *Новый деплой YouTubeGen!*\n\n${text}\n\n_Опубликовать в канал?_`,
+          text: `🚀 *Новый деплой Lefiro!*\n\n${text}\n\n_Опубликовать в канал?_`,
           parse_mode: 'Markdown',
           reply_markup: deployInline(),
         })

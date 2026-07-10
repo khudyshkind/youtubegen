@@ -16,7 +16,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       <aside className="w-56 shrink-0 bg-gray-900 min-h-screen flex flex-col py-6 px-3">
         <div className="px-3 mb-6">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Админ-панель</p>
-          <p className="text-lg font-bold text-white mt-1">YouTubeGen</p>
+          <p className="text-lg font-bold text-white mt-1">Lefiro</p>
         </div>
 
         <nav className="flex flex-col gap-1 flex-1">

@@ -386,7 +386,7 @@ async function checkGitHub(): Promise<ServiceResult> {
   try {
     const res = await safeFetch(
       'https://api.github.com/repos/khudyshkind/youtubegen/commits?per_page=1',
-      { headers: { Accept: 'application/vnd.github.v3+json', 'User-Agent': 'YouTubeGen-Admin/1.0' } }
+      { headers: { Accept: 'application/vnd.github.v3+json', 'User-Agent': 'Lefiro-Admin/1.0' } }
     )
     if (res.status === 404) return {
       ...base, status: 'warn',

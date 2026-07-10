@@ -129,7 +129,7 @@ function RegisterForm() {
         {/* Logo */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 text-2xl font-bold text-gray-900">
-            <span className="text-red-500">▶</span> YouTubeGen
+            Lefiro
           </Link>
           <p className="mt-2 text-gray-600">Создайте аккаунт бесплатно</p>
         </div>

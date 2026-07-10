@@ -1,7 +1,7 @@
 {
   "name": "ytgen-video-server",
   "version": "1.0.0",
-  "description": "Railway FFmpeg video assembly server for YouTubeGen",
+  "description": "Railway FFmpeg video assembly server for Lefiro",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"

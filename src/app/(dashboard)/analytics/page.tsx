@@ -3767,7 +3767,7 @@ export default function AnalyticsPage() {
 
             {/* Print header (only visible on print) */}
             <div className="hidden print:block mb-6">
-              <h1 className="text-2xl font-bold">YouTubeGen — Отчёт аналитики</h1>
+              <h1 className="text-2xl font-bold">Lefiro — Отчёт аналитики</h1>
               <p className="text-sm text-gray-500">{new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
             </div>
 

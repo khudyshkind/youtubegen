@@ -10,14 +10,14 @@ const geist = Geist({
 
 export const metadata: Metadata = {
   title: {
-    default: 'YouTubeGen — Автоматическая генерация YouTube-видео',
-    template: '%s | YouTubeGen',
+    default: 'Lefiro — Автоматическая генерация YouTube-видео',
+    template: '%s | Lefiro',
   },
   description:
     'Создавайте YouTube-видео на автопилоте: сценарий, озвучка, субтитры, иллюстрации и SEO — всё в одном месте.',
   keywords: ['youtube', 'генерация видео', 'автоматизация', 'контент', 'ИИ'],
   openGraph: {
-    title: 'YouTubeGen',
+    title: 'Lefiro',
     description: 'Автоматическая генерация YouTube-видео с помощью ИИ',
     type: 'website',
     locale: 'ru_RU',

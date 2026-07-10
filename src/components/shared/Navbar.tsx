@@ -149,17 +149,7 @@ export default function Navbar() {
             href={user ? '/dashboard' : '/'}
             className="flex items-center gap-2 text-xl font-bold hover:opacity-80 transition-opacity"
           >
-            <span
-              className="text-2xl"
-              style={{
-                background: 'linear-gradient(135deg, #A78BFA, #60A5FA)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-              }}
-            >
-              ▶
-            </span>
-            <span className="gradient-text">YouTubeGen</span>
+            <span className="gradient-text">Lefiro</span>
           </Link>
 
           {/* Right side */}

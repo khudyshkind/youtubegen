@@ -7,7 +7,7 @@ import type { Metadata } from 'next'
 import type { Profile, Project } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
-export const metadata: Metadata = { title: 'Dashboard · YouTubeGen' }
+export const metadata: Metadata = { title: 'Dashboard · Lefiro' }
 
 export default async function DashboardPage() {
   const supabase = await createServerSupabase()

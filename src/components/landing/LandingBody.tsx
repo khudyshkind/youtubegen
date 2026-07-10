@@ -452,8 +452,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 mb-8">
             <div>
               <div className="flex items-center gap-2 font-bold text-xl mb-1">
-                <span style={{ background: 'linear-gradient(135deg, #A78BFA, #60A5FA)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>▶</span>
-                <span className="text-slate-100">YouTubeGen</span>
+                <span className="text-slate-100">Lefiro</span>
               </div>
               <p className="text-slate-600 text-sm">{t('landing.footer_tagline')}</p>
             </div>
@@ -466,7 +465,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
             </nav>
           </div>
           <div className="pt-6" style={{ borderTop: DIV_LINE }}>
-            <p className="text-slate-700 text-sm text-center">© 2026 YouTubeGen. {t('landing.footer_rights')}.</p>
+            <p className="text-slate-700 text-sm text-center">© 2026 Lefiro. {t('landing.footer_rights')}.</p>
           </div>
         </div>
       </footer>

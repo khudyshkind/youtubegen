@@ -22,14 +22,14 @@ function layout(body: string): string {
     <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)">
       <!-- header -->
       <tr><td style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:32px;text-align:center">
-        <p style="margin:0;font-size:28px;font-weight:800;color:#fff;letter-spacing:-0.5px">🎬 YouTubeGen</p>
+        <p style="margin:0;font-size:28px;font-weight:800;color:#fff;letter-spacing:-0.5px">🎬 Lefiro</p>
         <p style="margin:6px 0 0;font-size:13px;color:rgba(255,255,255,.75)">Автоматическое создание YouTube-видео с ИИ</p>
       </td></tr>
       <!-- body -->
       <tr><td style="padding:40px 40px 32px">${body}</td></tr>
       <!-- footer -->
       <tr><td style="background:#f9fafb;padding:20px 40px;border-top:1px solid #f0f0f0;text-align:center">
-        <p style="margin:0;font-size:12px;color:#9ca3af">© 2025 YouTubeGen · <a href="${APP()}" style="color:#ef4444;text-decoration:none">Открыть сайт</a></p>
+        <p style="margin:0;font-size:12px;color:#9ca3af">© 2025 Lefiro · <a href="${APP()}" style="color:#ef4444;text-decoration:none">Открыть сайт</a></p>
       </td></tr>
     </table>
   </td></tr>
@@ -53,7 +53,7 @@ export async function sendWelcomeEmail(user: { email: string; name?: string | nu
   const html = layout(`
     <h2 style="margin:0 0 8px;font-size:22px;color:#111">Привет, ${name}! 👋</h2>
     <p style="margin:0 0 24px;font-size:15px;color:#4b5563;line-height:1.6">
-      Добро пожаловать в <strong>YouTubeGen</strong> — сервис для автоматического создания YouTube-видео с помощью ИИ.
+      Добро пожаловать в <strong>Lefiro</strong> — сервис для автоматического создания YouTube-видео с помощью ИИ.
     </p>
 
     <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:20px;margin-bottom:24px">
@@ -63,7 +63,7 @@ export async function sendWelcomeEmail(user: { email: string; name?: string | nu
 
     ${btn('Создать первое видео →', `${APP()}/studio`)}
 
-    <h3 style="margin:0 0 12px;font-size:15px;color:#111;font-weight:700">Как работает YouTubeGen — 7 шагов:</h3>
+    <h3 style="margin:0 0 12px;font-size:15px;color:#111;font-weight:700">Как работает Lefiro — 7 шагов:</h3>
     <table width="100%" cellpadding="0" cellspacing="0">
       ${[
         ['✍️', 'Сценарий', 'Claude AI пишет сценарий по вашей теме'],
@@ -90,7 +90,7 @@ export async function sendWelcomeEmail(user: { email: string; name?: string | nu
     await resend.emails.send({
       from: FROM(),
       to: user.email,
-      subject: 'Добро пожаловать в YouTubeGen! 🎬',
+      subject: 'Добро пожаловать в Lefiro! 🎬',
       html,
     })
   } catch (err) {

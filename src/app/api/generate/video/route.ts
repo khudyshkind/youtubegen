@@ -54,7 +54,7 @@ function buildTiming(images: SceneImage[], blocks: SubtitleBlock[], topic: strin
   })
 
   return [
-    `YouTubeGen — Тайм-коды иллюстраций`,
+    `Lefiro — Тайм-коды иллюстраций`,
     `====================================`,
     `Тема: ${topic}`,
     `Иллюстраций: ${images.length}`,
@@ -69,7 +69,7 @@ function buildTiming(images: SceneImage[], blocks: SubtitleBlock[], topic: strin
 }
 
 function buildReadme(topic: string): string {
-  return `YouTubeGen — Инструкция по финальному монтажу
+  return `Lefiro — Инструкция по финальному монтажу
 ==============================================
 Тема видео: ${topic}
 
