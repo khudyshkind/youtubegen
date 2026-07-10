@@ -3907,6 +3907,32 @@ function stripId3Tag(buf) {
   return buf
 }
 
+// Re-encode a concatenated MP3 buffer through local ffmpeg so the output has a
+// correct Xing/Info header covering the full file. Without this, the stale TOC
+// from chunk 1 causes browser seeks past the first chunk to land at wrong offsets.
+// Pipes buffer via stdin → stdout to avoid temp files.
+function repairMp3Buffer(buf) {
+  return new Promise((resolve, reject) => {
+    const ff = spawn('ffmpeg', [
+      '-v', 'error',
+      '-i', 'pipe:0',
+      '-c:a', 'libmp3lame',
+      '-b:a', '128k',
+      '-ar', '44100',
+      '-f', 'mp3',
+      'pipe:1',
+    ])
+    const out = []
+    ff.stdout.on('data', d => out.push(d))
+    ff.on('error', reject)
+    ff.on('close', code => {
+      if (code !== 0) { reject(new Error(`ffmpeg exited ${code}`)); return }
+      resolve(Buffer.concat(out))
+    })
+    ff.stdin.end(buf)
+  })
+}
+
 // Split text into chunks fitting within per-engine char/byte limit.
 // Splits at paragraph → sentence boundaries; word-split as last resort.
 function splitTextIntoChunks(text, maxChars, measureBytes) {
@@ -4184,9 +4210,24 @@ async function processAudioJob(job) {
     const buffers = await runLimited(tasks, 4)
 
     // 8. Concat in memory — first chunk keeps ID3 header, rest stripped to prevent PTS drift
-    const finalBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
+    let finalBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
     console.log(`[audio-job:${jobId}] concat: ${(finalBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`)
     if (finalBuffer.byteLength === 0) throw new Error('empty audio buffer after synthesis')
+
+    // 8a. Re-encode multi-chunk MP3 so the Xing/Info header covers the full file.
+    //     Without this, chunk 1's stale TOC causes browser seeks to land at wrong
+    //     byte offsets for any position past the first chunk boundary.
+    //     Single-chunk synthesis skips this (no concat = no stale TOC).
+    if (buffers.length > 1) {
+      try {
+        const repaired = await repairMp3Buffer(finalBuffer)
+        console.log(`[audio-job:${jobId}] xing-repair: ${(repaired.byteLength / 1024 / 1024).toFixed(2)} MB`)
+        finalBuffer = repaired
+      } catch (repairErr) {
+        console.error(`[audio-job:${jobId}] xing-repair failed, uploading raw concat:`, repairErr.message)
+        Sentry.captureException(repairErr, { extra: { jobId, engine: job.engine } })
+      }
+    }
 
     // 9. Upload to Supabase Storage → deterministic public URL
     const publicUrl = await uploadToSupabaseStorage(finalBuffer, job.user_id, job.project_id)

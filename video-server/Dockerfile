@@ -5,6 +5,7 @@ RUN apt-get update \
      curl \
      ca-certificates \
      postgresql-client \
+     ffmpeg \
   && pg_dump --version \
   && rm -rf /var/lib/apt/lists/*
 
