@@ -76,7 +76,7 @@ const CARD_NUMBER = process.env.CARD_NUMBER || '0000 0000 0000 0000'
 const CARD_HOLDER = process.env.CARD_HOLDER || 'IVAN IVANOV'
 const USDT_TRC20  = process.env.USDT_TRC20  || 'TW6Z6iZECebHe764YCKAsv5MfVFG6G947L'
 const USDT_ERC20  = process.env.USDT_ERC20  || '0x0f8d57d74367c4379b809399b1205f587f46104a'
-const APP_URL     = process.env.APP_URL     || 'https://youtubegen.vercel.app'
+const APP_URL     = process.env.APP_URL     || 'https://lefiro.co'
 
 // ── Telegram config ───────────────────────────────────────────────────────────
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
@@ -683,7 +683,7 @@ async function generatePost(topic) {
         '- Максимум 500 символов\n' +
         '- Используй эмодзи\n' +
         '- Короткие абзацы\n' +
-        '- В конце призыв: попробовать сервис со ссылкой https://youtubegen.vercel.app\n' +
+        `- В конце призыв: попробовать сервис со ссылкой ${APP_URL}\n` +
         '- Стиль: дружелюбный, живой, не рекламный\n' +
         '- Можно использовать Markdown для форматирования',
     }],
@@ -837,7 +837,7 @@ async function generateDeployPost(commitMessage) {
         'Правила:\n' +
         '- Объясни обновление простым языком для блогеров\n' +
         '- Покажи пользу для пользователя\n' +
-        '- Добавь эмодзи и ссылку https://youtubegen.vercel.app\n' +
+        `- Добавь эмодзи и ссылку ${APP_URL}\n` +
         '- Максимум 400 символов\n' +
         '- Стиль: живой, позитивный',
     }],
@@ -867,7 +867,7 @@ async function publishStats(toOwner = null) {
     `👥 Пользователей: *${stats.users}*\n` +
     `📁 Проектов: *${stats.projects}*\n` +
     `🎬 Видео готово: *${stats.videos}*\n\n` +
-    `Создай своё видео → https://youtubegen.vercel.app`
+    `Создай своё видео → ${APP_URL}`
   await publishToChannel(text)
   if (toOwner) await sendTo(toOwner, '✅ Статистика опубликована в канал')
 }

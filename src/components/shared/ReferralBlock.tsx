@@ -14,9 +14,7 @@ export default function ReferralBlock({ referralCode, referralCount, referralCre
   const { t } = useLang()
   const [copied, setCopied] = useState(false)
   const paidCount = referralCreditsEarned > 0 ? Math.round(referralCreditsEarned / REFERRER_BONUS) : 0
-  const [referralUrl, setReferralUrl] = useState(
-    `https://youtubegen.vercel.app/auth/register?ref=${referralCode}`
-  )
+  const [referralUrl, setReferralUrl] = useState('')
 
   useEffect(() => {
     setReferralUrl(`${window.location.origin}/auth/register?ref=${referralCode}`)
