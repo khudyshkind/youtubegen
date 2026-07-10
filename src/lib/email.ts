@@ -8,7 +8,7 @@ function getResend() {
 }
 
 const FROM = () => env('RESEND_FROM_EMAIL') || 'YouTubeGen <noreply@youtubegen.vercel.app>'
-const APP  = () => env('NEXT_PUBLIC_APP_URL') || 'https://youtubegen.vercel.app'
+const APP  = () => env('NEXT_PUBLIC_APP_URL') || 'https://lefiro.co'
 
 // ─── shared template wrapper ──────────────────────────────────────────────────
 
