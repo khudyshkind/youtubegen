@@ -412,7 +412,7 @@ export const translations = {
     'landing.plan_cta_pro':    'Выбрать →',
     'landing.plan_cta_agency': 'Выбрать →',
     'landing.plan_credits_mo': 'кредитов в месяц',
-    'landing.credits_note':    'Сценарий 550–900 кр · Озвучка 200–6600/1к симв · Субтитры 180 кр/мин · Иллюстрация 100–1230 кр/шт · Видео 300 кр/мин · SEO 750 кр · Полное видео ~3 500–13 000 кр',
+    'landing.credits_note':    'Сценарий 550–900 кр · Озвучка 200–6600/1к симв · Субтитры 180 кр/мин · Иллюстрация 100–1170 кр/шт · Видео 300 кр/мин · SEO 750 кр · Полное видео ~3 500–13 000 кр',
 
     // ── Landing — CTA section ─────────────────────────────────────────────────
     'landing.cta_h2_pre':   'Создай своё первое видео',
@@ -1458,7 +1458,7 @@ export const translations = {
     'landing.plan_cta_pro':    'Choose →',
     'landing.plan_cta_agency': 'Choose →',
     'landing.plan_credits_mo': 'credits/mo',
-    'landing.credits_note':    'Script 550–900 cr · Voice 200–6600/1k chars · Subtitles 180 cr/min · Image 100–1230 cr/ea · Video 300 cr/min · SEO 750 cr · Full video ~3,500–13,000 cr',
+    'landing.credits_note':    'Script 550–900 cr · Voice 200–6600/1k chars · Subtitles 180 cr/min · Image 100–1170 cr/ea · Video 300 cr/min · SEO 750 cr · Full video ~3,500–13,000 cr',
 
     // ── Landing — CTA section ─────────────────────────────────────────────────
     'landing.cta_h2_pre':    'Create your first video',
