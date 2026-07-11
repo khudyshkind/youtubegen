@@ -196,7 +196,7 @@ function StepWizardInner() {
   return (
     <div>
       {/* Step indicator */}
-      <div className="flex items-start mb-8 overflow-x-auto pb-1">
+      <div className="flex items-start mb-6 overflow-x-auto pt-5 pb-1">
         {STEP_KEYS.map((key, idx) => {
           const stepN = (idx + 1) as Step
           const done = currentStep > stepN

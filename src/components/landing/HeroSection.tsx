@@ -141,7 +141,7 @@ export default function HeroSection() {
           {[
             { to: 321, suffix: '', label: t('landing.hero_stat1') },
             { to: 28,  suffix: '', label: t('landing.hero_stat2') },
-            { to: 7,   suffix: '', label: t('landing.hero_stat3') },
+            { to: 8,   suffix: '', label: t('landing.hero_stat3') },
             { to: 10,  suffix: lang === 'en' ? ' min' : ' мин', label: t('landing.hero_stat4') },
           ].map((s, i) => (
             <div key={s.label} className={`px-8 py-2 text-center ${i > 0 ? 'border-l border-white/10' : ''}`}>

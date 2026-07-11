@@ -142,21 +142,16 @@ export default function BillingPage() {
           const isDowngrade = PLAN_ORDER.indexOf(plan.id) < PLAN_ORDER.indexOf(currentPlan)
 
           return (
-            <div
-              key={plan.id}
-              className={`relative rounded-2xl p-5 flex flex-col gap-4 transition-all ${
-                plan.highlight ? 'pro-card-glow' : 'card-dark'
-              } ${isCurrent ? 'border-violet-500/60' : ''}`}
-            >
+            <div key={plan.id} className="relative pt-4">
               {plan.highlight && !isCurrent && (
-                <div className="absolute -top-3 left-0 right-0 flex justify-center">
+                <div className="absolute top-0 left-0 right-0 flex justify-center z-10">
                   <span className="btn-gradient text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
                     {t('billing.popular')}
                   </span>
                 </div>
               )}
               {isCurrent && (
-                <div className="absolute -top-3 left-0 right-0 flex justify-center">
+                <div className="absolute top-0 left-0 right-0 flex justify-center z-10">
                   <span
                     className="text-violet-300 text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap"
                     style={{ background: 'rgba(124,58,237,0.3)', border: '1px solid rgba(124,58,237,0.5)' }}
@@ -165,7 +160,11 @@ export default function BillingPage() {
                   </span>
                 </div>
               )}
-
+              <div
+                className={`relative rounded-2xl p-5 flex flex-col gap-4 transition-all ${
+                  plan.highlight ? 'pro-card-glow' : 'card-dark'
+                } ${isCurrent ? 'border-violet-500/60' : ''}`}
+              >
               <div>
                 <p className="text-sm font-medium text-slate-400">{plan.name}</p>
                 <div className="flex items-end gap-1 mt-1">
@@ -219,6 +218,7 @@ export default function BillingPage() {
                   💬 {t('billing.tg_pay_btn')}
                 </a>
               )}
+              </div>
             </div>
           )
         })}

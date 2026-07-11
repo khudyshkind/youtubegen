@@ -14,7 +14,7 @@ export default function TiltInit() {
     cards.forEach((card) => {
       card.style.willChange = 'transform'
       card.style.transition = 'transform 0.15s ease-out, box-shadow 0.3s ease, border-color 0.3s ease, background 0.3s ease'
-      card.style.overflow = 'hidden'
+      card.style.overflow = 'visible'
 
       // Shine overlay
       const shine = document.createElement('div')

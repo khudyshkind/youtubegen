@@ -238,12 +238,13 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
             <p className="text-xl text-slate-400">{t('landing.analytics_sub')}</p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {[
-              { icon: '🔍', title: t('landing.analytics_card1_title'), desc: t('landing.analytics_card1_desc') },
-              { icon: '📈', title: t('landing.analytics_card2_title'), desc: t('landing.analytics_card2_desc') },
-              { icon: '🔑', title: t('landing.analytics_card3_title'), desc: t('landing.analytics_card3_desc') },
+              { icon: '🎯', title: t('landing.analytics_card1_title'), desc: t('landing.analytics_card1_desc') },
+              { icon: '🚀', title: t('landing.analytics_card2_title'), desc: t('landing.analytics_card2_desc') },
+              { icon: '📈', title: t('landing.analytics_card3_title'), desc: t('landing.analytics_card3_desc') },
               { icon: '📊', title: t('landing.analytics_card4_title'), desc: t('landing.analytics_card4_desc') },
+              { icon: '⭐', title: t('landing.analytics_card5_title'), desc: t('landing.analytics_card5_desc') },
             ].map((card, i) => (
               <div
                 key={card.title}
@@ -338,24 +339,24 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
             <p className="text-xl text-slate-400">{t('landing.pricing_sub')}</p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-start">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-start pt-5">
             {PLANS.map((plan, i) => (
-              <div
-                key={plan.name}
-                data-tilt
-                className={`relative rounded-2xl p-6 flex flex-col gap-5 reveal ${plan.highlight ? 'pro-card-glow' : 'card-dark'}`}
-                style={{
-                  transitionDelay: `${i * 80}ms`,
-                  ...(plan.highlight ? { background: 'rgba(124,58,237,0.08)' } : {}),
-                }}
-              >
+              <div key={plan.name} className="relative pt-4">
                 {plan.highlight && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2">
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 z-10">
                     <span className="text-white text-xs font-bold px-4 py-1.5 rounded-full whitespace-nowrap" style={{ background: 'linear-gradient(135deg, #7C3AED, #2563EB)' }}>
                       {t('landing.plan_popular')}
                     </span>
                   </div>
                 )}
+                <div
+                  data-tilt
+                  className={`relative rounded-2xl p-6 flex flex-col gap-5 reveal ${plan.highlight ? 'pro-card-glow' : 'card-dark'}`}
+                  style={{
+                    transitionDelay: `${i * 80}ms`,
+                    ...(plan.highlight ? { background: 'rgba(124,58,237,0.08)' } : {}),
+                  }}
+                >
                 <div>
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{plan.name}</p>
                   {plan.isFree ? (
@@ -374,8 +375,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
                     <p className="text-xs text-slate-600 mt-0.5">~{plan.rub?.toLocaleString('ru-RU')} ₽/мес</p>
                   )}
                   <p className="text-xs text-violet-400 font-semibold mt-1">
-                    {plan.credits.toLocaleString('ru-RU')} {t('landing.plan_credits_mo')}
-                    {plan.isFree && ' ·  разово'}
+                    {plan.credits.toLocaleString('ru-RU')} {plan.isFree ? t('landing.plan_credits_once') : t('landing.plan_credits_mo')}
                   </p>
                 </div>
                 <ul className="flex flex-col gap-2 flex-1">
@@ -397,6 +397,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
                     {plan.cta}
                   </Link>
                 )}
+                </div>
               </div>
             ))}
           </div>
