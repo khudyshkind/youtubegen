@@ -539,6 +539,16 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
       {/* Script textarea */}
       {script !== null && (
         <div>
+          <div
+            className="flex items-start gap-2.5 rounded-xl px-4 py-3 mb-3"
+            style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)' }}
+          >
+            <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <p className="text-xs text-yellow-300 leading-relaxed">{t('step2.review_banner')}</p>
+          </div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm font-medium text-slate-300">{t('step2.script_label')}</p>
             <span className="text-xs text-slate-500">
@@ -557,7 +567,6 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
             placeholder="..."
             className="w-full px-4 py-3 rounded-xl text-sm resize-none leading-relaxed"
           />
-          <p className="text-xs text-slate-600 mt-1">{t('step2.edit_hint')}</p>
         </div>
       )}
 

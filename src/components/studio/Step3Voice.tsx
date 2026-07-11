@@ -982,15 +982,40 @@ export default function Step3Voice() {
             </div>
           )}
 
-          <VoiceDropdown
-            value={svVoiceId}
-            voices={svVoices}
-            loading={svVoicesLoading}
-            genderFilter={genderFilter}
-            onChange={setSvVoiceId}
-            onPreview={handleSvPreview}
-            previewingId={previewingId}
-          />
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium text-slate-300">{t('step3.voice')}</p>
+              {svVoiceId && !svVoicesLoading && (
+                <button type="button"
+                  onClick={() => void handleSvPreview(svVoiceId)}
+                  disabled={!!previewingId}
+                  className="flex items-center gap-1.5 text-xs transition-colors disabled:opacity-40"
+                  style={{ color: previewingId === svVoiceId ? '#A78BFA' : '#64748B' }}
+                  onMouseEnter={(e) => { if (!previewingId) e.currentTarget.style.color = '#CBD5E1' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = previewingId === svVoiceId ? '#A78BFA' : '#64748B' }}
+                >
+                  {previewingId === svVoiceId ? (
+                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  )}
+                  {t('step3.listen')}
+                </button>
+              )}
+            </div>
+            <VoiceDropdown
+              value={svVoiceId}
+              voices={svVoices}
+              loading={svVoicesLoading}
+              genderFilter={genderFilter}
+              onChange={setSvVoiceId}
+              onPreview={handleSvPreview}
+              previewingId={previewingId}
+            />
+          </div>
 
           <div>
             <p className="text-sm font-medium text-slate-300 mb-2">{t('step3.voice_style')}</p>
@@ -1089,9 +1114,31 @@ export default function Step3Voice() {
           </div>
 
           <div>
-            <p className="text-sm font-medium text-slate-300 mb-2">
-              {t('step3.voice')}{!voicesLoading && voices.length > 0 && <span className="ml-1 text-slate-600 font-normal">· {voices.length}</span>}
-            </p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium text-slate-300">
+                {t('step3.voice')}{!voicesLoading && voices.length > 0 && <span className="ml-1 text-slate-600 font-normal">· {voices.length}</span>}
+              </p>
+              {voiceSettings.voiceId && !voicesLoading && (
+                <button type="button"
+                  onClick={() => void handlePreview(voiceSettings.voiceId)}
+                  disabled={!!previewingId}
+                  className="flex items-center gap-1.5 text-xs transition-colors disabled:opacity-40"
+                  style={{ color: previewingId === voiceSettings.voiceId ? '#A78BFA' : '#64748B' }}
+                  onMouseEnter={(e) => { if (!previewingId) e.currentTarget.style.color = '#CBD5E1' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = previewingId === voiceSettings.voiceId ? '#A78BFA' : '#64748B' }}
+                >
+                  {previewingId === voiceSettings.voiceId ? (
+                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  )}
+                  {t('step3.listen')}
+                </button>
+              )}
+            </div>
             <VoiceDropdown
               value={voiceSettings.voiceId} voices={voices} loading={voicesLoading}
               genderFilter={genderFilter} onChange={(id) => setVoiceSettings({ voiceId: id })}

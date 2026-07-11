@@ -2,7 +2,7 @@
 
 interface StickyActionPanelProps {
   stepLabel?: string
-  costLine?: string
+  costLine?: string | string[]
   primaryLabel: string
   primaryDisabled?: boolean
   onPrimary: () => void
@@ -33,7 +33,9 @@ export default function StickyActionPanel({
         </p>
       )}
       {costLine && (
-        <p className="text-sm text-slate-300">{costLine}</p>
+        Array.isArray(costLine)
+          ? <div className="flex flex-col gap-0.5">{costLine.map((l, i) => <p key={i} className="text-sm text-slate-300">{l}</p>)}</div>
+          : <p className="text-sm text-slate-300">{costLine}</p>
       )}
       <button
         type="button"

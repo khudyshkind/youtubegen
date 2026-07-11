@@ -314,7 +314,7 @@ export default function Step4Subtitles() {
         {subtitleBlocks.length === 0 && (
           <button
             type="button"
-            onClick={() => setStep(6)}
+            onClick={() => { if (window.confirm(t('step4.skip_confirm'))) setStep(6) }}
             className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
           >
             {t('step4.skip')}

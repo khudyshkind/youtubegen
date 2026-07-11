@@ -798,7 +798,7 @@ export default function Step5Images() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <p className="text-xs text-blue-300 leading-relaxed">
-          <strong>{imageCount}</strong> {t('studio.step5').toLowerCase()} · {t('step5.generating')}
+          <strong>{imageCount}</strong> {t('step6.scenes_count')} · {t('step5.generating')}
         </p>
       </div>
 
@@ -874,7 +874,7 @@ export default function Step5Images() {
           </button>
           <button
             type="button"
-            onClick={() => setStep(7)}
+            onClick={() => { if (window.confirm(t('step5.skip_confirm'))) setStep(7) }}
             className="flex items-center gap-1 py-2 px-3 text-slate-500 text-xs font-medium rounded-xl hover:text-slate-300 transition-colors"
             style={{ border: '1px solid rgba(255,255,255,0.07)' }}
           >
@@ -931,7 +931,7 @@ export default function Step5Images() {
 
           <div>
             <p className="text-sm font-medium text-slate-300 mb-3">
-              {t('studio.step5')} ({sceneImages.length})
+              {t('step5.scenes')} ({sceneImages.length})
               <span className="ml-2 text-xs text-slate-500 font-normal">{t('step5.regen_hint')}</span>
             </p>
 
@@ -984,7 +984,7 @@ export default function Step5Images() {
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={img.url}
-                            alt={`${t('studio.step5')} ${arrayIdx + 1}`}
+                            alt={`${t('step5.scenes')} ${arrayIdx + 1}`}
                             className={`w-full h-full object-cover transition-opacity ${isLoading ? 'opacity-40' : 'opacity-100'}`}
                           />
                         ) : (

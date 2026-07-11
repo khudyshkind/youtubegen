@@ -344,7 +344,7 @@ function StepWizardInner() {
           {currentStep === 8 && (
             <StickyActionPanel
               stepLabel={t('studio.step8')}
-              costLine={`SEO: −${CREDIT_COSTS.seo} кр.`}
+              costLine={[`SEO: −${CREDIT_COSTS.seo} кр.`, `Превью (опц.): −${CREDIT_COSTS.thumbnail} кр.`]}
               primaryLabel={t('step7.finish')}
               primaryDisabled={!seo}
               onPrimary={() => seoFinishRef.current?.()}

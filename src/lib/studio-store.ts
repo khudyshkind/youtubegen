@@ -102,9 +102,9 @@ const defaultScriptParams: ScriptParams = {
   narrative_style: 'storytelling',
   tone: 'neutral',
   target_audience: 'wide',
-  hook: false,
+  hook: true,
   hook_type: 'question',
-  cta: false,
+  cta: true,
   scene_markers: false,
   pauses: false,
 }

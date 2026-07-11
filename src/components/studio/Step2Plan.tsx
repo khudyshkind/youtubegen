@@ -258,7 +258,7 @@ export default function Step2Plan() {
         <div className="text-center">
           <button
             type="button"
-            onClick={() => setStep(3)}
+            onClick={() => { if (window.confirm(t('plan.skip_confirm'))) setStep(3) }}
             className="text-sm text-slate-600 hover:text-slate-400 transition-colors"
           >
             {t('plan.skip')}

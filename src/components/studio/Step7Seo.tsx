@@ -969,18 +969,21 @@ export default function Step7Seo({ onRegisterFinish }: Step7SeoProps) {
         >
           {t('step7.back')}
         </button>
-        <button
-          type="button"
-          onClick={() => { setSeo(localSeo!); setDone(true) }}
-          disabled={!localSeo}
-          className="flex-1 py-3 font-semibold rounded-xl text-sm disabled:opacity-40 transition-all"
-          style={localSeo
-            ? { background: 'linear-gradient(135deg, #10B981, #059669)', color: '#fff', boxShadow: '0 4px 20px rgba(16,185,129,0.3)' }
-            : { background: 'rgba(255,255,255,0.05)', color: '#475569', border: '1px solid rgba(255,255,255,0.08)' }
-          }
-        >
-          {t('step7.finish')}
-        </button>
+        <div className="flex-1 flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => { setSeo(localSeo!); setDone(true) }}
+            disabled={!localSeo}
+            className="w-full py-3 font-semibold rounded-xl text-sm disabled:opacity-40 transition-all"
+            style={localSeo
+              ? { background: 'linear-gradient(135deg, #10B981, #059669)', color: '#fff', boxShadow: '0 4px 20px rgba(16,185,129,0.3)' }
+              : { background: 'rgba(255,255,255,0.05)', color: '#475569', border: '1px solid rgba(255,255,255,0.08)' }
+            }
+          >
+            {t('step7.finish')}
+          </button>
+          <p className="text-xs text-center" style={{ color: 'rgba(100,116,139,0.7)' }}>{t('step7.finish_caption')}</p>
+        </div>
       </div>
     </div>
   )
