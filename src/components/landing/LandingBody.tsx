@@ -19,7 +19,7 @@ interface Props {
 }
 
 export default function LandingBody({ usdToRub = 90 }: Props) {
-  const { t } = useLang()
+  const { t, lang } = useLang()
 
   const STEPS = [
     { n: '01', icon: '💡', title: t('landing.step1_title'), desc: t('landing.step1_desc') },
@@ -172,7 +172,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {BENEFITS.map((b, i) => (
               <div
-                key={b.title}
+                key={b.icon}
                 data-tilt
                 className="card-dark rounded-2xl p-7 reveal"
                 style={{ transitionDelay: `${i * 90}ms` }}
@@ -249,7 +249,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
               { icon: '⭐', title: t('landing.analytics_card5_title'), desc: t('landing.analytics_card5_desc') },
             ].map((card, i) => (
               <div
-                key={card.title}
+                key={card.icon}
                 data-tilt
                 className="card-dark rounded-2xl p-6 reveal"
                 style={{ transitionDelay: `${i * 80}ms` }}
@@ -287,7 +287,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
               { to: 28,  suffix: '',  label: t('landing.stats_langs') },
               { to: 10,  suffix: t('landing.stats_avg_sfx'), label: t('landing.stats_avg') },
             ].map((s) => (
-              <div key={s.label} className="px-6 py-2">
+              <div key={s.to} className="px-6 py-2">
                 <div className="text-4xl font-extrabold text-slate-100">
                   <AnimatedCounter to={s.to} suffix={s.suffix} duration={1200} />
                 </div>
@@ -307,7 +307,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             {TESTIMONIALS.map((rev, i) => (
               <div
-                key={rev.name}
+                key={i}
                 data-tilt
                 className="card-dark rounded-2xl p-6 flex flex-col gap-4 reveal"
                 style={{ transitionDelay: `${i * 110}ms` }}
@@ -411,8 +411,8 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
             <p className="text-sm text-slate-600">{t('landing.credits_note')}</p>
           </div>
 
-          {/* Russia payment block */}
-          <div
+          {/* Russia payment block — RU locale only */}
+          {lang === 'ru' && <div
             className="mt-10 rounded-2xl p-6 reveal"
             style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
           >
@@ -452,7 +452,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
             >
               {t('billing.russia_btn')}
             </a>
-          </div>
+          </div>}
         </div>
       </section>
 
