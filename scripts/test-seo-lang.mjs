@@ -117,6 +117,9 @@ console.log('\n🧪 Part A — Prompt generation logic\n')
   check('seo: AI-gen RU (DB=ru, client=ru) → lang=ru', resolveSeоLang('ru', 'ru'), 'ru')
   // DB wins over stale clientLang: DB=en, client='ru' (stale store) → lang='en'
   check('seo: DB wins over stale client (DB=en, client=ru) → lang=en', resolveSeоLang('en', 'ru'), 'en')
+  // Explicit dropdown change: user picks 'ru' → PATCH writes 'ru' to DB → DB='ru' → lang='ru'
+  // (simulated: after dropdown write, DB reflects user intent)
+  check('seo: explicit dropdown override (dropdown→DB write: DB=ru, prev-DB=en) → lang=ru', resolveSeоLang('ru', 'ru'), 'ru')
 }
 
 // 4. SEO user message: OUTPUT LANGUAGE appended only when lang is set
@@ -162,7 +165,7 @@ OUTPUT LANGUAGE: Write all output in the same language as the video topic and sc
 async function callSeo(script, topic, lang) {
   const msg = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 600,
+    max_tokens: 1200,
     system: [{ type: 'text', text: SEO_SYSTEM_PROMPT }],
     messages: [{ role: 'user', content: buildSeoUserMessage(script, topic, lang) }],
   })

@@ -79,8 +79,17 @@ export async function PATCH(
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
 
-    const body = await request.json() as { title?: string; generate_from?: string }
-    const { title, generate_from } = body
+    const body = await request.json() as { title?: string; generate_from?: string; language?: string }
+    const { title, generate_from, language } = body
+
+    // Fast path: direct language write (e.g. user changed outputLang dropdown — no Haiku needed)
+    if (language && !generate_from && !title) {
+      const lang = language.toLowerCase().slice(0, 5)
+      const { error } = await supabase.from('projects').update({ language: lang }).eq('id', id).eq('user_id', user.id)
+      if (error) return NextResponse.json({ ok: false, error: 'Ошибка обновления проекта' }, { status: 500 })
+      console.log(`[projects/:id PATCH] direct language write: ${lang}`)
+      return NextResponse.json({ ok: true, data: { language: lang } })
+    }
 
     let finalTitle: string | undefined
     let detectedLanguage: string | null = null

@@ -343,7 +343,16 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
             <label className="text-xs font-medium text-slate-400 whitespace-nowrap shrink-0">{t('tools.output_lang')}</label>
             <select
               value={outputLang}
-              onChange={(e) => setOutputLang(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value
+                setOutputLang(v)
+                setScriptParams({ language: v as import('@/lib/types').ScriptLanguage })
+                if (projectId) void fetch(`/api/projects/${projectId}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ language: v }),
+                })
+              }}
               className="flex-1 px-3 py-2 rounded-lg text-sm text-slate-300 cursor-pointer outline-none"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
             >
