@@ -2923,17 +2923,22 @@ const VF_SCALE = 'scale=1280:720,setsar=1'
 //
 // Two alternating patterns prevent 19 identical zoom-ins in a row:
 //   even scenes → zoom-in to center (z 1.0→1.5 over the clip)
-//   odd  scenes → pan left→right with light zoom (z 1.1→1.3, x 0→128px)
-// scale before zoompan so iw/ih are always 1280×720 regardless of source engine.
+//   odd  scenes → pan left→right with light zoom (z 1.1→1.3, x 0→128px out)
+//
+// UPSCALE before zoompan (scale=4000:2250) eliminates integer-rounding jitter.
+// zoompan computes x/y in integer pixels on input canvas; at 1280px a 1-pixel
+// rounding error = 1 output pixel of stutter. At 4000px, 1px error = 0.32 output
+// pixels — sub-perceptual. Lanczos upscale is one-time per image; zoompan
+// downscales each crop back to s=1280x720 internally.
 function getVfFilter(_img, dur, sceneIdx, hasKenBurns) {
   if (!hasKenBurns) return VF_SCALE
   const d = Math.max(1, Math.round(dur * 25))
   if (sceneIdx % 2 === 0) {
-    // Pattern A: smooth zoom-in to center. z goes 1.0→~1.498 via on/duration (0→1).
-    return `scale=1280:720,zoompan=z=1+0.5*on/duration:x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):d=${d}:s=1280x720:fps=25,setsar=1`
+    // Pattern A: zoom-in to center. z 1.0→1.5; at 4000px canvas: x varies by ~4.7px/frame→0.75 out-px/frame.
+    return `scale=4000:2250:flags=lanczos,zoompan=z=1+0.5*on/duration:x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):d=${d}:s=1280x720:fps=25,setsar=1`
   } else {
-    // Pattern B: pan left→right while zooming. z 1.1→1.3, x 0→128px (safe at z=1.3: max_x≈295).
-    return `scale=1280:720,zoompan=z=1.1+0.2*on/duration:x=iw*0.1*on/duration:y=ih/2-(ih/zoom/2):d=${d}:s=1280x720:fps=25,setsar=1`
+    // Pattern B: pan left→right + zoom. z 1.1→1.3; x 0→400px at 4000 canvas (=128 out-px).
+    return `scale=4000:2250:flags=lanczos,zoompan=z=1.1+0.2*on/duration:x=iw*0.1*on/duration:y=ih/2-(ih/zoom/2):d=${d}:s=1280x720:fps=25,setsar=1`
   }
 }
 
