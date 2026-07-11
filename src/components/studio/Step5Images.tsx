@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
+import ConfirmModal from '@/components/shared/ConfirmModal'
 import { exportPrompts } from '@/lib/exportPrompts'
 import { CREDIT_COSTS, IMAGE_STYLES } from '@/lib/types'
 import type { SceneImage, ImageStyleKey } from '@/lib/types'
@@ -187,6 +188,7 @@ export default function Step5Images() {
 
   const { t } = useLang()
   const [showGptLimitModal, setShowGptLimitModal] = useState(false)
+  const [showSkipModal, setShowSkipModal] = useState(false)
   // Overrides imageCount for display/cost when user picks "Reduce to 20" from modal
   const [gptCountOverride, setGptCountOverride] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -500,6 +502,7 @@ export default function Step5Images() {
       : `~${scriptParams.duration_minutes} ${t('step1.min')}`
 
   return (
+    <>
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold text-slate-100 mb-1">{t('step5.title')}</h2>
@@ -874,7 +877,7 @@ export default function Step5Images() {
           </button>
           <button
             type="button"
-            onClick={() => { if (window.confirm(t('step5.skip_confirm'))) setStep(7) }}
+            onClick={() => setShowSkipModal(true)}
             className="flex items-center gap-1 py-2 px-3 text-slate-500 text-xs font-medium rounded-xl hover:text-slate-300 transition-colors"
             style={{ border: '1px solid rgba(255,255,255,0.07)' }}
           >
@@ -1113,5 +1116,14 @@ export default function Step5Images() {
         </button>
       </div>
     </div>
+
+    {showSkipModal && (
+      <ConfirmModal
+        message={t('step5.skip_confirm')}
+        onConfirm={() => { setShowSkipModal(false); setStep(7) }}
+        onCancel={() => setShowSkipModal(false)}
+      />
+    )}
+    </>
   )
 }

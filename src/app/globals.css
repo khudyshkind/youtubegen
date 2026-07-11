@@ -74,6 +74,14 @@ body {
   transform: scale(1.025);
   opacity: 0.92;
 }
+.btn-gradient:disabled {
+  background: rgb(30 41 59);
+  color: rgb(100 116 139);
+  opacity: 1;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
 
 /* ── Gradient text ────────────────────────────────────── */
 .gradient-text {

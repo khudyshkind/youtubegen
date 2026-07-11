@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
+import ConfirmModal from '@/components/shared/ConfirmModal'
 
 function extractAudioTs(url: string | null): number | null {
   if (!url) return null
@@ -62,6 +63,7 @@ export default function Step4Subtitles() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [srtUploadError, setSrtUploadError] = useState('')
+  const [showSkipModal, setShowSkipModal] = useState(false)
   const srtFileRef = useRef<HTMLInputElement>(null)
 
   function handleSrtUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -130,6 +132,7 @@ export default function Step4Subtitles() {
   }
 
   return (
+    <>
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold text-slate-100 mb-1">{t('step4.title')}</h2>
@@ -314,7 +317,7 @@ export default function Step4Subtitles() {
         {subtitleBlocks.length === 0 && (
           <button
             type="button"
-            onClick={() => { if (window.confirm(t('step4.skip_confirm'))) setStep(6) }}
+            onClick={() => setShowSkipModal(true)}
             className="px-5 py-3 btn-ghost-dark font-medium rounded-xl text-sm"
           >
             {t('step4.skip')}
@@ -322,5 +325,14 @@ export default function Step4Subtitles() {
         )}
       </div>
     </div>
+
+    {showSkipModal && (
+      <ConfirmModal
+        message={t('step4.skip_confirm')}
+        onConfirm={() => { setShowSkipModal(false); setStep(6) }}
+        onCancel={() => setShowSkipModal(false)}
+      />
+    )}
+    </>
   )
 }

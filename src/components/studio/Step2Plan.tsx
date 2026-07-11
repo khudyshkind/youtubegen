@@ -5,6 +5,7 @@ import { useStudioStore } from '@/lib/studio-store'
 import type { PlanSection } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { useLang } from '@/hooks/useLang'
+import ConfirmModal from '@/components/shared/ConfirmModal'
 
 function SpinnerIcon({ className }: { className?: string }) {
   return (
@@ -20,6 +21,7 @@ export default function Step2Plan() {
   const { t } = useLang()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showSkipModal, setShowSkipModal] = useState(false)
 
   async function handleGenerate() {
     setError('')
@@ -89,6 +91,7 @@ export default function Step2Plan() {
   }
 
   return (
+    <>
     <div className="flex flex-col gap-6">
       {/* Header */}
       <div>
@@ -258,7 +261,7 @@ export default function Step2Plan() {
         <div className="text-center">
           <button
             type="button"
-            onClick={() => { if (window.confirm(t('plan.skip_confirm'))) setStep(3) }}
+            onClick={() => setShowSkipModal(true)}
             className="text-sm text-slate-600 hover:text-slate-400 transition-colors"
           >
             {t('plan.skip')}
@@ -266,5 +269,14 @@ export default function Step2Plan() {
         </div>
       )}
     </div>
+
+    {showSkipModal && (
+      <ConfirmModal
+        message={t('plan.skip_confirm')}
+        onConfirm={() => { setShowSkipModal(false); setStep(3) }}
+        onCancel={() => setShowSkipModal(false)}
+      />
+    )}
+    </>
   )
 }
