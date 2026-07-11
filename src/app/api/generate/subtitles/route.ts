@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
     const msg = error instanceof Error ? error.message : String(error)
     if (msg.includes('429') || (error as { status?: number }).status === 429) {
       return NextResponse.json(
-        { ok: false, error: 'Превышена квота OpenAI — пополните баланс на platform.openai.com' },
+        { ok: false, error: 'Сервис распознавания речи временно перегружен — попробуйте через несколько минут' },
         { status: 402 }
       )
     }

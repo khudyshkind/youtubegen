@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { env } from '@/lib/env'
+import { ENGINE_DISPLAY } from '@/lib/types'
 
 export const maxDuration = 10
 
@@ -14,7 +15,7 @@ export async function GET(req: NextRequest) {
   const key = env('GOOGLE_TTS_API_KEY')
   if (!key) {
     return NextResponse.json(
-      { ok: false, error: 'Google TTS API key не настроен' },
+      { ok: false, error: `Движок ${ENGINE_DISPLAY.google.name} временно недоступен` },
       { status: 503 }
     )
   }
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
       const err = await res.text().catch(() => '')
       console.error('[voices/google]', res.status, err.slice(0, 200))
       return NextResponse.json(
-        { ok: false, error: `Google TTS API error ${res.status}` },
+        { ok: false, error: `Ошибка загрузки голосов ${ENGINE_DISPLAY.google.name} (${res.status})` },
         { status: 502 }
       )
     }

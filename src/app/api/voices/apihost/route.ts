@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { env } from '@/lib/env'
 import type { ApihostVoiceType } from '@/lib/types'
-import { CREDIT_COSTS } from '@/lib/types'
+import { CREDIT_COSTS, ENGINE_DISPLAY } from '@/lib/types'
 
 const APIHOST_RATE: Record<ApihostVoiceType, number> = {
   basic:    CREDIT_COSTS.audio_apihost_basic_per_1000,
@@ -146,6 +146,6 @@ export async function GET(request: Request) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[voices/apihost] error:', msg)
-    return NextResponse.json({ ok: false, error: 'Ошибка загрузки голосов APIHOST' }, { status: 500 })
+    return NextResponse.json({ ok: false, error: `Ошибка загрузки голосов ${ENGINE_DISPLAY.apihost.name}` }, { status: 500 })
   }
 }

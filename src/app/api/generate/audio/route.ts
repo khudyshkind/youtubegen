@@ -4,7 +4,7 @@ import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
-import { audioCost } from '@/lib/types'
+import { audioCost, ENGINE_DISPLAY } from '@/lib/types'
 import type { AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { env } from '@/lib/env'
 
@@ -678,7 +678,7 @@ export async function POST(request: NextRequest) {
     if (engine === 'openai') {
       const openaiKey = env('OPENAI_API_KEY')
       if (!openaiKey) {
-        return NextResponse.json({ ok: false, error: 'OpenAI API key не настроен' }, { status: 503 })
+        return NextResponse.json({ ok: false, error: `Движок ${ENGINE_DISPLAY.openai.name} временно недоступен` }, { status: 503 })
       }
 
       const buffers: Buffer[] = []
@@ -688,7 +688,7 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           console.error(`[generate/audio] OpenAI chunk ${i + 1}/${chunks.length} failed:`, msg)
-          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи OpenAI (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
+          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи ${ENGINE_DISPLAY.openai.name} (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
         }
       }
       audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
@@ -696,7 +696,7 @@ export async function POST(request: NextRequest) {
     } else if (engine === 'google') {
       const googleKey = env('GOOGLE_TTS_API_KEY')
       if (!googleKey) {
-        return NextResponse.json({ ok: false, error: 'Google TTS API key не настроен' }, { status: 503 })
+        return NextResponse.json({ ok: false, error: `Движок ${ENGINE_DISPLAY.google.name} временно недоступен` }, { status: 503 })
       }
 
       // Extract BCP-47 language code from voice name (e.g. "ru-RU-Standard-A" → "ru-RU")
@@ -709,7 +709,7 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           console.error(`[generate/audio] Google chunk ${i + 1}/${chunks.length} failed:`, msg)
-          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи Google (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
+          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи ${ENGINE_DISPLAY.google.name} (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
         }
       }
       audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
@@ -739,7 +739,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[generate/audio] APIHOST submit failed:', msg)
-        return NextResponse.json({ ok: false, error: `Ошибка отправки задачи APIHOST (${msg})` }, { status: 502 })
+        return NextResponse.json({ ok: false, error: `Ошибка отправки задачи ${ENGINE_DISPLAY.apihost.name} (${msg})` }, { status: 502 })
       }
 
       // Poll all jobs in parallel (each within 270s timeout)
@@ -755,7 +755,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[generate/audio] APIHOST poll failed:', msg)
-        return NextResponse.json({ ok: false, error: `APIHOST синтез не завершился вовремя (${msg})` }, { status: 504 })
+        return NextResponse.json({ ok: false, error: `${ENGINE_DISPLAY.apihost.name} синтез не завершился вовремя (${msg})` }, { status: 504 })
       }
 
       // Download all audio files in parallel
@@ -771,7 +771,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[generate/audio] APIHOST download failed:', msg)
-        return NextResponse.json({ ok: false, error: `Ошибка загрузки аудио с APIHOST (${msg})` }, { status: 502 })
+        return NextResponse.json({ ok: false, error: `Ошибка загрузки аудио с ${ENGINE_DISPLAY.apihost.name} (${msg})` }, { status: 502 })
       }
 
       audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
@@ -796,7 +796,7 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           console.error(`[generate/audio] ElevenLabs chunk ${i + 1}/${chunks.length} failed:`, msg)
-          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи ElevenLabs (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
+          return NextResponse.json({ ok: false, error: `Ошибка синтеза речи ${ENGINE_DISPLAY.elevenlabs.name} (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
         }
       }
       audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))

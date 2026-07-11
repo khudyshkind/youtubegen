@@ -5,7 +5,7 @@ import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { hasCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
-import { CREDIT_COSTS } from '@/lib/types'
+import { CREDIT_COSTS, ENGINE_DISPLAY } from '@/lib/types'
 import type { SceneImage, SubtitleBlock } from '@/lib/types'
 import { getStyleConfig } from '@/lib/image-style-configs'
 import type { StyleConfig } from '@/lib/image-style-configs'
@@ -625,7 +625,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: false,
       code: 'TOO_MANY_FOR_GPT_MINI',
-      error: 'GPT Image поддерживает максимум 20 иллюстраций за запуск',
+      error: `${ENGINE_DISPLAY.gpt_mini.name} поддерживает максимум 20 иллюстраций за запуск`,
       maxAllowed: 20,
       requested: count,
     }, { status: 400 })
