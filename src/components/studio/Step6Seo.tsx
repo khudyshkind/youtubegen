@@ -46,7 +46,7 @@ export default function Step6Seo() {
           script,
           topic: scriptParams.topic,
           project_id: projectId,
-          ...(ownScript ? {} : { lang: scriptParams.language }),
+          ...(scriptParams.language ? { lang: scriptParams.language } : {}),
         }),
       })
       const json = await res.json()

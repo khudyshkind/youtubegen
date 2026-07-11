@@ -560,7 +560,7 @@ export default function Step7Seo({ onRegisterFinish }: Step7SeoProps) {
           project_id: projectId,
           duration_minutes: scriptParams.duration_minutes,
           subtitle_blocks: subtitleBlocks.length > 0 ? subtitleBlocks : undefined,
-          ...(ownScript ? {} : { lang: scriptParams.language }),
+          ...(scriptParams.language ? { lang: scriptParams.language } : {}),
         }),
       })
       const json = await res.json()

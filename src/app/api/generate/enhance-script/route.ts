@@ -38,12 +38,18 @@ const LANG_NAMES: Record<string, string> = {
   vi: 'Vietnamese (Tiếng Việt)',
 }
 
-// Copied verbatim from script/route.ts:50-55 — keep in sync if source changes.
-const HOOK_LABELS: Record<string, string> = {
+const HOOK_LABELS_RU: Record<string, string> = {
   question:    'риторический вопрос',
   statistic:   'удивительная статистика',
   story:       'захватывающая история',
   provocation: 'провокационное заявление',
+}
+
+const HOOK_LABELS_EN: Record<string, string> = {
+  question:    'rhetorical question',
+  statistic:   'surprising statistic',
+  story:       'captivating story',
+  provocation: 'provocative statement',
 }
 
 function buildPrompt(
@@ -54,30 +60,54 @@ function buildPrompt(
   outputLang: string,
 ): string {
   const langName = LANG_NAMES[outputLang] ?? outputLang
+  const isRu = outputLang === 'ru'
+  const hookLabels = isRu ? HOOK_LABELS_RU : HOOK_LABELS_EN
 
   const instructions: string[] = []
   if (hook) {
-    // Verbatim from script/route.ts:73
-    instructions.push(`- Хук в начале: ${HOOK_LABELS[hookType] ?? hookType} (первые 15 секунд должны захватывать внимание)`)
+    if (isRu) {
+      instructions.push(`- Хук в начале: ${hookLabels[hookType] ?? hookType} (первые 15 секунд должны захватывать внимание)`)
+    } else {
+      instructions.push(`- Hook at the start: ${hookLabels[hookType] ?? hookType} (first 15 seconds must grab the viewer's attention)`)
+    }
   }
   if (cta) {
-    // Verbatim from script/route.ts:76
-    instructions.push('- В конце добавь призыв к действию: попроси подписаться, лайкнуть или написать комментарий')
+    if (isRu) {
+      instructions.push('- В конце добавь призыв к действию: попроси подписаться, лайкнуть или написать комментарий')
+    } else {
+      instructions.push('- At the end, add a call to action: ask viewers to subscribe, like, or leave a comment')
+    }
   }
   if (pauses) {
-    // Verbatim from script/route.ts:82
-    instructions.push('- Добавь паузы для дыхания в виде [...] в местах естественных остановок')
+    if (isRu) {
+      instructions.push('- Добавь паузы для дыхания в виде [...] в местах естественных остановок')
+    } else {
+      instructions.push('- Add breathing pauses as [...] at natural stopping points in the speech')
+    }
+  }
+
+  if (isRu) {
+    return [
+      `LANGUAGE RULE: Write your ENTIRE response in ${langName}. Enhance the existing text — do NOT translate or change the language of the content.`,
+      '',
+      'Усиль этот готовый текст сценария, применив следующие улучшения. Сохрани смысл, структуру и стиль текста:',
+      '',
+      ...instructions,
+      '',
+      'ФОРМАТ ВЫВОДА:',
+      'Верни только усиленный текст. Без вступительных фраз, без пояснений — только текст сценария.',
+    ].join('\n')
   }
 
   return [
-    `LANGUAGE RULE: Write your ENTIRE response in ${langName}. The input is already in this language — do NOT translate. Preserve the language exactly.`,
+    `LANGUAGE RULE: Write your ENTIRE response in ${langName}. Enhance the existing text — do NOT translate or change the language of the content.`,
     '',
-    'Усиль этот готовый текст сценария, применив следующие улучшения. Сохрани смысл, структуру и стиль текста:',
+    'Enhance this ready script by applying the following improvements. Preserve the meaning, structure, and style of the text:',
     '',
     ...instructions,
     '',
-    'ФОРМАТ ВЫВОДА:',
-    'Верни только усиленный текст. Без вступительных фраз, без пояснений — только текст сценария.',
+    'OUTPUT FORMAT:',
+    'Return only the enhanced text. No introductory phrases, no explanations — only the script text.',
   ].join('\n')
 }
 
@@ -118,8 +148,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Выберите хотя бы одно улучшение' }, { status: 400 })
     }
 
-    const outputLang = Object.keys(LANG_NAMES).includes(output_lang) ? output_lang : 'ru'
-    const hookType = Object.keys(HOOK_LABELS).includes(hook_type) ? hook_type : 'question'
+    let outputLang = Object.keys(LANG_NAMES).includes(output_lang) ? output_lang : 'ru'
+    const hookType = Object.keys(HOOK_LABELS_RU).includes(hook_type) ? hook_type : 'question'
+
+    const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+
+    // Resolve actual language from DB (authoritative) or detect from script when DB has null.
+    // Overrides the client default 'ru' so pasted EN scripts are enhanced in English.
+    if (project_id) {
+      const { data: proj } = await supabase.from('projects').select('language').eq('id', project_id).eq('user_id', user.id).single()
+      if (proj?.language && Object.keys(LANG_NAMES).includes(proj.language)) {
+        if (proj.language !== outputLang) console.log(`[enhance-script] lang from DB: ${proj.language} (client: ${outputLang})`)
+        outputLang = proj.language
+      } else if (proj !== null && !proj.language) {
+        // DB null — detect from first 500 chars of script
+        try {
+          const detect = await client.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 5,
+            messages: [{ role: 'user', content: `Reply with ONLY the ISO 639-1 language code of this text (e.g. "en", "ru", "es"). Nothing else.\n\n${script.slice(0, 500)}` }],
+          })
+          const detected = detect.content[0].type === 'text' ? detect.content[0].text.trim().toLowerCase().slice(0, 5) : null
+          if (detected && Object.keys(LANG_NAMES).includes(detected)) {
+            console.log(`[enhance-script] lang detected: ${detected} (client: ${outputLang})`)
+            outputLang = detected
+            void supabase.from('projects').update({ language: detected }).eq('id', project_id).eq('user_id', user.id)
+          }
+        } catch { /* keep outputLang from client */ }
+      }
+    }
 
     const check = await requireCreditsAmount(user.id, CREDIT_COSTS.enhance, supabase)
     if (!check.ok) {
@@ -128,8 +185,6 @@ export async function POST(request: NextRequest) {
 
     const systemPrompt = buildPrompt(hook, hookType, cta, pauses, outputLang)
     console.log(`[enhance-script] hook=${hook}(${hookType}) cta=${cta} pauses=${pauses} lang=${outputLang}`)
-
-    const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,

@@ -130,13 +130,20 @@ export async function POST(request: NextRequest) {
     const { script, topic, project_id, duration_minutes = 5, subtitle_blocks, lang: clientLang }: SeoRequest =
       await request.json()
 
-    // Guard: if client sends lang but project has no confirmed language in DB, let model auto-detect
+    // Language resolution: DB is authoritative when project_id is known.
+    // Priority: projects.language (DB) → clientLang → undefined (model auto-detects).
+    // When DB has null, ignore clientLang too — language was never confirmed.
     let lang = clientLang
-    if (clientLang && project_id) {
+    if (project_id) {
       const { data: projRow } = await supabase.from('projects').select('language').eq('id', project_id).eq('user_id', user.id).single()
-      if (projRow !== null && projRow.language === null) {
-        console.log(`[seo] client lang=${clientLang} ignored: projects.language is null — model will auto-detect`)
-        lang = undefined
+      if (projRow !== null) {
+        if (projRow.language) {
+          if (lang !== projRow.language) console.log(`[seo] lang resolved from DB: ${projRow.language} (client: ${lang ?? 'none'})`)
+          lang = projRow.language
+        } else {
+          if (lang) console.log(`[seo] client lang=${lang} ignored: projects.language is null — model will auto-detect`)
+          lang = undefined
+        }
       }
     }
 
@@ -195,7 +202,7 @@ ${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, descrip
     if (project_id) {
       await supabase
         .from('projects')
-        .update({ seo, title: seo.title, status: 'completed' })
+        .update({ seo, ...(lang ? { title: seo.title } : {}), status: 'completed' })
         .eq('id', project_id)
         .eq('user_id', user.id)
     }
