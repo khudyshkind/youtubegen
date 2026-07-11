@@ -16,11 +16,20 @@ export const metadata: Metadata = {
   description:
     'Создавайте YouTube-видео на автопилоте: сценарий, озвучка, субтитры, иллюстрации и SEO — всё в одном месте.',
   keywords: ['youtube', 'генерация видео', 'автоматизация', 'контент', 'ИИ'],
+  applicationName: 'Lefiro',
   openGraph: {
+    siteName: 'Lefiro',
     title: 'Lefiro',
     description: 'Автоматическая генерация YouTube-видео с помощью ИИ',
+    url: 'https://lefiro.co',
     type: 'website',
     locale: 'ru_RU',
+  },
+  twitter: {
+    card: 'summary',
+    site: 'Lefiro',
+    title: 'Lefiro',
+    description: 'Автоматическая генерация YouTube-видео с помощью ИИ',
   },
 }
 
