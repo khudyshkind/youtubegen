@@ -43,7 +43,7 @@ export default function BillingPage() {
       price: '$19',
       period: t('billing.period'),
       highlight: false,
-      features: [t('billing.f_credits_100'), t('billing.f_videos_5_9'), t('billing.f_all_tools'), t('billing.f_email_support')],
+      features: [t('billing.f_credits_100'), t('billing.f_all_tools'), t('billing.f_email_support')],
     },
     {
       id: 'pro' as Plan,
@@ -51,7 +51,7 @@ export default function BillingPage() {
       price: '$39',
       period: t('billing.period'),
       highlight: true,
-      features: [t('billing.f_credits_300'), t('billing.f_videos_15_25'), t('billing.f_all_tools'), t('billing.f_priority_support')],
+      features: [t('billing.f_credits_300'), t('billing.f_all_tools'), t('billing.f_priority_support')],
     },
     {
       id: 'agency' as Plan,
@@ -59,7 +59,7 @@ export default function BillingPage() {
       price: '$99',
       period: t('billing.period'),
       highlight: false,
-      features: [t('billing.f_credits_1000'), t('billing.f_videos_55_90'), t('billing.f_all_tools'), t('billing.f_dedicated_support'), t('billing.f_api_access')],
+      features: [t('billing.f_credits_1000'), t('billing.f_all_tools'), t('billing.f_dedicated_support'), t('billing.f_api_access')],
     },
   ]
 

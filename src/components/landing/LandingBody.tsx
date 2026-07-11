@@ -23,12 +23,13 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
 
   const STEPS = [
     { n: '01', icon: '💡', title: t('landing.step1_title'), desc: t('landing.step1_desc') },
-    { n: '02', icon: '✍️', title: t('landing.step2_title'), desc: t('landing.step2_desc') },
-    { n: '03', icon: '🎙️', title: t('landing.step3_title'), desc: t('landing.step3_desc') },
-    { n: '04', icon: '📋', title: t('landing.step4_title'), desc: t('landing.step4_desc') },
-    { n: '05', icon: '🖼️', title: t('landing.step5_title'), desc: t('landing.step5_desc') },
-    { n: '06', icon: '🎬', title: t('landing.step6_title'), desc: t('landing.step6_desc') },
-    { n: '07', icon: '🔍', title: t('landing.step7_title'), desc: t('landing.step7_desc') },
+    { n: '02', icon: '🗂️', title: t('landing.step2_title'), desc: t('landing.step2_desc') },
+    { n: '03', icon: '✍️', title: t('landing.step3_title'), desc: t('landing.step3_desc') },
+    { n: '04', icon: '🎙️', title: t('landing.step4_title'), desc: t('landing.step4_desc') },
+    { n: '05', icon: '📋', title: t('landing.step5_title'), desc: t('landing.step5_desc') },
+    { n: '06', icon: '🖼️', title: t('landing.step6_title'), desc: t('landing.step6_desc') },
+    { n: '07', icon: '🎬', title: t('landing.step7_title'), desc: t('landing.step7_desc') },
+    { n: '08', icon: '🔍', title: t('landing.step8_title'), desc: t('landing.step8_desc') },
   ]
 
   const BENEFITS = [
@@ -59,7 +60,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
       priceUsd: PLAN_PRICES['basic'],
       rub: Math.ceil(PLAN_PRICES['basic'] * usdToRub),
       credits: PLAN_CREDITS['basic'],
-      features: [t('billing.f_credits_basic'), t('billing.f_videos_3'), t('billing.f_all_tools'), t('billing.f_voices_3')],
+      features: [t('billing.f_credits_basic'), t('billing.f_all_tools'), t('billing.f_voices_3')],
       cta: t('landing.plan_cta_basic'),
       href: tgPlan('basic'),
       highlight: false,
@@ -70,7 +71,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
       priceUsd: PLAN_PRICES['starter'],
       rub: Math.ceil(PLAN_PRICES['starter'] * usdToRub),
       credits: PLAN_CREDITS['starter'],
-      features: [t('billing.f_credits_100'), t('billing.f_videos_7'), t('billing.f_all_tools'), t('billing.f_analytics')],
+      features: [t('billing.f_credits_100'), t('billing.f_all_tools'), t('billing.f_analytics')],
       cta: t('landing.plan_cta_starter'),
       href: tgPlan('starter'),
       highlight: true,
@@ -81,7 +82,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
       priceUsd: PLAN_PRICES['pro'],
       rub: Math.ceil(PLAN_PRICES['pro'] * usdToRub),
       credits: PLAN_CREDITS['pro'],
-      features: [t('billing.f_credits_300'), t('billing.f_videos_18'), t('billing.f_all_tools'), t('billing.f_priority_support')],
+      features: [t('billing.f_credits_300'), t('billing.f_all_tools'), t('billing.f_priority_support')],
       cta: t('landing.plan_cta_pro'),
       href: tgPlan('pro'),
       highlight: false,
@@ -92,7 +93,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
       priceUsd: PLAN_PRICES['agency'],
       rub: Math.ceil(PLAN_PRICES['agency'] * usdToRub),
       credits: PLAN_CREDITS['agency'],
-      features: [t('billing.f_credits_1000'), t('billing.f_videos_54'), t('billing.f_all_tools'), t('billing.f_dedicated_support')],
+      features: [t('billing.f_credits_1000'), t('billing.f_all_tools'), t('billing.f_dedicated_support')],
       cta: t('landing.plan_cta_agency'),
       href: tgPlan('agency'),
       highlight: false,
@@ -215,13 +216,57 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
             </div>
           </div>
 
-          <div className="grid grid-cols-7 gap-2 reveal">
+          <div className="grid grid-cols-8 gap-2 reveal">
             {STEPS.map((step) => (
               <div key={step.n} className="card-dark rounded-xl p-2 sm:p-3 text-center">
                 <div className="text-lg sm:text-2xl mb-1">{step.icon}</div>
                 <div className="text-xs text-slate-600 font-medium leading-tight hidden sm:block">{step.title}</div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Analytics ────────────────────────────────────── */}
+      <section className="py-28 relative" style={{ background: 'linear-gradient(to bottom, #0A0A0F, #0D0B16, #0A0A0F)' }}>
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-px bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
+
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16 reveal">
+            <p className="text-emerald-400 text-sm font-semibold uppercase tracking-widest mb-3">{t('landing.analytics_tag')}</p>
+            <h2 className="text-5xl font-extrabold gradient-text mb-4">{t('landing.analytics_h2')}</h2>
+            <p className="text-xl text-slate-400">{t('landing.analytics_sub')}</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {[
+              { icon: '🔍', title: t('landing.analytics_card1_title'), desc: t('landing.analytics_card1_desc') },
+              { icon: '📈', title: t('landing.analytics_card2_title'), desc: t('landing.analytics_card2_desc') },
+              { icon: '🔑', title: t('landing.analytics_card3_title'), desc: t('landing.analytics_card3_desc') },
+              { icon: '📊', title: t('landing.analytics_card4_title'), desc: t('landing.analytics_card4_desc') },
+            ].map((card, i) => (
+              <div
+                key={card.title}
+                data-tilt
+                className="card-dark rounded-2xl p-6 reveal"
+                style={{ transitionDelay: `${i * 80}ms` }}
+              >
+                <div
+                  className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl mb-4"
+                  style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.2)' }}
+                >
+                  {card.icon}
+                </div>
+                <h3 className="text-lg font-semibold text-slate-100 mb-2">{card.title}</h3>
+                <p className="text-slate-500 text-sm leading-relaxed">{card.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="text-center mt-12 reveal">
+            <Link href="/auth/register" className="btn-ghost-dark inline-block px-8 py-3.5 text-sm font-semibold rounded-xl">
+              {t('landing.cta_btn')}
+            </Link>
           </div>
         </div>
       </section>
@@ -237,7 +282,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
               { to: 100, suffix: '+', label: t('landing.stats_users_label') },
               { to: 500, suffix: '+', label: t('landing.stats_videos_label') },
               { to: 28,  suffix: '',  label: t('landing.stats_langs') },
-              { to: 10,  suffix: '',  label: t('landing.stats_avg') },
+              { to: 10,  suffix: t('landing.stats_avg_sfx'), label: t('landing.stats_avg') },
             ].map((s) => (
               <div key={s.label} className="px-6 py-2">
                 <div className="text-4xl font-extrabold text-slate-100">
