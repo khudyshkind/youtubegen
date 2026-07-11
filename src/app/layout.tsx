@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     locale: 'ru_RU',
   },
   twitter: {
-    card: 'summary',
+    card: 'summary_large_image',
     site: 'Lefiro',
     title: 'Lefiro',
     description: 'Автоматическая генерация YouTube-видео с помощью ИИ',
