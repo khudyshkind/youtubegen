@@ -64,6 +64,19 @@ export const CREDIT_COSTS = {
 export type AudioEngine = 'secretvoicer' | 'elevenlabs' | 'openai' | 'google' | 'apihost' | 'voicer'
 export type ApihostVoiceType = 'basic' | 'standard' | 'pro' | 'studio'
 
+export const ENGINE_DISPLAY: Record<string, { name: string; descRu: string; descEn: string }> = {
+  secretvoicer: { name: 'Voice Standard', descRu: 'Доступная озвучка, хорошее качество',          descEn: 'Affordable, good quality'                    },
+  elevenlabs:   { name: 'Voice Studio',   descRu: 'Премиум — лучшее качество',                    descEn: 'Premium — best quality'                      },
+  voicer:       { name: 'Voice Pro',      descRu: 'Мультиязычный, профессиональный',              descEn: 'Multilingual, professional'                  },
+  openai:       { name: 'Voice Plus',     descRu: 'Хорошее качество',                             descEn: 'Good quality'                                },
+  apihost:      { name: 'Voice Lite',     descRu: 'Российский сервис',                            descEn: 'Russian service'                             },
+  google:       { name: 'Voice Global',   descRu: 'Скоро',                                        descEn: 'Coming soon'                                 },
+  flux_schnell: { name: 'Vision Fast',    descRu: 'Быстро и дёшево',                             descEn: 'Fast and cheap'                              },
+  flux:         { name: 'Vision Classic', descRu: 'Детальные художественные иллюстрации',         descEn: 'Detailed artistic illustrations'             },
+  nano_banana:  { name: 'Vision Pro',     descRu: 'Точный текст в кадре, стабильные персонажи',  descEn: 'Accurate in-frame text, stable characters'  },
+  gpt_mini:     { name: 'Vision Ultra',   descRu: 'Высокая детализация',                         descEn: 'High detail'                                 },
+}
+
 export function audioCost(chars: number, engine: AudioEngine, apihostVoiceType?: ApihostVoiceType): number {
   const blocks = Math.ceil(chars / 1000)
   if (engine === 'secretvoicer') return Math.max(1, blocks * CREDIT_COSTS.audio_secretvoicer_per_1000)

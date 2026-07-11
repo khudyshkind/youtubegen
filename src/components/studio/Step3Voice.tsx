@@ -392,12 +392,12 @@ export default function Step3Voice() {
   const { t } = useLang()
 
   const ENGINES: { id: AudioEngine; medal: string; name: string; quality: string; meta: string; costLabel: string; soon?: boolean; premiumOnly?: boolean }[] = [
-    { id: 'secretvoicer', medal: '✨', name: 'SecretVoicer',     quality: t('voice.sv_desc'),       meta: t('voice.sv_meta'),     costLabel: `${CREDIT_COSTS.audio_secretvoicer_per_1000} ${t('step3.cr_per_k')}` },
-    { id: 'elevenlabs',   medal: '🥇', name: 'ElevenLabs',       quality: t('voice.el_desc'),       meta: t('voice.el_meta'),     costLabel: `${CREDIT_COSTS.audio_elevenlabs_per_1000} ${t('step3.cr_per_k')}` },
-    { id: 'voicer',       medal: '💎', name: 'Премиум-озвучка',  quality: 'ElevenLabs качество',    meta: 'Мультиязычный, быстрый', costLabel: `${CREDIT_COSTS.audio_voicer_per_1000} ${t('step3.cr_per_k')}`, premiumOnly: true },
-    { id: 'openai',       medal: '🥈', name: 'OpenAI TTS',       quality: t('voice.openai_quality'), meta: t('voice.openai_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}` },
-    { id: 'apihost',      medal: '🏠', name: 'APIHOST RU',       quality: t('voice.apihost_quality'),meta: t('voice.apihost_meta'),costLabel: t('voice.apihost_cost') },
-    { id: 'google',       medal: '🥉', name: 'Google TTS',       quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${CREDIT_COSTS.audio_google_per_1000} ${t('step3.cr_per_k')}`, soon: true },
+    { id: 'secretvoicer', medal: '✨', name: 'Voice Standard',    quality: t('voice.sv_desc'),        meta: t('voice.sv_meta'),      costLabel: `${CREDIT_COSTS.audio_secretvoicer_per_1000} ${t('step3.cr_per_k')}` },
+    { id: 'elevenlabs',   medal: '🥇', name: 'Voice Studio',     quality: t('voice.el_desc'),        meta: t('voice.el_meta'),      costLabel: `${CREDIT_COSTS.audio_elevenlabs_per_1000} ${t('step3.cr_per_k')}` },
+    { id: 'voicer',       medal: '💎', name: 'Voice Pro',         quality: t('voice.el_desc'),        meta: t('voice.voicer_meta'), costLabel: `${CREDIT_COSTS.audio_voicer_per_1000} ${t('step3.cr_per_k')}`, premiumOnly: true },
+    { id: 'openai',       medal: '🥈', name: 'Voice Plus',        quality: t('voice.openai_quality'), meta: t('voice.openai_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}` },
+    { id: 'apihost',      medal: '🏠', name: 'Voice Lite',        quality: t('voice.apihost_quality'),meta: t('voice.apihost_meta'),costLabel: t('voice.apihost_cost') },
+    { id: 'google',       medal: '🥉', name: 'Voice Global',      quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${CREDIT_COSTS.audio_google_per_1000} ${t('step3.cr_per_k')}`, soon: true },
   ]
 
   const OPENAI_VOICES = [
@@ -1028,7 +1028,7 @@ export default function Step3Voice() {
               style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
               <div className="flex items-center gap-2.5">
                 <span className="text-base">💎</span>
-                <p className="text-xs text-violet-300/90">Голоса ElevenLabs, синтез через премиум-сервер. Качество выше, стоимость ниже чем в прямом ElevenLabs.</p>
+                <p className="text-xs text-violet-300/90">Профессиональные голоса через премиум-сервер. Качество выше, стоимость ниже.</p>
               </div>
               <p className="text-xs text-violet-400/70 pl-7">⏱ Синтез занимает 2–4 минуты — не закрывайте вкладку.</p>
             </div>
