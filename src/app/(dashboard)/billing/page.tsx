@@ -7,7 +7,7 @@ import { CREDIT_COSTS, PLAN_CREDITS, PLAN_ORDER, TOPUP_PACKAGES } from '@/lib/ty
 import { useLang } from '@/hooks/useLang'
 import type { Profile, Plan } from '@/lib/types'
 
-const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME ?? 'youtubegenai_bot'
+const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME ?? 'lefiro_bot'
 
 function tgPayUrl(startParam: string) {
   return `https://t.me/${BOT_USERNAME}?start=${startParam}`

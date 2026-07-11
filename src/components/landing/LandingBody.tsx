@@ -41,8 +41,10 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
     { icon: '💰', title: t('landing.benefit6_title'), desc: t('landing.benefit6_desc') },
   ]
 
-  const BOT = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME ?? 'youtubegenai_bot'}`
+  const BOT = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME ?? 'lefiro_bot'}`
   const tgPlan = (id: string) => `${BOT}?start=plan_${id}`
+  // Set to true when the demo video is ready
+  const SHOW_DEMO_SECTION = false
 
   const PLANS = [
     {
@@ -190,7 +192,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
       </section>
 
       {/* ── Demo ──────────────────────────────────────────── */}
-      <section className="py-28" style={{ background: BG }}>
+      {SHOW_DEMO_SECTION && <section className="py-28" style={{ background: BG }}>
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-10 reveal">
             <p className="text-pink-400 text-sm font-semibold uppercase tracking-widest mb-3">{t('landing.demo_tag')}</p>
@@ -225,7 +227,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
             ))}
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* ── Analytics ────────────────────────────────────── */}
       <section className="py-28 relative" style={{ background: 'linear-gradient(to bottom, #0A0A0F, #0D0B16, #0A0A0F)' }}>
@@ -442,7 +444,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
               </div>
             </div>
             <a
-              href="https://t.me/youtubegenai_bot"
+              href="https://t.me/lefiro_bot"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
