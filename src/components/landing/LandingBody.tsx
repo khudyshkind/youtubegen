@@ -502,12 +502,19 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
               </div>
               <p className="text-slate-600 text-sm">{t('landing.footer_tagline')}</p>
             </div>
-            <nav className="flex flex-wrap gap-x-8 gap-y-2 text-sm text-slate-600">
-              <a href="#how-it-works" className="hover:text-slate-300 transition-colors">{t('nav.how_it_works')}</a>
-              <a href="#pricing"      className="hover:text-slate-300 transition-colors">{t('nav.pricing')}</a>
-              <a href="#faq"          className="hover:text-slate-300 transition-colors">{t('nav.faq')}</a>
-              <Link href="/auth/login"    className="hover:text-slate-300 transition-colors">{t('nav.login')}</Link>
-              <Link href="/auth/register" className="hover:text-slate-300 transition-colors">{t('nav.register')}</Link>
+            <nav className="flex flex-col gap-2">
+              <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm text-slate-600">
+                <a href="#how-it-works" className="hover:text-slate-300 transition-colors">{t('nav.how_it_works')}</a>
+                <a href="#pricing"      className="hover:text-slate-300 transition-colors">{t('nav.pricing')}</a>
+                <a href="#faq"          className="hover:text-slate-300 transition-colors">{t('nav.faq')}</a>
+                <Link href="/auth/login"    className="hover:text-slate-300 transition-colors">{t('nav.login')}</Link>
+                <Link href="/auth/register" className="hover:text-slate-300 transition-colors">{t('nav.register')}</Link>
+              </div>
+              <div className="flex flex-wrap gap-x-8 gap-y-1 text-sm text-slate-700">
+                <Link href="/terms"   className="hover:text-slate-500 transition-colors">{t('nav.terms')}</Link>
+                <Link href="/privacy" className="hover:text-slate-500 transition-colors">{t('nav.privacy')}</Link>
+                <Link href="/refund"  className="hover:text-slate-500 transition-colors">{t('nav.refund')}</Link>
+              </div>
             </nav>
           </div>
           <div className="pt-6" style={{ borderTop: DIV_LINE }}>

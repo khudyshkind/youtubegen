@@ -16,6 +16,9 @@ export const translations = {
     'nav.how_it_works':   'Как работает',
     'nav.pricing':        'Тарифы',
     'nav.faq':            'FAQ',
+    'nav.terms':          'Условия',
+    'nav.privacy':        'Конфиденциальность',
+    'nav.refund':         'Возвраты',
 
     // ── Dashboard ─────────────────────────────────────────────────────────────
     'dashboard.hello':          'Привет',
@@ -1065,6 +1068,9 @@ export const translations = {
     'nav.how_it_works':   'How it works',
     'nav.pricing':        'Pricing',
     'nav.faq':            'FAQ',
+    'nav.terms':          'Terms',
+    'nav.privacy':        'Privacy',
+    'nav.refund':         'Refunds',
 
     // ── Dashboard ─────────────────────────────────────────────────────────────
     'dashboard.hello':          'Hello',

@@ -120,6 +120,11 @@ export default function SidebarNav() {
             </svg>
             {t('nav.support')}
           </a>
+          <div className="px-3 pt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+            <Link href="/terms"   className="text-xs transition-colors" style={{ color: 'rgba(71,85,105,0.8)' }} onMouseOver={e => (e.currentTarget.style.color='rgba(100,116,139,1)')} onMouseOut={e => (e.currentTarget.style.color='rgba(71,85,105,0.8)')}>{t('nav.terms')}</Link>
+            <Link href="/privacy" className="text-xs transition-colors" style={{ color: 'rgba(71,85,105,0.8)' }} onMouseOver={e => (e.currentTarget.style.color='rgba(100,116,139,1)')} onMouseOut={e => (e.currentTarget.style.color='rgba(71,85,105,0.8)')}>{t('nav.privacy')}</Link>
+            <Link href="/refund"  className="text-xs transition-colors" style={{ color: 'rgba(71,85,105,0.8)' }} onMouseOver={e => (e.currentTarget.style.color='rgba(100,116,139,1)')} onMouseOut={e => (e.currentTarget.style.color='rgba(71,85,105,0.8)')}>{t('nav.refund')}</Link>
+          </div>
         </div>
       </aside>
 
