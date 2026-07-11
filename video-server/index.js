@@ -3025,7 +3025,7 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
       submitRes = await fetch('https://verygoodffmpeg.com/api/ffmpeg', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${VGF_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input_files: inputFiles, output_files: outNames, ffmpeg_commands: [cmd] }),
+        body: JSON.stringify({ input_files: inputFiles, output_files: outNames, ffmpeg_commands: [cmd], timeout_seconds: Math.ceil(timeoutMs / 1000) }),
         signal: AbortSignal.timeout(30000),
       })
     } catch (fetchErr) {
@@ -3291,8 +3291,9 @@ async function xfadeBatchPassVGF(clipUrls, clipDurations, transition, td, batchI
 
 // Concat a batch of pre-encoded clip URLs into one MP4 (no audio, no effects).
 // Used for hierarchical cut-concat to stay within VGF's per-job input limit.
-// CRF 28 keeps intermediate files small; mux pass always re-encodes at CRF 20 anyway.
-async function concatBatchVGF(clipUrls, batchId, timeoutMs = 600_000) {
+// crf=28 default for Phase A (small files, fast); pass crf=20 for Phase B merge
+// so the direct input to the CRF-20 mux pass is not further degraded.
+async function concatBatchVGF(clipUrls, batchId, timeoutMs = 600_000, crf = 28) {
   if (clipUrls.length === 1) return clipUrls[0]
   const inputFiles = {}
   for (let i = 0; i < clipUrls.length; i++) inputFiles[`in_${i + 1}`] = clipUrls[i]
@@ -3301,7 +3302,7 @@ async function concatBatchVGF(clipUrls, batchId, timeoutMs = 600_000) {
   const result = await runFFmpegOnVGF(
     inputFiles,
     { out_1: `${batchId}.mp4` },
-    `${inputArgs} -filter_complex "${filterStr}" -map [vout] -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -an {{out_1}}`,
+    `${inputArgs} -filter_complex "${filterStr}" -map [vout] -c:v libx264 -preset ultrafast -crf ${crf} -pix_fmt yuv420p -an {{out_1}}`,
     timeoutMs
   )
   return result.out_1
@@ -3578,7 +3579,7 @@ async function processVideoJob(jobId, body) {
         mergedVideoUrl = concatBatches[0]
       } else {
         console.log(`[vgf] merging ${concatBatches.length} batches...`)
-        mergedVideoUrl = await concatBatchVGF(concatBatches, 'cutmerge', vgfLongTimeout(audioDuration))
+        mergedVideoUrl = await concatBatchVGF(concatBatches, 'cutmerge', vgfLongTimeout(audioDuration), 20)
       }
 
       // Phase C: mux audio + bake effects in one pass
