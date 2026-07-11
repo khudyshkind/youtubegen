@@ -3291,7 +3291,8 @@ async function xfadeBatchPassVGF(clipUrls, clipDurations, transition, td, batchI
 
 // Concat a batch of pre-encoded clip URLs into one MP4 (no audio, no effects).
 // Used for hierarchical cut-concat to stay within VGF's per-job input limit.
-async function concatBatchVGF(clipUrls, batchId) {
+// CRF 28 keeps intermediate files small; mux pass always re-encodes at CRF 20 anyway.
+async function concatBatchVGF(clipUrls, batchId, timeoutMs = 600_000) {
   if (clipUrls.length === 1) return clipUrls[0]
   const inputFiles = {}
   for (let i = 0; i < clipUrls.length; i++) inputFiles[`in_${i + 1}`] = clipUrls[i]
@@ -3300,7 +3301,8 @@ async function concatBatchVGF(clipUrls, batchId) {
   const result = await runFFmpegOnVGF(
     inputFiles,
     { out_1: `${batchId}.mp4` },
-    `${inputArgs} -filter_complex "${filterStr}" -map [vout] -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -an {{out_1}}`
+    `${inputArgs} -filter_complex "${filterStr}" -map [vout] -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -an {{out_1}}`,
+    timeoutMs
   )
   return result.out_1
 }
@@ -3556,7 +3558,9 @@ async function processVideoJob(jobId, body) {
       console.time(T('3_concat'))
       // Hierarchical concat: batch clips to stay within VGF's per-job input limit.
       // A single VGF job with 155+ inputs triggers FFmpeg resource exhaustion.
-      const CUT_CONCAT_BATCH = 25
+      // Batch size 50: eliminates Phase B for most videos (≤50 scenes), saving one
+      // full re-encode pass — critical for Ken Burns where clips are heavy 25fps video.
+      const CUT_CONCAT_BATCH = 50
       console.log(`[vgf] concat ${clipUrls.length} clips in batches of ${CUT_CONCAT_BATCH}...`)
 
       // Phase A: concat clips in batches
@@ -3565,16 +3569,16 @@ async function processVideoJob(jobId, body) {
         const bClips = clipUrls.slice(b, b + CUT_CONCAT_BATCH)
         const bNum   = Math.floor(b / CUT_CONCAT_BATCH)
         console.log(`[vgf] concat batch ${bNum}: ${bClips.length} clips`)
-        concatBatches.push(await concatBatchVGF(bClips, `cutbatch_${bNum}`))
+        concatBatches.push(await concatBatchVGF(bClips, `cutbatch_${bNum}`, vgfLongTimeout(audioDuration)))
       }
 
-      // Phase B: merge batches (single concat if ≤1 batch)
+      // Phase B: merge batches (skipped for ≤50 scenes; longTimeout for rare >50-scene videos)
       let mergedVideoUrl
       if (concatBatches.length === 1) {
         mergedVideoUrl = concatBatches[0]
       } else {
         console.log(`[vgf] merging ${concatBatches.length} batches...`)
-        mergedVideoUrl = await concatBatchVGF(concatBatches, 'cutmerge')
+        mergedVideoUrl = await concatBatchVGF(concatBatches, 'cutmerge', vgfLongTimeout(audioDuration))
       }
 
       // Phase C: mux audio + bake effects in one pass
