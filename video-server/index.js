@@ -2888,12 +2888,12 @@ function blocksToAss(blocks, subtitle_style) {
   ].join('\n') + '\n'
 }
 
-// FFmpeg -vf filter string for each named effect.
+// FFmpeg -vf filter string for each named effect (applied in the final mux pass).
 // Single quotes are avoided — VGF shell interprets them inside double-quoted -vf args.
 // Spaces in curve points use backslash-escape (\\ in JS → \ at runtime → FFmpeg unescapes).
+// ken_burns is NOT here — it is applied per-clip at the still-image stage in getVfFilter().
 const EFFECT_FILTERS = {
-  film_grain: 'noise=alls=25:allf=t+u',
-  ken_burns: 'zoompan=z=min(1.3\\\\,zoom+0.0004):x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):d=1:s=1280x720:fps=25',
+  film_grain: 'noise=alls=35:allf=t+u',
   vignette: 'vignette=PI/3',
   haze: 'colorbalance=rs=0.05:gs=0.02:bs=0.25',
   grayscale: 'hue=s=0',
@@ -2911,8 +2911,30 @@ const VF_BASE =
 // horizontal compression (~17%) which is acceptable for AI-generated content.
 const VF_SCALE = 'scale=1280:720,setsar=1'
 
-function getVfFilter(_img) {
-  return VF_SCALE
+// Build per-clip vf filter. Ken Burns is applied here (still-image stage) so that
+// zoompan works on a looped static frame — the only context where it produces smooth motion.
+//
+// Key rules learned from testing:
+//   • z=CONSTANT (e.g. z=1.5) applies that zoom to ALL d frames — no animation.
+//   • on/duration is the per-output-frame variable (0→1) that produces smooth change.
+//   • No commas or colons in expressions → no escaping needed.
+//   • Command must use OUTPUT-side -t; INPUT-side -t N creates N×25 frames each expanded
+//     d times by zoompan → N²×25 total (2500s for a 10s clip).
+//
+// Two alternating patterns prevent 19 identical zoom-ins in a row:
+//   even scenes → zoom-in to center (z 1.0→1.5 over the clip)
+//   odd  scenes → pan left→right with light zoom (z 1.1→1.3, x 0→128px)
+// scale before zoompan so iw/ih are always 1280×720 regardless of source engine.
+function getVfFilter(_img, dur, sceneIdx, hasKenBurns) {
+  if (!hasKenBurns) return VF_SCALE
+  const d = Math.max(1, Math.round(dur * 25))
+  if (sceneIdx % 2 === 0) {
+    // Pattern A: smooth zoom-in to center. z goes 1.0→~1.498 via on/duration (0→1).
+    return `scale=1280:720,zoompan=z=1+0.5*on/duration:x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):d=${d}:s=1280x720:fps=25,setsar=1`
+  } else {
+    // Pattern B: pan left→right while zooming. z 1.1→1.3, x 0→128px (safe at z=1.3: max_x≈295).
+    return `scale=1280:720,zoompan=z=1.1+0.2*on/duration:x=iw*0.1*on/duration:y=ih/2-(ih/zoom/2):d=${d}:s=1280x720:fps=25,setsar=1`
+  }
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
@@ -3312,6 +3334,7 @@ async function processVideoJob(jobId, body) {
 
     const defaultDuration = Math.max(1, Number(image_interval) || 10)
     const effectFilters = (Array.isArray(effects) ? effects : []).map(e => EFFECT_FILTERS[e]).filter(Boolean)
+    const hasKenBurns = Array.isArray(effects) && effects.includes('ken_burns')
     const useXfade = transition && transition !== 'cut' && images.length > 1
     const td = Math.max(0.1, Math.min(1.5, Number(transition_duration) || 0.5))
 
@@ -3415,12 +3438,19 @@ async function processVideoJob(jobId, body) {
       const clipUrls = await Promise.all(resolvedImages.map((img, i) =>
         clipPool(async () => {
           const clipDur = (durations[i] + td).toFixed(3)
-          console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${getVfFilter(img)}`)
+          const vfFilter = getVfFilter(img, durations[i] + td, i, hasKenBurns)
+          console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${vfFilter}`)
+          // Ken Burns: -t on OUTPUT side; INPUT-side -t creates N×25 frames each expanded
+          // by zoompan d=N×25 → N²×25 total frames (2500s for a 10s clip). No -tune stillimage
+          // because the video has motion. For plain clips, keep the original INPUT-side -t.
+          const clipCmd = hasKenBurns
+            ? `-loop 1 -i {{in_1}} -vf "${vfFilter}" -t ${clipDur} -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -an {{out_1}}`
+            : `-loop 1 -r 25 -t ${clipDur} -i {{in_1}} -vf "${vfFilter}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
           try {
             const result = await runFFmpegOnVGF(
               { in_1: img.url },
               { out_1: `clip_${i}.mp4` },
-              `-loop 1 -r 25 -t ${clipDur} -i {{in_1}} -vf "${getVfFilter(img)}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
+              clipCmd
             )
             console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
             return result.out_1
@@ -3502,12 +3532,16 @@ async function processVideoJob(jobId, body) {
       console.log(`[vgf] encoding ${resolvedImages.length} clips in parallel (cut, pool=${VGF_CLIP_CONCURRENCY})...`)
       const clipUrls = await Promise.all(resolvedImages.map((img, i) =>
         clipPool(async () => {
-          console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${getVfFilter(img)}`)
+          const vfFilter = getVfFilter(img, durations[i], i, hasKenBurns)
+          console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${vfFilter}`)
+          const clipCmd = hasKenBurns
+            ? `-loop 1 -i {{in_1}} -vf "${vfFilter}" -t ${durations[i].toFixed(3)} -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -an {{out_1}}`
+            : `-loop 1 -r 25 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${vfFilter}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
           try {
             const result = await runFFmpegOnVGF(
               { in_1: img.url },
               { out_1: `clip_${i}.mp4` },
-              `-loop 1 -r 25 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${getVfFilter(img)}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
+              clipCmd
             )
             console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
             return result.out_1
