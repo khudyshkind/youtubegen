@@ -34,11 +34,11 @@ function loadEnv() {
 }
 loadEnv()
 
-const SUPABASE_URL  = process.env.SUPABASE_URL?.trim()
+const SUPABASE_URL  = (process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL)?.trim()
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('❌ SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required')
+  console.error('❌ SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are required')
   process.exit(1)
 }
 
