@@ -583,6 +583,12 @@ async function publishToChannel(text, imageUrl = null) {
   return tgApi('sendMessage', { chat_id: CHANNEL_ID, text, parse_mode: 'Markdown' })
 }
 
+// Returns clickable post link when publish succeeded, null otherwise
+function channelPostLink(res) {
+  const msgId = res?.result?.message_id
+  return msgId ? `https://t.me/lefiro_channel/${msgId}` : null
+}
+
 // ── Russia payment helpers ────────────────────────────────────────────────────
 function cardPaymentText(planInfo, rubAmount) {
   const rubLine = rubAmount ? `Переведи: *${rubAmount} ₽*\n` : `Переведи сумму на карту:\n`
@@ -868,8 +874,12 @@ async function publishStats(toOwner = null) {
     `📁 Проектов: *${stats.projects}*\n` +
     `🎬 Видео готово: *${stats.videos}*\n\n` +
     `Создай своё видео → ${APP_URL}`
-  await publishToChannel(text)
-  if (toOwner) await sendTo(toOwner, '✅ Статистика опубликована в канал')
+  const pubResStats = await publishToChannel(text)
+  if (toOwner) {
+    const link = channelPostLink(pubResStats)
+    if (link) await sendTo(toOwner, `✅ Статистика опубликована: ${link}`)
+    else await sendTo(toOwner, `❌ Не удалось опубликовать статистику: ${pubResStats?.description ?? 'нет ответа от Telegram'}`)
+  }
 }
 
 // ── Content monitor ───────────────────────────────────────────────────────────
@@ -1117,8 +1127,10 @@ async function generateAndHandle(chatId, topic, forcePreview = false) {
     await sendTo(OWNER_ID, '⚠️ Изображение не сгенерировалось (Flux), публикую без него').catch(() => {})
   }
   if (config.autoPublish && !forcePreview) {
-    await publishToChannel(post, imageUrl)
-    await sendTo(chatId, '✅ Опубликовано в канал (автопубликация)')
+    const pubResAuto = await publishToChannel(post, imageUrl)
+    const autoLink = channelPostLink(pubResAuto)
+    if (autoLink) await sendTo(chatId, `✅ Опубликовано в канал (автопубликация): ${autoLink}`)
+    else await sendTo(chatId, `❌ Не удалось опубликовать: ${pubResAuto?.description ?? 'нет ответа от Telegram'}`)
   } else {
     await showPreview(chatId, post, imageUrl, topic)
   }
@@ -1232,10 +1244,12 @@ async function handleCallback(cq) {
   if (data === 'publish') {
     const post = await ensurePendingPost()
     if (!post) { await sendTo(chatId, 'Нет поста на одобрении'); return }
-    await publishToChannel(post.text, post.imageUrl)
+    const pubResPub = await publishToChannel(post.text, post.imageUrl)
     await clearPendingPost()
     await clearButtons()
-    await sendTo(chatId, '✅ Опубликовано в канал')
+    const pubLink = channelPostLink(pubResPub)
+    if (pubLink) await sendTo(chatId, `✅ Опубликовано в канал: ${pubLink}`)
+    else await sendTo(chatId, `❌ Не удалось опубликовать: ${pubResPub?.description ?? 'нет ответа от Telegram'}`)
 
   } else if (data === 'decline') {
     await clearPendingPost()
@@ -1300,10 +1314,12 @@ async function handleCallback(cq) {
 
   } else if (data === 'dep_pub') {
     if (!pendingDeployPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
-    await publishToChannel(pendingDeployPost.text)
+    const pubResDep = await publishToChannel(pendingDeployPost.text)
     pendingDeployPost = null
     await clearButtons()
-    await sendTo(chatId, '✅ Пост об обновлении опубликован')
+    const depLink = channelPostLink(pubResDep)
+    if (depLink) await sendTo(chatId, `✅ Пост об обновлении опубликован: ${depLink}`)
+    else await sendTo(chatId, `❌ Не удалось опубликовать: ${pubResDep?.description ?? 'нет ответа от Telegram'}`)
 
   } else if (data === 'dep_skip') {
     pendingDeployPost = null
@@ -1312,10 +1328,12 @@ async function handleCallback(cq) {
 
   } else if (data === 'mon_pub') {
     if (!pendingMonitorPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
-    await publishToChannel(pendingMonitorPost.post)
+    const pubResMon = await publishToChannel(pendingMonitorPost.post)
     pendingMonitorPost = null
     await clearButtons()
-    await sendTo(chatId, '✅ Опубликовано в канал')
+    const monLink = channelPostLink(pubResMon)
+    if (monLink) await sendTo(chatId, `✅ Опубликовано в канал: ${monLink}`)
+    else await sendTo(chatId, `❌ Не удалось опубликовать: ${pubResMon?.description ?? 'нет ответа от Telegram'}`)
 
   } else if (data === 'mon_skip') {
     pendingMonitorPost = null
@@ -2544,8 +2562,14 @@ async function checkVercelDeploy() {
   try {
     const text = await generateDeployPost(commit)
     if (config.autoPublish) {
-      await publishToChannel(text)
-      console.log('[vercel] deploy post auto-published')
+      const pubResVercel = await publishToChannel(text)
+      if (pubResVercel?.ok) {
+        const vLink = channelPostLink(pubResVercel)
+        console.log('[vercel] deploy post auto-published', vLink ?? '')
+      } else {
+        console.error('[vercel] deploy post publish failed:', pubResVercel?.description ?? 'no response')
+        if (OWNER_ID) await sendTo(OWNER_ID, `❌ Не удалось опубликовать пост о деплое: ${pubResVercel?.description ?? 'нет ответа от Telegram'}`).catch(() => {})
+      }
     } else {
       pendingDeployPost = { text, commitMessage: commit, deployUrl: latest.url }
       if (OWNER_ID) {
