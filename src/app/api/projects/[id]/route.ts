@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { env } from '@/lib/env'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 
 export async function GET(
   _req: NextRequest,
@@ -104,17 +105,22 @@ export async function PATCH(
           max_tokens: 60,
           messages: [{
             role: 'user',
-            content: `Analyze this video script. Return ONLY valid JSON, no markdown:\n{"title":"<3-6 word video title in the script language>","language":"<ISO 639-1 code, e.g. en, ru, es>"}\n\nScript:\n${textSnippet}`,
+            content: `Analyze this video script. Return raw JSON object only — no markdown fences, no explanation:\n{"title":"<3-6 word video title in the script language>","language":"<ISO 639-1 code, e.g. en, ru, es>"}\n\nScript:\n${textSnippet}`,
           }],
         })
         const raw = msg.content[0].type === 'text' ? msg.content[0].text.trim() : ''
         try {
-          const parsed = JSON.parse(raw) as { title?: string; language?: string }
-          finalTitle = (parsed.title?.trim()) || fallback
+          const parsed = parseClaudeJson<{ title?: string; language?: string }>(raw, 'title-detect')
+          finalTitle = parsed.title?.trim() || fallback
           detectedLanguage = parsed.language?.toLowerCase().slice(0, 5) ?? null
           console.log(`[projects/:id PATCH] detected title="${finalTitle}" language="${detectedLanguage}"`)
         } catch {
-          finalTitle = raw.replace(/^["{]|["}]$/g, '').trim() || fallback
+          // last resort: regex extraction from partial/broken response
+          const langMatch = raw.match(/"language"\s*:\s*"([a-z]{2,5})"/)
+          const titleMatch = raw.match(/"title"\s*:\s*"([^"]+)"/)
+          if (langMatch) detectedLanguage = langMatch[1].toLowerCase().slice(0, 5)
+          finalTitle = (titleMatch ? titleMatch[1].trim() : null) || fallback
+          console.warn(`[projects/:id PATCH] parse fallback: title="${finalTitle}" lang="${detectedLanguage}" raw="${raw.slice(0, 200)}"`)
         }
       } catch (e) {
         console.error('[projects/:id PATCH] Haiku failed, using fallback title:', e instanceof Error ? e.message : e)

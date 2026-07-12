@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
+import { parseClaudeJson } from '@/lib/parse-claude-json'
 import type { SeoData, SubtitleBlock } from '@/lib/types'
 
 interface SeoRequest {
@@ -163,8 +164,10 @@ export async function POST(request: NextRequest) {
       ? `\n\nГЛАВЫ ВИДЕО (определи 4-8 ключевых момента с РЕАЛЬНЫМИ таймкодами из транскрипта ниже — YouTube создаёт главы автоматически):\n0:00 Введение\n[следующие главы с реальными таймкодами]\n[пустая строка]`
       : ''
 
-    const userMessage = `Тема: ${topic}
-Длительность: ~${duration_minutes} мин${chaptersInstruction}
+    // 'Свой текст' is a sentinel meaning "own script, no topic" — omit it to avoid
+    // anchoring the model to Russian when the script language is different.
+    const topicLine = topic && topic !== 'Свой текст' ? `Тема: ${topic}\n` : ''
+    const userMessage = `${topicLine}Длительность: ~${duration_minutes} мин${chaptersInstruction}
 
 Сценарий (первые 2500 символов):
 ${script.slice(0, 2500)}
@@ -180,14 +183,7 @@ ${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, descrip
     console.log(`[seo] lang=${lang ?? 'auto'} cache input:`, message.usage.input_tokens, 'cache_read:', message.usage.cache_read_input_tokens ?? 0, 'cache_write:', message.usage.cache_creation_input_tokens ?? 0)
 
     const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : ''
-
-    let seo: SeoData
-    try {
-      seo = JSON.parse(rawText) as SeoData
-    } catch {
-      const cleaned = rawText.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
-      seo = JSON.parse(cleaned) as SeoData
-    }
+    const seo = parseClaudeJson<SeoData>(rawText, 'seo')
 
     // Enforce 70-char limit on titles
     if (seo.title.length > 70) seo.title = seo.title.slice(0, 70).trimEnd()

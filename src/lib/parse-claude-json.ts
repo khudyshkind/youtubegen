@@ -85,3 +85,34 @@ export function parseClaudeJson<T>(text: string, label: string): T {
 
   throw new Error(`${label}: unbalanced braces`)
 }
+
+export function parseClaudeJsonArray<T>(text: string, label: string): T[] {
+  const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+  const start = cleaned.indexOf('[')
+  if (start === -1) throw new Error(`${label}: no [ found`)
+
+  // Pass 1: exact bracket scanner
+  let depth = 0, inStr = false, esc = false
+  for (let i = start; i < cleaned.length; i++) {
+    const c = cleaned[i]
+    if (esc) { esc = false; continue }
+    if (c === '\\') { esc = true; continue }
+    if (c === '"') { inStr = !inStr; continue }
+    if (inStr) continue
+    if (c === '[') depth++
+    if (c === ']') {
+      depth--
+      if (depth === 0) return tryParse<T[]>(cleaned.slice(start, i + 1), label)
+    }
+  }
+
+  // Pass 2: greedy fallback
+  console.warn(`[parse-claude-json] ${label} array exact scan lost track, trying greedy fallback`)
+  const lastBracket = cleaned.lastIndexOf(']')
+  if (lastBracket > start) {
+    try { return tryParse<T[]>(cleaned.slice(start, lastBracket + 1), label) }
+    catch { /* fall through */ }
+  }
+
+  throw new Error(`${label}: unbalanced brackets`)
+}

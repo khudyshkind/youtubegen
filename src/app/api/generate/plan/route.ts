@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
+import { parseClaudeJsonArray } from '@/lib/parse-claude-json'
 import type { PlanSection } from '@/lib/types'
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -50,12 +51,7 @@ function buildPrompt(
 }
 
 function parseSections(raw: string): PlanSection[] {
-  const cleaned = raw
-    .replace(/```json\s*/gi, '')
-    .replace(/```\s*/g, '')
-    .trim()
-  const parsed = JSON.parse(cleaned)
-  if (!Array.isArray(parsed)) throw new Error('Not an array')
+  const parsed = parseClaudeJsonArray<{ title?: unknown; description?: unknown }>(raw, 'plan-sections')
   return parsed
     .filter((s) => s && typeof s.title === 'string' && typeof s.description === 'string')
     .map((s) => ({ title: String(s.title).trim(), description: String(s.description).trim() }))
