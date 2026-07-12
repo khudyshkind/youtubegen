@@ -135,7 +135,8 @@ export async function POST(request: NextRequest) {
     // When DB has null, ignore clientLang too — language was never confirmed.
     let lang = clientLang
     if (project_id) {
-      const { data: projRow } = await supabase.from('projects').select('language').eq('id', project_id).eq('user_id', user.id).single()
+      const { data: projRow, error: projErr } = await supabase.from('projects').select('language').eq('id', project_id).eq('user_id', user.id).single()
+      const dbLang = projRow?.language ?? null
       if (projRow !== null) {
         if (projRow.language) {
           if (lang !== projRow.language) console.log(`[seo] lang resolved from DB: ${projRow.language} (client: ${lang ?? 'none'})`)
@@ -145,6 +146,7 @@ export async function POST(request: NextRequest) {
           lang = undefined
         }
       }
+      console.log(`[seo] lang resolved: db=${dbLang ?? 'null'} client=${clientLang ?? 'none'} final=${lang ?? 'auto'} projRow=${projRow === null ? `null(err:${projErr?.code})` : 'ok'} project=${project_id}`)
     }
 
     // Build timeline: real subtitles take priority over estimated scene markers
