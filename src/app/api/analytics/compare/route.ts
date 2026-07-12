@@ -6,6 +6,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
+import { checkAnalyticsGate } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
@@ -220,6 +221,9 @@ export async function POST(req: NextRequest) {
 
     if (inputs.length < 2) return NextResponse.json({ ok: false, error: 'Введите минимум 2 канала' }, { status: 400 })
     if (inputs.length > 3) return NextResponse.json({ ok: false, error: 'Максимум 3 канала' }, { status: 400 })
+
+    const gateRes = await checkAnalyticsGate(user.id, supabase)
+    if (gateRes) return gateRes
 
     const check = await requireCredits(user.id, 'channels_compare', supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })

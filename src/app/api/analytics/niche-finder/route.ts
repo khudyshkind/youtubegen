@@ -7,6 +7,7 @@ import { env } from '@/lib/env'
 import { resolveUserLang, langNote } from '@/lib/user-lang'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
+import { checkAnalyticsGate } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
@@ -154,6 +155,9 @@ export async function POST(req: NextRequest) {
 
     if (!interests.trim()) return NextResponse.json({ ok: false, error: 'Укажите ваши интересы' }, { status: 400 })
     if (!skills.trim()) return NextResponse.json({ ok: false, error: 'Укажите ваши навыки' }, { status: 400 })
+
+    const gateRes = await checkAnalyticsGate(user.id, supabase, lang)
+    if (gateRes) return gateRes
 
     const check = await requireCredits(user.id, 'niche_finder', supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })

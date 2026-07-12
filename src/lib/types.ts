@@ -56,7 +56,7 @@ export const CREDIT_COSTS = {
   channel_analysis:  2000,
   revenue_calc:       600,
   comments_analysis: 1800,
-  keywords_analysis: 4000,
+  keywords_analysis: 10000,
   channels_compare:  2400,
   rising_stars:      3000,
 } as const

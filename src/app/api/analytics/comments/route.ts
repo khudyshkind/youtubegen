@@ -6,6 +6,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
+import { checkAnalyticsGate } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
@@ -186,6 +187,9 @@ export async function POST(req: NextRequest) {
     if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
       return NextResponse.json({ ok: false, error: 'Введите корректный URL YouTube' }, { status: 400 })
     }
+
+    const gateRes = await checkAnalyticsGate(user.id, supabase, lang)
+    if (gateRes) return gateRes
 
     const check = await requireCredits(user.id, 'comments_analysis', supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })

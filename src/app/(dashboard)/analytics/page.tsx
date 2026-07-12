@@ -501,6 +501,36 @@ function NicheResultView({ result, cached, t, onCreateVideo, onAnalyzeChannel }:
   )
 }
 
+// ─── BYOK gate block (shown instead of red error when plan=free + no API key) ──
+
+function ByokBlock() {
+  const { t } = useLang()
+  const router = useRouter()
+  return (
+    <div className="rounded-2xl p-5 flex flex-col gap-4"
+      style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.25)' }}>
+      <div className="flex items-start gap-3">
+        <span className="text-2xl">🔑</span>
+        <p className="text-sm text-slate-300 leading-relaxed">{t('analytics.byok_msg')}</p>
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => router.push('/settings')}
+          className="flex-1 py-2 rounded-xl text-sm font-medium text-violet-300 transition"
+          style={{ background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.35)' }}>
+          {t('analytics.byok_settings')}
+        </button>
+        <button
+          onClick={() => router.push('/pricing')}
+          className="flex-1 py-2 rounded-xl text-sm font-medium text-slate-300 transition"
+          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+          {t('analytics.byok_plans')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Niche Tab ────────────────────────────────────────────────────────────────
 
 function NicheTab({ externalResult, onClearExternal, onAnalyzeChannel, initialTopic }: {
@@ -736,6 +766,7 @@ function NicheFinderTab({ onGoToNiche, onGoToPlan, externalResult, onClearExtern
       })
       const json = await res.json() as { ok: boolean; data?: NicheFinderResult; error?: string; code?: string }
       if (!json.ok) {
+        if (json.code === 'byok_required') { setError('__byok__'); return }
         setError(json.code === 'NO_CREDITS' ? t('analytics.err_credits') : (json.error ?? t('analytics.err_general')))
       } else {
         setResult(json.data ?? null)
@@ -1013,7 +1044,7 @@ function NicheFinderTab({ onGoToNiche, onGoToPlan, externalResult, onClearExtern
             </div>
           </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error === '__byok__' ? <ByokBlock /> : error ? <p className="text-sm text-red-400">{error}</p> : null}
 
           <button onClick={() => void handleFind()} disabled={loading}
             className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
@@ -1083,6 +1114,7 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
       })
       const json = await res.json() as { ok: boolean; data?: ChannelPlanResult; error?: string; code?: string }
       if (!json.ok) {
+        if (json.code === 'byok_required') { setError('__byok__'); return }
         setError(json.code === 'NO_CREDITS' ? t('analytics.err_credits') : (json.error ?? t('analytics.err_general')))
       } else {
         setResult(json.data ?? null)
@@ -1570,7 +1602,7 @@ function ChannelPlanTab({ initialTopic, externalResult, onClearExternal, onGoToN
             />
           </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error === '__byok__' ? <ByokBlock /> : error ? <p className="text-sm text-red-400">{error}</p> : null}
 
           <button onClick={() => void handleGenerate()} disabled={loading}
             className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
@@ -1629,6 +1661,7 @@ function TrendsTab({ externalResult, onClearExternal }: {
       })
       const json = await res.json() as { ok: boolean; data?: TrendResult; cached?: boolean; error?: string; code?: string }
       if (!json.ok) {
+        if (json.code === 'byok_required') { setError('__byok__'); return }
         setError(json.code === 'NO_CREDITS' ? t('analytics.err_credits') : (json.error ?? t('analytics.err_general')))
       } else {
         setResult(json.data ?? null)
@@ -1744,7 +1777,7 @@ function TrendsTab({ externalResult, onClearExternal }: {
                 </select>
               </div>
             </div>
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            {error === '__byok__' ? <ByokBlock /> : error ? <p className="text-sm text-red-400">{error}</p> : null}
             <button onClick={() => void handleFind()} disabled={loading}
               className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
               {loading ? <Spinner /> : '🔥'}
@@ -1880,6 +1913,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
       })
       const json = await res.json() as { ok: boolean; data?: ChannelResult; cached?: boolean; error?: string; code?: string }
       if (!json.ok) {
+        if (json.code === 'byok_required') { setError('__byok__'); return }
         setError(json.code === 'NO_CREDITS' ? t('analytics.err_credits') : (json.error ?? t('analytics.err_general')))
       } else {
         setResult(json.data ?? null)
@@ -1933,7 +1967,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                 style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
               />
             </div>
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            {error === '__byok__' ? <ByokBlock /> : error ? <p className="text-sm text-red-400">{error}</p> : null}
             <button onClick={() => void handleAnalyze()} disabled={loading}
               className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
               {loading ? <Spinner /> : '📊'}
@@ -2312,8 +2346,8 @@ function CommentsTab({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, count, ui_lang: lang }),
       })
-      const json = await res.json() as { ok: boolean; data?: CommentsResult; error?: string }
-      if (!json.ok) { setError(json.error ?? 'Ошибка'); return }
+      const json = await res.json() as { ok: boolean; data?: CommentsResult; error?: string; code?: string }
+      if (!json.ok) { if (json.code === 'byok_required') { setError('__byok__'); return }; setError(json.error ?? 'Ошибка'); return }
       setResult(json.data!)
     } catch {
       setError('Ошибка сети')
@@ -2364,7 +2398,7 @@ function CommentsTab({
                 ))}
               </div>
             </div>
-            {error && <p className="text-red-400 text-sm">{error}</p>}
+            {error === '__byok__' ? <ByokBlock /> : error ? <p className="text-red-400 text-sm">{error}</p> : null}
             <button type="submit" disabled={loading || !url}
               className="btn-gradient py-3.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50">
               {loading
@@ -2563,7 +2597,7 @@ function KeywordsTab({
         body: JSON.stringify({ keyword, country, content_lang: contentLang, ui_lang: uiLang }),
       })
       const json = await res.json() as { ok: boolean; data?: KeywordsResult; error?: string; code?: string }
-      if (!json.ok) { setError(json.error ?? 'Ошибка'); return }
+      if (!json.ok) { if (json.code === 'byok_required') { setError('__byok__'); return }; setError(json.error ?? 'Ошибка'); return }
       setResult(json.data!)
     } catch {
       setError('Ошибка сети')
@@ -2648,7 +2682,7 @@ function KeywordsTab({
                 </select>
               </div>
             </div>
-            {error && <p className="text-red-400 text-sm">{error}</p>}
+            {error === '__byok__' ? <ByokBlock /> : error ? <p className="text-red-400 text-sm">{error}</p> : null}
             <button type="submit" disabled={loading || !keyword}
               className="btn-gradient py-3.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50">
               {loading
@@ -2820,7 +2854,7 @@ function CompareTab({
         body: JSON.stringify({ channels }),
       })
       const json = await res.json() as { ok: boolean; data?: CompareResult; error?: string; code?: string }
-      if (!json.ok) { setError(json.error ?? 'Ошибка'); return }
+      if (!json.ok) { if (json.code === 'byok_required') { setError('__byok__'); return }; setError(json.error ?? 'Ошибка'); return }
       setResult(json.data!)
     } catch {
       setError('Ошибка сети')
@@ -2866,7 +2900,7 @@ function CompareTab({
                 />
               </div>
             ))}
-            {error && <p className="text-red-400 text-sm">{error}</p>}
+            {error === '__byok__' ? <ByokBlock /> : error ? <p className="text-red-400 text-sm">{error}</p> : null}
             <button type="submit" disabled={loading || inputs.filter(Boolean).length < 2}
               className="btn-gradient py-3.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50">
               {loading
@@ -3172,7 +3206,8 @@ function RisingStarsTab({
       })
       const json = await res.json() as { ok: boolean; data?: RisingStarsResult; error?: string; code?: string }
       if (!json.ok) {
-        setError(json.code === 'NO_CREDITS' ? 'Недостаточно кредитов' : (json.error ?? 'Ошибка'))
+        if (json.code === 'byok_required') { setError('__byok__') }
+        else { setError(json.code === 'NO_CREDITS' ? 'Недостаточно кредитов' : (json.error ?? 'Ошибка')) }
       } else {
         setResult(json.data!)
         onResult?.(json.data!)
@@ -3341,7 +3376,7 @@ function RisingStarsTab({
               </div>
             </div>
 
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            {error === '__byok__' ? <ByokBlock /> : error ? <p className="text-sm text-red-400">{error}</p> : null}
 
             <button onClick={() => void handleSearch()} disabled={loading}
               className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">

@@ -1029,6 +1029,9 @@ export const translations = {
     'analytics.err_general':        'Ошибка анализа. Попробуйте снова.',
     'analytics.err_topic':          'Введите тему для анализа',
     'analytics.err_channel':        'Введите URL или название канала',
+    'analytics.byok_msg':           'Аналитика на бесплатном тарифе доступна с вашим YouTube API-ключом. Загрузите ключ в настройках или перейдите на платный тариф для доступа без ключа.',
+    'analytics.byok_settings':      'Настройки',
+    'analytics.byok_plans':         'Тарифы',
 
     // Trends result
     'analytics.urgent':             'Срочно',
@@ -2083,6 +2086,9 @@ export const translations = {
     'analytics.err_general':        'Analysis error. Please try again.',
     'analytics.err_topic':          'Enter a topic to analyze',
     'analytics.err_channel':        'Enter a channel URL or name',
+    'analytics.byok_msg':           'Analytics on the free plan requires your own YouTube API key. Add your key in Settings or upgrade to a paid plan for access without a key.',
+    'analytics.byok_settings':      'Settings',
+    'analytics.byok_plans':         'Plans',
 
     'analytics.urgent':             'Urgent',
     'analytics.can_wait':           'Can wait',

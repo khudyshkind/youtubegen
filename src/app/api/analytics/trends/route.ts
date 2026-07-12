@@ -6,6 +6,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
+import { checkAnalyticsGate } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
@@ -120,6 +121,9 @@ export async function POST(req: NextRequest) {
 
     console.log(`[trends] start topic="${topic}" period=${period} lang=${lang} country=${country} contentLang=${contentLang}`)
     if (!topic) return NextResponse.json({ ok: false, error: 'Введите тему' }, { status: 400 })
+
+    const gateRes = await checkAnalyticsGate(user.id, supabase, lang)
+    if (gateRes) return gateRes
 
     const svc = createServiceClient()
     const key = cacheKey(topic, period, country, contentLang)

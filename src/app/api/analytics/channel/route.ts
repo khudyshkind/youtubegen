@@ -6,6 +6,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
+import { checkAnalyticsGate } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
@@ -110,6 +111,9 @@ export async function POST(req: NextRequest) {
     const channelInput = body.channel?.trim() ?? ''
     lang = body.ui_lang ?? body.lang ?? 'ru'
     if (!channelInput) return NextResponse.json({ ok: false, error: 'Введите канал' }, { status: 400 })
+
+    const gateRes = await checkAnalyticsGate(user.id, supabase, lang)
+    if (gateRes) return gateRes
 
     console.log(`[channel] start input="${channelInput}" lang=${lang}`)
 
