@@ -26,12 +26,12 @@ export async function GET(request: NextRequest) {
     const svc = createServiceClient()
 
     // Resolve job: by job_id (normal polling) or by project_id (resume after reload)
-    let job: { id: string; status: string; progress: number | null; video_url: string | null; error_message: string | null; project_id: string | null; user_id: string } | null = null
+    let job: { id: string; status: string; progress: number | null; video_url: string | null; error_message: string | null; project_id: string | null; user_id: string; credits_charged: number; credits_refunded_at: string | null } | null = null
 
     if (jobId) {
       const { data, error } = await svc
         .from('video_jobs')
-        .select('id, status, progress, video_url, error_message, project_id, user_id')
+        .select('id, status, progress, video_url, error_message, project_id, user_id, credits_charged, credits_refunded_at')
         .eq('id', jobId)
         .eq('user_id', user.id)
         .single()
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
       // Resume polling: find the latest non-failed job for this project
       const { data, error } = await svc
         .from('video_jobs')
-        .select('id, status, progress, video_url, error_message, project_id, user_id')
+        .select('id, status, progress, video_url, error_message, project_id, user_id, credits_charged, credits_refunded_at')
         .eq('project_id', projectIdParam!)
         .eq('user_id', user.id)
         .neq('status', 'failed')
@@ -128,6 +128,33 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Vercel-side refund fallback: fires when the client is still polling and
+    // the video-server-side refund failed or hasn't run yet (race with watchdog).
+    // Uses the same credits_refunded_at IS NULL atomic guard as the server path.
+    if (job.status === 'failed' && (job.credits_charged ?? 0) > 0 && !job.credits_refunded_at) {
+      const { data: claimed } = await svc
+        .from('video_jobs')
+        .update({ credits_refunded_at: new Date().toISOString() })
+        .eq('id', job.id)
+        .is('credits_refunded_at', null)
+        .select('id')
+      if (claimed && claimed.length > 0) {
+        const rpcRes = await svc.rpc('add_credits', {
+          p_user_id:    user.id,
+          p_amount:     job.credits_charged,
+          p_operation:  'video_refund',
+          p_project_id: job.project_id,
+        })
+        if (rpcRes.error) {
+          console.error(`[video/status] refund RPC failed for job ${job.id}:`, rpcRes.error.message)
+          Sentry.captureException(new Error(`video refund RPC failed: ${rpcRes.error.message}`), { extra: { job_id: job.id } })
+        } else {
+          console.log(`[video/status] refund fallback: ${job.credits_charged} credits → ${user.id}`)
+          job = { ...job, credits_refunded_at: new Date().toISOString() }
+        }
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       job_id: job.id,
@@ -135,6 +162,7 @@ export async function GET(request: NextRequest) {
       progress: job.progress,
       video_url: job.video_url ?? null,
       error_message: job.error_message ?? null,
+      credits_refunded: job.status === 'failed' && (job.credits_charged ?? 0) > 0 ? job.credits_charged : 0,
     })
   } catch (error) {
     console.error('[generate/video/status]', error)

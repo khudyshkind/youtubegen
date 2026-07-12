@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
-import { createServerSupabase } from '@/lib/supabase-server'
+import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
@@ -114,6 +114,18 @@ export async function POST(request: NextRequest) {
     const { job_id } = (await renderRes.json()) as { job_id: string }
 
     await spendCredits(user.id, videoCost, 'video', project_id)
+
+    // Record amount charged so refundVideoJobCredits can look it up atomically.
+    const svc = createServiceClient()
+    const { error: chargeWriteErr } = await svc
+      .from('video_jobs')
+      .update({ credits_charged: videoCost })
+      .eq('id', job_id)
+    if (chargeWriteErr) {
+      console.error(`[video/render] credits_charged write failed for job ${job_id}:`, chargeWriteErr.message)
+      Sentry.captureException(new Error(`credits_charged write failed: ${chargeWriteErr.message}`), { extra: { job_id, videoCost } })
+    }
+
     Sentry.setContext('generate', { project_id, stage: 'video_render', job_id, image_count: images?.length })
     return NextResponse.json({ ok: true, data: { job_id } })
   } catch (error) {

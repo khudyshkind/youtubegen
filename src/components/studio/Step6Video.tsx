@@ -252,7 +252,7 @@ export default function Step6Video() {
       }
       try {
         const res = await fetch(`/api/generate/video/status?job_id=${jobId}`)
-        const json = await res.json() as { ok: boolean; status?: string; progress?: number; video_url?: string; error_message?: string }
+        const json = await res.json() as { ok: boolean; status?: string; progress?: number; video_url?: string; error_message?: string; credits_refunded?: number }
         if (!res.ok || !json.ok) return
 
         setRenderProgress(json.progress ?? 0)
@@ -263,7 +263,9 @@ export default function Step6Video() {
           void refreshCredits(); setRenderState('done')
         } else if (json.status === 'failed') {
           clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
-          setRenderError(json.error_message ?? 'Ошибка рендеринга'); setRenderState('error')
+          void refreshCredits()
+          const refundNote = (json.credits_refunded ?? 0) > 0 ? `\n${json.credits_refunded} кр. возвращены на баланс` : ''
+          setRenderError((json.error_message ?? 'Ошибка рендеринга') + refundNote); setRenderState('error')
         } else if (json.status === 'processing') {
           setRenderState('processing')
         }

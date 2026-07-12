@@ -2421,8 +2421,24 @@ async function runWatchdog() {
     for (const row of rows) {
       const ageMin = Math.round((now - new Date(row.updated_at).getTime()) / 60_000)
       console.log(`${tag} project ${row.id} stuck in generating_video ${ageMin} min`)
-      if (!WATCHDOG_DRY_RUN) await sbPatch('projects', `id=eq.${row.id}`, { status: 'failed' })
-      resets.push({ type: 'video', id: row.id, ageMin })
+      let creditsCharged = 0
+      let needsVideoRefund = false
+      if (!WATCHDOG_DRY_RUN) {
+        await sbPatch('projects', `id=eq.${row.id}`, { status: 'failed' })
+        try {
+          const vJobs = await sbGet('video_jobs',
+            `project_id=eq.${row.id}&status=in.(pending,processing)&select=id,user_id,credits_charged,credits_refunded_at`)
+          for (const vj of (Array.isArray(vJobs) ? vJobs : [])) {
+            needsVideoRefund = !!(vj.credits_charged > 0 && !vj.credits_refunded_at)
+            creditsCharged = vj.credits_charged ?? 0
+            await updateJob(vj.id, { status: 'failed', error_message: `watchdog: stuck in generating_video for ${ageMin} min` })
+            await refundVideoJobCredits(vj.id, vj.user_id, row.id)
+          }
+        } catch (e) {
+          console.warn(`${tag} video_jobs cleanup for project ${row.id}:`, e.message)
+        }
+      }
+      resets.push({ type: 'video', id: row.id, ageMin, creditsCharged, needsVideoRefund })
     }
   } catch (e) { console.warn(`${tag} video query failed:`, e.message) }
 
@@ -2458,6 +2474,8 @@ async function runWatchdog() {
         : `project ${r.id.slice(0, 8)} (generating_${r.type})`
       const refundNote = r.type === 'audio'
         ? (r.needsRefund ? `, ${r.creditsCharged} кр. возвращены` : ', refund не потребовался')
+        : r.type === 'video' && r.creditsCharged > 0
+        ? (r.needsVideoRefund ? `, ${r.creditsCharged} кр. возвращены` : ', refund не потребовался')
         : ''
       const msg = `${emoji} Watchdog${dryLabel}\n${subject} stuck ${r.ageMin} min → reset to failed${refundNote}`
       await tgApi('sendMessage', { chat_id: OWNER_ID, text: msg })
@@ -3669,6 +3687,7 @@ async function processVideoJob(jobId, body) {
     })
     try { console.timeEnd(T('TOTAL')) } catch (_) {}
     await updateJob(jobId, { status: 'failed', error_message: err.message })
+    await refundVideoJobCredits(jobId, body.user_id, body.project_id)
   } finally {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true })
@@ -3928,6 +3947,39 @@ async function refundAudioJobCredits(jobId, userId, projectId) {
     console.log(`[audio-job:${jobId}] refunded ${row.credits_charged} credits to ${userId}`)
   } catch (e) {
     console.error(`[audio-job:${jobId}] refundAudioJobCredits failed:`, e.message)
+    Sentry.captureException(e, { extra: { jobId, userId, projectId } })
+  }
+}
+
+// Mirror of refundAudioJobCredits for video jobs. Called from processVideoJob catch
+// and the watchdog video branch. The Vercel status route has a secondary fallback.
+async function refundVideoJobCredits(jobId, userId, projectId) {
+  try {
+    const rows = await sbGet('video_jobs', `id=eq.${jobId}&select=credits_charged,credits_refunded_at`)
+    const row = Array.isArray(rows) ? rows[0] : null
+    if (!row || !(row.credits_charged > 0) || row.credits_refunded_at) return
+
+    const updated = await sbPatch(
+      'video_jobs',
+      `id=eq.${jobId}&credits_refunded_at=is.null`,
+      { credits_refunded_at: new Date().toISOString() }
+    )
+    if (!Array.isArray(updated) || updated.length === 0) return
+
+    const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/add_credits`, {
+      method: 'POST',
+      headers: sbHeaders(),
+      body: JSON.stringify({
+        p_user_id:    userId,
+        p_amount:     row.credits_charged,
+        p_operation:  'video_refund',
+        p_project_id: projectId ?? null,
+      }),
+    })
+    if (!rpcRes.ok) throw new Error(`add_credits RPC: ${rpcRes.status} ${await rpcRes.text().catch(() => '')}`)
+    console.log(`[video-job:${jobId}] refunded ${row.credits_charged} credits to ${userId}`)
+  } catch (e) {
+    console.error(`[video-job:${jobId}] refundVideoJobCredits failed:`, e.message)
     Sentry.captureException(e, { extra: { jobId, userId, projectId } })
   }
 }
