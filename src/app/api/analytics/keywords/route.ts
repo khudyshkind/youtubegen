@@ -5,6 +5,7 @@ import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
 
 export const maxDuration = 120
 
@@ -124,7 +125,10 @@ async function getQueryStats(query: string, contentLang: string, country: string
     if (regionCode) searchUrl.searchParams.set('regionCode', regionCode)
 
     const searchRes = await fetch(searchUrl.toString())
-    if (!searchRes.ok) return { avg_views: 0, video_count: 0 }
+    if (!searchRes.ok) {
+      checkYouTubeQuota(searchRes.status, await searchRes.text())
+      return { avg_views: 0, video_count: 0 }
+    }
     const searchData = await searchRes.json() as YtSearchResponse & { pageInfo?: { totalResults?: number } }
 
     const videoIds = (searchData.items ?? [])
@@ -141,7 +145,10 @@ async function getQueryStats(query: string, contentLang: string, country: string
     statsUrl.searchParams.set('key', apiKey)
 
     const statsRes = await fetch(statsUrl.toString())
-    if (!statsRes.ok) return { avg_views: 0, video_count: videoCount }
+    if (!statsRes.ok) {
+      checkYouTubeQuota(statsRes.status, await statsRes.text())
+      return { avg_views: 0, video_count: videoCount }
+    }
     const statsData = await statsRes.json() as YtVideoListResponse
 
     const views = (statsData.items ?? [])
@@ -153,7 +160,8 @@ async function getQueryStats(query: string, contentLang: string, country: string
       : 0
 
     return { avg_views, video_count: videoCount }
-  } catch {
+  } catch (e) {
+    if (e instanceof YouTubeQuotaError) throw e
     return { avg_views: 0, video_count: 0 }
   }
 }
@@ -165,6 +173,7 @@ function fmtViews(n: number): string {
 }
 
 export async function POST(req: NextRequest) {
+  let lang = 'ru'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -174,6 +183,7 @@ export async function POST(req: NextRequest) {
     const keyword = body.keyword?.trim() ?? ''
     const contentLang = body.content_lang ?? body.lang ?? 'ru'
     const uiLang = body.ui_lang ?? body.lang ?? 'ru'
+    lang = uiLang
     const country = body.country ?? 'RU'
 
     if (!keyword) return NextResponse.json({ ok: false, error: 'Введите ключевое слово' }, { status: 400 })
@@ -342,6 +352,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: result })
   } catch (error) {
+    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/keywords] error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка анализа: ${msg}` }, { status: 500 })

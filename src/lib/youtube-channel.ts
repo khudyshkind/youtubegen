@@ -1,3 +1,5 @@
+import { checkYouTubeQuota, YouTubeQuotaError } from './youtube-quota'
+
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
 export type ChannelRef =
@@ -18,7 +20,10 @@ async function ytGet(path: string, params: Record<string, string>, apiKey: strin
   const qs = new URLSearchParams({ ...params, key: apiKey }).toString()
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
-  if (!res.ok) throw new Error(`YouTube API ${res.status} on ${path}: ${text.slice(0, 200)}`)
+  if (!res.ok) {
+    checkYouTubeQuota(res.status, text)
+    throw new Error(`YouTube API ${res.status} on ${path}: ${text.slice(0, 200)}`)
+  }
   return JSON.parse(text)
 }
 
@@ -28,7 +33,8 @@ export async function verifyHandle(handle: string, apiKey: string): Promise<stri
   try {
     const res = await ytGet('/channels', { part: 'snippet', forHandle: h }, apiKey) as { items?: Array<{ id: string }> }
     return res.items?.[0]?.id ?? null
-  } catch {
+  } catch (e) {
+    if (e instanceof YouTubeQuotaError) throw e
     return null
   }
 }

@@ -5,6 +5,7 @@ import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
 
 export const maxDuration = 120
 
@@ -16,7 +17,11 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   url.searchParams.set('key', env('YOUTUBE_API_KEY'))
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
   const res = await fetch(url.toString())
-  if (!res.ok) throw new Error(`YouTube API ${path} ${res.status}: ${await res.text()}`)
+  if (!res.ok) {
+    const text = await res.text()
+    checkYouTubeQuota(res.status, text)
+    throw new Error(`YouTube API ${path} ${res.status}: ${text.slice(0, 200)}`)
+  }
   return res.json()
 }
 
@@ -343,6 +348,7 @@ ${channelBlocks}
 
     return NextResponse.json({ ok: true, data: result })
   } catch (error) {
+    if (error instanceof YouTubeQuotaError) return quotaExceededResponse()
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/compare] error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка сравнения: ${msg}` }, { status: 500 })

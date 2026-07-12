@@ -5,6 +5,7 @@ import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
 
 export const maxDuration = 120
 
@@ -50,7 +51,11 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   url.searchParams.set('key', env('YOUTUBE_API_KEY'))
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
   const res = await fetch(url.toString())
-  if (!res.ok) throw new Error(`YouTube API ${path} ${res.status}: ${await res.text()}`)
+  if (!res.ok) {
+    const text = await res.text()
+    checkYouTubeQuota(res.status, text)
+    throw new Error(`YouTube API ${path} ${res.status}: ${text.slice(0, 200)}`)
+  }
   return res.json()
 }
 
@@ -159,12 +164,14 @@ async function fetchComments(videoId: string, maxResults: number): Promise<strin
       const likes = s.likeCount > 0 ? ` [${s.likeCount} лайков]` : ''
       return `${s.textDisplay}${likes}`
     })
-  } catch {
+  } catch (e) {
+    if (e instanceof YouTubeQuotaError) throw e
     return []
   }
 }
 
 export async function POST(req: NextRequest) {
+  let lang = 'ru'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -172,7 +179,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json() as { url?: string; count?: number; lang?: string; ui_lang?: string }
     const url = body.url?.trim() ?? ''
-    const lang = body.ui_lang ?? body.lang ?? 'ru'
+    lang = body.ui_lang ?? body.lang ?? 'ru'
     const count = [50, 100, 200].includes(body.count ?? 0) ? (body.count as 50 | 100 | 200) : 100
 
     if (!url) return NextResponse.json({ ok: false, error: 'Введите URL видео или канала' }, { status: 400 })
@@ -314,6 +321,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: result })
   } catch (error) {
+    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/comments] error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка анализа: ${msg}` }, { status: 500 })

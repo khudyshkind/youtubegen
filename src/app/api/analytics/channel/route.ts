@@ -5,6 +5,7 @@ import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
 
 export const maxDuration = 120
 
@@ -89,13 +90,17 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
   console.log(`[channel] yt ${path} status=${res.status} body=${text.slice(0, 300)}`)
-  if (!res.ok) throw new Error(`YouTube API ${res.status} on ${path}: ${text.slice(0, 200)}`)
+  if (!res.ok) {
+    checkYouTubeQuota(res.status, text)
+    throw new Error(`YouTube API ${res.status} on ${path}: ${text.slice(0, 200)}`)
+  }
   return JSON.parse(text)
 }
 
 import { detectChannelInput } from '@/lib/youtube-channel'
 
 export async function POST(req: NextRequest) {
+  let lang = 'ru'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -103,7 +108,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json() as { channel?: string; lang?: string; ui_lang?: string }
     const channelInput = body.channel?.trim() ?? ''
-    const lang = body.ui_lang ?? body.lang ?? 'ru'
+    lang = body.ui_lang ?? body.lang ?? 'ru'
     if (!channelInput) return NextResponse.json({ ok: false, error: 'Введите канал' }, { status: 400 })
 
     console.log(`[channel] start input="${channelInput}" lang=${lang}`)
@@ -384,6 +389,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: analysis, cached: false })
   } catch (error) {
+    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/channel] fatal error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка анализа канала: ${msg}` }, { status: 500 })

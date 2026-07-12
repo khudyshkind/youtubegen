@@ -7,6 +7,7 @@ import { env } from '@/lib/env'
 import { resolveUserLang, langNote } from '@/lib/user-lang'
 import { verifyHandle, resolveChannelId, fetchRecentVideoTitles } from '@/lib/youtube-channel'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
 
 export const maxDuration = 120
 
@@ -17,7 +18,10 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   const qs = new URLSearchParams({ ...params, key }).toString()
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
-  if (!res.ok) throw new Error(`YouTube API ${res.status}: ${text.slice(0, 200)}`)
+  if (!res.ok) {
+    checkYouTubeQuota(res.status, text)
+    throw new Error(`YouTube API ${res.status}: ${text.slice(0, 200)}`)
+  }
   return JSON.parse(text)
 }
 
@@ -222,6 +226,7 @@ interface StyleResult {
 }
 
 export async function POST(req: NextRequest) {
+  let lang = 'ru'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -245,6 +250,7 @@ export async function POST(req: NextRequest) {
       publish_frequency = 1,
       user_channel_url = '',
     } = body
+    lang = ui_lang
 
     if (!topic.trim()) return NextResponse.json({ ok: false, error: 'Введите тему канала' }, { status: 400 })
 
@@ -294,6 +300,7 @@ export async function POST(req: NextRequest) {
           console.log(`[channel-plan] user channel resolved, ${userChannelVideos.length} videos`)
         }
       } catch (e) {
+        if (e instanceof YouTubeQuotaError) throw e
         userChannelError = e instanceof Error ? e.message : String(e)
         console.warn('[channel-plan] user channel fetch failed:', userChannelError)
       }
@@ -339,6 +346,7 @@ export async function POST(req: NextRequest) {
         }).join('\n')
       }
     } catch (e) {
+      if (e instanceof YouTubeQuotaError) throw e
       console.warn('[channel-plan] YouTube fetch failed:', e instanceof Error ? e.message : String(e))
     }
 
@@ -453,6 +461,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: result })
   } catch (error) {
+    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/channel-plan] error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка: ${msg}` }, { status: 500 })

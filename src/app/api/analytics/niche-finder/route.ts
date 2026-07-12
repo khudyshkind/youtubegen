@@ -6,6 +6,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { resolveUserLang, langNote } from '@/lib/user-lang'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
 
 export const maxDuration = 120
 
@@ -16,7 +17,10 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   const qs = new URLSearchParams({ ...params, key }).toString()
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
-  if (!res.ok) throw new Error(`YouTube API ${res.status}: ${text.slice(0, 200)}`)
+  if (!res.ok) {
+    checkYouTubeQuota(res.status, text)
+    throw new Error(`YouTube API ${res.status}: ${text.slice(0, 200)}`)
+  }
   return JSON.parse(text)
 }
 
@@ -131,6 +135,7 @@ interface RecommendationResult {
 }
 
 export async function POST(req: NextRequest) {
+  let lang = 'ru'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -145,6 +150,7 @@ export async function POST(req: NextRequest) {
       time_per_week = '5-10', goal = 'money',
       country = 'RU', content_lang = 'ru', ui_lang = 'ru',
     } = body
+    lang = ui_lang
 
     if (!interests.trim()) return NextResponse.json({ ok: false, error: 'Укажите ваши интересы' }, { status: 400 })
     if (!skills.trim()) return NextResponse.json({ ok: false, error: 'Укажите ваши навыки' }, { status: 400 })
@@ -196,6 +202,7 @@ export async function POST(req: NextRequest) {
         }
         return { name: niche.name, video_count: search.pageInfo?.totalResults ?? 0, avg_views: avgViews }
       } catch (e) {
+        if (e instanceof YouTubeQuotaError) throw e
         console.warn(`[niche-finder] YT failed for "${niche.name}":`, e instanceof Error ? e.message : String(e))
         return { name: niche.name, video_count: 0, avg_views: 0 }
       }
@@ -277,6 +284,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: result })
   } catch (error) {
+    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/niche-finder] error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка: ${msg}` }, { status: 500 })

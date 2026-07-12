@@ -5,6 +5,7 @@ import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
 
 export const maxDuration = 120
 
@@ -67,11 +68,15 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
   console.log(`[rising] yt ${path} status=${res.status} body=${text.slice(0, 400)}`)
-  if (!res.ok) throw new Error(`YouTube API ${res.status}: ${text.slice(0, 200)}`)
+  if (!res.ok) {
+    checkYouTubeQuota(res.status, text)
+    throw new Error(`YouTube API ${res.status}: ${text.slice(0, 200)}`)
+  }
   return JSON.parse(text)
 }
 
 export async function POST(req: NextRequest) {
+  let lang = 'ru'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -92,7 +97,7 @@ export async function POST(req: NextRequest) {
     const subMin = body.sub_min ?? 1000
     const subMax = body.sub_max ?? 100000
     const monthsMax = body.months_max ?? 0
-    const lang = body.ui_lang ?? body.lang ?? 'ru'
+    lang = body.ui_lang ?? body.lang ?? 'ru'
     const isRu = lang !== 'en'
     const contentLang = body.content_lang ?? 'ru'
     const country = body.country ?? 'RU'
@@ -151,8 +156,7 @@ export async function POST(req: NextRequest) {
     console.log(`[rising] unique channels from videos: ${channelIds.length}`)
 
     if (channelIds.length === 0) {
-      console.log('[rising] 0 channels — returning empty result')
-      await spendCredits(user.id, CREDIT_COSTS.rising_stars, 'rising_stars')
+      console.log('[rising] 0 channels from search — returning empty, no charge')
       return NextResponse.json({ ok: true, data: { topic, total_found: 0, channels: [], common_patterns: [] } })
     }
 
@@ -280,9 +284,8 @@ export async function POST(req: NextRequest) {
 
     console.log(`[rising] enriched channels for Claude: ${enriched.length}`)
 
-    await spendCredits(user.id, CREDIT_COSTS.rising_stars, 'rising_stars')
-
     if (enriched.length === 0) {
+      await spendCredits(user.id, CREDIT_COSTS.rising_stars, 'rising_stars')
       const svc2 = createServiceClient()
       try {
         await svc2.from('analytics_reports').insert({
@@ -367,6 +370,8 @@ ${videoLines}`
       common_patterns: claudeResult.common_patterns ?? [],
     }
 
+    await spendCredits(user.id, CREDIT_COSTS.rising_stars, 'rising_stars')
+
     const svc = createServiceClient()
     try {
       const { data: old } = await svc
@@ -391,6 +396,7 @@ ${videoLines}`
 
     return NextResponse.json({ ok: true, data: result })
   } catch (error) {
+    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[rising]', msg)
     return NextResponse.json({ ok: false, error: `Ошибка: ${msg}` }, { status: 500 })

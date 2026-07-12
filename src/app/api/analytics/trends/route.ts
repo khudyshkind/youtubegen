@@ -5,6 +5,7 @@ import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
 
 export const maxDuration = 120
 
@@ -17,7 +18,10 @@ async function ytFetch(path: string, params: Record<string, string>): Promise<un
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
   console.log(`[trends] yt ${path} status=${res.status} body=${text.slice(0, 300)}`)
-  if (!res.ok) throw new Error(`YouTube API ${res.status} on ${path}: ${text.slice(0, 200)}`)
+  if (!res.ok) {
+    checkYouTubeQuota(res.status, text)
+    throw new Error(`YouTube API ${res.status} on ${path}: ${text.slice(0, 200)}`)
+  }
   return JSON.parse(text)
 }
 
@@ -101,6 +105,7 @@ function cacheKey(topic: string, period: string, country: string, contentLang: s
 }
 
 export async function POST(req: NextRequest) {
+  let lang = 'ru'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -109,7 +114,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as { topic?: string; period?: string; lang?: string; ui_lang?: string; country?: string; content_lang?: string }
     const topic = body.topic?.trim() ?? ''
     const period = body.period ?? 'week'
-    const lang = body.ui_lang ?? body.lang ?? 'ru'
+    lang = body.ui_lang ?? body.lang ?? 'ru'
     const country = body.country ?? 'RU'
     const contentLang = body.content_lang ?? body.lang ?? 'ru'
 
@@ -320,6 +325,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: analysis, cached: false })
   } catch (error) {
+    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/trends] fatal error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка анализа трендов: ${msg}` }, { status: 500 })
