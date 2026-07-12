@@ -3358,12 +3358,6 @@ async function processVideoJob(jobId, body) {
       '| effects:', effects,
       '| burnIn:', subtitle_style?.burnIn ?? false)
 
-    // ── INJECTED TEST FAILURE — remove after live refund gate test ──────────
-    console.log(`[job:${jobId}] 🔴 INJECTED: sleeping 5s then throwing to test refund path`)
-    await new Promise(r => setTimeout(r, 5000))
-    throw new Error('INJECTED FAILURE: video credit refund gate test')
-    // ── END INJECTION ────────────────────────────────────────────────────────
-
     const defaultDuration = Math.max(1, Number(image_interval) || 10)
     const effectFilters = (Array.isArray(effects) ? effects : []).map(e => EFFECT_FILTERS[e]).filter(Boolean)
     const hasKenBurns = Array.isArray(effects) && effects.includes('ken_burns')
