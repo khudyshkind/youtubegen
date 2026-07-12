@@ -172,6 +172,10 @@ function fmtViews(n: number): string {
   return String(n)
 }
 
+function cacheKey(keyword: string, contentLang: string, country: string): string {
+  return `${keyword.toLowerCase().trim()}|${contentLang}|${country}|v1`
+}
+
 export async function POST(req: NextRequest) {
   let lang = 'ru'
   try {
@@ -187,6 +191,58 @@ export async function POST(req: NextRequest) {
     const country = body.country ?? 'RU'
 
     if (!keyword) return NextResponse.json({ ok: false, error: 'Введите ключевое слово' }, { status: 400 })
+
+    const svc = createServiceClient()
+    const key = cacheKey(keyword, contentLang, country)
+
+    // Cache check — non-fatal
+    try {
+      const { data: cached } = await svc
+        .from('analytics_cache')
+        .select('result, created_at')
+        .eq('cache_type', 'keywords')
+        .eq('cache_key', key)
+        .gt('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
+        .maybeSingle()
+      if (cached) {
+        console.log('[keywords] cache hit, saving report for user:', user.id)
+        try {
+          const { data: existing } = await svc
+            .from('analytics_reports')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('report_type', 'keywords')
+            .eq('query', keyword)
+            .gte('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
+            .maybeSingle()
+          if (!existing) {
+            const { data: old } = await svc
+              .from('analytics_reports')
+              .select('id')
+              .eq('user_id', user.id)
+              .eq('report_type', 'keywords')
+              .order('created_at', { ascending: true })
+            if ((old?.length ?? 0) >= 20) {
+              await svc.from('analytics_reports').delete().eq('id', old![0].id)
+            }
+            await svc.from('analytics_reports').insert({
+              user_id: user.id,
+              report_type: 'keywords',
+              title: `Ключевые слова: ${keyword}`,
+              query: keyword,
+              result: cached.result,
+            })
+          } else {
+            console.log('[keywords] cache-hit: report already saved, skip')
+          }
+        } catch (saveEx) {
+          console.warn('[keywords] cache-hit report save failed:', saveEx instanceof Error ? saveEx.message : String(saveEx))
+        }
+        return NextResponse.json({ ok: true, data: cached.result, cached: true })
+      }
+    } catch (e) {
+      console.warn('[keywords] cache check skipped:', e instanceof Error ? e.message : String(e))
+    }
 
     const check = await requireCredits(user.id, 'keywords_analysis', supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
@@ -326,8 +382,18 @@ export async function POST(req: NextRequest) {
 
     await spendCredits(user.id, CREDIT_COSTS.keywords_analysis, 'keywords_analysis')
 
+    try {
+      await svc.from('analytics_cache').upsert({
+        cache_type: 'keywords',
+        cache_key: key,
+        result,
+        created_at: new Date().toISOString(),
+      }, { onConflict: 'cache_type,cache_key' })
+    } catch (e) {
+      console.warn('[keywords] cache write failed:', e instanceof Error ? e.message : String(e))
+    }
+
     // Save to analytics_reports (non-fatal, 20-limit)
-    const svc = createServiceClient()
     try {
       const { data: old } = await svc
         .from('analytics_reports')
@@ -350,7 +416,16 @@ export async function POST(req: NextRequest) {
       console.warn('[keywords] report save failed:', e instanceof Error ? e.message : String(e))
     }
 
-    return NextResponse.json({ ok: true, data: result })
+    // Cleanup stale cache (non-fatal)
+    try {
+      await svc.from('analytics_cache')
+        .delete()
+        .lt('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
+    } catch (e) {
+      console.warn('[keywords] cache cleanup failed:', e instanceof Error ? e.message : String(e))
+    }
+
+    return NextResponse.json({ ok: true, data: result, cached: false })
   } catch (error) {
     if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)

@@ -293,6 +293,8 @@ create index if not exists analytics_cache_created_at_idx
 
 -- service role reads/writes cache; no RLS needed (server-side only)
 alter table public.analytics_cache enable row level security;
+grant all on public.analytics_cache to service_role;
+grant select, insert, update, delete on public.analytics_cache to authenticated;
 
 -- ─────────────────────────────────────────
 -- Analytics reports history (per-user, max 20)
