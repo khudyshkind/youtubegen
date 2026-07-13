@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { IMAGE_INTERVAL_MIN, IMAGE_INTERVAL_MAX } from './types'
 import type {
   ScriptParams, SubtitleBlock, SceneImage, SeoData,
   VoiceSettings, SubtitleStyle, PlanSection,
@@ -37,7 +38,7 @@ interface StudioState {
 
   // Step 5: Illustrations
   sceneImages: SceneImage[]
-  imageInterval: number  // seconds per scene (3–30)
+  imageInterval: number  // seconds per scene (IMAGE_INTERVAL_MIN–IMAGE_INTERVAL_MAX)
   imageStyle: string | null
   imageEngine: 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana'
   audioCostEstimate: number | null
@@ -178,7 +179,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setSubtitleStyle: (style) =>
     set((s) => ({ subtitleStyle: { ...s.subtitleStyle, ...style } })),
   setSceneImages: (images) => set({ sceneImages: images }),
-  setImageInterval: (interval) => set({ imageInterval: Math.max(3, Math.min(30, interval)) }),
+  setImageInterval: (interval) => set({ imageInterval: Math.max(IMAGE_INTERVAL_MIN, Math.min(IMAGE_INTERVAL_MAX, interval)) }),
   setImageStyle: (style) => set({ imageStyle: style }),
   setImageEngine: (engine) => set({ imageEngine: engine }),
   setAudioCostEstimate: (v) => set({ audioCostEstimate: v }),

@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import ConfirmModal from '@/components/shared/ConfirmModal'
 import { exportPrompts } from '@/lib/exportPrompts'
-import { CREDIT_COSTS, IMAGE_STYLES } from '@/lib/types'
+import { CREDIT_COSTS, IMAGE_STYLES, IMAGE_INTERVAL_MIN, IMAGE_INTERVAL_MAX } from '@/lib/types'
 import type { SceneImage, ImageStyleKey } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
@@ -255,7 +255,7 @@ export default function Step5Images() {
   function handleCustomIntervalChange(raw: string) {
     setCustomInterval(raw)
     const n = parseInt(raw, 10)
-    if (!isNaN(n) && n >= 3 && n <= 300) { setImageInterval(n); setGptCountOverride(null) }
+    if (!isNaN(n) && n >= IMAGE_INTERVAL_MIN && n <= IMAGE_INTERVAL_MAX) { setImageInterval(n); setGptCountOverride(null) }
   }
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {

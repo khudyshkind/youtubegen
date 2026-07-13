@@ -61,6 +61,9 @@ export const CREDIT_COSTS = {
   rising_stars:      3000,
 } as const
 
+export const IMAGE_INTERVAL_MIN = 3    // seconds — lower bound for scene duration
+export const IMAGE_INTERVAL_MAX = 300  // seconds — upper bound for scene duration
+
 export type AudioEngine = 'secretvoicer' | 'elevenlabs' | 'openai' | 'google' | 'apihost' | 'voicer'
 export type ApihostVoiceType = 'basic' | 'standard' | 'pro' | 'studio'
 
