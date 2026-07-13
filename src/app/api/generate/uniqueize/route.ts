@@ -5,6 +5,7 @@ import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
+import { countWords, calcMaxTokens, isGuardOk } from '@/lib/enhance-guard'
 
 export const maxDuration = 120
 
@@ -198,19 +199,45 @@ The ideal output sounds like a knowledgeable friend explaining something fascina
 Return only the rewritten text. No preamble, no "Here is the rewritten version:", no explanations.`
 }
 
-async function callClaude(client: Anthropic, systemPrompt: string, text: string, tag: string): Promise<string> {
-  const message = await client.messages.create({
+async function callClaude(
+  client: Anthropic,
+  systemPrompt: string,
+  text: string,
+  maxTokens: number,
+  tag: string,
+): Promise<{ text: string; stopReason: string | null }> {
+  const msg = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
+    max_tokens: maxTokens,
     system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: `ТЕКСТ:\n${text}` }],
   })
-  console.log(`[uniqueize/${tag}] cache input:`, message.usage.input_tokens, 'cache_read:', message.usage.cache_read_input_tokens ?? 0, 'cache_write:', message.usage.cache_creation_input_tokens ?? 0)
-  return message.content
-    .filter((b) => b.type === 'text')
-    .map((b) => (b as { type: 'text'; text: string }).text)
-    .join('')
-    .trim()
+  console.log(`[uniqueize/${tag}] stop_reason=${msg.stop_reason} input_tokens=${msg.usage.input_tokens} cache_read=${msg.usage.cache_read_input_tokens ?? 0} cache_write=${msg.usage.cache_creation_input_tokens ?? 0}`)
+  return {
+    text: msg.content
+      .filter((b) => b.type === 'text')
+      .map((b) => (b as { type: 'text'; text: string }).text)
+      .join('')
+      .trim(),
+    stopReason: msg.stop_reason,
+  }
+}
+
+async function runWithGuard(
+  client: Anthropic,
+  systemPrompt: string,
+  input: string,
+  maxTokens: number,
+  inputWords: number,
+  tag: string,
+): Promise<string | null> {
+  const a1 = await callClaude(client, systemPrompt, input, maxTokens, tag)
+  if (a1.text && isGuardOk(a1.stopReason, a1.text, inputWords)) return a1.text
+  console.warn(`[uniqueize/${tag}] guard fail attempt=1 outputWords=${countWords(a1.text)} inputWords=${inputWords} stop_reason=${a1.stopReason} — retrying`)
+  const a2 = await callClaude(client, systemPrompt, input, maxTokens, tag)
+  if (a2.text && isGuardOk(a2.stopReason, a2.text, inputWords)) return a2.text
+  console.error(`[uniqueize/${tag}] guard fail attempt=2 outputWords=${countWords(a2.text)} — aborting, credits not charged`)
+  return null
 }
 
 export async function POST(request: NextRequest) {
@@ -243,22 +270,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
     }
 
-    console.log(`[uniqueize] mode=${mode} output_lang=${outputLang}`)
+    const inputWords = countWords(script)
+    const maxTokens  = calcMaxTokens(script)
+    console.log(`[uniqueize] mode=${mode} output_lang=${outputLang} maxTokens=${maxTokens} inputWords=${inputWords}`)
     const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
     let result: string
 
     if (mode === 'unique') {
-      result = await callClaude(client, buildUniqueizePrompt(outputLang), script, 'unique')
+      const r = await runWithGuard(client, buildUniqueizePrompt(outputLang), script, maxTokens, inputWords, 'unique')
+      if (r === null) {
+        return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
+      }
+      result = r
     } else if (mode === 'human') {
-      result = await callClaude(client, buildHumanizePrompt(outputLang), script, 'human')
+      const r = await runWithGuard(client, buildHumanizePrompt(outputLang), script, maxTokens, inputWords, 'human')
+      if (r === null) {
+        return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
+      }
+      result = r
     } else {
-      // both: uniqueize first, then humanize
-      const uniqueized = await callClaude(client, buildUniqueizePrompt(outputLang), script, 'unique')
-      result = await callClaude(client, buildHumanizePrompt(outputLang), uniqueized, 'human')
-    }
-
-    if (!result) {
-      return NextResponse.json({ ok: false, error: 'Пустой ответ от Claude' }, { status: 502 })
+      // both: uniqueize first, then humanise the result; neither step may truncate
+      const r1 = await runWithGuard(client, buildUniqueizePrompt(outputLang), script, maxTokens, inputWords, 'unique')
+      if (r1 === null) {
+        return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
+      }
+      const maxTokens2 = calcMaxTokens(r1)
+      const r2 = await runWithGuard(client, buildHumanizePrompt(outputLang), r1, maxTokens2, countWords(r1), 'human')
+      if (r2 === null) {
+        return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
+      }
+      result = r2
     }
 
     await spendCredits(user.id, creditCost, `uniqueize_${mode}`, project_id)

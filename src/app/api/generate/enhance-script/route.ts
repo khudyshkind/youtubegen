@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
+import { countWords, calcMaxTokens, isGuardOk } from '@/lib/enhance-guard'
 
 export const maxDuration = 120
 
@@ -111,23 +112,6 @@ function buildPrompt(
   ].join('\n')
 }
 
-// Words → tokens: conservative ratio covers Russian (≈2.3 tok/word), EN (≈1.3 tok/word), mixed content.
-const ENHANCE_TOKENS_PER_WORD  = 2.9
-// Safety headroom: hooks, CTA, and pauses can lengthen the output by up to 40 %.
-const ENHANCE_SAFETY_FACTOR    = 1.4
-const ENHANCE_MIN_TOKENS       = 4_096
-const ENHANCE_MAX_TOKENS       = 32_768
-// Guard: output must retain ≥ this fraction of input word count; otherwise the response was truncated.
-const ENHANCE_MIN_OUTPUT_RATIO = 0.85
-
-function countWords(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length
-}
-
-function calcEnhanceMaxTokens(inputText: string): number {
-  const raw = Math.ceil(countWords(inputText) * ENHANCE_TOKENS_PER_WORD * ENHANCE_SAFETY_FACTOR)
-  return Math.min(ENHANCE_MAX_TOKENS, Math.max(ENHANCE_MIN_TOKENS, raw))
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -202,7 +186,7 @@ export async function POST(request: NextRequest) {
     }
 
     const systemPrompt = buildPrompt(hook, hookType, cta, pauses, outputLang)
-    const maxTokens  = calcEnhanceMaxTokens(script)
+    const maxTokens  = calcMaxTokens(script)
     const inputWords = countWords(script)
     console.log(`[enhance-script] hook=${hook}(${hookType}) cta=${cta} pauses=${pauses} lang=${outputLang} maxTokens=${maxTokens} inputWords=${inputWords}`)
 
@@ -218,9 +202,6 @@ export async function POST(request: NextRequest) {
     const extractText = (msg: ClaudeMsg) =>
       msg.content.filter((b) => b.type === 'text').map((b) => (b as { type: 'text'; text: string }).text).join('').trim()
 
-    const guardOk = (msg: ClaudeMsg, text: string) =>
-      msg.stop_reason !== 'max_tokens' && countWords(text) >= inputWords * ENHANCE_MIN_OUTPUT_RATIO
-
     const msg1 = await callClaude()
     console.log(`[enhance-script] attempt=1 stop_reason=${msg1.stop_reason} input_tokens=${msg1.usage.input_tokens} cache_read=${msg1.usage.cache_read_input_tokens ?? 0}`)
     let result = extractText(msg1)
@@ -229,13 +210,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Пустой ответ от Claude' }, { status: 502 })
     }
 
-    if (!guardOk(msg1, result)) {
+    if (!isGuardOk(msg1.stop_reason, result, inputWords)) {
       console.warn(`[enhance-script] guard fail attempt=1 outputWords=${countWords(result)} inputWords=${inputWords} stop_reason=${msg1.stop_reason} — retrying`)
       const msg2 = await callClaude()
       console.log(`[enhance-script] attempt=2 stop_reason=${msg2.stop_reason}`)
       const result2 = extractText(msg2)
 
-      if (!result2 || !guardOk(msg2, result2)) {
+      if (!result2 || !isGuardOk(msg2.stop_reason, result2, inputWords)) {
         console.error(`[enhance-script] guard fail attempt=2 outputWords=${countWords(result2)} — aborting, credits not charged`)
         return NextResponse.json({
           ok: false,
