@@ -246,10 +246,22 @@ export default function Step5Images() {
   const displayCount = gptCountOverride ?? imageCount
   const creditCost = displayCount * costPerImage
 
+  const customN = parseInt(customInterval, 10)
+  const isIntervalValid = customInterval !== '' && !isNaN(customN) && customN >= IMAGE_INTERVAL_MIN && customN <= IMAGE_INTERVAL_MAX
+  const isIntervalInvalid = customInterval !== '' && !isIntervalValid
+
   function handleIntervalPreset(sec: number) {
     setImageInterval(sec)
     setCustomInterval('')
     setGptCountOverride(null)
+  }
+
+  function handleCustomIntervalBlur() {
+    if (customInterval === '') return
+    const n = parseInt(customInterval, 10)
+    if (isNaN(n) || n < IMAGE_INTERVAL_MIN || n > IMAGE_INTERVAL_MAX) {
+      setCustomInterval(String(imageInterval))
+    }
   }
 
   function handleCustomIntervalChange(raw: string) {
@@ -556,16 +568,23 @@ export default function Step5Images() {
               max={300}
               value={customInterval}
               onChange={(e) => handleCustomIntervalChange(e.target.value)}
+              onBlur={handleCustomIntervalBlur}
               placeholder="..."
               className="w-16 px-2 py-1.5 rounded-xl text-sm text-center focus:outline-none"
-              style={customInterval && !isNaN(parseInt(customInterval, 10))
-                ? { border: '2px solid #7C3AED' }
-                : { border: '2px solid rgba(255,255,255,0.08)' }
+              style={
+                isIntervalInvalid
+                  ? { border: '2px solid #EF4444' }
+                  : isIntervalValid
+                  ? { border: '2px solid #7C3AED' }
+                  : { border: '2px solid rgba(255,255,255,0.08)' }
               }
             />
             <span className="text-xs text-slate-500">{t('step5.sec')}</span>
           </div>
         </div>
+        {isIntervalInvalid && (
+          <p className="text-xs text-red-400">{t('step5.interval_hint')}</p>
+        )}
 
         {/* Calculation preview */}
         <div

@@ -708,6 +708,7 @@ export const translations = {
     'step5.ref_analyzing':   'Анализирую стиль...',
     'step5.ref_detected':    'Стиль:',
     'step5.audio_changed':   'Озвучка изменилась после генерации иллюстраций — тайминги могли устареть. Перегенерируйте иллюстрации для точного соответствия.',
+    'step5.interval_hint':   'Интервал: 3–300 сек',
 
     // ── Step 7 (Video, formerly Step 6) ──────────────────────────────────────────
     'step6.title':          'Шаг 7: Сборка видео',
@@ -1784,6 +1785,7 @@ export const translations = {
     'step5.ref_analyzing':   'Analyzing style...',
     'step5.ref_detected':    'Style:',
     'step5.audio_changed':   'Audio changed after illustrations were generated — timings may be stale. Regenerate illustrations for accurate sync.',
+    'step5.interval_hint':   'Interval: 3–300 sec',
 
     // ── Step 7 (Video, formerly Step 6) ──────────────────────────────────────────
     'step6.title':          'Step 7: Video assembly',

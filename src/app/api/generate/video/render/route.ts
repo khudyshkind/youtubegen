@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
-import { CREDIT_COSTS } from '@/lib/types'
+import { CREDIT_COSTS, IMAGE_INTERVAL_MIN, IMAGE_INTERVAL_MAX } from '@/lib/types'
 import { env } from '@/lib/env'
 import type { SceneImage, SubtitleBlock, SubtitleStyle } from '@/lib/types'
 
@@ -37,12 +37,13 @@ export async function POST(request: NextRequest) {
     const body: RenderRequest = await request.json()
     const { project_id, audio_url, image_interval, images, subtitle_blocks, subtitle_style,
             transition, transition_duration, effects } = body
+    const safeInterval = Math.max(IMAGE_INTERVAL_MIN, Math.min(IMAGE_INTERVAL_MAX, image_interval ?? 10))
 
     // Derive exact duration from request body — known upfront unlike subtitles
     const durationSec =
       subtitle_blocks && subtitle_blocks.length > 0
         ? subtitle_blocks[subtitle_blocks.length - 1].end
-        : (images?.length ?? 0) * image_interval
+        : (images?.length ?? 0) * safeInterval
     const videoCost = Math.max(CREDIT_COSTS.video, Math.ceil(durationSec / 60) * CREDIT_COSTS.video)
 
     const check = await requireCreditsAmount(user.id, videoCost, supabase)
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         audio_url,
-        image_interval,
+        image_interval: safeInterval,
         images,
         subtitle_blocks,
         subtitle_style,
