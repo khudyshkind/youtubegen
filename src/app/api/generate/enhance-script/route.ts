@@ -6,7 +6,7 @@ import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import {
   countWords, calcMaxTokens, isGuardOk,
-  splitIntoChunks, buildChunkUserMessage, chunkHeadWords, chunkTailWords, CHUNK_THRESHOLD,
+  runChunked, ChunkCallFn, CHUNK_THRESHOLD,
 } from '@/lib/enhance-guard'
 
 export const maxDuration = 120
@@ -235,47 +235,20 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // ── Chunked parallel path for long texts (>CHUNK_THRESHOLD words) ─────
-      const chunks = splitIntoChunks(script)
-      const inputWordsList = chunks.map(c => countWords(c.text))
-      console.log(`[enhance-script] chunked mode: ${chunks.length} chunks, words=[${inputWordsList.join(',')}]`)
-
-      const callChunk = async (idx: number) => {
-        const chunk = chunks[idx]
-        const prevSeam = idx > 0 ? chunkTailWords(chunks[idx - 1].text, 40) : null
-        const nextSeam = idx < chunks.length - 1 ? chunkHeadWords(chunks[idx + 1].text, 40) : null
-        const userContent = buildChunkUserMessage(chunk.text, idx, chunks.length, prevSeam, nextSeam)
-        const msg = await callClaude(userContent, calcMaxTokens(chunk.text))
-        console.log(`[enhance-script] chunk=${idx + 1}/${chunks.length} stop_reason=${msg.stop_reason} input_tokens=${msg.usage.input_tokens} cache_read=${msg.usage.cache_read_input_tokens ?? 0}`)
-        return { msg, text: extractText(msg) }
+      const callFn: ChunkCallFn = async (userContent, chunkMaxTokens, chunkTag) => {
+        const msg = await callClaude(userContent, chunkMaxTokens)
+        console.log(`[${chunkTag}] stop_reason=${msg.stop_reason} input_tokens=${msg.usage.input_tokens} cache_read=${msg.usage.cache_read_input_tokens ?? 0}`)
+        return { text: extractText(msg), stopReason: msg.stop_reason }
       }
-
-      // Wave 1: all chunks in parallel
-      const wave1: Array<{ msg: ClaudeMsg; text: string } | null> =
-        await Promise.all(chunks.map((_, i) => callChunk(i).catch(() => null)))
-
-      const failedIdx = wave1
-        .map((r, i) => (!r || !isGuardOk(r.msg.stop_reason, r.text, inputWordsList[i])) ? i : -1)
-        .filter(i => i >= 0)
-
-      if (failedIdx.length > 0) {
-        console.warn(`[enhance-script] guard fail wave1 chunks=[${failedIdx.map(i => i + 1)}] — retrying`)
-        const wave2 = await Promise.all(failedIdx.map(i => callChunk(i).catch(() => null)))
-        for (let j = 0; j < failedIdx.length; j++) {
-          const i = failedIdx[j]
-          const r = wave2[j]
-          if (!r || !isGuardOk(r.msg.stop_reason, r.text, inputWordsList[i])) {
-            console.error(`[enhance-script] guard fail wave2 chunk=${i + 1} — aborting, credits not charged`)
-            return NextResponse.json({
-              ok: false,
-              error: 'Не удалось оживить текст целиком — попробуйте ещё раз или разбейте текст на части',
-              code: 'ENHANCE_TRUNCATED',
-            }, { status: 422 })
-          }
-          wave1[i] = r
-        }
+      const r = await runChunked(script, callFn, 'enhance-script')
+      if (r === null) {
+        return NextResponse.json({
+          ok: false,
+          error: 'Не удалось оживить текст целиком — попробуйте ещё раз или разбейте текст на части',
+          code: 'ENHANCE_TRUNCATED',
+        }, { status: 422 })
       }
-
-      result = chunks.map((c, i) => wave1[i]!.text.trimEnd() + c.sep).join('')
+      result = r
     }
 
     await spendCredits(user.id, CREDIT_COSTS.enhance, 'enhance_script', project_id)

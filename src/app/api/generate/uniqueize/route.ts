@@ -7,7 +7,7 @@ import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import {
   countWords, calcMaxTokens, isGuardOk,
-  splitIntoChunks, buildChunkUserMessage, chunkHeadWords, chunkTailWords, CHUNK_THRESHOLD,
+  runChunked, ChunkCallFn, CHUNK_THRESHOLD,
 } from '@/lib/enhance-guard'
 
 export const maxDuration = 120
@@ -244,48 +244,6 @@ async function runWithGuard(
   return null
 }
 
-async function runChunked(
-  client: Anthropic,
-  systemPrompt: string,
-  text: string,
-  tag: string,
-): Promise<string | null> {
-  const chunks = splitIntoChunks(text)
-  const inputWordsList = chunks.map(c => countWords(c.text))
-  console.log(`[uniqueize/${tag}] chunked mode: ${chunks.length} chunks, words=[${inputWordsList.join(',')}]`)
-
-  const callChunk = (idx: number) => {
-    const chunk = chunks[idx]
-    const prevSeam = idx > 0 ? chunkTailWords(chunks[idx - 1].text, 40) : null
-    const nextSeam = idx < chunks.length - 1 ? chunkHeadWords(chunks[idx + 1].text, 40) : null
-    const userContent = buildChunkUserMessage(chunk.text, idx, chunks.length, prevSeam, nextSeam)
-    return callClaude(client, systemPrompt, userContent, calcMaxTokens(chunk.text), `${tag}-c${idx + 1}`)
-  }
-
-  // Wave 1: all chunks in parallel
-  const wave1 = await Promise.all(chunks.map((_, i) => callChunk(i).catch(() => null)))
-
-  const failedIdx = wave1
-    .map((r, i) => (!r || !isGuardOk(r.stopReason, r.text, inputWordsList[i])) ? i : -1)
-    .filter(i => i >= 0)
-
-  if (failedIdx.length > 0) {
-    console.warn(`[uniqueize/${tag}] guard fail wave1 chunks=[${failedIdx.map(i => i + 1)}] — retrying`)
-    const wave2 = await Promise.all(failedIdx.map(i => callChunk(i).catch(() => null)))
-    for (let j = 0; j < failedIdx.length; j++) {
-      const i = failedIdx[j]
-      const r = wave2[j]
-      if (!r || !isGuardOk(r.stopReason, r.text, inputWordsList[i])) {
-        console.error(`[uniqueize/${tag}] guard fail wave2 chunk=${i + 1} — aborting, credits not charged`)
-        return null
-      }
-      wave1[i] = r
-    }
-  }
-
-  return chunks.map((c, i) => wave1[i]!.text.trimEnd() + c.sep).join('')
-}
-
 async function processText(
   client: Anthropic,
   systemPrompt: string,
@@ -297,7 +255,9 @@ async function processText(
   if (inputWords <= CHUNK_THRESHOLD) {
     return runWithGuard(client, systemPrompt, text, maxTokens, inputWords, tag)
   }
-  return runChunked(client, systemPrompt, text, tag)
+  const callFn: ChunkCallFn = (userContent, chunkMaxTokens, chunkTag) =>
+    callClaude(client, systemPrompt, userContent, chunkMaxTokens, chunkTag)
+  return runChunked(text, callFn, tag)
 }
 
 export async function POST(request: NextRequest) {

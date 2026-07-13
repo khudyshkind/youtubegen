@@ -133,3 +133,60 @@ export function buildChunkUserMessage(
   }
   return parts.join('\n')
 }
+
+/**
+ * Callback type supplied by each route to make a single Claude call.
+ * Receives the pre-built user message, per-chunk max_tokens, and a tag for logging.
+ */
+export type ChunkCallFn = (
+  userContent: string,
+  maxTokens: number,
+  tag: string,
+) => Promise<{ text: string; stopReason: string | null }>
+
+/**
+ * Process long text in parallel chunks.
+ * callFn is route-specific (captures client + system prompt); everything else is shared.
+ * Returns assembled text or null if any chunk fails guard twice (credits must NOT be charged).
+ */
+export async function runChunked(
+  text: string,
+  callFn: ChunkCallFn,
+  logPrefix: string,
+): Promise<string | null> {
+  const chunks = splitIntoChunks(text)
+  const inputWordsList = chunks.map(c => countWords(c.text))
+  console.log(`[${logPrefix}] chunked: ${chunks.length} chunks, words=[${inputWordsList.join(',')}]`)
+
+  const callChunk = (idx: number) => {
+    const chunk = chunks[idx]
+    const prevSeam = idx > 0 ? chunkTailWords(chunks[idx - 1].text, 40) : null
+    const nextSeam = idx < chunks.length - 1 ? chunkHeadWords(chunks[idx + 1].text, 40) : null
+    const userContent = buildChunkUserMessage(chunk.text, idx, chunks.length, prevSeam, nextSeam)
+    return callFn(userContent, calcMaxTokens(chunk.text), `${logPrefix}-c${idx + 1}`)
+  }
+
+  // Wave 1: all chunks in parallel
+  const wave1: Array<{ text: string; stopReason: string | null } | null> =
+    await Promise.all(chunks.map((_, i) => callChunk(i).catch(() => null)))
+
+  const failedIdx = wave1
+    .map((r, i) => (!r || !isGuardOk(r.stopReason, r.text, inputWordsList[i])) ? i : -1)
+    .filter(i => i >= 0)
+
+  if (failedIdx.length > 0) {
+    console.warn(`[${logPrefix}] guard fail wave1 chunks=[${failedIdx.map(i => i + 1)}] — retrying`)
+    const wave2 = await Promise.all(failedIdx.map(i => callChunk(i).catch(() => null)))
+    for (let j = 0; j < failedIdx.length; j++) {
+      const i = failedIdx[j]
+      const r = wave2[j]
+      if (!r || !isGuardOk(r.stopReason, r.text, inputWordsList[i])) {
+        console.error(`[${logPrefix}] guard fail wave2 chunk=${i + 1} — aborting, credits not charged`)
+        return null
+      }
+      wave1[i] = r
+    }
+  }
+
+  return chunks.map((c, i) => wave1[i]!.text.trimEnd() + c.sep).join('')
+}
