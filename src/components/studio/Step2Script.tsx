@@ -185,8 +185,12 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
         })
         const json2 = await res2.json()
         if (!json2.ok) {
-          if (json2.code === 'NO_CREDITS') { setError(t('step2.err_credits')); return }
-          throw new Error(json2.error)
+          // Step 1 succeeded and was charged — preserve its result rather than discarding it.
+          setOriginalScript(script)
+          setScript(uniqueized)
+          void refreshCredits()
+          setError(t('step2.err_both_partial'))
+          return
         }
         finalText = json2.data.script
       } else {
