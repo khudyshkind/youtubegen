@@ -8,6 +8,7 @@ import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
 import type { ScriptParams, PlanSection, ScriptModel } from '@/lib/types'
 import { CREDIT_COSTS } from '@/lib/types'
+import { isGuardOk, countWords } from '@/lib/enhance-guard'
 
 export const maxDuration = 300
 
@@ -134,15 +135,17 @@ function modelCost(model: string): number {
   return CREDIT_COSTS.script_sonnet
 }
 
-// Dynamic token budget: 130 words/min × 2 tokens/word (Cyrillic-safe) × 1.3 buffer.
-// Cap is model-specific: GPT-4o max output = 16 384; Claude Sonnet 4.6 = 64 K, Opus 4.5 = 32 K → capped at 32 768.
+// Dynamic token budget: 130 words/min × 2.9 tok/word (RU ≈2.9; EN cheaper — intentional headroom) × 1.3 buffer.
+// Cap: GPT-4o 16 384; Claude 32 768 (covers RU up to ~87 min before cap bites).
 function calcMaxTokens(durationMinutes: number, model: ScriptModel): number {
-  const raw = Math.max(2048, Math.ceil(durationMinutes * 130 * 2 * 1.3))
+  const raw = Math.max(2048, Math.ceil(durationMinutes * 130 * 2.9 * 1.3))
   const cap  = model === 'gpt-4o' ? 16_384 : 32_768
   return Math.min(cap, raw)
 }
 
-async function generateWithClaude(prompt: string, opus: boolean, maxTokens: number): Promise<string> {
+type GenResult = { text: string; stopReason: string | null }
+
+async function generateWithClaude(prompt: string, opus: boolean, maxTokens: number): Promise<GenResult> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
   const modelId = opus ? 'claude-opus-4-5' : 'claude-sonnet-4-6'
   const message = await anthropic.messages.create({
@@ -150,18 +153,21 @@ async function generateWithClaude(prompt: string, opus: boolean, maxTokens: numb
     max_tokens: maxTokens,
     messages: [{ role: 'user', content: prompt }],
   })
+  console.log(`[generate/script] stop_reason=${message.stop_reason} usage=${JSON.stringify(message.usage)}`)
   const block = message.content[0]
-  return block.type === 'text' ? block.text : ''
+  return { text: block.type === 'text' ? block.text : '', stopReason: message.stop_reason }
 }
 
-async function generateWithGpt4o(prompt: string, maxTokens: number): Promise<string> {
+async function generateWithGpt4o(prompt: string, maxTokens: number): Promise<GenResult> {
   const openai = new OpenAI({ apiKey: env('OPENAI_API_KEY') })
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [{ role: 'user', content: prompt }],
     max_tokens: maxTokens,
   })
-  return completion.choices[0].message.content ?? ''
+  const choice = completion.choices[0]
+  console.log(`[generate/script] stop_reason=${choice.finish_reason} usage=${JSON.stringify(completion.usage)}`)
+  return { text: choice.message.content ?? '', stopReason: choice.finish_reason ?? null }
 }
 
 export async function POST(request: NextRequest) {
@@ -199,18 +205,41 @@ export async function POST(request: NextRequest) {
 
     const prompt = buildPrompt(scriptParams, plan_sections)
     const maxTokens = calcMaxTokens(scriptParams.duration_minutes, model)
-    console.log(`[generate/script] duration=${scriptParams.duration_minutes}min max_tokens=${maxTokens}`)
+    const targetWords = scriptParams.duration_minutes * 130
+    console.log(`[generate/script] duration=${scriptParams.duration_minutes}min max_tokens=${maxTokens} target_words=${targetWords}`)
 
-    let script: string
-    if (model === 'gpt-4o') {
-      script = await generateWithGpt4o(prompt, maxTokens)
-    } else {
-      script = await generateWithClaude(prompt, model === 'claude-opus', maxTokens)
-    }
+    const callGenerate = (): Promise<GenResult> =>
+      model === 'gpt-4o'
+        ? generateWithGpt4o(prompt, maxTokens)
+        : generateWithClaude(prompt, model === 'claude-opus', maxTokens)
 
-    if (!script) {
+    // GPT-4o uses 'length' for the same concept as Claude's 'max_tokens'
+    const normaliseStop = (r: string | null) => r === 'length' ? 'max_tokens' : r
+
+    let gen = await callGenerate()
+    let normStop = normaliseStop(gen.stopReason)
+
+    if (!gen.text) {
       return NextResponse.json({ ok: false, error: 'Модель вернула пустой ответ' }, { status: 502 })
     }
+
+    // Guard: stop_reason=max_tokens OR output < 85 % of target words → retry once, then 422 (no credits)
+    if (!isGuardOk(normStop, gen.text, targetWords)) {
+      console.warn(`[generate/script] guard fail attempt=1 words=${countWords(gen.text)} target=${targetWords} stop_reason=${normStop} — retrying`)
+      const retry = await callGenerate()
+      const retryStop = normaliseStop(retry.stopReason)
+      if (!retry.text || !isGuardOk(retryStop, retry.text, targetWords)) {
+        console.error(`[generate/script] guard fail attempt=2 words=${retry.text ? countWords(retry.text) : 0} stop_reason=${retryStop} — aborting, credits not charged`)
+        return NextResponse.json({
+          ok: false,
+          error: 'Сценарий получился короче ожидаемого — попробуйте ещё раз или уменьшите длительность.',
+          code: 'SCRIPT_TRUNCATED',
+        }, { status: 422 })
+      }
+      gen = retry
+    }
+
+    const script = gen.text
 
     await spendCredits(user.id, cost, operation, project_id)
 

@@ -114,5 +114,23 @@ export function parseClaudeJsonArray<T>(text: string, label: string): T[] {
     catch { /* fall through */ }
   }
 
+  // Pass 3: truncation recovery — find last complete top-level element (}) and close the array.
+  // Handles max_tokens cutoff where the closing ] was never emitted.
+  console.warn(`[parse-claude-json] ${label} array attempting truncation recovery`)
+  let tDepth = 0, tInStr = false, tEsc = false, lastCompleteEnd = -1
+  for (let i = start + 1; i < cleaned.length; i++) {
+    const c = cleaned[i]
+    if (tEsc) { tEsc = false; continue }
+    if (c === '\\') { tEsc = true; continue }
+    if (c === '"') { tInStr = !tInStr; continue }
+    if (tInStr) continue
+    if (c === '{') tDepth++
+    if (c === '}') { tDepth--; if (tDepth === 0) lastCompleteEnd = i }
+  }
+  if (lastCompleteEnd > start) {
+    try { return tryParse<T[]>(cleaned.slice(start, lastCompleteEnd + 1) + ']', label) }
+    catch { /* fall through to throw */ }
+  }
+
   throw new Error(`${label}: unbalanced brackets`)
 }

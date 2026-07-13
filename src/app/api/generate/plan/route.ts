@@ -77,24 +77,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Тема не указана' }, { status: 400 })
     }
 
+    const sectionCount = calcSectionCount(duration_minutes ?? 5)
+    const planMaxTokens = sectionCount * 150 + 500
     const prompt = buildPrompt(topic, duration_minutes ?? 5, language ?? 'ru', narrative_style ?? 'storytelling', tone ?? 'neutral')
 
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1500,
-      messages: [{ role: 'user', content: prompt }],
-    })
 
-    const block = message.content[0]
-    const raw = block.type === 'text' ? block.text : ''
+    async function callPlan() {
+      const message = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: planMaxTokens,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      console.log(`[generate/plan] stop_reason=${message.stop_reason} usage=${JSON.stringify(message.usage)} sections_n=${sectionCount}`)
+      const block = message.content[0]
+      return { raw: block.type === 'text' ? block.text : '', stopReason: message.stop_reason }
+    }
+
+    let { raw, stopReason } = await callPlan()
+
+    if (stopReason === 'max_tokens') {
+      console.warn(`[generate/plan] max_tokens attempt=1 sections_n=${sectionCount} — retrying`)
+      const retry = await callPlan()
+      raw = retry.raw
+      stopReason = retry.stopReason
+      if (stopReason === 'max_tokens') {
+        console.error(`[generate/plan] max_tokens attempt=2 — aborting, credits not charged`)
+        return NextResponse.json({
+          ok: false,
+          error: 'Не удалось сгенерировать план целиком — попробуйте ещё раз.',
+          code: 'PLAN_TRUNCATED',
+        }, { status: 422 })
+      }
+    }
+
     if (!raw) return NextResponse.json({ ok: false, error: 'Модель вернула пустой ответ' }, { status: 502 })
 
     let sections: PlanSection[]
     try {
       sections = parseSections(raw)
     } catch {
-      console.error('[generate/plan] parse error, raw:', raw.slice(0, 300))
+      console.error('[generate/plan] parse error, raw tail:', raw.slice(-300))
       return NextResponse.json({ ok: false, error: 'Ошибка разбора плана от модели' }, { status: 502 })
     }
 
