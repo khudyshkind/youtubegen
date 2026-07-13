@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase-server'
+import { sendTelegramAlert } from '@/lib/telegram'
 
 const DEDUP_TTL_MS = 10 * 60 * 1000 // 10 minutes
 
@@ -15,26 +16,6 @@ function verifySignature(rawBody: string, signature: string, secret: string): bo
   } catch {
     return false
   }
-}
-
-async function sendTelegramAlert(text: string): Promise<void> {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN
-  const ownerId = process.env.TELEGRAM_OWNER_ID
-  if (!botToken || !ownerId) {
-    console.warn('[sentry-webhook] TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID not set')
-    return
-  }
-  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: ownerId,
-      text,
-      parse_mode: 'HTML',
-      disable_web_page_preview: false,
-    }),
-  })
-  if (!res.ok) console.error('[sentry-webhook] Telegram sendMessage failed:', await res.text().catch(() => ''))
 }
 
 function escapeHtml(s: string): string {
