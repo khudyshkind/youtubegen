@@ -5,7 +5,10 @@ import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
-import { countWords, calcMaxTokens, isGuardOk } from '@/lib/enhance-guard'
+import {
+  countWords, calcMaxTokens, isGuardOk,
+  splitIntoChunks, buildChunkUserMessage, chunkHeadWords, chunkTailWords, CHUNK_THRESHOLD,
+} from '@/lib/enhance-guard'
 
 export const maxDuration = 120
 
@@ -202,7 +205,7 @@ Return only the rewritten text. No preamble, no "Here is the rewritten version:"
 async function callClaude(
   client: Anthropic,
   systemPrompt: string,
-  text: string,
+  userContent: string,
   maxTokens: number,
   tag: string,
 ): Promise<{ text: string; stopReason: string | null }> {
@@ -210,7 +213,7 @@ async function callClaude(
     model: 'claude-sonnet-4-6',
     max_tokens: maxTokens,
     system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: `ТЕКСТ:\n${text}` }],
+    messages: [{ role: 'user', content: userContent }],
   })
   console.log(`[uniqueize/${tag}] stop_reason=${msg.stop_reason} input_tokens=${msg.usage.input_tokens} cache_read=${msg.usage.cache_read_input_tokens ?? 0} cache_write=${msg.usage.cache_creation_input_tokens ?? 0}`)
   return {
@@ -231,13 +234,70 @@ async function runWithGuard(
   inputWords: number,
   tag: string,
 ): Promise<string | null> {
-  const a1 = await callClaude(client, systemPrompt, input, maxTokens, tag)
+  const userContent = `ТЕКСТ:\n${input}`
+  const a1 = await callClaude(client, systemPrompt, userContent, maxTokens, tag)
   if (a1.text && isGuardOk(a1.stopReason, a1.text, inputWords)) return a1.text
   console.warn(`[uniqueize/${tag}] guard fail attempt=1 outputWords=${countWords(a1.text)} inputWords=${inputWords} stop_reason=${a1.stopReason} — retrying`)
-  const a2 = await callClaude(client, systemPrompt, input, maxTokens, tag)
+  const a2 = await callClaude(client, systemPrompt, userContent, maxTokens, tag)
   if (a2.text && isGuardOk(a2.stopReason, a2.text, inputWords)) return a2.text
   console.error(`[uniqueize/${tag}] guard fail attempt=2 outputWords=${countWords(a2.text)} — aborting, credits not charged`)
   return null
+}
+
+async function runChunked(
+  client: Anthropic,
+  systemPrompt: string,
+  text: string,
+  tag: string,
+): Promise<string | null> {
+  const chunks = splitIntoChunks(text)
+  const inputWordsList = chunks.map(c => countWords(c.text))
+  console.log(`[uniqueize/${tag}] chunked mode: ${chunks.length} chunks, words=[${inputWordsList.join(',')}]`)
+
+  const callChunk = (idx: number) => {
+    const chunk = chunks[idx]
+    const prevSeam = idx > 0 ? chunkTailWords(chunks[idx - 1].text, 40) : null
+    const nextSeam = idx < chunks.length - 1 ? chunkHeadWords(chunks[idx + 1].text, 40) : null
+    const userContent = buildChunkUserMessage(chunk.text, idx, chunks.length, prevSeam, nextSeam)
+    return callClaude(client, systemPrompt, userContent, calcMaxTokens(chunk.text), `${tag}-c${idx + 1}`)
+  }
+
+  // Wave 1: all chunks in parallel
+  const wave1 = await Promise.all(chunks.map((_, i) => callChunk(i).catch(() => null)))
+
+  const failedIdx = wave1
+    .map((r, i) => (!r || !isGuardOk(r.stopReason, r.text, inputWordsList[i])) ? i : -1)
+    .filter(i => i >= 0)
+
+  if (failedIdx.length > 0) {
+    console.warn(`[uniqueize/${tag}] guard fail wave1 chunks=[${failedIdx.map(i => i + 1)}] — retrying`)
+    const wave2 = await Promise.all(failedIdx.map(i => callChunk(i).catch(() => null)))
+    for (let j = 0; j < failedIdx.length; j++) {
+      const i = failedIdx[j]
+      const r = wave2[j]
+      if (!r || !isGuardOk(r.stopReason, r.text, inputWordsList[i])) {
+        console.error(`[uniqueize/${tag}] guard fail wave2 chunk=${i + 1} — aborting, credits not charged`)
+        return null
+      }
+      wave1[i] = r
+    }
+  }
+
+  return chunks.map((c, i) => wave1[i]!.text.trimEnd() + c.sep).join('')
+}
+
+async function processText(
+  client: Anthropic,
+  systemPrompt: string,
+  text: string,
+  inputWords: number,
+  maxTokens: number,
+  tag: string,
+): Promise<string | null> {
+  if (inputWords <= CHUNK_THRESHOLD) {
+    return runWithGuard(client, systemPrompt, text, maxTokens, inputWords, tag)
+  }
+  return runChunked(client, systemPrompt, text, tag)
 }
 
 export async function POST(request: NextRequest) {
@@ -277,25 +337,25 @@ export async function POST(request: NextRequest) {
     let result: string
 
     if (mode === 'unique') {
-      const r = await runWithGuard(client, buildUniqueizePrompt(outputLang), script, maxTokens, inputWords, 'unique')
+      const r = await processText(client, buildUniqueizePrompt(outputLang), script, inputWords, maxTokens, 'unique')
       if (r === null) {
         return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
       }
       result = r
     } else if (mode === 'human') {
-      const r = await runWithGuard(client, buildHumanizePrompt(outputLang), script, maxTokens, inputWords, 'human')
+      const r = await processText(client, buildHumanizePrompt(outputLang), script, inputWords, maxTokens, 'human')
       if (r === null) {
         return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
       }
       result = r
     } else {
       // both: uniqueize first, then humanise the result; neither step may truncate
-      const r1 = await runWithGuard(client, buildUniqueizePrompt(outputLang), script, maxTokens, inputWords, 'unique')
+      const r1 = await processText(client, buildUniqueizePrompt(outputLang), script, inputWords, maxTokens, 'unique')
       if (r1 === null) {
         return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
       }
-      const maxTokens2 = calcMaxTokens(r1)
-      const r2 = await runWithGuard(client, buildHumanizePrompt(outputLang), r1, maxTokens2, countWords(r1), 'human')
+      const r1Words = countWords(r1)
+      const r2 = await processText(client, buildHumanizePrompt(outputLang), r1, r1Words, calcMaxTokens(r1), 'human')
       if (r2 === null) {
         return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
       }

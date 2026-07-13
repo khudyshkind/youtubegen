@@ -4,7 +4,10 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
-import { countWords, calcMaxTokens, isGuardOk } from '@/lib/enhance-guard'
+import {
+  countWords, calcMaxTokens, isGuardOk,
+  splitIntoChunks, buildChunkUserMessage, chunkHeadWords, chunkTailWords, CHUNK_THRESHOLD,
+} from '@/lib/enhance-guard'
 
 export const maxDuration = 120
 
@@ -190,11 +193,11 @@ export async function POST(request: NextRequest) {
     const inputWords = countWords(script)
     console.log(`[enhance-script] hook=${hook}(${hookType}) cta=${cta} pauses=${pauses} lang=${outputLang} maxTokens=${maxTokens} inputWords=${inputWords}`)
 
-    const callClaude = () => client.messages.create({
+    const callClaude = (userContent: string, chunkMaxTokens: number) => client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: maxTokens,
+      max_tokens: chunkMaxTokens,
       system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: `ТЕКСТ:\n${script}` }],
+      messages: [{ role: 'user', content: userContent }],
     })
 
     type ClaudeMsg = Awaited<ReturnType<typeof callClaude>>
@@ -202,29 +205,77 @@ export async function POST(request: NextRequest) {
     const extractText = (msg: ClaudeMsg) =>
       msg.content.filter((b) => b.type === 'text').map((b) => (b as { type: 'text'; text: string }).text).join('').trim()
 
-    const msg1 = await callClaude()
-    console.log(`[enhance-script] attempt=1 stop_reason=${msg1.stop_reason} input_tokens=${msg1.usage.input_tokens} cache_read=${msg1.usage.cache_read_input_tokens ?? 0}`)
-    let result = extractText(msg1)
+    let result = ''
 
-    if (!result) {
-      return NextResponse.json({ ok: false, error: 'Пустой ответ от Claude' }, { status: 502 })
-    }
+    if (inputWords <= CHUNK_THRESHOLD) {
+      // ── Single-call path (unchanged for short texts) ──────────────────────
+      const msg1 = await callClaude(`ТЕКСТ:\n${script}`, maxTokens)
+      console.log(`[enhance-script] attempt=1 stop_reason=${msg1.stop_reason} input_tokens=${msg1.usage.input_tokens} cache_read=${msg1.usage.cache_read_input_tokens ?? 0}`)
+      result = extractText(msg1)
 
-    if (!isGuardOk(msg1.stop_reason, result, inputWords)) {
-      console.warn(`[enhance-script] guard fail attempt=1 outputWords=${countWords(result)} inputWords=${inputWords} stop_reason=${msg1.stop_reason} — retrying`)
-      const msg2 = await callClaude()
-      console.log(`[enhance-script] attempt=2 stop_reason=${msg2.stop_reason}`)
-      const result2 = extractText(msg2)
-
-      if (!result2 || !isGuardOk(msg2.stop_reason, result2, inputWords)) {
-        console.error(`[enhance-script] guard fail attempt=2 outputWords=${countWords(result2)} — aborting, credits not charged`)
-        return NextResponse.json({
-          ok: false,
-          error: 'Не удалось оживить текст целиком — попробуйте ещё раз или разбейте текст на части',
-          code: 'ENHANCE_TRUNCATED',
-        }, { status: 422 })
+      if (!result) {
+        return NextResponse.json({ ok: false, error: 'Пустой ответ от Claude' }, { status: 502 })
       }
-      result = result2
+
+      if (!isGuardOk(msg1.stop_reason, result, inputWords)) {
+        console.warn(`[enhance-script] guard fail attempt=1 outputWords=${countWords(result)} inputWords=${inputWords} stop_reason=${msg1.stop_reason} — retrying`)
+        const msg2 = await callClaude(`ТЕКСТ:\n${script}`, maxTokens)
+        console.log(`[enhance-script] attempt=2 stop_reason=${msg2.stop_reason}`)
+        const result2 = extractText(msg2)
+
+        if (!result2 || !isGuardOk(msg2.stop_reason, result2, inputWords)) {
+          console.error(`[enhance-script] guard fail attempt=2 outputWords=${countWords(result2)} — aborting, credits not charged`)
+          return NextResponse.json({
+            ok: false,
+            error: 'Не удалось оживить текст целиком — попробуйте ещё раз или разбейте текст на части',
+            code: 'ENHANCE_TRUNCATED',
+          }, { status: 422 })
+        }
+        result = result2
+      }
+    } else {
+      // ── Chunked parallel path for long texts (>CHUNK_THRESHOLD words) ─────
+      const chunks = splitIntoChunks(script)
+      const inputWordsList = chunks.map(c => countWords(c.text))
+      console.log(`[enhance-script] chunked mode: ${chunks.length} chunks, words=[${inputWordsList.join(',')}]`)
+
+      const callChunk = async (idx: number) => {
+        const chunk = chunks[idx]
+        const prevSeam = idx > 0 ? chunkTailWords(chunks[idx - 1].text, 40) : null
+        const nextSeam = idx < chunks.length - 1 ? chunkHeadWords(chunks[idx + 1].text, 40) : null
+        const userContent = buildChunkUserMessage(chunk.text, idx, chunks.length, prevSeam, nextSeam)
+        const msg = await callClaude(userContent, calcMaxTokens(chunk.text))
+        console.log(`[enhance-script] chunk=${idx + 1}/${chunks.length} stop_reason=${msg.stop_reason} input_tokens=${msg.usage.input_tokens} cache_read=${msg.usage.cache_read_input_tokens ?? 0}`)
+        return { msg, text: extractText(msg) }
+      }
+
+      // Wave 1: all chunks in parallel
+      const wave1: Array<{ msg: ClaudeMsg; text: string } | null> =
+        await Promise.all(chunks.map((_, i) => callChunk(i).catch(() => null)))
+
+      const failedIdx = wave1
+        .map((r, i) => (!r || !isGuardOk(r.msg.stop_reason, r.text, inputWordsList[i])) ? i : -1)
+        .filter(i => i >= 0)
+
+      if (failedIdx.length > 0) {
+        console.warn(`[enhance-script] guard fail wave1 chunks=[${failedIdx.map(i => i + 1)}] — retrying`)
+        const wave2 = await Promise.all(failedIdx.map(i => callChunk(i).catch(() => null)))
+        for (let j = 0; j < failedIdx.length; j++) {
+          const i = failedIdx[j]
+          const r = wave2[j]
+          if (!r || !isGuardOk(r.msg.stop_reason, r.text, inputWordsList[i])) {
+            console.error(`[enhance-script] guard fail wave2 chunk=${i + 1} — aborting, credits not charged`)
+            return NextResponse.json({
+              ok: false,
+              error: 'Не удалось оживить текст целиком — попробуйте ещё раз или разбейте текст на части',
+              code: 'ENHANCE_TRUNCATED',
+            }, { status: 422 })
+          }
+          wave1[i] = r
+        }
+      }
+
+      result = chunks.map((c, i) => wave1[i]!.text.trimEnd() + c.sep).join('')
     }
 
     await spendCredits(user.id, CREDIT_COSTS.enhance, 'enhance_script', project_id)

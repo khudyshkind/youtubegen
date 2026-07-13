@@ -96,6 +96,16 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
   const model = scriptParams.model
   const creditCost = MODEL_COSTS[model] ?? 10
 
+  // Throws with a user-visible timeout message if the server returned non-JSON
+  // (e.g. Vercel plain-text "An error occurred" on gateway timeout).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const safeJson = async (res: Response): Promise<any> => {
+    if (!res.headers.get('content-type')?.includes('application/json')) {
+      throw new Error(t('step2.err_timeout'))
+    }
+    return res.json()
+  }
+
   async function handleGenerate() {
     if (!confirmRegenIfCompleted(t('regen_confirm.message'))) return
     setError('')
@@ -106,7 +116,7 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...scriptParams, project_id: projectId, plan_sections: planSections.length > 0 ? planSections : undefined }),
       })
-      const json = await res.json()
+      const json = await safeJson(res)
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') {
           setError(t('step2.err_credits'))
@@ -169,7 +179,7 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ script, project_id: projectId, mode: 'unique', output_lang: outputLang }),
         })
-        const json1 = await res1.json()
+        const json1 = await safeJson(res1)
         if (!json1.ok) {
           if (json1.code === 'NO_CREDITS') { setError(t('step2.err_credits')); return }
           throw new Error(json1.error)
@@ -183,9 +193,10 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ script: uniqueized, project_id: projectId, mode: 'human', output_lang: outputLang }),
         })
-        const json2 = await res2.json()
+        // Step 1 was charged — on any step-2 failure preserve step-1 result
+        const ct2 = res2.headers.get('content-type') ?? ''
+        const json2 = ct2.includes('application/json') ? await res2.json() : { ok: false }
         if (!json2.ok) {
-          // Step 1 succeeded and was charged — preserve its result rather than discarding it.
           setOriginalScript(script)
           setScript(uniqueized)
           void refreshCredits()
@@ -199,7 +210,7 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ script, project_id: projectId, mode, output_lang: outputLang }),
         })
-        const json = await res.json()
+        const json = await safeJson(res)
         if (!json.ok) {
           if (json.code === 'NO_CREDITS') { setError(t('step2.err_credits')); return }
           throw new Error(json.error)
@@ -247,7 +258,7 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
           project_id: projectId,
         }),
       })
-      const json = await res.json()
+      const json = await safeJson(res)
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') { setError(t('step2.err_credits')); return }
         throw new Error(json.error)
