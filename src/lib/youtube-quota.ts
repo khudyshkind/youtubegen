@@ -24,6 +24,21 @@ export function checkYouTubeQuota(status: number, body: string): void {
   }
 }
 
+/** Used when the user's own BYOK key quota is exhausted (free plan, no fallback). */
+export function byokQuotaResponse(lang = 'ru'): NextResponse {
+  const isRu = lang !== 'en'
+  return NextResponse.json(
+    {
+      ok: false,
+      error: isRu
+        ? 'Ваша YouTube API-квота исчерпана. Обновится в полночь по тихоокеанскому времени (PT). Проверьте лимиты в Google Cloud Console или попробуйте позже.'
+        : 'Your YouTube API quota is exhausted. Resets at midnight Pacific Time (PT). Check your limits in Google Cloud Console or try again later.',
+      code: 'byok_quota_exceeded',
+    },
+    { status: 503 }
+  )
+}
+
 export function quotaExceededResponse(lang = 'ru'): NextResponse {
   const isRu = lang !== 'en'
   return NextResponse.json(

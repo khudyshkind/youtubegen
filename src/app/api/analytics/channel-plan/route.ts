@@ -1,22 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
-import { requireCredits, spendCredits } from '@/lib/credits'
+import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { resolveUserLang, langNote } from '@/lib/user-lang'
 import { verifyHandle, resolveChannelId, fetchRecentVideoTitles } from '@/lib/youtube-channel'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
-import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
-import { checkAnalyticsGate } from '@/lib/analytics-gate'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse } from '@/lib/youtube-quota'
+import { resolveAnalyticsContext } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
-  const key = env('YOUTUBE_API_KEY')
-  const qs = new URLSearchParams({ ...params, key }).toString()
+async function ytFetch(path: string, params: Record<string, string>, apiKey: string): Promise<unknown> {
+  const qs = new URLSearchParams({ ...params, key: apiKey }).toString()
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
   if (!res.ok) {
@@ -228,6 +227,8 @@ interface StyleResult {
 
 export async function POST(req: NextRequest) {
   let lang = 'ru'
+  let userHasKey = false
+  let plan = 'free'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -255,10 +256,19 @@ export async function POST(req: NextRequest) {
 
     if (!topic.trim()) return NextResponse.json({ ok: false, error: 'Введите тему канала' }, { status: 400 })
 
-    const gateRes = await checkAnalyticsGate(user.id, supabase, lang)
+    const svc = createServiceClient()
+    const ctx = await resolveAnalyticsContext(user.id, svc, lang)
+    const { gateRes, apiKey, fallbackKey, cost } = ctx
+    userHasKey = ctx.userHasKey
+    plan = ctx.plan
     if (gateRes) return gateRes
+    async function ytf(path: string, params: Record<string, string>): Promise<unknown> {
+      try { return await ytFetch(path, params, apiKey) }
+      catch (e) { if (e instanceof YouTubeQuotaError && fallbackKey) return ytFetch(path, params, fallbackKey); throw e }
+    }
 
-    const check = await requireCredits(user.id, 'channel_plan', supabase)
+    const actualCost = cost(CREDIT_COSTS.channel_plan)
+    const check = await requireCreditsAmount(user.id, actualCost, supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
     const uiLangFull = resolveUserLang(req, ui_lang)
@@ -291,15 +301,14 @@ export async function POST(req: NextRequest) {
     let userChannelEmpty = false
     if (user_channel_url.trim()) {
       try {
-        const ytKey = env('YOUTUBE_API_KEY')
         console.log('[channel-plan] resolving user channel:', user_channel_url.trim())
-        const channelId = await resolveChannelId(user_channel_url.trim(), ytKey)
+        const channelId = await resolveChannelId(user_channel_url.trim(), apiKey)
         if (!channelId) {
           userChannelError = ui_lang === 'en'
             ? 'Channel not found. Check the URL or @handle.'
             : 'Канал не найден. Проверьте URL или @хэндл.'
         } else {
-          userChannelVideos = await fetchRecentVideoTitles(channelId, ytKey, 15)
+          userChannelVideos = await fetchRecentVideoTitles(channelId, apiKey, 15)
           userChannelEmpty = userChannelVideos.length === 0
           console.log(`[channel-plan] user channel resolved, ${userChannelVideos.length} videos`)
         }
@@ -331,13 +340,13 @@ export async function POST(req: NextRequest) {
       if (content_lang && content_lang !== 'auto') searchParams.relevanceLanguage = content_lang
       if (country && country !== 'worldwide') searchParams.regionCode = country
 
-      const search = await ytFetch('/search', searchParams) as {
+      const search = await ytf('/search', searchParams) as {
         items?: Array<{ id: { videoId?: string }; snippet: { title: string; channelTitle: string } }>
       }
       const ids = (search.items ?? []).map(v => v.id?.videoId).filter(Boolean).join(',')
 
       if (ids) {
-        const stats = await ytFetch('/videos', { part: 'statistics,snippet', id: ids }) as {
+        const stats = await ytf('/videos', { part: 'statistics,snippet', id: ids }) as {
           items?: Array<{
             snippet: { title: string; channelTitle: string; tags?: string[] }
             statistics: { viewCount?: string }
@@ -403,12 +412,11 @@ export async function POST(req: NextRequest) {
     // Verify reference channel handles (Task 4) — 1 quota unit each, no search fallback
     const refChannels = ideas.reference_channels ?? []
     if (refChannels.length > 0) {
-      const ytKey = env('YOUTUBE_API_KEY')
       const verified = await Promise.all(
         refChannels.map(async ch => {
           const rawHandle = ch.handle?.trim() ?? ''
           if (!rawHandle || rawHandle === '@') return { ...ch, verified_url: null }
-          const channelId = await verifyHandle(rawHandle, ytKey)
+          const channelId = await verifyHandle(rawHandle, apiKey)
           const handle = rawHandle.startsWith('@') ? rawHandle : `@${rawHandle}`
           return { ...ch, verified_url: channelId ? `https://www.youtube.com/${handle}` : null }
         })
@@ -437,11 +445,10 @@ export async function POST(req: NextRequest) {
       seo_keywords: style.seo_keywords ?? { channel_description: [], video_tags: [], hashtags: [] },
     }
 
-    await spendCredits(user.id, CREDIT_COSTS.channel_plan, 'channel_plan')
+    await spendCredits(user.id, actualCost, 'channel_plan')
 
     console.log('[channel-plan] saving report...')
     try {
-      const svc = createServiceClient()
       const { data: old } = await svc.from('analytics_reports').select('id')
         .eq('user_id', user.id).eq('report_type', 'channel_plan')
         .order('created_at', { ascending: true })
@@ -465,7 +472,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: result })
   } catch (error) {
-    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
+    if (error instanceof YouTubeQuotaError) return (userHasKey && plan === 'free') ? byokQuotaResponse(lang) : quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/channel-plan] error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка: ${msg}` }, { status: 500 })

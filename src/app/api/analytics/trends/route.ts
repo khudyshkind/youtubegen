@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
-import { requireCredits, spendCredits } from '@/lib/credits'
+import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
-import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
-import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
-import { checkAnalyticsGate } from '@/lib/analytics-gate'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse } from '@/lib/youtube-quota'
+import { resolveAnalyticsContext } from '@/lib/analytics-gate'
+import { env } from '@/lib/env'
 
 export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
 
-async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
-  const key = env('YOUTUBE_API_KEY')
-  const qs = new URLSearchParams({ ...params, key }).toString()
+async function ytFetch(path: string, params: Record<string, string>, apiKey: string): Promise<unknown> {
+  const qs = new URLSearchParams({ ...params, key: apiKey }).toString()
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
   console.log(`[trends] yt ${path} status=${res.status} body=${text.slice(0, 300)}`)
@@ -107,6 +106,8 @@ function cacheKey(topic: string, period: string, country: string, contentLang: s
 
 export async function POST(req: NextRequest) {
   let lang = 'ru'
+  let userHasKey = false
+  let plan = 'free'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -122,10 +123,19 @@ export async function POST(req: NextRequest) {
     console.log(`[trends] start topic="${topic}" period=${period} lang=${lang} country=${country} contentLang=${contentLang}`)
     if (!topic) return NextResponse.json({ ok: false, error: 'Введите тему' }, { status: 400 })
 
-    const gateRes = await checkAnalyticsGate(user.id, supabase, lang)
+    const svc = createServiceClient()
+    const ctx = await resolveAnalyticsContext(user.id, svc, lang)
+    const { gateRes, apiKey, fallbackKey, cost } = ctx
+    userHasKey = ctx.userHasKey
+    plan = ctx.plan
     if (gateRes) return gateRes
 
-    const svc = createServiceClient()
+    // ytFetch with per-key fallback for paid BYOK users
+    async function ytf(path: string, params: Record<string, string>): Promise<unknown> {
+      try { return await ytFetch(path, params, apiKey) }
+      catch (e) { if (e instanceof YouTubeQuotaError && fallbackKey) return ytFetch(path, params, fallbackKey); throw e }
+    }
+
     const key = cacheKey(topic, period, country, contentLang)
 
     // Cache check — non-fatal
@@ -179,7 +189,8 @@ export async function POST(req: NextRequest) {
       console.warn('[trends] cache check skipped:', e instanceof Error ? e.message : String(e))
     }
 
-    const check = await requireCredits(user.id, 'trends', supabase)
+    const actualCost = cost(CREDIT_COSTS.trends)
+    const check = await requireCreditsAmount(user.id, actualCost, supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
     const days = period === 'month' ? 30 : 7
@@ -195,7 +206,7 @@ export async function POST(req: NextRequest) {
       maxResults: '20', relevanceLanguage: contentLang,
     }
     if (regionCode) videoSearchParams.regionCode = regionCode
-    const videoSearch = await ytFetch('/search', videoSearchParams) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; channelTitle: string; publishedAt: string } }> }
+    const videoSearch = await ytf('/search', videoSearchParams) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; channelTitle: string; publishedAt: string } }> }
 
     const videoItems = videoSearch.items ?? []
     console.log(`[trends] videos count: ${videoItems.length}`)
@@ -204,7 +215,7 @@ export async function POST(req: NextRequest) {
     let videosData: Array<{ title: string; views: number; channel: string; url: string; publishedAt: string }> = []
     if (videoIds) {
       console.log('[trends] step 2: video stats')
-      const vStats = await ytFetch('/videos', {
+      const vStats = await ytf('/videos', {
         part: 'statistics,snippet', id: videoIds,
       }) as { items?: Array<{ id: string; snippet: { title: string; channelTitle: string; publishedAt: string }; statistics: { viewCount?: string } }> }
 
@@ -283,7 +294,7 @@ export async function POST(req: NextRequest) {
 
     console.log('[trends] analysis merged ok, trends count:', analysis.trends.length)
 
-    await spendCredits(user.id, CREDIT_COSTS.trends, 'trends')
+    await spendCredits(user.id, actualCost, 'trends')
 
     try {
       await svc.from('analytics_cache').upsert({
@@ -329,7 +340,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: analysis, cached: false })
   } catch (error) {
-    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
+    if (error instanceof YouTubeQuotaError) return (userHasKey && plan === 'free') ? byokQuotaResponse(lang) : quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/trends] fatal error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка анализа трендов: ${msg}` }, { status: 500 })

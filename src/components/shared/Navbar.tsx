@@ -97,7 +97,7 @@ export default function Navbar() {
         if (currentUser) {
           const { data } = await supabase
             .from('profiles')
-            .select('*')
+            .select('id, email, credits, plan, full_name, avatar_url, preferred_lang, credits_cap')
             .eq('id', currentUser.id)
             .single()
           const p = data as Profile | null

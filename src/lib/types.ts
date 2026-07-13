@@ -197,6 +197,7 @@ export interface Profile {
   avatar_url: string | null
   plan: Plan
   credits: number
+  encrypted_yt_key: string | null
   paddle_customer_id: string | null
   paddle_subscription_id: string | null
   onboarding_completed: boolean

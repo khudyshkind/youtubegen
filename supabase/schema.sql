@@ -39,6 +39,7 @@ alter table public.profiles add column if not exists referral_code text unique;
 alter table public.profiles add column if not exists referred_by text;
 alter table public.profiles add column if not exists referral_count integer not null default 0;
 alter table public.profiles add column if not exists referral_credits_earned integer not null default 0;
+alter table public.profiles add column if not exists encrypted_yt_key text;
 
 create table if not exists public.projects (
   id              uuid        default uuid_generate_v4() primary key,

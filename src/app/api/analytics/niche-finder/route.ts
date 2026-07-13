@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
-import { requireCredits, spendCredits } from '@/lib/credits'
+import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { resolveUserLang, langNote } from '@/lib/user-lang'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
-import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
-import { checkAnalyticsGate } from '@/lib/analytics-gate'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse } from '@/lib/youtube-quota'
+import { resolveAnalyticsContext } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
-async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
-  const key = env('YOUTUBE_API_KEY')
-  const qs = new URLSearchParams({ ...params, key }).toString()
+async function ytFetch(path: string, params: Record<string, string>, apiKey: string): Promise<unknown> {
+  const qs = new URLSearchParams({ ...params, key: apiKey }).toString()
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
   if (!res.ok) {
@@ -137,6 +136,8 @@ interface RecommendationResult {
 
 export async function POST(req: NextRequest) {
   let lang = 'ru'
+  let userHasKey = false
+  let plan = 'free'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -156,10 +157,20 @@ export async function POST(req: NextRequest) {
     if (!interests.trim()) return NextResponse.json({ ok: false, error: 'Укажите ваши интересы' }, { status: 400 })
     if (!skills.trim()) return NextResponse.json({ ok: false, error: 'Укажите ваши навыки' }, { status: 400 })
 
-    const gateRes = await checkAnalyticsGate(user.id, supabase, lang)
+    const svcCtx = createServiceClient()
+    const ctx = await resolveAnalyticsContext(user.id, svcCtx, lang)
+    const { gateRes, apiKey, fallbackKey, cost } = ctx
+    userHasKey = ctx.userHasKey
+    plan = ctx.plan
     if (gateRes) return gateRes
 
-    const check = await requireCredits(user.id, 'niche_finder', supabase)
+    async function ytf(path: string, params: Record<string, string>): Promise<unknown> {
+      try { return await ytFetch(path, params, apiKey) }
+      catch (e) { if (e instanceof YouTubeQuotaError && fallbackKey) return ytFetch(path, params, fallbackKey); throw e }
+    }
+
+    const actualCost = cost(CREDIT_COSTS.niche_finder)
+    const check = await requireCreditsAmount(user.id, actualCost, supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
     const uiLangFull = resolveUserLang(req, ui_lang)
@@ -191,14 +202,14 @@ export async function POST(req: NextRequest) {
 
     const ytResults = await Promise.all(niches.slice(0, 3).map(async (niche) => {
       try {
-        const search = await ytFetch('/search', { ...ytBase, q: niche.name }) as {
+        const search = await ytf('/search', { ...ytBase, q: niche.name }) as {
           items?: Array<{ id: { videoId: string } }>
           pageInfo?: { totalResults: number }
         }
         const ids = (search.items ?? []).map(v => v.id?.videoId).filter(Boolean).join(',')
         let avgViews = 0
         if (ids) {
-          const stats = await ytFetch('/videos', { part: 'statistics', id: ids }) as {
+          const stats = await ytf('/videos', { part: 'statistics', id: ids }) as {
             items?: Array<{ statistics: { viewCount?: string } }>
           }
           const views = (stats.items ?? []).map(v => parseInt(v.statistics.viewCount ?? '0')).filter(v => v > 0)
@@ -259,7 +270,7 @@ export async function POST(req: NextRequest) {
       user_profile: { interests, skills, time_per_week, goal },
     }
 
-    await spendCredits(user.id, CREDIT_COSTS.niche_finder, 'niche_finder')
+    await spendCredits(user.id, actualCost, 'niche_finder')
 
     // Save to reports (non-fatal)
     console.log('[niche-finder] saving report...')
@@ -288,7 +299,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: result })
   } catch (error) {
-    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
+    if (error instanceof YouTubeQuotaError) return (userHasKey && plan === 'free') ? byokQuotaResponse(lang) : quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/niche-finder] error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка: ${msg}` }, { status: 500 })

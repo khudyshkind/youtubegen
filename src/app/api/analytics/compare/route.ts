@@ -1,21 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
-import { requireCredits, spendCredits } from '@/lib/credits'
+import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
-import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
-import { checkAnalyticsGate } from '@/lib/analytics-gate'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse } from '@/lib/youtube-quota'
+import { resolveAnalyticsContext } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3'
 
 
-async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
+type YtFn = (path: string, params: Record<string, string>) => Promise<unknown>
+
+async function ytFetch(path: string, params: Record<string, string>, apiKey: string): Promise<unknown> {
   const url = new URL(`${YT_BASE}${path}`)
-  url.searchParams.set('key', env('YOUTUBE_API_KEY'))
+  url.searchParams.set('key', apiKey)
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
   const res = await fetch(url.toString())
   if (!res.ok) {
@@ -59,31 +61,31 @@ interface TopVideo {
 }
 
 // Resolve channel identifier (URL, @handle, or plain name) → channelId + name
-async function resolveChannel(input: string): Promise<{ id: string; name: string } | null> {
+async function resolveChannel(input: string, ytf: YtFn): Promise<{ id: string; name: string } | null> {
   const trimmed = input.trim()
 
   const handleMatch = trimmed.match(/(?:youtube\.com\/@|^@)([^/?&\s]+)/)
   if (handleMatch) {
-    const data = await ytFetch('/channels', { part: 'id,snippet', forHandle: handleMatch[1] }) as YtChannelListResponse
+    const data = await ytf('/channels', { part: 'id,snippet', forHandle: handleMatch[1] }) as YtChannelListResponse
     const ch = data.items?.[0]
     return ch ? { id: ch.id, name: ch.snippet.title } : null
   }
 
   const channelIdMatch = trimmed.match(/youtube\.com\/channel\/([a-zA-Z0-9_-]+)/)
   if (channelIdMatch) {
-    const data = await ytFetch('/channels', { part: 'id,snippet', id: channelIdMatch[1] }) as YtChannelListResponse
+    const data = await ytf('/channels', { part: 'id,snippet', id: channelIdMatch[1] }) as YtChannelListResponse
     const ch = data.items?.[0]
     return ch ? { id: ch.id, name: ch.snippet.title } : null
   }
 
   const userMatch = trimmed.match(/youtube\.com\/user\/([^/?&\s]+)/)
   if (userMatch) {
-    const data = await ytFetch('/channels', { part: 'id,snippet', forUsername: userMatch[1] }) as YtChannelListResponse
+    const data = await ytf('/channels', { part: 'id,snippet', forUsername: userMatch[1] }) as YtChannelListResponse
     const ch = data.items?.[0]
     return ch ? { id: ch.id, name: ch.snippet.title } : null
   }
 
-  const search = await ytFetch('/search', { part: 'snippet', type: 'channel', q: trimmed, maxResults: '1' }) as YtSearchResponse
+  const search = await ytf('/search', { part: 'snippet', type: 'channel', q: trimmed, maxResults: '1' }) as YtSearchResponse
   const item = search.items?.[0]
   if (!item?.id.channelId) return null
   return { id: item.id.channelId, name: item.snippet.channelTitle }
@@ -106,16 +108,16 @@ interface ChannelStats {
 
 const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 
-async function getChannelStats(channelId: string, channelName: string): Promise<ChannelStats> {
+async function getChannelStats(channelId: string, channelName: string, ytf: YtFn): Promise<ChannelStats> {
   // Get channel base stats
-  const chData = await ytFetch('/channels', { part: 'statistics', id: channelId }) as YtChannelListResponse
+  const chData = await ytf('/channels', { part: 'statistics', id: channelId }) as YtChannelListResponse
   const stats = chData.items?.[0]?.statistics ?? {}
   const subscribers = Number(stats.subscriberCount ?? 0)
   const total_views = Number(stats.viewCount ?? 0)
   const video_count = Number(stats.videoCount ?? 0)
 
   // Get last 20 videos (by date — for schedule analysis)
-  const search = await ytFetch('/search', {
+  const search = await ytf('/search', {
     part: 'id', channelId, type: 'video', order: 'date', maxResults: '20',
   }) as YtSearchResponse
   const videoIds = (search.items ?? []).map(i => i.id.videoId).filter((id): id is string => !!id)
@@ -124,7 +126,7 @@ async function getChannelStats(channelId: string, channelName: string): Promise<
     return { id: channelId, name: channelName, subscribers, total_views, video_count, avg_views: 0, upload_frequency: 0, engagement_rate: 0, recent_video_count: 0, top_videos: [], common_tags: [], publish_days: [] }
   }
 
-  const vidsData = await ytFetch('/videos', {
+  const vidsData = await ytf('/videos', {
     part: 'snippet,statistics', id: videoIds.join(','),
   }) as YtVideoListResponse
   const videos = vidsData.items ?? []
@@ -211,6 +213,8 @@ ${topTitles}
 }
 
 export async function POST(req: NextRequest) {
+  let userHasKey = false
+  let plan = 'free'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -222,14 +226,23 @@ export async function POST(req: NextRequest) {
     if (inputs.length < 2) return NextResponse.json({ ok: false, error: 'Введите минимум 2 канала' }, { status: 400 })
     if (inputs.length > 3) return NextResponse.json({ ok: false, error: 'Максимум 3 канала' }, { status: 400 })
 
-    const gateRes = await checkAnalyticsGate(user.id, supabase)
+    const svc = createServiceClient()
+    const ctx = await resolveAnalyticsContext(user.id, svc)
+    const { gateRes, apiKey, fallbackKey, cost } = ctx
+    userHasKey = ctx.userHasKey
+    plan = ctx.plan
     if (gateRes) return gateRes
+    async function ytf(path: string, params: Record<string, string>): Promise<unknown> {
+      try { return await ytFetch(path, params, apiKey) }
+      catch (e) { if (e instanceof YouTubeQuotaError && fallbackKey) return ytFetch(path, params, fallbackKey); throw e }
+    }
 
-    const check = await requireCredits(user.id, 'channels_compare', supabase)
+    const actualCost = cost(CREDIT_COSTS.channels_compare)
+    const check = await requireCreditsAmount(user.id, actualCost, supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
     console.log('[compare] resolving channels:', inputs)
-    const resolved = await Promise.all(inputs.map(resolveChannel))
+    const resolved = await Promise.all(inputs.map(input => resolveChannel(input, ytf)))
 
     const notFound = resolved.findIndex(r => r === null)
     if (notFound !== -1) {
@@ -239,7 +252,7 @@ export async function POST(req: NextRequest) {
     const channels = resolved as Array<{ id: string; name: string }>
 
     console.log('[compare] fetching stats for:', channels.map(c => c.name))
-    const statsArr = await Promise.all(channels.map(ch => getChannelStats(ch.id, ch.name)))
+    const statsArr = await Promise.all(channels.map(ch => getChannelStats(ch.id, ch.name, ytf)))
 
     // Build enriched text blocks for Claude
     const channelBlocks = statsArr.map(buildChannelBlock).join('\n\n')
@@ -329,9 +342,8 @@ ${channelBlocks}
       steal_ideas:        insights.steal_ideas     ?? [],
     }
 
-    await spendCredits(user.id, CREDIT_COSTS.channels_compare, 'channels_compare')
+    await spendCredits(user.id, actualCost, 'channels_compare')
 
-    const svc = createServiceClient()
     try {
       const { data: old } = await svc
         .from('analytics_reports').select('id')
@@ -352,7 +364,7 @@ ${channelBlocks}
 
     return NextResponse.json({ ok: true, data: result })
   } catch (error) {
-    if (error instanceof YouTubeQuotaError) return quotaExceededResponse()
+    if (error instanceof YouTubeQuotaError) return (userHasKey && plan === 'free') ? byokQuotaResponse() : quotaExceededResponse()
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/compare] error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка сравнения: ${msg}` }, { status: 500 })

@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { decryptKey } from './crypto'
+import { env } from './env'
+
+// ─── Response helpers ──────────────────────────────────────────────────────────
 
 export function byokRequiredResponse(lang = 'ru'): NextResponse {
   const isRu = lang !== 'en'
@@ -15,47 +19,105 @@ export function byokRequiredResponse(lang = 'ru'): NextResponse {
   )
 }
 
+// ─── Analytics context (single DB read) ───────────────────────────────────────
+
+export interface AnalyticsContext {
+  /** Non-null → caller must return this response immediately */
+  gateRes: NextResponse | null
+  /** Resolved YouTube API key: user's decrypted key or shared env key */
+  apiKey: string
+  /** Shared env key to use if user's key hits quota (paid plans only) */
+  fallbackKey: string | null
+  /** True when user supplied their own decrypted key (applies 30% discount) */
+  userHasKey: boolean
+  /** User plan string */
+  plan: string
+  /** Returns base cost with 30% BYOK discount when userHasKey=true */
+  cost: (base: number) => number
+}
+
 /**
- * Gate for analytics routes: free users need their own YouTube API key (BYOK).
- * Returns 403 byok_required if the user is on the free plan without a key.
- * Returns null if the request should proceed.
- *
- * Note: profiles.youtube_api_key is added in 3b. Until then, the combined
- * query fails gracefully and free users are blocked (expected behaviour for 3a).
+ * Single DB read combining gate check + key resolution + discount.
+ * Must be called with a service_role Supabase client so it can read
+ * the encrypted_yt_key column without RLS restriction.
+ * Falls open on any DB error (credits check catches real auth issues).
+ */
+export async function resolveAnalyticsContext(
+  userId: string,
+  svc: SupabaseClient,
+  lang = 'ru'
+): Promise<AnalyticsContext> {
+  const sharedKey = env('YOUTUBE_API_KEY')
+  const failOpen: AnalyticsContext = {
+    gateRes: null,
+    apiKey: sharedKey,
+    fallbackKey: null,
+    userHasKey: false,
+    plan: 'paid',
+    cost: (b) => b,
+  }
+
+  const { data, error } = await svc
+    .from('profiles')
+    .select('plan, encrypted_yt_key')
+    .eq('id', userId)
+    .single()
+
+  if (error || !data) return failOpen
+
+  const plan: string = (data as { plan: string }).plan
+  const encryptedKey: string | null =
+    (data as { encrypted_yt_key?: string | null }).encrypted_yt_key ?? null
+  const hasEncryptedKey = !!encryptedKey
+
+  // Gate: free plan requires own key
+  if (plan === 'free' && !hasEncryptedKey) {
+    return { ...failOpen, plan, gateRes: byokRequiredResponse(lang) }
+  }
+
+  let apiKey = sharedKey
+  let fallbackKey: string | null = null
+  let userHasKey = false
+
+  if (hasEncryptedKey && encryptedKey) {
+    try {
+      const decrypted = decryptKey(encryptedKey)
+      apiKey = decrypted
+      userHasKey = true
+      // Paid users can fall back to shared key when their quota runs out
+      if (plan !== 'free') fallbackKey = sharedKey
+    } catch {
+      // Decryption failure → use shared key, no discount, no block
+      apiKey = sharedKey
+    }
+  }
+
+  const cost = userHasKey
+    ? (b: number) => Math.round(b * 0.7)
+    : (b: number) => b
+
+  return { gateRes: null, apiKey, fallbackKey, userHasKey, plan, cost }
+}
+
+/**
+ * Lightweight gate-only check (no key decryption, no discount).
+ * Kept for backward compat; prefer resolveAnalyticsContext in routes.
  */
 export async function checkAnalyticsGate(
   userId: string,
   supabase: SupabaseClient,
   lang = 'ru'
 ): Promise<NextResponse | null> {
-  let plan: string | null = null
-  let hasKey = false
-
-  // Attempt combined query — succeeds after 3b adds the youtube_api_key column
-  const { data: full, error: fullErr } = await supabase
+  const { data, error } = await supabase
     .from('profiles')
-    .select('plan, youtube_api_key')
+    .select('plan, encrypted_yt_key')
     .eq('id', userId)
     .single()
 
-  if (!fullErr && full) {
-    plan = (full as { plan: string; youtube_api_key?: string | null }).plan
-    hasKey = !!(full as { youtube_api_key?: string | null }).youtube_api_key
-  } else {
-    // Column missing (pre-3b) or other transient error — fall back to plan-only read
-    const { data: planRow } = await supabase
-      .from('profiles')
-      .select('plan')
-      .eq('id', userId)
-      .single()
-    plan = planRow?.plan ?? null
-    hasKey = false  // column absent → treat as no key → free users blocked
-  }
-
-  if (!plan) return null           // fail open — credits check covers real auth issues
-  if (plan !== 'free') return null  // paid plans: always pass
-
-  // Free plan without own YouTube API key → blocked
+  if (error || !data) return null // fail open
+  const plan: string = (data as { plan: string }).plan
+  const hasKey = !!(data as { encrypted_yt_key?: string | null }).encrypted_yt_key
+  if (plan !== 'free') return null
   if (!hasKey) return byokRequiredResponse(lang)
   return null
 }

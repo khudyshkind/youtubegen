@@ -24,6 +24,11 @@ export default function SettingsClient({ profile }: Props) {
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState('')
 
+  const [ytKey, setYtKey] = useState('')
+  const [ytKeyValidating, setYtKeyValidating] = useState(false)
+  const [ytKeyError, setYtKeyError] = useState('')
+  const [ytKeyConnected, setYtKeyConnected] = useState(!!profile?.encrypted_yt_key)
+
   async function handleSaveProfile() {
     setSaving(true)
     setSaveError('')
@@ -56,6 +61,45 @@ export default function SettingsClient({ profile }: Props) {
         body: JSON.stringify({ preferred_lang: l }),
       })
     } catch {}
+  }
+
+  async function handleSaveYtKey() {
+    setYtKeyValidating(true)
+    setYtKeyError('')
+    try {
+      const res = await fetch('/api/settings/save-yt-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: ytKey.trim() }),
+      })
+      const json = await res.json() as { ok: boolean; code?: string; error?: string }
+      if (!json.ok) {
+        const code = json.code ?? ''
+        if (code === 'invalid_format') setYtKeyError(t('settings.yt_api_key_error_format'))
+        else if (code === 'invalid_key') setYtKeyError(t('settings.yt_api_key_error_invalid'))
+        else if (code === 'quota_exceeded') setYtKeyError(t('settings.yt_api_key_error_quota'))
+        else if (code === 'key_restricted') setYtKeyError(t('settings.yt_api_key_error_restricted'))
+        else setYtKeyError(json.error ?? 'Error')
+      } else {
+        setYtKeyConnected(true)
+        setYtKey('')
+      }
+    } catch {
+      setYtKeyError('Network error')
+    } finally {
+      setYtKeyValidating(false)
+    }
+  }
+
+  async function handleDeleteYtKey() {
+    setYtKeyValidating(true)
+    try {
+      await fetch('/api/settings/save-yt-key', { method: 'DELETE' })
+      setYtKeyConnected(false)
+    } catch {}
+    finally {
+      setYtKeyValidating(false)
+    }
   }
 
   async function handleSignOut() {
@@ -200,7 +244,74 @@ export default function SettingsClient({ profile }: Props) {
           </div>
         </div>
 
-        {/* 3. Appearance */}
+        {/* 3. YouTube API Key (BYOK) */}
+        <div className="rounded-2xl p-6 flex flex-col gap-4" style={cardStyle}>
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">{t('settings.yt_api_key')}</h2>
+            <p className="text-xs text-slate-500 mt-1">{t('settings.yt_api_key_desc')}</p>
+          </div>
+
+          <div
+            className="flex items-center gap-2 text-xs rounded-xl px-3 py-2.5"
+            style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)', color: '#a78bfa' }}
+          >
+            <span>🔑</span>
+            <span>{t('settings.yt_api_key_discount')}</span>
+          </div>
+
+          {ytKeyConnected ? (
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <span className="text-sm font-medium" style={{ color: '#34d399' }}>{t('settings.yt_api_key_saved')}</span>
+              <button
+                type="button"
+                onClick={() => void handleDeleteYtKey()}
+                disabled={ytKeyValidating}
+                className="px-4 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-50"
+                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}
+              >
+                {ytKeyValidating ? '…' : t('settings.yt_api_key_delete')}
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <input
+                type="password"
+                value={ytKey}
+                onChange={(e) => setYtKey(e.target.value)}
+                placeholder={t('settings.yt_api_key_placeholder')}
+                autoComplete="off"
+                spellCheck={false}
+                className={inputCls}
+                style={inputStyle}
+              />
+              {ytKeyError && (
+                <p className="text-xs text-red-400">{ytKeyError}</p>
+              )}
+              <button
+                type="button"
+                onClick={() => void handleSaveYtKey()}
+                disabled={ytKeyValidating || !ytKey.trim()}
+                className="self-start px-5 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+                style={{ background: 'rgba(124,58,237,0.25)', border: '1px solid rgba(124,58,237,0.4)', color: '#c4b5fd' }}
+              >
+                {ytKeyValidating ? t('settings.yt_api_key_validating') : t('settings.yt_api_key_validate')}
+              </button>
+            </div>
+          )}
+
+          <p className="text-xs text-slate-600">{t('settings.yt_api_key_warning')}</p>
+          <a
+            href="https://console.cloud.google.com/apis/library/youtube.googleapis.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs transition-colors self-start"
+            style={{ color: '#7c3aed' }}
+          >
+            {t('settings.yt_api_key_link')}
+          </a>
+        </div>
+
+        {/* 4. Appearance */}
         <div className="rounded-2xl p-6 flex flex-col gap-4" style={cardStyle}>
           <h2 className="text-base font-semibold text-slate-100">{t('settings.appearance')}</h2>
           <div className="flex items-center justify-between gap-4 flex-wrap">

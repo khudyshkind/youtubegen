@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
-import { requireCredits, spendCredits } from '@/lib/credits'
+import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
-import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
-import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
-import { checkAnalyticsGate } from '@/lib/analytics-gate'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse } from '@/lib/youtube-quota'
+import { resolveAnalyticsContext } from '@/lib/analytics-gate'
+import { env } from '@/lib/env'
 
 export const maxDuration = 120
 
@@ -85,9 +85,8 @@ IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`
 }
 
 
-async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
-  const key = env('YOUTUBE_API_KEY')
-  const qs = new URLSearchParams({ ...params, key }).toString()
+async function ytFetch(path: string, params: Record<string, string>, apiKey: string): Promise<unknown> {
+  const qs = new URLSearchParams({ ...params, key: apiKey }).toString()
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
   console.log(`[channel] yt ${path} status=${res.status} body=${text.slice(0, 300)}`)
@@ -102,6 +101,8 @@ import { detectChannelInput } from '@/lib/youtube-channel'
 
 export async function POST(req: NextRequest) {
   let lang = 'ru'
+  let userHasKey = false
+  let plan = 'free'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -112,12 +113,19 @@ export async function POST(req: NextRequest) {
     lang = body.ui_lang ?? body.lang ?? 'ru'
     if (!channelInput) return NextResponse.json({ ok: false, error: 'Введите канал' }, { status: 400 })
 
-    const gateRes = await checkAnalyticsGate(user.id, supabase, lang)
+    const svc = createServiceClient()
+    const ctx = await resolveAnalyticsContext(user.id, svc, lang)
+    const { gateRes, apiKey, fallbackKey, cost } = ctx
+    userHasKey = ctx.userHasKey
+    plan = ctx.plan
     if (gateRes) return gateRes
+    async function ytf(path: string, params: Record<string, string>): Promise<unknown> {
+      try { return await ytFetch(path, params, apiKey) }
+      catch (e) { if (e instanceof YouTubeQuotaError && fallbackKey) return ytFetch(path, params, fallbackKey); throw e }
+    }
 
     console.log(`[channel] start input="${channelInput}" lang=${lang}`)
 
-    const svc = createServiceClient()
     const cacheKey = channelInput.toLowerCase().replace(/\s+/g, '-') + `|${lang}|v2`
 
     // Cache check — non-fatal
@@ -171,7 +179,8 @@ export async function POST(req: NextRequest) {
       console.warn('[channel] cache check skipped:', e instanceof Error ? e.message : String(e))
     }
 
-    const check = await requireCredits(user.id, 'channel_analysis', supabase)
+    const actualCost = cost(CREDIT_COSTS.channel_analysis)
+    const check = await requireCreditsAmount(user.id, actualCost, supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
     // ── YouTube data ──────────────────────────────────────────────────────────
@@ -185,7 +194,7 @@ export async function POST(req: NextRequest) {
 
     if (ref.type === 'handle') {
       console.log(`[channel] step 1: handle @${ref.handle} → /channels?forHandle (1 quota unit)`)
-      const res = await ytFetch('/channels', {
+      const res = await ytf('/channels', {
         part: 'statistics,snippet', forHandle: ref.handle,
       }) as { items?: ChItem[] }
       quotaUsed += 1
@@ -195,7 +204,7 @@ export async function POST(req: NextRequest) {
 
     } else if (ref.type === 'id') {
       console.log(`[channel] step 1: direct id ${ref.channelId} → /channels?id (1 quota unit)`)
-      const res = await ytFetch('/channels', {
+      const res = await ytf('/channels', {
         part: 'statistics,snippet', id: ref.channelId,
       }) as { items?: ChItem[] }
       quotaUsed += 1
@@ -205,7 +214,7 @@ export async function POST(req: NextRequest) {
 
     } else {
       console.log(`[channel] step 1: text search "${ref.query}" → /search (100 quota units)`)
-      const channelSearch = await ytFetch('/search', {
+      const channelSearch = await ytf('/search', {
         part: 'snippet', type: 'channel', q: ref.query, maxResults: '1',
       }) as { items?: Array<{ id: { channelId: string }; snippet: { title: string } }> }
       quotaUsed += 100
@@ -213,7 +222,7 @@ export async function POST(req: NextRequest) {
       if (!channelId) return NextResponse.json({ ok: false, error: 'Канал не найден' }, { status: 404 })
 
       console.log(`[channel] channel id: ${channelId} | step 2: channel stats (1 quota unit)`)
-      const channelStats = await ytFetch('/channels', {
+      const channelStats = await ytf('/channels', {
         part: 'statistics,snippet', id: channelId,
       }) as { items?: ChItem[] }
       quotaUsed += 1
@@ -234,7 +243,7 @@ export async function POST(req: NextRequest) {
     console.log(`[channel] name="${channelData.name}" subs=${channelData.subscribers}`)
 
     console.log('[channel] step 3: last 50 videos (100 quota units)')
-    const videoSearch = await ytFetch('/search', {
+    const videoSearch = await ytf('/search', {
       part: 'snippet', channelId,
       order: 'date', maxResults: '50', type: 'video',
     }) as { items?: Array<{ id: { videoId: string }; snippet: { title: string; publishedAt: string } }> }
@@ -247,7 +256,7 @@ export async function POST(req: NextRequest) {
     let videosData: Array<{ title: string; views: number; url: string; publishedAt: string }> = []
     if (videoIds) {
       console.log('[channel] step 4: video stats (1 quota unit)')
-      const vStats = await ytFetch('/videos', {
+      const vStats = await ytf('/videos', {
         part: 'statistics,snippet', id: videoIds,
       }) as { items?: Array<{ id: string; snippet: { title: string; publishedAt: string }; statistics: { viewCount?: string; likeCount?: string } }> }
       quotaUsed += 1
@@ -347,7 +356,7 @@ export async function POST(req: NextRequest) {
 
     console.log('[channel] analysis merged ok')
 
-    await spendCredits(user.id, CREDIT_COSTS.channel_analysis, 'channel_analysis')
+    await spendCredits(user.id, actualCost, 'channel_analysis')
 
     try {
       await svc.from('analytics_cache').upsert({
@@ -393,7 +402,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: analysis, cached: false })
   } catch (error) {
-    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
+    if (error instanceof YouTubeQuotaError) return (userHasKey && plan === 'free') ? byokQuotaResponse(lang) : quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/channel] fatal error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка анализа канала: ${msg}` }, { status: 500 })

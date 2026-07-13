@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
-import { requireCredits, spendCredits } from '@/lib/credits'
+import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
-import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
-import { checkAnalyticsGate } from '@/lib/analytics-gate'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse } from '@/lib/youtube-quota'
+import { resolveAnalyticsContext } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
@@ -47,9 +47,11 @@ IMPORTANT: Return ONLY valid JSON. All text values must be in English. No \`\`\`
 }
 
 
-async function ytFetch(path: string, params: Record<string, string>): Promise<unknown> {
+type YtFn = (path: string, params: Record<string, string>) => Promise<unknown>
+
+async function ytFetch(path: string, params: Record<string, string>, apiKey: string): Promise<unknown> {
   const url = new URL(`${YT_BASE}${path}`)
-  url.searchParams.set('key', env('YOUTUBE_API_KEY'))
+  url.searchParams.set('key', apiKey)
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
   const res = await fetch(url.toString())
   if (!res.ok) {
@@ -109,7 +111,7 @@ interface YtCommentThreadsResponse {
   }>
 }
 
-async function resolveChannelId(identifier: { type: 'handle' | 'id' | 'user'; value: string }): Promise<string> {
+async function resolveChannelId(identifier: { type: 'handle' | 'id' | 'user'; value: string }, ytf: YtFn): Promise<string> {
   if (identifier.type === 'id') return identifier.value
 
   let forParam: Record<string, string>
@@ -119,14 +121,14 @@ async function resolveChannelId(identifier: { type: 'handle' | 'id' | 'user'; va
     forParam = { forUsername: identifier.value, part: 'id,snippet' }
   }
 
-  const data = await ytFetch('/channels', forParam) as YtChannelListResponse
+  const data = await ytf('/channels', forParam) as YtChannelListResponse
   const channelId = data.items?.[0]?.id
   if (!channelId) throw new Error(`Канал не найден: @${identifier.value}`)
   return channelId
 }
 
-async function getTopVideoIds(channelId: string, limit: number): Promise<string[]> {
-  const search = await ytFetch('/search', {
+async function getTopVideoIds(channelId: string, limit: number, ytf: YtFn): Promise<string[]> {
+  const search = await ytf('/search', {
     part: 'id,snippet',
     channelId,
     type: 'video',
@@ -141,7 +143,7 @@ async function getTopVideoIds(channelId: string, limit: number): Promise<string[
   if (ids.length === 0) return []
 
   // Get actual view counts to confirm top videos
-  const vids = await ytFetch('/videos', {
+  const vids = await ytf('/videos', {
     part: 'id,snippet,statistics',
     id: ids.join(','),
   }) as YtVideoListResponse
@@ -151,9 +153,9 @@ async function getTopVideoIds(channelId: string, limit: number): Promise<string[
     .map(v => v.id)
 }
 
-async function fetchComments(videoId: string, maxResults: number): Promise<string[]> {
+async function fetchComments(videoId: string, maxResults: number, ytf: YtFn): Promise<string[]> {
   try {
-    const data = await ytFetch('/commentThreads', {
+    const data = await ytf('/commentThreads', {
       part: 'snippet',
       videoId,
       maxResults: String(Math.min(maxResults, 100)),
@@ -173,6 +175,8 @@ async function fetchComments(videoId: string, maxResults: number): Promise<strin
 
 export async function POST(req: NextRequest) {
   let lang = 'ru'
+  let userHasKey = false
+  let plan = 'free'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -188,10 +192,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Введите корректный URL YouTube' }, { status: 400 })
     }
 
-    const gateRes = await checkAnalyticsGate(user.id, supabase, lang)
+    const svc = createServiceClient()
+    const ctx = await resolveAnalyticsContext(user.id, svc, lang)
+    const { gateRes, apiKey, fallbackKey, cost } = ctx
+    userHasKey = ctx.userHasKey
+    plan = ctx.plan
     if (gateRes) return gateRes
+    async function ytf(path: string, params: Record<string, string>): Promise<unknown> {
+      try { return await ytFetch(path, params, apiKey) }
+      catch (e) { if (e instanceof YouTubeQuotaError && fallbackKey) return ytFetch(path, params, fallbackKey); throw e }
+    }
 
-    const check = await requireCredits(user.id, 'comments_analysis', supabase)
+    const actualCost = cost(CREDIT_COSTS.comments_analysis)
+    const check = await requireCreditsAmount(user.id, actualCost, supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
     let comments: string[] = []
@@ -202,7 +215,7 @@ export async function POST(req: NextRequest) {
 
     if (videoId) {
       // Single video
-      const vids = await ytFetch('/videos', {
+      const vids = await ytf('/videos', {
         part: 'id,snippet,statistics',
         id: videoId,
       }) as YtVideoListResponse
@@ -212,7 +225,7 @@ export async function POST(req: NextRequest) {
 
       topic = video.snippet.title
       sourceLabel = video.snippet.title
-      comments = await fetchComments(videoId, count)
+      comments = await fetchComments(videoId, count, ytf)
 
       if (comments.length === 0) {
         return NextResponse.json({ ok: false, error: 'Комментарии отключены или их нет под этим видео' }, { status: 400 })
@@ -224,10 +237,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: 'Не удалось распознать URL. Поддерживается: /watch?v=..., /shorts/..., /@channel, /channel/...' }, { status: 400 })
       }
 
-      const channelId = await resolveChannelId(channelIdent)
+      const channelId = await resolveChannelId(channelIdent, ytf)
 
       // Get channel info
-      const chInfo = await ytFetch('/channels', {
+      const chInfo = await ytf('/channels', {
         part: 'snippet',
         id: channelId,
       }) as YtChannelListResponse
@@ -235,14 +248,14 @@ export async function POST(req: NextRequest) {
       sourceLabel = `канал ${topic}`
 
       const perVideo = Math.ceil(count / 3)
-      const topVideoIds = await getTopVideoIds(channelId, 3)
+      const topVideoIds = await getTopVideoIds(channelId, 3, ytf)
 
       if (topVideoIds.length === 0) {
         return NextResponse.json({ ok: false, error: 'Не удалось найти видео на канале' }, { status: 400 })
       }
 
       const allComments = await Promise.all(
-        topVideoIds.map(vid => fetchComments(vid, perVideo))
+        topVideoIds.map(vid => fetchComments(vid, perVideo, ytf))
       )
       comments = allComments.flat()
 
@@ -297,10 +310,9 @@ export async function POST(req: NextRequest) {
       audience_portrait:    analysis.audience_portrait    ?? '',
     }
 
-    await spendCredits(user.id, CREDIT_COSTS.comments_analysis, 'comments_analysis')
+    await spendCredits(user.id, actualCost, 'comments_analysis')
 
     // Save to analytics_reports (non-fatal, 20-limit)
-    const svc = createServiceClient()
     try {
       const { data: old } = await svc
         .from('analytics_reports')
@@ -325,7 +337,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: result })
   } catch (error) {
-    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
+    if (error instanceof YouTubeQuotaError) return (userHasKey && plan === 'free') ? byokQuotaResponse(lang) : quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/comments] error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка анализа: ${msg}` }, { status: 500 })

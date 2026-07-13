@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
-import { requireCredits, spendCredits } from '@/lib/credits'
+import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
-import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
-import { checkAnalyticsGate } from '@/lib/analytics-gate'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse } from '@/lib/youtube-quota'
+import { resolveAnalyticsContext } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
@@ -112,16 +112,18 @@ interface YtVideoListResponse {
 }
 
 // Get avg views for top-5 videos on a query
-async function getQueryStats(query: string, contentLang: string, country: string): Promise<{ avg_views: number; video_count: number }> {
-  try {
-    const apiKey = env('YOUTUBE_API_KEY')
+async function getQueryStats(
+  query: string, contentLang: string, country: string,
+  apiKey: string, fallbackKey: string | null
+): Promise<{ avg_views: number; video_count: number }> {
+  async function fetchStats(key: string): Promise<{ avg_views: number; video_count: number }> {
     const regionCode = country === 'worldwide' ? undefined : country
     const searchUrl = new URL(`${YT_BASE}/search`)
     searchUrl.searchParams.set('part', 'snippet')
     searchUrl.searchParams.set('type', 'video')
     searchUrl.searchParams.set('q', query)
     searchUrl.searchParams.set('maxResults', '5')
-    searchUrl.searchParams.set('key', apiKey)
+    searchUrl.searchParams.set('key', key)
     searchUrl.searchParams.set('relevanceLanguage', contentLang)
     if (regionCode) searchUrl.searchParams.set('regionCode', regionCode)
 
@@ -143,7 +145,7 @@ async function getQueryStats(query: string, contentLang: string, country: string
     const statsUrl = new URL(`${YT_BASE}/videos`)
     statsUrl.searchParams.set('part', 'statistics')
     statsUrl.searchParams.set('id', videoIds.join(','))
-    statsUrl.searchParams.set('key', apiKey)
+    statsUrl.searchParams.set('key', key)
 
     const statsRes = await fetch(statsUrl.toString())
     if (!statsRes.ok) {
@@ -161,7 +163,12 @@ async function getQueryStats(query: string, contentLang: string, country: string
       : 0
 
     return { avg_views, video_count: videoCount }
+  }
+
+  try {
+    return await fetchStats(apiKey)
   } catch (e) {
+    if (e instanceof YouTubeQuotaError && fallbackKey) return fetchStats(fallbackKey)
     if (e instanceof YouTubeQuotaError) throw e
     return { avg_views: 0, video_count: 0 }
   }
@@ -179,6 +186,8 @@ function cacheKey(keyword: string, contentLang: string, country: string): string
 
 export async function POST(req: NextRequest) {
   let lang = 'ru'
+  let userHasKey = false
+  let plan = 'free'
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -193,10 +202,13 @@ export async function POST(req: NextRequest) {
 
     if (!keyword) return NextResponse.json({ ok: false, error: 'Введите ключевое слово' }, { status: 400 })
 
-    const gateRes = await checkAnalyticsGate(user.id, supabase, lang)
+    const svc = createServiceClient()
+    const ctx = await resolveAnalyticsContext(user.id, svc, lang)
+    const { gateRes, apiKey, fallbackKey, cost } = ctx
+    userHasKey = ctx.userHasKey
+    plan = ctx.plan
     if (gateRes) return gateRes
 
-    const svc = createServiceClient()
     const key = cacheKey(keyword, contentLang, country)
 
     // Cache check — non-fatal
@@ -248,7 +260,8 @@ export async function POST(req: NextRequest) {
       console.warn('[keywords] cache check skipped:', e instanceof Error ? e.message : String(e))
     }
 
-    const check = await requireCredits(user.id, 'keywords_analysis', supabase)
+    const actualCost = cost(CREDIT_COSTS.keywords_analysis)
+    const check = await requireCreditsAmount(user.id, actualCost, supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
     // Collect autocomplete suggestions from multiple seed queries
@@ -292,7 +305,7 @@ export async function POST(req: NextRequest) {
 
     for (let i = 0; i < suggestions.length; i += batchSize) {
       const batch = suggestions.slice(i, i + batchSize)
-      const results = await Promise.all(batch.map(s => getQueryStats(s, contentLang, country)))
+      const results = await Promise.all(batch.map(s => getQueryStats(s, contentLang, country, apiKey, fallbackKey)))
       batch.forEach((s, j) => statsMap.set(s, results[j]))
     }
 
@@ -384,7 +397,7 @@ export async function POST(req: NextRequest) {
       insights:        insights.insights        ?? '',
     }
 
-    await spendCredits(user.id, CREDIT_COSTS.keywords_analysis, 'keywords_analysis')
+    await spendCredits(user.id, actualCost, 'keywords_analysis')
 
     try {
       await svc.from('analytics_cache').upsert({
@@ -431,7 +444,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, data: result, cached: false })
   } catch (error) {
-    if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
+    if (error instanceof YouTubeQuotaError) return (userHasKey && plan === 'free') ? byokQuotaResponse(lang) : quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/keywords] error:', msg)
     return NextResponse.json({ ok: false, error: `Ошибка анализа: ${msg}` }, { status: 500 })
