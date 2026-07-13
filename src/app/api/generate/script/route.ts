@@ -180,6 +180,15 @@ export async function POST(request: NextRequest) {
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, model })
 
+    // GPT-4o output cap is 16 384 tokens; 50+ min Cyrillic scripts need ~15–22 K tokens → truncation risk.
+    if (model === 'gpt-4o' && scriptParams.duration_minutes >= 50) {
+      return NextResponse.json({
+        ok: false,
+        error: 'GPT-4o не поддерживает сценарии 50 мин и длиннее: лимит 16 384 токена обрежет текст. Выберите Claude для длинных видео.',
+        code: 'GPT4O_DURATION_LIMIT',
+      }, { status: 422 })
+    }
+
     const operation = modelOperation(model)
     const cost = modelCost(model)
 
