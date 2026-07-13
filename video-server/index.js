@@ -159,6 +159,19 @@ async function updateJob(jobId, data) {
   }
 }
 
+// Refresh projects.updated_at so the watchdog (updated_at < now−40min) does not
+// kill a legitimately long render (e.g. 4×300s Ken Burns + mux + subtitle burn).
+// Guard: &status=eq.generating_video so a watchdog-killed project is not resurrected.
+// Errors are logged but never thrown — a missed heartbeat is better than a crashed render.
+async function heartbeatProject(projectId) {
+  if (!projectId) return
+  try {
+    await sbPatch('projects', `id=eq.${projectId}&status=eq.generating_video`, { status: 'generating_video' })
+  } catch (e) {
+    console.error('[heartbeat]', projectId, e.message)
+  }
+}
+
 // ── Queue operations (bot_content_queue) ─────────────────────────────────────
 async function getQueue() {
   try {
@@ -3520,6 +3533,7 @@ async function processVideoJob(jobId, body) {
       console.log(`[vgf] all ${clipUrls.length} clips encoded`)
       console.timeEnd(T('2_clips_encode'))
       await updateJob(jobId, { progress: 20 })
+      await heartbeatProject(project_id)
 
       // ── Stage 3: Batch xfade → merge → mux+effects ──────────────────────────
       console.time(T('3_xfade'))
@@ -3567,6 +3581,7 @@ async function processVideoJob(jobId, body) {
       console.log(`[vgf] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
       console.timeEnd(T('3_xfade'))
       await updateJob(jobId, { progress: 60 })
+      await heartbeatProject(project_id)
 
       // ── Stage 4: effects merged into Stage 3 mux pass ──────────────────────
       console.log(`[perf] 4_effects: ${effectFilters.length > 0 ? `merged into mux (${effects.join(', ')})` : 'skipped (no effects)'}`)
@@ -3577,6 +3592,7 @@ async function processVideoJob(jobId, body) {
         currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId, longTimeout)
         console.timeEnd(T('5_subtitles'))
         await updateJob(jobId, { progress: 80 })
+        await heartbeatProject(project_id)
       } else {
         console.log('[perf] 5_subtitles: skipped (no burn-in)')
       }
@@ -3614,6 +3630,7 @@ async function processVideoJob(jobId, body) {
       ))
       console.timeEnd(T('2_clips_encode'))
       await updateJob(jobId, { progress: 20 })
+      await heartbeatProject(project_id)
 
       console.time(T('3_concat'))
       // Hierarchical concat: batch clips to stay within VGF's per-job input limit.
@@ -3656,6 +3673,7 @@ async function processVideoJob(jobId, body) {
       console.log(`[vgf] concat+effects done: effects=[${effects.join(', ')}]`)
       console.timeEnd(T('3_concat'))
       await updateJob(jobId, { progress: 60 })
+      await heartbeatProject(project_id)
 
       // ── Stage 4: effects merged into concat pass ────────────────────────────
       console.log(`[perf] 4_effects: ${effectFilters.length > 0 ? `merged into concat (${effects.join(', ')})` : 'skipped (no effects)'}`)
@@ -3666,6 +3684,7 @@ async function processVideoJob(jobId, body) {
         currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId, longTimeout)
         console.timeEnd(T('5_subtitles'))
         await updateJob(jobId, { progress: 80 })
+        await heartbeatProject(project_id)
       } else {
         console.log('[perf] 5_subtitles: skipped (no burn-in)')
       }
