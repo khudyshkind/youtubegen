@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import JSZip from 'jszip'
 import { createServerSupabase } from '@/lib/supabase-server'
+import { IMAGE_INTERVAL_MIN, IMAGE_INTERVAL_MAX } from '@/lib/types'
 import type { SubtitleBlock, SceneImage } from '@/lib/types'
 
 export const maxDuration = 120
@@ -39,16 +40,29 @@ function buildSrt(blocks: SubtitleBlock[]): string {
     .join('\n\n') + '\n'
 }
 
+function parseTimecodeToSec(tc: string): number {
+  const parts = String(tc || '0').split(':').map(Number)
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  return parts[0]
+}
+
 function buildTiming(images: SceneImage[], blocks: SubtitleBlock[], topic: string, intervalSec: number): string {
   const totalDuration =
     blocks.length > 0
       ? Math.ceil(blocks[blocks.length - 1].end)
       : images.length * intervalSec
 
-  const rows = images.map((_, i) => {
-    const start = i * intervalSec
-    // Last scene runs until the end of audio
-    const end = i === images.length - 1 ? totalDuration : (i + 1) * intervalSec
+  const rows = images.map((img, i) => {
+    let start: number
+    let end: number
+    if (img.timecode_start && img.timecode_end) {
+      start = parseTimecodeToSec(img.timecode_start)
+      end   = parseTimecodeToSec(img.timecode_end)
+    } else {
+      start = i * intervalSec
+      end   = i === images.length - 1 ? totalDuration : (i + 1) * intervalSec
+    }
     const num = String(i + 1).padStart(2, '0')
     return `scene_${num}.jpg    ${formatHms(start)} → ${formatHms(end)}`
   })
@@ -58,12 +72,11 @@ function buildTiming(images: SceneImage[], blocks: SubtitleBlock[], topic: strin
     `====================================`,
     `Тема: ${topic}`,
     `Иллюстраций: ${images.length}`,
-    `Смена каждые: ${intervalSec} секунд`,
     `Длительность аудио: ~${formatHms(totalDuration)}`,
     ``,
     ...rows,
     ``,
-    `Примечание: тайм-коды рассчитаны по интервалу ${intervalSec} сек.`,
+    `Примечание: тайм-коды из субтитров (при отсутствии — интервал ${intervalSec} сек).`,
     `Скорректируйте в редакторе по ощущению ритма.`,
   ].join('\n')
 }
@@ -130,7 +143,7 @@ export async function POST(request: NextRequest) {
 
     const body: VideoRequest = await request.json()
     const { audio_url, scene_images, subtitle_blocks, topic, image_interval } = body
-    const intervalSec = Math.max(3, Math.min(30, image_interval ?? 10))
+    const intervalSec = Math.max(IMAGE_INTERVAL_MIN, Math.min(IMAGE_INTERVAL_MAX, image_interval ?? 10))
 
     if (!audio_url) {
       return NextResponse.json({ ok: false, error: 'audio_url обязателен' }, { status: 400 })

@@ -2972,9 +2972,13 @@ const VF_SCALE = 'scale=1280:720,setsar=1'
 // rounding error = 1 output pixel of stutter. At 4000px, 1px error = 0.32 output
 // pixels — sub-perceptual. Lanczos upscale is one-time per image; zoompan
 // downscales each crop back to s=1280x720 internally.
+function calcZoompanFrames(dur) {
+  return Math.max(1, Math.round(dur * 25))
+}
+
 function getVfFilter(_img, dur, sceneIdx, hasKenBurns) {
   if (!hasKenBurns) return VF_SCALE
-  const d = Math.max(1, Math.round(dur * 25))
+  const d = calcZoompanFrames(dur)
   if (sceneIdx % 2 === 0) {
     // Pattern A: zoom-in to center. z 1.0→1.5; at 4000px canvas: x varies by ~4.7px/frame→0.75 out-px/frame.
     return `scale=4000:2250:flags=lanczos,zoompan=z=1+0.5*on/duration:x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):d=${d}:s=1280x720:fps=25,setsar=1`
@@ -3489,6 +3493,9 @@ async function processVideoJob(jobId, body) {
         clipPool(async () => {
           const clipDur = (durations[i] + td).toFixed(3)
           const vfFilter = getVfFilter(img, durations[i] + td, i, hasKenBurns)
+          const clipTimeout = hasKenBurns
+            ? Math.min(1_800_000, Math.max(600_000, calcZoompanFrames(durations[i] + td) * 120))
+            : 600_000
           console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${vfFilter}`)
           // Ken Burns: -t on OUTPUT side; INPUT-side -t creates N×25 frames each expanded
           // by zoompan d=N×25 → N²×25 total frames (2500s for a 10s clip). No -tune stillimage
@@ -3500,7 +3507,8 @@ async function processVideoJob(jobId, body) {
             const result = await runFFmpegOnVGF(
               { in_1: img.url },
               { out_1: `clip_${i}.mp4` },
-              clipCmd
+              clipCmd,
+              clipTimeout
             )
             console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
             return result.out_1
@@ -3583,6 +3591,9 @@ async function processVideoJob(jobId, body) {
       const clipUrls = await Promise.all(resolvedImages.map((img, i) =>
         clipPool(async () => {
           const vfFilter = getVfFilter(img, durations[i], i, hasKenBurns)
+          const clipTimeout = hasKenBurns
+            ? Math.min(1_800_000, Math.max(600_000, calcZoompanFrames(durations[i]) * 120))
+            : 600_000
           console.log(`[render] clip_${i} engine=${img.engine ?? 'undefined'} url=${img.url?.slice(0, 80)} vf=${vfFilter}`)
           const clipCmd = hasKenBurns
             ? `-loop 1 -i {{in_1}} -vf "${vfFilter}" -t ${durations[i].toFixed(3)} -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -an {{out_1}}`
@@ -3591,7 +3602,8 @@ async function processVideoJob(jobId, body) {
             const result = await runFFmpegOnVGF(
               { in_1: img.url },
               { out_1: `clip_${i}.mp4` },
-              clipCmd
+              clipCmd,
+              clipTimeout
             )
             console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
             return result.out_1
