@@ -97,8 +97,12 @@ Create maximum surface-level diversity:
 — All proper nouns: names, places, brands, organizations, titles
 — All technical terms that have no acceptable synonyms in context
 — All factual claims — the meaning must not change at all
-— Scene markers [SCENE N] in their exact original positions
+— Any structural markers or formatting in their exact original positions
 — Approximate word count — do not significantly expand or shrink
+
+FACTUAL ACCURACY IS ABSOLUTE: dates, numbers, names, abbreviations, and numeric
+designations must be copied EXACTLY from the source — restyle the delivery, never
+the content. Do not paraphrase, approximate, or reinterpret any specific fact.
 
 ═══ QUALITY CRITERIA ═══
 A successfully uniqueized text should:
@@ -195,9 +199,12 @@ The ideal output sounds like a knowledgeable friend explaining something fascina
 
 ═══ ABSOLUTE REQUIREMENTS ═══
 — Preserve ALL facts, statistics, names, dates, and specific claims
-— Maintain every scene marker [SCENE N] in its exact original position
+— Maintain any structural markers or formatting in their exact original position
 — Keep approximately the same word count and topic coverage
 — Never add invented information or change factual content
+— FACTUAL ACCURACY IS ABSOLUTE: dates, numbers, names, abbreviations, and numeric
+  designations must be copied EXACTLY from the source — restyle the delivery, never
+  the content. Do not paraphrase, approximate, or reinterpret any specific fact.
 
 Return only the rewritten text. No preamble, no "Here is the rewritten version:", no explanations.`
 }

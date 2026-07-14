@@ -263,7 +263,7 @@ function buildSystemPrompt(p: ScriptParams): string {
     'OUTPUT FORMAT:',
     'Output ONLY the voiceover text for this section. No preamble, no explanations, no labels.',
     'NO Markdown: no # headings, no --- separators, no **bold** or *italic* formatting.',
-    'NO section headers: no "Section N:", "Part N:", "Chapter N:" labels of any kind.',
+    'NO section headers: no "[Сцена N]", "[Scene N]", "Section N:", "Part N:", "Chapter N:" labels of any kind.',
   )
 
   if (p.scene_markers) {
