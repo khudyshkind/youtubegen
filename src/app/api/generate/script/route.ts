@@ -8,7 +8,8 @@ import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
 import type { ScriptParams, PlanSection, ScriptModel } from '@/lib/types'
 import { CREDIT_COSTS } from '@/lib/types'
-import { isGuardOk, countWords } from '@/lib/enhance-guard'
+import { isGuardOk, countWords, runParallelGuarded, MIN_TOKENS, MIN_OUTPUT_RATIO } from '@/lib/enhance-guard'
+import { parseClaudeJsonArray } from '@/lib/parse-claude-json'
 
 export const maxDuration = 300
 
@@ -170,6 +171,218 @@ async function generateWithGpt4o(prompt: string, maxTokens: number): Promise<Gen
   return { text: choice.message.content ?? '', stopReason: choice.finish_reason ?? null }
 }
 
+// ── Constants for chunked generation ─────────────────────────────────────────
+
+const CHUNKED_THRESHOLD = 30  // duration_minutes >= this → parallel section generation
+
+// English language names for the internal plan prompt (mirrors plan/route.ts convention)
+const PLAN_LANG_NAMES: Record<string, string> = {
+  ru: 'Russian', en: 'English', es: 'Spanish', fr: 'French',
+  de: 'German', it: 'Italian', pt: 'Portuguese', zh: 'Chinese',
+  ja: 'Japanese', ko: 'Korean', ar: 'Arabic', hi: 'Hindi',
+  nl: 'Dutch', pl: 'Polish', tr: 'Turkish', sv: 'Swedish',
+  no: 'Norwegian', da: 'Danish', fi: 'Finnish', uk: 'Ukrainian',
+  cs: 'Czech', ro: 'Romanian', hu: 'Hungarian', el: 'Greek',
+  he: 'Hebrew', th: 'Thai', id: 'Indonesian', vi: 'Vietnamese',
+}
+
+function calcSectionCount(durationMinutes: number): number {
+  return Math.min(20, Math.max(2, Math.round(durationMinutes * 0.4 + 2)))
+}
+
+// Generate a plan internally when user skipped the plan step. Not charged (no spendCredits).
+async function generateInternalPlan(anthropic: Anthropic, p: ScriptParams): Promise<PlanSection[]> {
+  const n = calcSectionCount(p.duration_minutes)
+  const maxTokens = n * 150 + 500
+  const langName = PLAN_LANG_NAMES[p.language] ?? p.language
+  const minsPerSection = (p.duration_minutes / n).toFixed(1)
+
+  const prompt = [
+    `Generate a structural plan for a YouTube video. Write all titles and descriptions in ${langName}.`,
+    '',
+    `Topic: "${p.topic}"`,
+    `Duration: ${p.duration_minutes} min (target: 130 words/min)`,
+    `Style: ${p.narrative_style}`,
+    `Tone: ${p.tone}`,
+    '',
+    `Create exactly ${n} sections (~${minsPerSection} min each).`,
+    'Each section needs a short title and a 1-2 sentence description of its content.',
+    '',
+    'Return ONLY a JSON array, no markdown, no extra text:',
+    '[',
+    '  {"title": "...", "description": "..."},',
+    '  ...',
+    ']',
+  ].join('\n')
+
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: maxTokens,
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  console.log(`[generate/script] internal-plan stop_reason=${message.stop_reason} sections_n=${n}`)
+
+  const block = message.content[0]
+  const raw = block.type === 'text' ? block.text : ''
+  if (!raw) return []
+
+  try {
+    const parsed = parseClaudeJsonArray<{ title?: unknown; description?: unknown }>(raw, 'internal-plan')
+    return parsed
+      .filter(s => s && typeof s.title === 'string' && typeof s.description === 'string')
+      .map(s => ({ title: String(s.title).trim(), description: String(s.description).trim() }))
+  } catch {
+    console.error('[generate/script] internal-plan parse error, raw tail:', raw.slice(-300))
+    return []
+  }
+}
+
+// System prompt shared by all section calls (cached via cache_control: ephemeral)
+function buildSystemPrompt(p: ScriptParams): string {
+  const langName = PLAN_LANG_NAMES[p.language] ?? p.language
+
+  const lines: string[] = [
+    'CRITICAL LANGUAGE RULE — READ THIS FIRST:',
+    `Write your ENTIRE response in ${langName}. ALL output text must be in ${langName} only.`,
+    '',
+    'You are a professional YouTube scriptwriter writing one section of a video script.',
+    '',
+    'VIDEO PARAMETERS:',
+    `- Narrative style: ${NARRATIVE_STYLE_LABELS[p.narrative_style] ?? p.narrative_style}`,
+    `- Tone: ${TONE_LABELS[p.tone] ?? p.tone}`,
+    `- Target audience: ${AUDIENCE_LABELS[p.target_audience] ?? p.target_audience}`,
+  ]
+
+  if (p.pauses) {
+    lines.push('- Add breathing pauses as [...] at natural stopping points')
+  }
+
+  lines.push(
+    '',
+    'OUTPUT FORMAT:',
+    'Output ONLY the voiceover text for this section. No preamble, no explanations, no labels.',
+    'NO Markdown: no # headings, no --- separators, no **bold** or *italic* formatting.',
+    'NO section headers: no "Section N:", "Part N:", "Chapter N:" labels of any kind.',
+  )
+
+  if (p.scene_markers) {
+    lines.push('EXCEPTION: start this section with exactly one scene marker [Сцена N: Title] on its own line.')
+  }
+
+  lines.push(
+    '',
+    'TTS RULES (text will be synthesized by voice):',
+    'Numbers as words. Expand all abbreviations. Symbols as words.',
+    'Decode acronyms on first use. Keep sentences natural and speakable.',
+  )
+
+  return lines.join('\n')
+}
+
+function buildSectionUserMessage(
+  p: ScriptParams,
+  section: PlanSection,
+  idx: number,
+  total: number,
+  wordsTarget: number,
+  prevSection: PlanSection | null,
+  nextSection: PlanSection | null,
+): string {
+  const isFirst = idx === 0
+  const isLast  = idx === total - 1
+
+  const lines: string[] = [
+    `Напиши фрагмент сценария — секция ${idx + 1} из ${total} видео на тему: "${p.topic}".`,
+    `Целевой объём: ~${wordsTarget} слов.`,
+    '',
+  ]
+
+  if (prevSection || nextSection) {
+    lines.push('[Контекст соседних секций — в твой текст НЕ включать]:')
+    if (prevSection) lines.push(`Предыдущая: "${prevSection.title}" — ${prevSection.description}`)
+    if (nextSection) lines.push(`Следующая: "${nextSection.title}" — ${nextSection.description}`)
+    lines.push('')
+  }
+
+  lines.push('[Содержание этой секции]:')
+  lines.push(`${section.title}: ${section.description}`)
+  lines.push('')
+
+  if (isFirst) {
+    if (p.hook) {
+      lines.push(`Начни с хука (${HOOK_LABELS[p.hook_type] ?? p.hook_type}) — первые 15 секунд захватывают внимание.`)
+    } else {
+      lines.push('Начни со вступления к видео.')
+    }
+  } else {
+    lines.push('Начни сразу с содержания секции (без приветствий, вступлений и анонса).')
+  }
+
+  if (isLast) {
+    if (p.cta) {
+      lines.push('Заверши призывом к действию: попроси подписаться, поставить лайк, написать комментарий.')
+    } else {
+      lines.push('Заверши итогом и прощанием.')
+    }
+  } else {
+    lines.push('Заверши мысль секции естественно — без финального слова, итога или прощания.')
+  }
+
+  if (p.scene_markers) {
+    lines.push(`Начни строго с маркера [Сцена ${idx + 1}: ${section.title}] на отдельной строке.`)
+  }
+
+  return lines.join('\n')
+}
+
+async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): Promise<string | null> {
+  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+  const opus = p.model === 'claude-opus'
+  const modelId = opus ? 'claude-opus-4-5' : 'claude-sonnet-4-6'
+  const systemPrompt = buildSystemPrompt(p)
+  const wordsPerSection = Math.round((p.duration_minutes * 130) / sections.length)
+
+  console.log(`[generate/script] chunked model=${modelId} sections=${sections.length} wordsPerSec=${wordsPerSection}`)
+
+  const genResults = await runParallelGuarded<PlanSection, GenResult>(
+    sections,
+    async (section, idx) => {
+      const prevSection = idx > 0 ? sections[idx - 1] : null
+      const nextSection = idx < sections.length - 1 ? sections[idx + 1] : null
+      const userMessage = buildSectionUserMessage(p, section, idx, sections.length, wordsPerSection, prevSection, nextSection)
+      const sectionMaxTokens = Math.max(MIN_TOKENS, Math.ceil(wordsPerSection * 2.9 * 1.3))
+
+      const message = await anthropic.messages.create({
+        model: modelId,
+        max_tokens: sectionMaxTokens,
+        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: userMessage }],
+      })
+
+      console.log(`[generate/script] section=${idx + 1}/${sections.length} stop_reason=${message.stop_reason} usage=${JSON.stringify(message.usage)}`)
+
+      const block = message.content[0]
+      return { text: block.type === 'text' ? block.text.trim() : '', stopReason: message.stop_reason }
+    },
+    (result, idx) => isGuardOk(result.stopReason, result.text, wordsPerSection),
+    'generate/script-chunked',
+  )
+
+  if (genResults === null) return null
+
+  const assembled = genResults.map(r => r.text).join('\n\n')
+
+  const totalWords = countWords(assembled)
+  const totalTarget = p.duration_minutes * 130
+  if (totalWords < totalTarget * MIN_OUTPUT_RATIO) {
+    console.error(`[generate/script] chunked final guard fail: words=${totalWords} target=${totalTarget}`)
+    return null
+  }
+
+  return assembled
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabase()
@@ -186,11 +399,11 @@ export async function POST(request: NextRequest) {
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, model })
 
-    // GPT-4o output cap is 16 384 tokens; 50+ min Cyrillic scripts need ~15–22 K tokens → truncation risk.
-    if (model === 'gpt-4o' && scriptParams.duration_minutes >= 50) {
+    // GPT-4o cannot run section-parallel generation (16 384 token cap is too low per section).
+    if (model === 'gpt-4o' && scriptParams.duration_minutes >= CHUNKED_THRESHOLD) {
       return NextResponse.json({
         ok: false,
-        error: 'GPT-4o не поддерживает сценарии 50 мин и длиннее: лимит 16 384 токена обрежет текст. Выберите Claude для длинных видео.',
+        error: `GPT-4o не поддерживает посекционную генерацию для видео ${CHUNKED_THRESHOLD} мин и длиннее. Выберите Claude Sonnet или Opus.`,
         code: 'GPT4O_DURATION_LIMIT',
       }, { status: 422 })
     }
@@ -203,6 +416,52 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(check, { status: 402 })
     }
 
+    if (scriptParams.duration_minutes >= CHUNKED_THRESHOLD) {
+      // ── Chunked path: parallel section generation ─────────────────────────
+      const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+      let usedSections: PlanSection[]
+
+      if (plan_sections && plan_sections.length > 0) {
+        usedSections = plan_sections
+      } else {
+        console.log(`[generate/script] generating internal plan for ${scriptParams.duration_minutes}min`)
+        usedSections = await generateInternalPlan(anthropic, scriptParams)
+        if (usedSections.length === 0) {
+          return NextResponse.json({ ok: false, error: 'Не удалось сгенерировать план для посекционной генерации' }, { status: 502 })
+        }
+        console.log(`[generate/script] internal plan: ${usedSections.length} sections`)
+      }
+
+      const script = await generateChunkedScript(scriptParams, usedSections)
+      if (script === null) {
+        return NextResponse.json({
+          ok: false,
+          error: 'Сценарий получился короче ожидаемого — попробуйте ещё раз или уменьшите длительность.',
+          code: 'SCRIPT_TRUNCATED',
+        }, { status: 422 })
+      }
+
+      await spendCredits(user.id, cost, operation, project_id)
+
+      if (project_id) {
+        await supabase
+          .from('projects')
+          .update({
+            script,
+            status: 'draft',
+            credits_spent: cost,
+            language: scriptParams.language ?? null,
+            plan_sections: usedSections,
+          })
+          .eq('id', project_id)
+          .eq('user_id', user.id)
+      }
+
+      void trackEvent(user.id, 'step_completed', { step: 'script', model, project_id, chunked: true })
+      return NextResponse.json({ ok: true, data: { script } })
+    }
+
+    // ── Single-call path (duration < CHUNKED_THRESHOLD) ──────────────────────
     const prompt = buildPrompt(scriptParams, plan_sections)
     const maxTokens = calcMaxTokens(scriptParams.duration_minutes, model)
     const targetWords = scriptParams.duration_minutes * 130

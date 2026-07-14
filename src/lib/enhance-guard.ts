@@ -190,3 +190,50 @@ export async function runChunked(
 
   return chunks.map((c, i) => wave1[i]!.text.trimEnd() + c.sep).join('')
 }
+
+/**
+ * Process a fixed pre-split set of items in parallel, with wave-2 retry for guard failures.
+ * Use this for section-parallel script generation where items are already determined (not text-split).
+ * Returns results in original order, or null if any item still fails after wave 2 (credits must NOT be charged).
+ */
+export async function runParallelGuarded<I, R>(
+  items: I[],
+  callFn: (item: I, idx: number) => Promise<R>,
+  guardFn: (result: R, idx: number) => boolean,
+  logPrefix: string,
+): Promise<R[] | null> {
+  if (items.length === 0) return []
+  console.log(`[${logPrefix}] parallel items=${items.length}`)
+
+  const wave1: Array<R | null> = await Promise.all(
+    items.map((item, i) => callFn(item, i).catch((e) => {
+      console.warn(`[${logPrefix}] item=${i + 1} wave1 threw: ${e instanceof Error ? e.message : e}`)
+      return null
+    }))
+  )
+
+  const failedIdx = wave1
+    .map((r, i) => (r === null || !guardFn(r, i)) ? i : -1)
+    .filter(i => i >= 0)
+
+  if (failedIdx.length > 0) {
+    console.warn(`[${logPrefix}] guard fail wave1 items=[${failedIdx.map(i => i + 1)}] — retrying`)
+    const wave2 = await Promise.all(
+      failedIdx.map(i => callFn(items[i], i).catch((e) => {
+        console.warn(`[${logPrefix}] item=${i + 1} wave2 threw: ${e instanceof Error ? e.message : e}`)
+        return null
+      }))
+    )
+    for (let j = 0; j < failedIdx.length; j++) {
+      const i = failedIdx[j]
+      const r = wave2[j]
+      if (r === null || !guardFn(r, i)) {
+        console.error(`[${logPrefix}] guard fail wave2 item=${i + 1} — aborting, credits not charged`)
+        return null
+      }
+      wave1[i] = r
+    }
+  }
+
+  return wave1 as R[]
+}

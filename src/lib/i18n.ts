@@ -509,6 +509,8 @@ export const translations = {
     'step1.scene_hint':     '[СЦЕНА 1], [СЦЕНА 2]... для удобства монтажа',
     'step1.pauses_hint':    '[ПАУЗА] — ориентир для диктора',
     'step1.credits_label':  'Генерация сценария:',
+    'step1.long_cost_prefix': 'Длинный проект · ≈',
+    'step1.long_cost_suffix': ' тыс. кр (сценарий + озвучка + субтитры + иллюстрации + сборка)',
 
     // ── Step 4 (Voice, formerly Step 3) ──────────────────────────────────────────
     'step3.title':          'Шаг 4: Озвучка',
@@ -1589,6 +1591,8 @@ export const translations = {
     'step1.scene_hint':     '[SCENE 1], [SCENE 2]... for easy editing',
     'step1.pauses_hint':    '[PAUSE] — marker for narrator',
     'step1.credits_label':  'Script generation:',
+    'step1.long_cost_prefix': 'Long project · ≈',
+    'step1.long_cost_suffix': 'k cr (script + audio + subtitles + images + render)',
 
     // ── Step 4 (Voice, formerly Step 3) ──────────────────────────────────────────
     'step3.title':          'Step 4: Voiceover',
