@@ -294,7 +294,7 @@ function buildSectionUserMessage(
 
   const lines: string[] = [
     `Напиши фрагмент сценария — секция ${idx + 1} из ${total} видео на тему: "${p.topic}".`,
-    `Целевой объём: ~${wordsTarget} слов.`,
+    `Объём секции: от ${Math.round(wordsTarget * 1.3)} до ${Math.round(wordsTarget * 1.6)} слов. Не короче нижней границы — секция с недобором будет отклонена. Пиши развёрнуто, не обрывай мысли.`,
     '',
   ]
 
@@ -366,51 +366,11 @@ async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): 
 
   const guardSection = (result: GenResult) => isGuardOk(result.stopReason, result.text, wordsPerSection)
 
-  // ── Warmup: call section 0 first to write the system-prompt cache ────────────
-  // All N sections starting simultaneously → all N get cache misses (cache not established yet).
-  // Warmup serialises section 0 first; sections 1..N-1 then get cache reads → ~87% savings
-  // on system-prompt input tokens (1 cache_write + (N-1) cache_reads vs N cache_writes).
-  console.log(`[generate/script] cache warmup section=1/${sections.length}`)
-  let warmupResult: GenResult | null = null
-  try {
-    warmupResult = await callSection(sections[0], 0)
-  } catch (e) {
-    const httpStatus = (e instanceof Error && 'status' in e) ? ` [${(e as { status: unknown }).status}]` : ''
-    const errMsg = e instanceof Error ? e.message : String(e)
-    console.warn(`[generate/script] section=1/${sections.length} warmup threw${httpStatus}: ${errMsg}`)
-  }
+  // prompt caching вернуть, если системник вырастет ≥1024 ток
+  const results = await runParallelGuarded(sections, callSection, guardSection, 'generate/script-chunked')
+  if (results === null) return null
 
-  // ── Sections 1..N-1 in parallel (cache is now established) ───────────────────
-  const restResults = sections.length > 1
-    ? await runParallelGuarded(
-        sections.slice(1),
-        (section, idx) => callSection(section, idx + 1),
-        (result) => guardSection(result),
-        'generate/script-chunked',
-      )
-    : []
-
-  // ── Guard + wave-2 retry for section 0 ───────────────────────────────────────
-  let verified0: GenResult | null = warmupResult && guardSection(warmupResult) ? warmupResult : null
-  if (!verified0) {
-    console.warn(`[generate/script] section=1/${sections.length} ${warmupResult ? 'guard fail' : 'threw'} attempt=1 — retrying`)
-    try {
-      const retry0 = await callSection(sections[0], 0)
-      verified0 = guardSection(retry0) ? retry0 : null
-    } catch (e) {
-      const httpStatus = (e instanceof Error && 'status' in e) ? ` [${(e as { status: unknown }).status}]` : ''
-      const errMsg = e instanceof Error ? e.message : String(e)
-      console.warn(`[generate/script] section=1/${sections.length} retry threw${httpStatus}: ${errMsg}`)
-    }
-    if (!verified0) {
-      console.error(`[generate/script] guard fail wave2 section=1/${sections.length} — aborting, credits not charged`)
-      return null
-    }
-  }
-
-  if (restResults === null) return null
-
-  const assembled = [verified0, ...restResults].map(r => r.text).join('\n\n')
+  const assembled = results.map(r => r.text).join('\n\n')
 
   const totalWords = countWords(assembled)
   const totalTarget = p.duration_minutes * 130
@@ -475,7 +435,7 @@ export async function POST(request: NextRequest) {
       if (script === null) {
         return NextResponse.json({
           ok: false,
-          error: 'Сценарий получился короче ожидаемого — попробуйте ещё раз или уменьшите длительность.',
+          error: 'Не удалось сгенерировать сценарий полностью — попробуйте ещё раз.',
           code: 'SCRIPT_TRUNCATED',
         }, { status: 422 })
       }
@@ -530,7 +490,7 @@ export async function POST(request: NextRequest) {
         console.error(`[generate/script] guard fail attempt=2 words=${retry.text ? countWords(retry.text) : 0} stop_reason=${retryStop} — aborting, credits not charged`)
         return NextResponse.json({
           ok: false,
-          error: 'Сценарий получился короче ожидаемого — попробуйте ещё раз или уменьшите длительность.',
+          error: 'Не удалось сгенерировать сценарий полностью — попробуйте ещё раз.',
           code: 'SCRIPT_TRUNCATED',
         }, { status: 422 })
       }

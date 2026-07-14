@@ -19,20 +19,6 @@ const MODELS_BASE: { value: ScriptModel; key: 'standard' | 'enhanced' | 'alterna
 
 const DURATION_OPTIONS = [1, 2, 3, 5, 7, 10, 15, 20, 30, 40, 50, 60, 70]
 
-function calcLongCostRange(d: number): { min: number; max: number } {
-  const scriptCost = CREDIT_COSTS.script_sonnet
-  const audioCost = Math.ceil(d * 130 * 7 / 1000) * CREDIT_COSTS.audio_secretvoicer_per_1000
-  const subsCost = d * CREDIT_COSTS.subtitles_per_minute
-  const imgCount = Math.ceil(d * 60 / 30)
-  const imgMin = imgCount * CREDIT_COSTS.image_flux_schnell
-  const imgMax = imgCount * CREDIT_COSTS.image_flux
-  const vidCost = d * CREDIT_COSTS.video
-  return {
-    min: Math.round((scriptCost + audioCost + subsCost + imgMin + vidCost) / 1000),
-    max: Math.round((scriptCost + audioCost + subsCost + imgMax + vidCost) / 1000),
-  }
-}
-
 // ─── Language dropdown ─────────────────────────────────────────────────────────
 
 function LanguageSelect({
@@ -376,10 +362,6 @@ export default function Step1Topic({ onRegisterSubmit }: Step1TopicProps) {
                 <option key={d} value={d}>{d} {t('step1.min')}</option>
               ))}
             </select>
-            {scriptParams.duration_minutes >= 40 && (() => {
-              const { min, max } = calcLongCostRange(scriptParams.duration_minutes)
-              return <p className="text-xs text-amber-400/80 mt-1.5">{t('step1.long_cost_prefix')}{min}–{max}{t('step1.long_cost_suffix')}</p>
-            })()}
           </div>
         </div>
       )}
