@@ -100,13 +100,21 @@ Description requirements:
 • Example: ["#history", "#facts", "#science", "#top10"]
 
 ═══ TAG RULES (field "tags") ═══
-20-25 tags total — three tiers:
-• 5-7 short tags (1-2 words): broad topic — maximum reach
-• 8-10 medium tags (3-4 words): specific topic — target audience
-• 5-7 long tags (5+ words): exact search queries — low competition, high relevance
-• 2-3 tags in English for international reach when relevant
+12-15 tags total — two tiers only:
+• First tag: the SINGLE main entity of the video (1-3 words) — carries the highest algorithmic weight; place it first
+• 5-6 short tags (1-2 words): broad topic — maximum reach
+• 6-9 medium tags (3-4 words): specific subtopic or audience targeting
 
-Tags should cover: main topic, related topics, content types, questions the audience asks.
+STRICT PROHIBITIONS — violating these ruins SEO:
+✗ No tags of 5+ words
+✗ No question tags ("do animals think", "why do cats purr", "which animals are self-aware")
+✗ No sentence fragments or phrases that read like full questions
+✗ No years or dates in any tag ("2024", "2026", "в 2024 году") — year-stamped tags decay rapidly and signal spam
+✗ No duplicate concepts across tiers
+
+If the output language is not English, you may include 2-3 tags in English for international reach — but only as a minority; the rest must be in the output language.
+
+Tags should cover: main topic entity, key subtopics, related concepts, content format.
 
 ═══ QUALITY AND ACCURACY ═══
 • Titles and descriptions must accurately reflect the video content — no deceptive clickbait
@@ -194,6 +202,18 @@ ${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, descrip
     seo.hashtags = seo.hashtags
       .slice(0, 5)
       .map((h) => (h.startsWith('#') ? h : `#${h}`))
+
+    // Post-filter tags: remove ≥5-word tags, year-stamped tags, cap at 15.
+    // Guards against model ignoring prompt constraints.
+    if (!Array.isArray(seo.tags)) seo.tags = []
+    const beforeFilter = seo.tags.length
+    seo.tags = seo.tags
+      .filter((tag) => tag.trim().split(/\s+/).length <= 4)          // drop ≥5-word tags
+      .filter((tag) => !/\b(19|20)\d{2}\b/.test(tag))               // drop year-stamped tags
+      .slice(0, 15)                                                   // cap at 15
+    if (seo.tags.length !== beforeFilter) {
+      console.log(`[seo] tags post-filter: ${beforeFilter} → ${seo.tags.length}`)
+    }
 
     await spendCredits(user.id, CREDIT_COSTS.seo, 'seo', project_id)
 
