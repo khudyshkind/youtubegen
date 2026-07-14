@@ -53,7 +53,7 @@ const DEFAULT_OVERLAY_PARAMS: TextOverlayParams = {
 // and returns JSON parameters that control exactly how text is rendered in Satori.
 // Each image gets its own analysis — no static presets by style name.
 
-async function analyzeImageForTextOverlay(bgDataUrl: string, title: string): Promise<TextOverlayParams> {
+async function analyzeImageForTextOverlay(bgDataUrl: string, title: string, refStyle?: string): Promise<TextOverlayParams> {
   try {
     const base64Data = bgDataUrl.split(',')[1]
     const mediaType = (bgDataUrl.split(';')[0].split(':')[1] ?? 'image/jpeg') as
@@ -74,7 +74,7 @@ async function analyzeImageForTextOverlay(bgDataUrl: string, title: string): Pro
           {
             type: 'text',
             text: `Video title to overlay: "${title}"
-
+${refStyle ? `Reference typography hint: "${refStyle}" — prefer a text color and stroke that match this style description.\n` : ''}
 Analyze the image (colors, brightness zones, visual style — cartoon/illustrated/realistic/cinematic/etc) and return optimal text overlay parameters as JSON:
 
 {
@@ -133,32 +133,50 @@ async function generateFluxPromptWithText(
   topic: string,
   imageStyle?: string,
   refStyle?: string,
+  hasRefUrl?: boolean,
 ): Promise<string> {
   try {
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 160,
-      system: `You write YouTube thumbnail image prompts for Flux AI image generator.
+    // refStyle (uploaded reference) wins unconditionally — single unambiguous style source
+    const effectiveStyle = refStyle || imageStyle || 'cinematic photography'
+
+    // When a pixel reference is present, NB2/edit will inherit typography from the reference image
+    // directly (color, outline, letter shape). Haiku must NOT also specify text styling — two
+    // competing sources cause the model to ignore the reference and invent its own colors.
+    const system = hasRefUrl
+      ? `You write YouTube thumbnail image prompts for Flux AI image generator.
+The prompt must place the video title text as a visible element in the scene.
+Rules:
+- Focus ONLY on scene composition, environment, and where to position the title text (framing, placement in frame)
+- Do NOT specify text color, outline, stroke, glow, font style or any typographic treatment — those are inherited from the reference image
+- CRITICAL: include the title text EXACTLY as given — never translate it, never rephrase it, preserve original language and spelling
+- 30–40 words. Prompt in English only (except the title itself). Return only the prompt text.`
+      : `You write YouTube thumbnail image prompts for Flux AI image generator.
 The prompt must naturally integrate the video title text as a visual element in the scene.
 Rules:
 - Decide how to style and position the title text based on the image style and scene mood
 - Describe the text styling organically as part of the scene description (e.g. "bold neon lettering", "hand-painted wooden sign with the title", "carved stone inscription", "comic book text bubble with the title", "retro painted billboard sign")
 - The scene composition should frame and complement the text
 - CRITICAL: include the title text EXACTLY as given — never translate it, never rephrase it, preserve original language and spelling
-- 35–45 words. Prompt in English only (except the title itself). Return only the prompt text.`,
-      messages: [{
-        role: 'user',
-        content: (() => {
-          // refStyle (uploaded reference) wins unconditionally — single unambiguous style source
-          const effectiveStyle = refStyle || imageStyle || 'cinematic photography'
-          return `Video title: "${title}"
+- 35–45 words. Prompt in English only (except the title itself). Return only the prompt text.`
+
+    const userMsg = hasRefUrl
+      ? `Video title: "${title}"
+Topic: "${topic}"
+Visual style: "${effectiveStyle}"
+
+Write a thumbnail image prompt placing the title "${title}" in the scene. Describe only the scene and where the text is positioned — do NOT describe text color, outline, or any typographic style.`
+      : `Video title: "${title}"
 Topic: "${topic}"
 Visual style: "${effectiveStyle}"
 
 Write a thumbnail image prompt where the title "${title}" is naturally integrated as a visual element, with text styling that matches the ${effectiveStyle} aesthetic.`
-        })(),
-      }],
+
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 160,
+      system,
+      messages: [{ role: 'user', content: userMsg }],
     })
     const block = msg.content[0]
     return block.type === 'text' ? block.text.trim()
@@ -236,7 +254,7 @@ async function generateThumbnailBg(prompt: string): Promise<string> {
 
 async function generateThumbnailBgWithRef(prompt: string, refUrl: string): Promise<string> {
   fal.config({ credentials: env('FAL_KEY') })
-  const editPrompt = `${prompt}. Create a NEW YouTube thumbnail composition; match the visual style, palette, lighting and mood of the reference image; do NOT copy its subject or layout.`
+  const editPrompt = `${prompt}. Create a NEW YouTube thumbnail composition; match the visual style, palette, lighting and mood of the reference image AND the typography treatment: text color, outline style, letter shape and placement manner — but render the NEW title text provided, not the words from the reference; do NOT copy its subject or layout.`
 
   // Primary: nano-banana-2/edit (same model, edit endpoint)
   try {
@@ -542,7 +560,7 @@ function buildThumbnailOverlay(
 
 // ─── Compose thumbnail with Claude-determined overlay params ───────────────────
 
-async function createThumbnailBuffer(bgDataUrl: string, title: string): Promise<{ buffer: Buffer; overlayParams: TextOverlayParams }> {
+async function createThumbnailBuffer(bgDataUrl: string, title: string, refStyle?: string): Promise<{ buffer: Buffer; overlayParams: TextOverlayParams }> {
   const lines = wrapText(title)
   const lineCount = lines.length
   const fontSize = lineCount === 1 ? 82 : lineCount === 2 ? 70 : 58
@@ -552,7 +570,7 @@ async function createThumbnailBuffer(bgDataUrl: string, title: string): Promise<
     MONTSERRAT_BLACK.byteOffset + MONTSERRAT_BLACK.byteLength,
   ) as ArrayBuffer
 
-  const overlayParams = await analyzeImageForTextOverlay(bgDataUrl, title)
+  const overlayParams = await analyzeImageForTextOverlay(bgDataUrl, title, refStyle)
   console.log('[thumbnail] overlay params from Claude:', JSON.stringify(overlayParams))
 
   const rootEl = buildThumbnailOverlay(bgDataUrl, lines, fontSize, overlayParams)
@@ -600,7 +618,7 @@ export async function POST(request: NextRequest) {
     if (dry_run) {
       const prompt = custom_prompt?.trim() || (
         text_mode === 'ai'
-          ? await generateFluxPromptWithText(title, topic, image_style, ref_style)
+          ? await generateFluxPromptWithText(title, topic, image_style, ref_style, !!ref_url)
           : await generateFluxPromptBackground(title, topic, ref_style, image_style)
       )
       return NextResponse.json({ ok: true, data: { prompt } })
@@ -624,7 +642,7 @@ export async function POST(request: NextRequest) {
     } else {
       const rawPrompt = custom_prompt?.trim() || (
         text_mode === 'ai'
-          ? await generateFluxPromptWithText(title, topic, image_style, ref_style)
+          ? await generateFluxPromptWithText(title, topic, image_style, ref_style, !!ref_url)
           : await generateFluxPromptBackground(title, topic, ref_style, image_style)
       )
 
@@ -670,7 +688,7 @@ export async function POST(request: NextRequest) {
 
     if (text_mode === 'overlay') {
       // Mode A: Claude analyzes the actual image → dynamic text overlay params → Satori render
-      const result = await createThumbnailBuffer(bgDataUrl, title.trim())
+      const result = await createThumbnailBuffer(bgDataUrl, title.trim(), ref_style ?? undefined)
       thumbBuf = result.buffer
       overlayParams = result.overlayParams
     } else {
