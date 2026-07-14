@@ -294,7 +294,7 @@ function buildSectionUserMessage(
 
   const lines: string[] = [
     `Напиши фрагмент сценария — секция ${idx + 1} из ${total} видео на тему: "${p.topic}".`,
-    `Объём секции: от ${Math.round(wordsTarget * 1.3)} до ${Math.round(wordsTarget * 1.6)} слов. Не короче нижней границы — секция с недобором будет отклонена. Пиши развёрнуто, не обрывай мысли.`,
+    `Объём секции: от ${Math.round(wordsTarget * 1.05)} до ${Math.round(wordsTarget * 1.25)} слов. Не короче нижней границы — секция с недобором будет отклонена. Пиши развёрнуто, не обрывай мысли.`,
     '',
   ]
 
@@ -364,7 +364,7 @@ async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): 
     return { text: block.type === 'text' ? block.text.trim() : '', stopReason: message.stop_reason }
   }
 
-  const guardSection = (result: GenResult) => isGuardOk(result.stopReason, result.text, wordsPerSection)
+  const guardSection = (result: GenResult) => isGuardOk(result.stopReason, result.text, wordsPerSection, 0.75)
 
   // prompt caching вернуть, если системник вырастет ≥1024 ток
   const results = await runParallelGuarded(sections, callSection, guardSection, 'generate/script-chunked')

@@ -17,12 +17,14 @@ export function calcMaxTokens(inputText: string): number {
 }
 
 // Returns true when the model finished normally AND the output retained enough words.
+// ratio defaults to MIN_OUTPUT_RATIO (0.85); chunked-section calls pass 0.75.
 export function isGuardOk(
   stopReason: string | null | undefined,
   outputText: string,
   inputWords: number,
+  ratio = MIN_OUTPUT_RATIO,
 ): boolean {
-  return stopReason !== 'max_tokens' && countWords(outputText) >= inputWords * MIN_OUTPUT_RATIO
+  return stopReason !== 'max_tokens' && countWords(outputText) >= inputWords * ratio
 }
 
 // ── Chunk-processing helpers ────────────────────────────────────────────────
