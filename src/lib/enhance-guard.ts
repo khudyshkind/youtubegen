@@ -207,7 +207,9 @@ export async function runParallelGuarded<I, R>(
 
   const wave1: Array<R | null> = await Promise.all(
     items.map((item, i) => callFn(item, i).catch((e) => {
-      console.warn(`[${logPrefix}] item=${i + 1} wave1 threw: ${e instanceof Error ? e.message : e}`)
+      const httpStatus = (e instanceof Error && 'status' in e) ? ` [${(e as { status: unknown }).status}]` : ''
+      const errMsg = e instanceof Error ? e.message : String(e)
+      console.warn(`[${logPrefix}] item=${i + 1} wave1 threw${httpStatus}: ${errMsg}`)
       return null
     }))
   )
@@ -220,7 +222,9 @@ export async function runParallelGuarded<I, R>(
     console.warn(`[${logPrefix}] guard fail wave1 items=[${failedIdx.map(i => i + 1)}] — retrying`)
     const wave2 = await Promise.all(
       failedIdx.map(i => callFn(items[i], i).catch((e) => {
-        console.warn(`[${logPrefix}] item=${i + 1} wave2 threw: ${e instanceof Error ? e.message : e}`)
+        const httpStatus = (e instanceof Error && 'status' in e) ? ` [${(e as { status: unknown }).status}]` : ''
+        const errMsg = e instanceof Error ? e.message : String(e)
+        console.warn(`[${logPrefix}] item=${i + 1} wave2 threw${httpStatus}: ${errMsg}`)
         return null
       }))
     )
