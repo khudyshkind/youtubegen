@@ -43,11 +43,11 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fallbackPrompt: 'Cinematic scene related to {topic}, dramatic lighting, movie still, wide angle',
   },
   'flat 2D doodle cartoon, minimalist stick figures, bold black outlines, simple comedic style': {
-    claudeInstruction: 'Minimalist doodle cartoon scene. Stick-figure characters with round white heads, simple dot eyes, thin limbs. Describe only actions and objects — no complex faces, no realistic textures, no detailed clothing. Bold outlines, flat colors. 20–25 words.',
-    fluxSuffix: 'flat 2D doodle cartoon style, minimalist character design, round white head, simple black dot eyes, thin stick-figure body, bold black outlines, flat color illustration, simple comedic animation style, vector art, expressive minimalistic faces, hyperbolic comedic poses',
-    negativePrompt: 'photorealistic, photograph, 3d render, detailed shading, gradient, realistic anatomy, complex textures, cinematic lighting, watercolor, pencil sketch, detailed faces, text, numbers, digits, numerals, typography, lettering, written words',
-    enhanceSystemHint: 'Minimalist doodle cartoon style with simple stick-figure characters, bold black outlines, flat colors. No photorealism, no detail.',
-    fallbackPrompt: 'Simple doodle cartoon scene related to {topic}, stick figure characters, flat colors, bold outlines, minimalist style',
+    claudeInstruction: 'Doodle cartoon scene. Stick-figure characters with round heads, simple dot eyes, thin limbs — but ALWAYS describe a full, specific environment around them (place, background objects, weather/season, colorful details) and any animals/objects involved. Simple characters, rich scene. 35–45 words.',
+    fluxSuffix: 'doodle cartoon illustration, stick-figure characters with round heads and dot eyes, bold thick black outlines, vibrant saturated flat colors, fully colored detailed background scene, cartoon environment with props and scenery, webtoon comic style, playful expressive poses',
+    negativePrompt: 'photorealistic, photograph, 3d render, detailed shading, realistic anatomy, complex textures, cinematic lighting, watercolor, pencil sketch, detailed faces, white background, empty background, plain background, blank canvas, isolated object, sparse composition, text, numbers, digits, numerals, typography, lettering, written words',
+    enhanceSystemHint: 'Doodle cartoon style: simple stick-figure characters, bold outlines, vibrant flat colors, but always in a full, colorful, detailed scene with background environment. Simple characters, rich world.',
+    fallbackPrompt: 'Doodle cartoon scene related to {topic}, stick figure characters with round heads, bold black outlines, vibrant flat colors, in a colorful detailed environment, vibrant background scene',
   },
   'neon cyberpunk style, vibrant neon colors, futuristic dystopia': {
     claudeInstruction: 'Neon cyberpunk aesthetic. Futuristic urban dystopia, glowing neon lights. Describe city scenes with neon glow vocabulary. 20–25 words.',
