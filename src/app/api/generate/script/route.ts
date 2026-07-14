@@ -284,11 +284,10 @@ function buildSectionUserMessage(
   p: ScriptParams,
   section: PlanSection,
   idx: number,
-  total: number,
+  sections: PlanSection[],
   wordsTarget: number,
-  prevSection: PlanSection | null,
-  nextSection: PlanSection | null,
 ): string {
+  const total = sections.length
   const isFirst = idx === 0
   const isLast  = idx === total - 1
 
@@ -296,18 +295,13 @@ function buildSectionUserMessage(
     `Напиши фрагмент сценария — секция ${idx + 1} из ${total} видео на тему: "${p.topic}".`,
     `Объём секции: от ${Math.round(wordsTarget * 1.05)} до ${Math.round(wordsTarget * 1.25)} слов. Не короче нижней границы — секция с недобором будет отклонена. Пиши развёрнуто, не обрывай мысли.`,
     '',
+    'Полная структура видео (что раскрыто в других секциях — НЕ повторяй их факты, не представляй заново людей/объекты, упомянутые там):',
+    ...sections.map((s, i) => `${i + 1}. ${s.title}: ${s.description}`),
+    '',
+    '[Содержание ЭТОЙ секции — напиши только её]:',
+    `${section.title}: ${section.description}`,
+    '',
   ]
-
-  if (prevSection || nextSection) {
-    lines.push('[Контекст соседних секций — в твой текст НЕ включать]:')
-    if (prevSection) lines.push(`Предыдущая: "${prevSection.title}" — ${prevSection.description}`)
-    if (nextSection) lines.push(`Следующая: "${nextSection.title}" — ${nextSection.description}`)
-    lines.push('')
-  }
-
-  lines.push('[Содержание этой секции]:')
-  lines.push(`${section.title}: ${section.description}`)
-  lines.push('')
 
   if (isFirst) {
     if (p.hook) {
@@ -316,7 +310,7 @@ function buildSectionUserMessage(
       lines.push('Начни со вступления к видео.')
     }
   } else {
-    lines.push('Начни сразу с содержания секции (без приветствий, вступлений и анонса).')
+    lines.push('Начни секцию сразу с содержания, БЕЗ шаблонных открытий («Представьте себе», «Давайте поговорим», «Итак»). Первое предложение — конкретный факт, сцена или вопрос, свой для этой секции.')
   }
 
   if (isLast) {
@@ -347,9 +341,7 @@ async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): 
   console.log(`[generate/script] chunked model=${modelId} sections=${sections.length} wordsPerSec=${wordsPerSection}`)
 
   const callSection = async (section: PlanSection, idx: number): Promise<GenResult> => {
-    const prevSection = idx > 0 ? sections[idx - 1] : null
-    const nextSection = idx < sections.length - 1 ? sections[idx + 1] : null
-    const userMessage = buildSectionUserMessage(p, section, idx, sections.length, wordsPerSection, prevSection, nextSection)
+    const userMessage = buildSectionUserMessage(p, section, idx, sections, wordsPerSection)
 
     const message = await anthropic.messages.create({
       model: modelId,
@@ -366,7 +358,8 @@ async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): 
 
   const guardSection = (result: GenResult) => isGuardOk(result.stopReason, result.text, wordsPerSection, 0.75)
 
-  // prompt caching вернуть, если системник вырастет ≥1024 ток
+  // prompt caching: system ~220 tok + план ~500-650 tok ≈ 720-870 < 1024 (минимум Sonnet) → не активируется.
+  // Вернуть cache_control + прогрев, если system+план вырастут ≥1024 ток.
   const results = await runParallelGuarded(sections, callSection, guardSection, 'generate/script-chunked')
   if (results === null) return null
 
