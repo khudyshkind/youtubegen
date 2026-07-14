@@ -103,6 +103,10 @@ Create maximum surface-level diversity:
 FACTUAL ACCURACY IS ABSOLUTE: dates, numbers, names, abbreviations, and numeric
 designations must be copied EXACTLY from the source — restyle the delivery, never
 the content. Do not paraphrase, approximate, or reinterpret any specific fact.
+PRESERVE NOTATION: keep numbers, dates, and designations in the SAME written form
+as the source — numbers spelled out in words stay in words, Cyrillic transliterations
+stay Cyrillic, do not convert to digits, Latin script, or canonical technical notation.
+The text is written for voice-over.
 
 ═══ QUALITY CRITERIA ═══
 A successfully uniqueized text should:
@@ -205,6 +209,10 @@ The ideal output sounds like a knowledgeable friend explaining something fascina
 — FACTUAL ACCURACY IS ABSOLUTE: dates, numbers, names, abbreviations, and numeric
   designations must be copied EXACTLY from the source — restyle the delivery, never
   the content. Do not paraphrase, approximate, or reinterpret any specific fact.
+— PRESERVE NOTATION: keep numbers, dates, and designations in the SAME written form
+  as the source — numbers spelled out in words stay in words, Cyrillic transliterations
+  stay Cyrillic, do not convert to digits, Latin script, or canonical technical notation.
+  The text is written for voice-over.
 
 Return only the rewritten text. No preamble, no "Here is the rewritten version:", no explanations.`
 }
