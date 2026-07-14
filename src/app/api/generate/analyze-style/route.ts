@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { createServerSupabase } from '@/lib/supabase-server'
+import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 
@@ -63,9 +63,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Не удалось определить стиль' }, { status: 502 })
     }
 
+    // Store image in Supabase so thumbnail/route.ts can pass the public URL to NB2-edit as image_urls.
+    // Supabase public URL is accessible by fal.ai directly — no auth header needed.
+    let refUrl: string | null = null
+    try {
+      const serviceClient = createServiceClient()
+      const ext = mediaType === 'image/png' ? 'png' : mediaType === 'image/webp' ? 'webp' : 'jpg'
+      const refPath = projectId
+        ? `${user.id}/${projectId}/thumbnail_ref.${ext}`
+        : `${user.id}/thumbnail_ref.${ext}`
+      await serviceClient.storage.from('images').upload(refPath, buffer, {
+        contentType: mediaType,
+        upsert: true,
+      })
+      const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(refPath)
+      refUrl = publicUrl
+      console.log(`[analyze-style] ref stored: ${refPath}`)
+    } catch (e) {
+      console.warn('[analyze-style] ref storage upload failed (non-fatal):', e instanceof Error ? e.message : e)
+    }
+
     await spendCredits(user.id, 2, 'style_analysis', projectId ?? undefined)
 
-    return NextResponse.json({ ok: true, data: { style_description: styleDescription } })
+    return NextResponse.json({ ok: true, data: { style_description: styleDescription, ref_url: refUrl } })
   } catch (error) {
     console.error('[analyze-style]', error)
     return NextResponse.json({ ok: false, error: 'Ошибка анализа стиля' }, { status: 500 })

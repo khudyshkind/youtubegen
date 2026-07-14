@@ -83,6 +83,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
 
   // Reference style
   const [refStyle, setRefStyle] = useState<string | null>(null)
+  const [refUrl, setRefUrl] = useState<string | null>(null)
   const [refPreview, setRefPreview] = useState<string | null>(null)
   const [refAnalyzing, setRefAnalyzing] = useState(false)
   const refInputRef = useRef<HTMLInputElement>(null)
@@ -139,6 +140,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
       }
       const desc: string = json.data.style_description
       setRefStyle(desc)
+      setRefUrl((json.data.ref_url as string | null) ?? null)
       await loadPrompt(desc)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('thumb.err_gen'))
@@ -164,6 +166,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
           bg_url: opts.regenBg ? undefined : (thumbnailBgUrl ?? undefined),
           custom_prompt: opts.useCustomPrompt && promptText.trim() ? promptText.trim() : undefined,
           ref_style: refStyle ?? undefined,
+          ref_url: refUrl ?? undefined,
           text_mode: thumbnailTextMode,
           image_style: imageStyle ?? undefined,
         }),
@@ -314,7 +317,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
               <img src={refPreview} alt="ref" className="w-10 h-10 object-cover rounded-lg" />
               <button
                 type="button"
-                onClick={() => { setRefPreview(null); setRefStyle(null) }}
+                onClick={() => { setRefPreview(null); setRefStyle(null); setRefUrl(null) }}
                 className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-white flex items-center justify-center"
                 style={{ background: '#EF4444', fontSize: 10, lineHeight: 1 }}
               >

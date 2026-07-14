@@ -11,6 +11,7 @@ import { requireCredits, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { ThumbnailTextMode, TextOverlayParams } from '@/lib/thumbnail-text-presets'
+import { getStyleConfig } from '@/lib/image-style-configs'
 
 const MONTSERRAT_BLACK = readFileSync(
   join(process.cwd(), 'public', 'fonts', 'Montserrat-Black.ttf'),
@@ -26,6 +27,7 @@ interface ThumbnailRequest {
   dry_run?: boolean
   custom_prompt?: string
   ref_style?: string
+  ref_url?: string
   text_mode?: ThumbnailTextMode
   image_style?: string
 }
@@ -224,6 +226,50 @@ async function generateThumbnailBg(prompt: string): Promise<string> {
   if (!url) throw new Error('Flux не вернул изображение')
   console.log('[thumbnail] flux/dev fallback succeeded (1280x720)')
   return await fetchAsBase64(url)
+}
+
+// ─── Reference-edit cascade: NB2/edit → NB1/edit → text-to-image fallback ────
+//
+// fal-ai/nano-banana-2/edit accepts image_urls (Supabase public URL) + prompt.
+// Instruction: generate new composition, match reference style, don't copy subject.
+// Falls back to the existing text-to-image cascade if both edit endpoints fail.
+
+async function generateThumbnailBgWithRef(prompt: string, refUrl: string): Promise<string> {
+  fal.config({ credentials: env('FAL_KEY') })
+  const editPrompt = `${prompt}. Create a NEW YouTube thumbnail composition; match the visual style, palette, lighting and mood of the reference image; do NOT copy its subject or layout.`
+
+  // Primary: nano-banana-2/edit (same model, edit endpoint)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await (fal.subscribe as any)('fal-ai/nano-banana-2/edit', {
+      input: { prompt: editPrompt, image_urls: [refUrl], aspect_ratio: '16:9', resolution: '1K', num_images: 1, output_format: 'jpeg' },
+    }) as { data: { images: Array<{ url: string; width?: number; height?: number }> } }
+    const img = r.data?.images?.[0]
+    if (!img?.url) throw new Error('no image returned')
+    checkThumbRatio(img.width ?? 0, img.height ?? 0, 'nano-banana-2/edit')
+    console.log('[thumbnail] nano-banana-2/edit succeeded')
+    return await fetchAsBase64(img.url)
+  } catch (e) {
+    console.warn('[thumbnail] nano-banana-2/edit failed:', e instanceof Error ? e.message : e)
+  }
+
+  // Secondary: nano-banana/edit
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await (fal.subscribe as any)('fal-ai/nano-banana/edit', {
+      input: { prompt: editPrompt, image_urls: [refUrl], aspect_ratio: '16:9', num_images: 1, output_format: 'jpeg' },
+    }) as { data: { images: Array<{ url: string; width?: number; height?: number }> } }
+    const img = r.data?.images?.[0]
+    if (!img?.url) throw new Error('no image returned')
+    checkThumbRatio(img.width ?? 0, img.height ?? 0, 'nano-banana/edit')
+    console.log('[thumbnail] nano-banana/edit succeeded')
+    return await fetchAsBase64(img.url)
+  } catch (e) {
+    console.warn('[thumbnail] nano-banana/edit failed, falling back to text-to-image cascade:', e instanceof Error ? e.message : e)
+  }
+
+  // Fallback: text-to-image cascade (ref_style text description already in prompt via Haiku)
+  return generateThumbnailBg(prompt)
 }
 
 // ─── Mode A/C: background-only Flux prompt ────────────────────────────────────
@@ -531,7 +577,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: ThumbnailRequest = await request.json()
-    const { project_id, title, topic, bg_url, dry_run, custom_prompt, ref_style, text_mode = 'overlay', image_style } = body
+    const { project_id, title, topic, bg_url, dry_run, custom_prompt, ref_style, ref_url, text_mode = 'overlay', image_style } = body
 
     if (!project_id || !title?.trim() || !topic?.trim()) {
       return NextResponse.json(
@@ -540,11 +586,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // THUMBNAIL_AI_TEXT_ENGINE: when set to 'gpt' or 'gemini', mode=ai uses external engine for text-in-image.
+    // Default 'nano_banana_2' (NB2 cascade). Set in Vercel env if switching engines.
     const AI_TEXT_ENGINE_HINT = text_mode === 'ai'
       ? (process.env.THUMBNAIL_AI_TEXT_ENGINE ?? 'nano_banana_2')
       : 'overlay'
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, text_mode, engine: AI_TEXT_ENGINE_HINT })
+
+    console.log(`[thumbnail] image_style="${image_style ?? 'none'}" ref_style="${(ref_style ?? '').slice(0, 60) || 'none'}" ref_url=${ref_url ? 'yes' : 'no'}`)
 
     // dry_run: return the Flux prompt only — no image generation, no credits
     if (dry_run) {
@@ -572,11 +622,16 @@ export async function POST(request: NextRequest) {
         .getPublicUrl(`${user.id}/${project_id}/thumbnail_bg.jpg`)
       storedBgUrl = publicUrl
     } else {
-      const prompt = custom_prompt?.trim() || (
+      const rawPrompt = custom_prompt?.trim() || (
         text_mode === 'ai'
           ? await generateFluxPromptWithText(title, topic, image_style, ref_style)
           : await generateFluxPromptBackground(title, topic, ref_style, image_style)
       )
+
+      // Apply project illustration style suffix for visual consistency — same as image-single/route.ts.
+      // Skip when ref_url is present: pixel reference controls style, two sources would conflict.
+      const fluxSuffix = (image_style && !ref_url) ? getStyleConfig(image_style).fluxSuffix : ''
+      const prompt = fluxSuffix ? `${rawPrompt}, ${fluxSuffix}` : rawPrompt
 
       // Mode B: GPT/Gemini only if explicitly set via env; default → nano-banana-2 cascade
       const AI_TEXT_ENGINE = (process.env.THUMBNAIL_AI_TEXT_ENGINE ?? 'nano_banana_2') as 'flux' | 'gpt' | 'gemini' | 'nano_banana_2'
@@ -587,6 +642,10 @@ export async function POST(request: NextRequest) {
         bgDataUrl = AI_TEXT_ENGINE === 'gemini'
           ? await generateGeminiThumbnail(prompt)
           : await generateGptThumbnail(prompt)
+      } else if (ref_url) {
+        const editBase = text_mode === 'ai' ? prompt : `${prompt}, NO TEXT, NO WATERMARKS`
+        console.log(`[thumbnail] mode=${text_mode} engine=nano-banana-2/edit (ref) prompt: ${editBase}`)
+        bgDataUrl = await generateThumbnailBgWithRef(editBase, ref_url)
       } else {
         const fluxPrompt = text_mode === 'ai' ? prompt : `${prompt}, NO TEXT, NO WATERMARKS`
         console.log(`[thumbnail] mode=${text_mode} engine=nano-banana-2 (cascade) prompt: ${fluxPrompt}`)
