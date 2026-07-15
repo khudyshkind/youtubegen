@@ -25,7 +25,7 @@ export const NO_TEXT_POSITIVE = 'clean wordless illustration, no speech bubbles,
 export const STYLE_CONFIGS: Record<string, StyleConfig> = {
   'hand-drawn illustration, pencil sketch style, artistic line art': {
     claudeInstruction: 'Hand-drawn pencil sketch only. Black and white line art. Describe subject and composition using pencil-sketch vocabulary: hatching, cross-hatching, pencil strokes. 20–25 words.',
-    fluxSuffix: 'hand-drawn pencil sketch, black and white line art, hatching technique, pencil strokes, monochrome illustration',
+    fluxSuffix: 'hand-drawn pencil sketch, black and white line art, hatching technique, pencil strokes, monochrome illustration, monochrome pencil rendering, no color fills',
     negativePrompt: 'photorealistic, photograph, color, cinematic lighting, cartoon, watercolor, digital art, oil painting, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Hand-drawn pencil sketch style. Black and white. No color, no photo, no cinematic.',
     fallbackPrompt: 'Hand-drawn pencil sketch of scene related to {topic}, black and white line art, detailed hatching',
@@ -39,14 +39,14 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
   },
   'watercolor painting style, soft colors, textured paper, artistic': {
     claudeInstruction: 'Watercolor painting. Soft blended colors, textured paper. Describe subjects with painterly vocabulary: washes, wet-on-wet, soft edges. 20–25 words.',
-    fluxSuffix: 'watercolor painting, soft blended washes, wet-on-wet technique, textured paper background, artistic painting',
+    fluxSuffix: 'watercolor painting, soft blended washes, wet-on-wet technique, textured paper background, artistic painting, soft bleeding edges, no sharp outlines',
     negativePrompt: 'photorealistic, photograph, cinematic lighting, sharp lines, pencil sketch, cartoon, digital art, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Watercolor painting style. Soft blended colors. No sharp lines, no photo, no cinematic.',
     fallbackPrompt: 'Watercolor painting of scene related to {topic}, soft blended colors, textured paper',
   },
   'cinematic photography, dramatic lighting, movie still, wide-angle': {
     claudeInstruction: 'Cinematic movie still frame. CRITICAL: first describe the actual subject, action and setting from the scene text — what is happening, who or what is in frame, and where. Apply cinematic treatment (dramatic lighting, wide-angle, depth of field) only as framing around that concrete content. The subject and action must stay clearly identifiable, never replaced by mood words. 25-35 words.',
-    fluxSuffix: 'cinematic photography, dramatic lighting, movie still, wide-angle lens, film grain, depth of field',
+    fluxSuffix: 'cinematic photography, dramatic lighting, movie still, wide-angle lens, film grain, depth of field, real film photography, live-action movie still, photographic realism, no cartoon, no illustration, no anime',
     negativePrompt: 'cartoon, sketch, watercolor, painting, illustration, anime, low quality, blurry, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Cinematic photography style. Dramatic lighting, movie still.',
     fallbackPrompt: 'Cinematic scene related to {topic}, dramatic lighting, movie still, wide angle',
@@ -60,7 +60,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
   },
   'neon cyberpunk style, vibrant neon colors, futuristic dystopia': {
     claudeInstruction: 'Neon cyberpunk aesthetic. Futuristic urban dystopia, glowing neon lights. Describe city scenes with neon glow vocabulary. 20–25 words.',
-    fluxSuffix: 'neon cyberpunk aesthetic, glowing neon lights, futuristic city, dark dystopian atmosphere, vibrant neon colors',
+    fluxSuffix: 'neon cyberpunk aesthetic, glowing neon lights, futuristic city, dark dystopian atmosphere, vibrant neon colors, nighttime scene only, dark sky, wet reflective streets lit by neon signs, no daylight, no natural sunlight',
     negativePrompt: 'naturalistic, daytime countryside, watercolor, pencil sketch, cartoon, soft colors, pastel, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Neon cyberpunk style. Futuristic city, glowing neon. No naturalism, no soft colors.',
     fallbackPrompt: 'Cyberpunk neon scene related to {topic}, futuristic city, glowing neon lights',
@@ -74,7 +74,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
   },
   'anime style, cel shading, Japanese animation, expressive characters': {
     claudeInstruction: 'Anime illustration in modern Japanese animation style. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with clean cel-shaded lines, expressive eyes, vibrant colors. 20-25 words.',
-    fluxSuffix: 'anime style, cel shading, clean linework, expressive large eyes, vibrant colors, modern Japanese animation',
+    fluxSuffix: 'anime style, cel shading, clean linework, expressive large eyes, vibrant colors, modern Japanese animation, Japanese anime aesthetic, no western cartoon style',
     negativePrompt: 'photorealistic, photograph, 3d render, western cartoon, pencil sketch, watercolor, oil painting, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Anime illustration style. Cel shading, clean linework. No photorealism, no western cartoon.',
     fallbackPrompt: 'Anime-style illustration of scene related to {topic}, cel shading, vibrant colors, expressive characters',
@@ -88,14 +88,14 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
   },
   'oil painting, visible brushstrokes, impasto texture, classical palette': {
     claudeInstruction: 'Classical oil painting. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with visible brushstrokes, rich textured impasto, warm classical palette. 20-25 words.',
-    fluxSuffix: 'oil painting, visible brushstrokes, textured impasto, rich classical palette, canvas texture, old master style',
+    fluxSuffix: 'oil painting, visible brushstrokes, textured impasto, rich classical palette, canvas texture, old master style, visible impasto brush strokes, rich tonal blending, no flat colors',
     negativePrompt: 'photorealistic, photograph, 3d render, digital art, cartoon, anime, pencil sketch, flat colors, cgi, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Classical oil painting style. Visible brushstrokes, impasto texture. No photorealism, no digital art.',
     fallbackPrompt: 'Oil painting of scene related to {topic}, visible brushstrokes, rich textured colors, classical style',
   },
   'dark atmospheric, low-key lighting, deep shadows, moody cinematic': {
     claudeInstruction: 'Dark atmospheric cinematic scene. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with deep shadows, moody low-key lighting, muted desaturated tones, heavy atmosphere. 25-35 words.',
-    fluxSuffix: 'dark atmospheric, low-key lighting, deep shadows, moody, muted desaturated colors, cinematic, dramatic chiaroscuro',
+    fluxSuffix: 'dark atmospheric, low-key lighting, deep shadows, moody, muted desaturated colors, cinematic, dramatic chiaroscuro, dark low-key scene, nighttime or dim lighting only, muted desaturated palette, no bright daylight, no cheerful vibrant colors',
     negativePrompt: 'bright, cheerful, vibrant colors, cartoon, sketch, watercolor, high-key lighting, pastel, daytime, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Dark atmospheric style. Low-key lighting, deep shadows. No bright colors, no cartoon.',
     fallbackPrompt: 'Dark atmospheric scene related to {topic}, deep shadows, moody lighting, muted tones',
