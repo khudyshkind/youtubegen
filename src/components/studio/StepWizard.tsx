@@ -4,7 +4,7 @@ import React, { Suspense, useEffect, useState, useRef, useCallback } from 'react
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useStudioStore, stampAudioUrl } from '@/lib/studio-store'
 import type { Project } from '@/lib/types'
-import { CREDIT_COSTS } from '@/lib/types'
+import { CREDIT_COSTS, IMAGE_COUNT_MAX } from '@/lib/types'
 import Step1Topic from './Step1Topic'
 import Step2Plan from './Step2Plan'
 import Step2Script from './Step2Script'
@@ -59,7 +59,7 @@ function StepWizardInner() {
   const durationSec = subtitleBlocks.length > 0
     ? Math.ceil(subtitleBlocks[subtitleBlocks.length - 1].end)
     : scriptParams.duration_minutes * 60
-  const imgCount = Math.max(1, Math.ceil(durationSec / imageInterval))
+  const imgCount = Math.min(IMAGE_COUNT_MAX, Math.max(1, Math.ceil(durationSec / imageInterval)))
   const costPerImg = imageEngine === 'gpt_mini'    ? CREDIT_COSTS.image_gpt_mini
     : imageEngine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell
     : imageEngine === 'nano_banana'  ? CREDIT_COSTS.image_nano_banana

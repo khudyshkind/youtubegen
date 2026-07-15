@@ -6,7 +6,7 @@ import { createServerSupabase, createServiceClient } from '@/lib/supabase-server
 import { hasCredits, spendCredits } from '@/lib/credits'
 import { isBillingError, notifyBillingError } from '@/lib/telegram'
 import { env } from '@/lib/env'
-import { CREDIT_COSTS, ENGINE_DISPLAY } from '@/lib/types'
+import { CREDIT_COSTS, ENGINE_DISPLAY, IMAGE_COUNT_MAX } from '@/lib/types'
 import type { SceneImage, SubtitleBlock } from '@/lib/types'
 import { getStyleConfig } from '@/lib/image-style-configs'
 import type { StyleConfig } from '@/lib/image-style-configs'
@@ -722,7 +722,7 @@ export async function POST(request: NextRequest) {
   Sentry.setUser({ id: user.id })
   Sentry.setContext('generate', { project_id, engine, image_count })
 
-  const count = Math.max(1, Math.min(200, image_count ?? 1))
+  const count = Math.max(1, Math.min(IMAGE_COUNT_MAX, image_count ?? 1))
   const interval = Math.max(3, Math.min(300, image_interval ?? 10))
   const costPerImage =
     engine === 'gpt_mini'     ? CREDIT_COSTS.image_gpt_mini :

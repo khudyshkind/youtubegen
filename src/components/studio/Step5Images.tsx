@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import ConfirmModal from '@/components/shared/ConfirmModal'
 import { exportPrompts } from '@/lib/exportPrompts'
-import { CREDIT_COSTS, IMAGE_STYLES, IMAGE_INTERVAL_MIN, IMAGE_INTERVAL_MAX } from '@/lib/types'
+import { CREDIT_COSTS, IMAGE_STYLES, IMAGE_INTERVAL_MIN, IMAGE_INTERVAL_MAX, IMAGE_COUNT_MAX } from '@/lib/types'
 import type { SceneImage, ImageStyleKey } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
@@ -236,13 +236,15 @@ export default function Step5Images() {
   const showAudioChangedBanner =
     storedAudioFp !== undefined && currentAudioFp !== storedAudioFp
 
-  const imageCount = Math.max(1, Math.ceil(audioDurationSec / imageInterval))
+  const imageCount = Math.min(IMAGE_COUNT_MAX, Math.max(1, Math.ceil(audioDurationSec / imageInterval)))
+  const isCountCapped = Math.ceil(audioDurationSec / imageInterval) > IMAGE_COUNT_MAX
+  const effectiveIntervalWhenCapped = isCountCapped ? Math.ceil(audioDurationSec / IMAGE_COUNT_MAX) : null
   const costPerImage =
     imageEngine === 'gpt_mini'     ? CREDIT_COSTS.image_gpt_mini :
     imageEngine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell :
     imageEngine === 'nano_banana'  ? CREDIT_COSTS.image_nano_banana :
     CREDIT_COSTS.image_flux
-  // displayCount respects the "reduce to 20" override; actual imageCount is unaffected
+  // displayCount respects the "reduce to 20" GPT-mini override; imageCount already clamped to IMAGE_COUNT_MAX
   const displayCount = gptCountOverride ?? imageCount
   const creditCost = displayCount * costPerImage
 
@@ -606,6 +608,13 @@ export default function Step5Images() {
             Итого: <strong className="text-violet-400">{creditCost} {t('nav.credits_suffix')}</strong>
           </p>
         </div>
+        {isCountCapped && effectiveIntervalWhenCapped !== null && (
+          <p className="text-xs text-amber-400">
+            {t('step5.count_capped')
+              .replace('{N}', String(IMAGE_COUNT_MAX))
+              .replace('{X}', String(effectiveIntervalWhenCapped))}
+          </p>
+        )}
       </div>
 
       {/* Engine selector */}
