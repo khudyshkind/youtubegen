@@ -4,6 +4,11 @@
 // IMPORTANT: "NOT X" in a Flux positive prompt does NOT work as negation — Flux processes
 // the word "photorealistic" regardless of "NOT" before it. Always put unwanted concepts in
 // the separate negativePrompt field, which maps to Flux's native negative_prompt parameter.
+//
+// negativePrompt is ONLY forwarded to fal-ai/flux/dev (image-single:260, images:723).
+// flux_schnell, nano_banana and gpt_mini silently ignore it — their API has no such field.
+// NO_TEXT_POSITIVE is therefore injected into every fluxSuffix via getStyleConfig() so the
+// anti-text constraint reaches all four engines as a positive directive.
 
 export interface StyleConfig {
   claudeInstruction: string     // replaces generic "Cinematic lighting, photorealistic" in Claude prompts
@@ -12,6 +17,10 @@ export interface StyleConfig {
   enhanceSystemHint: string     // injected into enhancePrompt system prompt for single-image regen
   fallbackPrompt: string        // template for failed/missing scene prompts ({topic} is replaced)
 }
+
+// Injected into every fluxSuffix by getStyleConfig() — works on ALL engines (flux, schnell, NB, GPT)
+// because those engines have no negativePrompt field. Positive constraint is the only reliable lever.
+export const NO_TEXT_POSITIVE = 'clean wordless illustration, no speech bubbles, no signs, no labels, no captions, no written words or letters anywhere, characters express meaning through poses gestures and facial expressions only'
 
 export const STYLE_CONFIGS: Record<string, StyleConfig> = {
   'hand-drawn illustration, pencil sketch style, artistic line art': {
@@ -43,7 +52,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fallbackPrompt: 'Cinematic scene related to {topic}, dramatic lighting, movie still, wide angle',
   },
   'flat 2D doodle cartoon, minimalist stick figures, bold black outlines, simple comedic style': {
-    claudeInstruction: 'Doodle cartoon scene. Stick-figure characters — humans AND animals are all drawn as simple doodles with round heads, dot eyes and thin limbs (a doodle monkey is a stick figure with monkey ears/tail, not a realistic monkey) — but ALWAYS describe a full, specific environment around them (place, background objects, weather/season, colorful details). Simple characters, rich scene. 35–45 words.',
+    claudeInstruction: 'Doodle cartoon scene. Stick-figure characters — humans AND animals are all drawn as simple doodles with round heads, dot eyes and thin limbs (a doodle monkey is a stick figure with monkey ears/tail, not a realistic monkey) — but ALWAYS describe a full, specific environment around them (place, background objects, weather/season, colorful details). Never describe signs, labels, books with visible text, banners, screens with text, or characters speaking in bubbles. The illustration must be wordless — convey meaning through action, posture and objects. Simple characters, rich scene. 35–45 words.',
     fluxSuffix: 'flat 2D doodle cartoon illustration, ALL characters — humans and animals alike — drawn as simple stick-figure doodles with round heads, dot eyes and thin limbs, bold thick black outlines, vibrant saturated flat colors, no shading, no 3D volume, colorful cartoon background environment with props and scenery, playful expressive poses',
     negativePrompt: 'photorealistic, photograph, 3d render, 3d volume, shading, fur texture, detailed animals, realistic animals, pixar style, rendered characters, realistic anatomy, complex textures, cinematic lighting, watercolor, pencil sketch, detailed faces, white background, empty background, plain background, blank canvas, isolated object, sparse composition, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Doodle cartoon style: all creatures — humans and animals — drawn in the same flat stick-figure doodle manner with round heads and dot eyes, bold outlines, vibrant flat colors, in a full colorful scene with background environment. Simple characters, rich world.',
@@ -102,6 +111,8 @@ export const DEFAULT_STYLE_CONFIG: StyleConfig = {
 }
 
 export function getStyleConfig(imageStyle?: string | null): StyleConfig {
-  if (!imageStyle) return DEFAULT_STYLE_CONFIG
-  return STYLE_CONFIGS[imageStyle] ?? DEFAULT_STYLE_CONFIG
+  const base = imageStyle ? (STYLE_CONFIGS[imageStyle] ?? DEFAULT_STYLE_CONFIG) : DEFAULT_STYLE_CONFIG
+  // NO_TEXT_POSITIVE appended here — single injection point that reaches ALL engines
+  // (flux, flux_schnell, nano_banana, gpt_mini) as a positive constraint.
+  return { ...base, fluxSuffix: `${base.fluxSuffix}, ${NO_TEXT_POSITIVE}` }
 }
