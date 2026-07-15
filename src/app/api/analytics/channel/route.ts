@@ -4,7 +4,7 @@ import { createServerSupabase, createServiceClient } from '@/lib/supabase-server
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
-import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse } from '@/lib/youtube-quota'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse, isYouTubeKeyError, youTubeKeyErrorResponse } from '@/lib/youtube-quota'
 import { resolveAnalyticsContext } from '@/lib/analytics-gate'
 import { env } from '@/lib/env'
 import { isBillingError, notifyBillingError } from '@/lib/telegram'
@@ -406,6 +406,7 @@ export async function POST(req: NextRequest) {
     if (error instanceof YouTubeQuotaError) return (userHasKey && plan === 'free') ? byokQuotaResponse(lang) : quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/channel] fatal error:', msg)
+    if (isYouTubeKeyError(msg)) return youTubeKeyErrorResponse(lang)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/analytics/channel').catch(() => {})
     return NextResponse.json({ ok: false, error: 'Сервис временно недоступен — попробуйте позже' }, { status: 500 })
   }

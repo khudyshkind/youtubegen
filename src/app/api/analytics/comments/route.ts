@@ -5,7 +5,7 @@ import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
-import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse } from '@/lib/youtube-quota'
+import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse, isYouTubeKeyError, youTubeKeyErrorResponse } from '@/lib/youtube-quota'
 import { resolveAnalyticsContext } from '@/lib/analytics-gate'
 import { isBillingError, notifyBillingError } from '@/lib/telegram'
 
@@ -343,6 +343,7 @@ export async function POST(req: NextRequest) {
     console.error('[analytics/comments] error:', msg)
     // "Канал не найден: @handle" comes from resolveChannelInput — safe to surface
     if (msg.startsWith('Канал не найден:')) return NextResponse.json({ ok: false, error: msg }, { status: 404 })
+    if (isYouTubeKeyError(msg)) return youTubeKeyErrorResponse(lang)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/analytics/comments').catch(() => {})
     return NextResponse.json({ ok: false, error: 'Сервис временно недоступен — попробуйте позже' }, { status: 500 })
   }

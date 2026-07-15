@@ -39,6 +39,31 @@ export function byokQuotaResponse(lang = 'ru'): NextResponse {
   )
 }
 
+/** Returns true when the error message indicates an invalid, revoked, or restricted YouTube API key. */
+export function isYouTubeKeyError(msg: string): boolean {
+  return (
+    msg.includes('keyInvalid') ||
+    msg.includes('accessNotConfigured') ||
+    msg.includes('ipRefererBlocked') ||
+    msg.includes('refererNotAllowedByKey') ||
+    msg.includes('YouTube API 401')
+  )
+}
+
+export function youTubeKeyErrorResponse(lang = 'ru'): NextResponse {
+  const isRu = lang !== 'en'
+  return NextResponse.json(
+    {
+      ok: false,
+      error: isRu
+        ? 'YouTube API недоступен: ключ недействителен или не настроен. Если используете свой ключ — проверьте его в настройках.'
+        : 'YouTube API error: key is invalid or not configured. If you use your own key, check it in Settings.',
+      code: 'youtube_key_error',
+    },
+    { status: 400 }
+  )
+}
+
 export function quotaExceededResponse(lang = 'ru'): NextResponse {
   const isRu = lang !== 'en'
   return NextResponse.json(

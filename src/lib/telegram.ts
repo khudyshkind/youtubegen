@@ -30,24 +30,45 @@ export function isBillingError(msg: string): boolean {
 }
 
 // Send a billing-exhaustion alert to Telegram with 1-hour dedup via bot_settings.
+// Uses atomic UPDATE-if-old + INSERT-if-missing to avoid sending N alerts under parallel load.
 // Safe to call with .catch(() => {}) — never throws to the caller.
 export async function notifyBillingError(service: string, route: string): Promise<void> {
   try {
     const svc = createServiceClient()
-    const { data } = await svc
+    const threshold = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const now = new Date().toISOString()
+
+    // Atomic: UPDATE only if the existing row is older than 1h. Returns the updated row.
+    const { data: updated } = await svc
       .from('bot_settings')
-      .select('value')
+      .update({ value: now })
       .eq('key', 'billing_alert_ts')
-      .maybeSingle()
-    const lastTs = data?.value ? new Date(data.value as string).getTime() : 0
-    if (Date.now() - lastTs < 60 * 60 * 1000) return  // dedup: max one alert per hour
-    await svc
+      .lt('value', threshold)
+      .select('key')
+
+    if ((updated?.length ?? 0) > 0) {
+      // We won the race — exactly one concurrent call gets here.
+      await sendTelegramAlert(
+        `🔴 <b>Billing error: ${service}</b>\nRoute: <code>${route}</code>\n${new Date().toUTCString()}\n<a href="https://console.anthropic.com/settings/billing">Пополнить баланс →</a>`
+      )
+      return
+    }
+
+    // Row might not exist yet (first ever alert). INSERT; unique constraint ensures only one wins.
+    const { error: insertErr } = await svc
       .from('bot_settings')
-      .upsert({ key: 'billing_alert_ts', value: new Date().toISOString() }, { onConflict: 'key' })
+      .insert({ key: 'billing_alert_ts', value: now })
+
+    if (!insertErr) {
+      await sendTelegramAlert(
+        `🔴 <b>Billing error: ${service}</b>\nRoute: <code>${route}</code>\n${new Date().toUTCString()}\n<a href="https://console.anthropic.com/settings/billing">Пополнить баланс →</a>`
+      )
+    }
+    // If insertErr = duplicate key: another concurrent call already inserted, skip.
   } catch {
-    // dedup check failed — send alert anyway (better noisy than silent)
+    // DB unreachable — send alert anyway (better noisy than silent)
+    await sendTelegramAlert(
+      `🔴 <b>Billing error: ${service}</b>\nRoute: <code>${route}</code>\n${new Date().toUTCString()}\n<a href="https://console.anthropic.com/settings/billing">Пополнить баланс →</a>`
+    ).catch(() => {})
   }
-  await sendTelegramAlert(
-    `🔴 <b>Billing error: ${service}</b>\nRoute: <code>${route}</code>\n${new Date().toUTCString()}\n<a href="https://console.anthropic.com/settings/billing">Пополнить баланс →</a>`
-  )
 }
