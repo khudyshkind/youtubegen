@@ -182,6 +182,7 @@ INSTEAD use illustration vocabulary:
 
 TEXT AND SPEECH:
 • If characters react or talk: describe their open mouths, raised arms, expressive body poses — NEVER speech bubbles or caption boxes
+• NEVER thought bubbles, dream clouds, or floating overlays showing symbols or images above a character's head — instead show the character gesturing toward or pointing at the actual object: NOT "thought bubbles showing a wheel" BUT "character points at a wooden wheel lying nearby"
 • If a scene involves text in the world (signs, books, whiteboards, screens): describe the environment and person interacting with it — not the text itself
 
 ═══ FEW-SHOT QUALITY EXAMPLES (ILLUSTRATION) ═══
@@ -240,7 +241,19 @@ async function extractCharacters(
   fullText: string,
   topic: string,
   anthropic: Anthropic,
+  styleConfig: StyleConfig,
 ): Promise<CharacterProfile[]> {
+  const styleDirective = styleConfig.illustrative
+    ? `\nSTYLE: ILLUSTRATION MODE. Describe each character as a flat drawn SHAPE, not as anatomy.
+FORBIDDEN words in descriptions: hair, fur, mane, molars, teeth, jaw, gut, belly, swollen, coarse, texture, muscle, skin, nostril, pore.
+Use shape-language only: "round head", "flat body", "small ears", "thin stick arms", "short curvy tail", "flat color patch".
+Example: NOT "Bipedal primate with coarse body hair, massive jaw with thick molars, swollen gut" BUT "stick figure with round head, small ears and a short tail, flat brown body, slightly hunched"\n`
+    : ''
+
+  const descriptionTask = styleConfig.illustrative
+    ? 'For each recurring character, write a concise 15–25 word ENGLISH description of drawn appearance: shape, flat color, key visual features (ears, tail, size). This will be copied verbatim into illustration prompts.'
+    : 'For each recurring character, write a concise 15–25 word ENGLISH visual description covering: species/type, distinctive color, key physical features, size/scale. This description will be copied verbatim into prompts for scenes where that character is physically present.'
+
   try {
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -250,8 +263,8 @@ async function extractCharacters(
         content: `Analyze this video script about "${topic}". Identify visual characters (animals, creatures, people, beings) that appear visually in multiple scenes.
 
 PURPOSE: These profiles ensure the character looks IDENTICAL every time it appears in an illustration. A profile does NOT mean the character must appear in every scene — it is only used when the scene text actually shows that character.
-
-For each recurring character, write a concise 15–25 word ENGLISH visual description covering: species/type, distinctive color, key physical features, size/scale. This description will be copied verbatim into prompts for scenes where that character is physically present.
+${styleDirective}
+${descriptionTask}
 
 Rules:
 - Include a character only if it will be visually depicted (shown, seen) in 2 or more scenes
@@ -341,7 +354,7 @@ async function generateScenesFromSubtitles(
   })
 
   const fullText = subtitleBlocks.map((b) => b.text).join(' ')
-  const characters = await extractCharacters(fullText, topic, anthropic)
+  const characters = await extractCharacters(fullText, topic, anthropic, styleConfig)
   const charSection = characters.length > 0
     ? `\nПЕРСОНАЖИ — включать точные описания в промпты для сцен где они присутствуют:\n${characters.map((c) => `• ${c.name}: ${c.description}`).join('\n')}\n`
     : ''
@@ -463,7 +476,7 @@ async function generateScenesFromScript(
   const blocks = splitScriptByWords(script, imageCount)
   const blocksWithTimecodes = calculateTimecodes(blocks, durationSec)
 
-  const characters = await extractCharacters(script, topic, anthropic)
+  const characters = await extractCharacters(script, topic, anthropic, styleConfig)
   const charSection = characters.length > 0
     ? `\nПЕРСОНАЖИ — включать точные описания в промпты для сцен где они присутствуют:\n${characters.map((c) => `• ${c.name}: ${c.description}`).join('\n')}\n`
     : ''

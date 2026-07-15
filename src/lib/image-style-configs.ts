@@ -24,7 +24,7 @@ export interface StyleConfig {
 
 export const STYLE_CONFIGS: Record<string, StyleConfig> = {
   'hand-drawn illustration, pencil sketch style, artistic line art': {
-    claudeInstruction: 'Hand-drawn pencil sketch only. Black and white line art. Describe subject and composition using pencil-sketch vocabulary: hatching, cross-hatching, pencil strokes. 20–25 words.',
+    claudeInstruction: 'Hand-drawn pencil sketch only. Black and white line art. Describe subject and composition using pencil-sketch vocabulary: hatching, cross-hatching, pencil strokes.',
     fluxSuffix: 'hand-drawn pencil sketch, black and white line art, hatching technique, pencil strokes, monochrome illustration, monochrome pencil rendering, no color fills',
     negativePrompt: 'photorealistic, photograph, color, cinematic lighting, cartoon, watercolor, digital art, oil painting, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Hand-drawn pencil sketch style. Black and white. No color, no photo, no cinematic.',
@@ -32,7 +32,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     illustrative: true,
   },
   'cartoon style, vibrant colors, animated illustration, bold lines': {
-    claudeInstruction: 'Cartoon illustration. Bold outlines, vibrant flat colors, animated style. Describe characters and scenes as cartoon visuals. 20–25 words.',
+    claudeInstruction: 'Cartoon illustration. Bold outlines, vibrant flat colors, animated style. Describe characters and scenes as cartoon visuals.',
     fluxSuffix: 'cartoon illustration, bold outlines, vibrant flat colors, animated style, 2d animation',
     negativePrompt: 'photorealistic, photograph, cinematic lighting, pencil sketch, watercolor, realistic texture, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Cartoon illustration style. Bold colors, animated. No photorealism, no cinematic.',
@@ -40,7 +40,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     illustrative: true,
   },
   'watercolor painting style, soft colors, textured paper, artistic': {
-    claudeInstruction: 'Watercolor painting. Soft blended colors, textured paper. Describe subjects with painterly vocabulary: washes, wet-on-wet, soft edges. 20–25 words.',
+    claudeInstruction: 'Watercolor painting. Soft blended colors, textured paper. Describe subjects with painterly vocabulary: washes, wet-on-wet, soft edges.',
     fluxSuffix: 'watercolor painting, soft blended washes, wet-on-wet technique, textured paper background, artistic painting, soft bleeding edges, no sharp outlines',
     negativePrompt: 'photorealistic, photograph, cinematic lighting, sharp lines, pencil sketch, cartoon, digital art, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Watercolor painting style. Soft blended colors. No sharp lines, no photo, no cinematic.',
@@ -55,7 +55,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fallbackPrompt: 'Cinematic scene related to {topic}, dramatic lighting, movie still, wide angle',
   },
   'flat 2D doodle cartoon, minimalist stick figures, bold black outlines, simple comedic style': {
-    claudeInstruction: 'Doodle cartoon scene. Stick-figure characters — humans AND animals are all drawn as simple doodles with round heads, dot eyes and thin limbs (a doodle monkey is a stick figure with monkey ears/tail, not a realistic monkey) — but ALWAYS describe a full, specific environment around them (place, background objects, weather/season, colorful details). When characters talk or react, describe their open mouths, raised arms and expressive body poses — never speech bubbles or caption boxes. When a scene involves text in the world (signs, books, whiteboards), show the environment and the person interacting with it — never the text itself. Simple characters, rich scene. 35–45 words.',
+    claudeInstruction: 'Doodle cartoon scene. Stick-figure characters — humans AND animals are all drawn as simple doodles with round heads, dot eyes and thin limbs (a doodle monkey is a stick figure with monkey ears/tail, not a realistic monkey) — but ALWAYS describe a full, specific environment around them (place, background objects, weather/season, colorful details). When characters talk or react, describe their open mouths, raised arms and expressive body poses — never speech bubbles or caption boxes. When a scene involves text in the world (signs, books, whiteboards), show the environment and the person interacting with it — never the text itself. Simple characters, rich scene.',
     fluxSuffix: 'flat 2D doodle cartoon illustration, ALL characters — humans and animals alike — drawn as simple stick-figure doodles with round heads, dot eyes and thin limbs, bold thick black outlines, vibrant saturated flat colors, no shading, no 3D volume, colorful cartoon background environment with props and scenery, playful expressive poses',
     negativePrompt: 'photorealistic, photograph, 3d render, 3d volume, shading, fur texture, detailed animals, realistic animals, pixar style, rendered characters, realistic anatomy, complex textures, cinematic lighting, watercolor, pencil sketch, detailed faces, white background, empty background, plain background, blank canvas, isolated object, sparse composition, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Doodle cartoon style: all creatures — humans and animals — drawn in the same flat stick-figure doodle manner with round heads and dot eyes, bold outlines, vibrant flat colors, in a full colorful scene with background environment. Simple characters, rich world.',
@@ -77,7 +77,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fallbackPrompt: 'Photorealistic scene related to {topic}, professional photography, detailed',
   },
   'anime style, cel shading, Japanese animation, expressive characters': {
-    claudeInstruction: 'Anime illustration in modern Japanese animation style. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with clean cel-shaded lines, expressive eyes, vibrant colors. 20-25 words.',
+    claudeInstruction: 'Anime illustration in modern Japanese animation style. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with clean cel-shaded lines, expressive eyes, vibrant colors.',
     fluxSuffix: 'anime style, cel shading, clean linework, expressive large eyes, vibrant colors, modern Japanese animation, Japanese anime aesthetic, no western cartoon style',
     negativePrompt: 'photorealistic, photograph, 3d render, western cartoon, pencil sketch, watercolor, oil painting, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Anime illustration style. Cel shading, clean linework. No photorealism, no western cartoon.',
@@ -92,7 +92,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fallbackPrompt: '3D Pixar-style render of scene related to {topic}, soft lighting, smooth shapes, polished CGI',
   },
   'oil painting, visible brushstrokes, impasto texture, classical palette': {
-    claudeInstruction: 'Classical oil painting. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with visible brushstrokes, rich textured impasto, warm classical palette. 20-25 words.',
+    claudeInstruction: 'Classical oil painting. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with visible brushstrokes, rich textured impasto, warm classical palette.',
     fluxSuffix: 'oil painting, visible brushstrokes, textured impasto, rich classical palette, canvas texture, old master style, visible impasto brush strokes, rich tonal blending, no flat colors',
     negativePrompt: 'photorealistic, photograph, 3d render, digital art, cartoon, anime, pencil sketch, flat colors, cgi, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Classical oil painting style. Visible brushstrokes, impasto texture. No photorealism, no digital art.',
