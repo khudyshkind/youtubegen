@@ -4,6 +4,7 @@ import OpenAI from 'openai'
 import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
+import { isBillingError, notifyBillingError } from '@/lib/telegram'
 import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
 import type { ScriptParams, PlanSection, ScriptModel } from '@/lib/types'
@@ -520,7 +521,9 @@ export async function POST(request: NextRequest) {
     void trackEvent(user.id, 'step_completed', { step: 'script', model, project_id })
     return NextResponse.json({ ok: true, data: { script } })
   } catch (error) {
-    console.error('[generate/script]', error instanceof Error ? error.message : error)
+    const msg = error instanceof Error ? error.message : String(error)
+    console.error('[generate/script]', msg)
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/script').catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка генерации сценария' }, { status: 500 })
   }
 }

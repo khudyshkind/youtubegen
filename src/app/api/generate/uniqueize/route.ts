@@ -5,6 +5,7 @@ import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
+import { isBillingError, notifyBillingError } from '@/lib/telegram'
 import {
   countWords, calcMaxTokens, isGuardOk,
   runChunked, ChunkCallFn, CHUNK_THRESHOLD,
@@ -344,6 +345,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/uniqueize] error:', msg)
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/uniqueize').catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка обработки текста' }, { status: 500 })
   }
 }

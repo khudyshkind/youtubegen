@@ -12,6 +12,7 @@ import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { ThumbnailTextMode, TextOverlayParams } from '@/lib/thumbnail-text-presets'
 import { getStyleConfig } from '@/lib/image-style-configs'
+import { isBillingError, notifyBillingError } from '@/lib/telegram'
 
 const MONTSERRAT_BLACK = readFileSync(
   join(process.cwd(), 'public', 'fonts', 'Montserrat-Black.ttf'),
@@ -724,7 +725,9 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error('[thumbnail]', error)
+    const msg = error instanceof Error ? error.message : String(error)
+    console.error('[thumbnail]', msg)
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/thumbnail').catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка генерации превью' }, { status: 500 })
   }
 }

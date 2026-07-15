@@ -52,6 +52,8 @@ function formatUptime(seconds: number): string {
 
 // ─── Service checks ─────────────────────────────────────────────────────────────
 
+// NOTE: /v1/models returns 200 even when credit balance is zero — this check cannot detect billing exhaustion.
+// Real billing errors surface only at inference time and are handled via notifyBillingError() in route catch blocks.
 async function checkAnthropic(): Promise<ServiceResult> {
   const base = { key: 'anthropic', name: 'Anthropic (Claude)', icon: '🤖', link: 'https://console.anthropic.com' }
   const apiKey = env('ANTHROPIC_API_KEY')
