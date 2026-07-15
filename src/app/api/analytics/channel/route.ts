@@ -7,6 +7,7 @@ import { parseClaudeJson } from '@/lib/parse-claude-json'
 import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaResponse } from '@/lib/youtube-quota'
 import { resolveAnalyticsContext } from '@/lib/analytics-gate'
 import { env } from '@/lib/env'
+import { isBillingError, notifyBillingError } from '@/lib/telegram'
 
 export const maxDuration = 120
 
@@ -405,6 +406,7 @@ export async function POST(req: NextRequest) {
     if (error instanceof YouTubeQuotaError) return (userHasKey && plan === 'free') ? byokQuotaResponse(lang) : quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/channel] fatal error:', msg)
-    return NextResponse.json({ ok: false, error: `Ошибка анализа канала: ${msg}` }, { status: 500 })
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/analytics/channel').catch(() => {})
+    return NextResponse.json({ ok: false, error: 'Сервис временно недоступен — попробуйте позже' }, { status: 500 })
   }
 }

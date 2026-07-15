@@ -5,6 +5,7 @@ import { requireCredits, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
+import { isBillingError, notifyBillingError } from '@/lib/telegram'
 
 export const maxDuration = 60
 
@@ -148,7 +149,8 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/revenue] error:', msg)
-    return NextResponse.json({ ok: false, error: `Ошибка расчёта: ${msg}` }, { status: 500 })
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/analytics/revenue').catch(() => {})
+    return NextResponse.json({ ok: false, error: 'Сервис временно недоступен — попробуйте позже' }, { status: 500 })
   }
 }
 
