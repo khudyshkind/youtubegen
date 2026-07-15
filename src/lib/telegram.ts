@@ -39,10 +39,11 @@ export async function notifyBillingError(service: string, route: string): Promis
     const now = new Date().toISOString()
 
     // Atomic: UPDATE only if the existing row is older than 1h. Returns the updated row.
+    const alertKey = `billing_alert_ts:${service.toLowerCase()}`
     const { data: updated } = await svc
       .from('bot_settings')
       .update({ value: now })
-      .eq('key', 'billing_alert_ts')
+      .eq('key', alertKey)
       .lt('value', threshold)
       .select('key')
 
@@ -57,7 +58,7 @@ export async function notifyBillingError(service: string, route: string): Promis
     // Row might not exist yet (first ever alert). INSERT; unique constraint ensures only one wins.
     const { error: insertErr } = await svc
       .from('bot_settings')
-      .insert({ key: 'billing_alert_ts', value: now })
+      .insert({ key: alertKey, value: now })
 
     if (!insertErr) {
       await sendTelegramAlert(

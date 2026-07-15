@@ -2253,9 +2253,30 @@ async function cleanupExpiredMedia() {
   }
 }
 
-// ── fal.ai balance monitoring ─────────────────────────────────────────────────
-const FAL_ADMIN_KEY = process.env.FAL_ADMIN_KEY || process.env.FAL_KEY || ''
-const FAL_BALANCE_THRESHOLD = parseFloat(process.env.FAL_BALANCE_ALERT_THRESHOLD ?? '10')
+// ── Balance monitoring — fal.ai, ElevenLabs, APIHOST ─────────────────────────
+const FAL_ADMIN_KEY                    = process.env.FAL_ADMIN_KEY || process.env.FAL_KEY || ''
+const FAL_BALANCE_THRESHOLD            = parseFloat(process.env.FAL_BALANCE_ALERT_THRESHOLD      ?? '10')
+const ELEVENLABS_CHARS_ALERT_THRESHOLD = parseInt  (process.env.ELEVENLABS_CHARS_ALERT_THRESHOLD ?? '50000')
+const APIHOST_BALANCE_ALERT_THRESHOLD  = parseFloat(process.env.APIHOST_BALANCE_ALERT_THRESHOLD  ?? '100')
+
+// Send billing-exhaustion alert from Railway with 1h dedup per service.
+async function notifyBillingErrorRailway(service, route) {
+  const key = `billing_alert_ts:${service.toLowerCase()}`
+  try {
+    const lastAlert = await getSetting(key)
+    const hoursSince = lastAlert ? (Date.now() - new Date(lastAlert).getTime()) / 3_600_000 : Infinity
+    if (hoursSince < 1) return
+    await setSetting(key, new Date().toISOString())
+    if (OWNER_ID) {
+      await tgApi('sendMessage', {
+        chat_id: OWNER_ID,
+        text: `🔴 Billing error: ${service}\nRoute: ${route}\n${new Date().toUTCString()}`,
+      }).catch(() => {})
+    }
+  } catch {
+    // DB unreachable — swallow to never throw into caller
+  }
+}
 
 async function fetchFalBalance() {
   if (!FAL_ADMIN_KEY) return { error: 'no_key' }
@@ -2359,10 +2380,171 @@ async function checkFalBalance() {
   }
 }
 
-// ── fal.ai balance check — every 30 minutes ───────────────────────────────────
+// ── ElevenLabs characters balance ─────────────────────────────────────────────
+async function fetchElevenLabsBalance() {
+  const apiKey = process.env.ELEVENLABS_API_KEY
+  if (!apiKey) return { error: 'no_key' }
+  const controller = new AbortController()
+  const t = setTimeout(() => controller.abort(), 10_000)
+  try {
+    const res = await fetch('https://api.elevenlabs.io/v1/user', {
+      headers: { 'xi-api-key': apiKey },
+      signal: controller.signal,
+    })
+    if (res.status === 401 || res.status === 403) return { error: 'unauthorized' }
+    if (!res.ok) return { error: 'unavailable' }
+    const data = await res.json()
+    const sub   = data.subscription ?? {}
+    const used  = sub.character_count ?? null
+    const limit = sub.character_limit ?? null
+    const reset = sub.next_character_count_reset_unix ?? null
+    if (typeof used !== 'number' || typeof limit !== 'number') return { error: 'unavailable' }
+    return { used, limit, remaining: limit - used, reset }
+  } catch {
+    return { error: 'unavailable' }
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+async function checkElevenLabsBalance() {
+  const tag = '[elevenlabs/balance]'
+  const result = await fetchElevenLabsBalance()
+
+  if ('used' in result) {
+    await setSetting('elevenlabs_chars_used',  String(result.used))
+    await setSetting('elevenlabs_chars_limit', String(result.limit))
+    await setSetting('elevenlabs_chars_ts',    new Date().toISOString())
+    if (result.reset) await setSetting('elevenlabs_chars_reset', String(result.reset))
+    console.log(`${tag} used=${result.used}/${result.limit} remaining=${result.remaining}`)
+  }
+
+  if (!OWNER_ID) return
+
+  if (result.error === 'no_key') { console.warn(`${tag} ELEVENLABS_API_KEY not set on Railway — add to Railway env`); return }
+  if (result.error === 'unauthorized') { console.warn(`${tag} key unauthorized`); return }
+  if (result.error === 'unavailable')  { console.warn(`${tag} API unavailable, skipping`); return }
+
+  const { remaining } = result
+  const alertState      = await getSetting('elevenlabs_chars_alert_state')
+  const alertAt         = await getSetting('elevenlabs_chars_alert_at')
+  const hoursSinceAlert = alertAt ? (Date.now() - new Date(alertAt).getTime()) / 3_600_000 : Infinity
+
+  if (remaining < ELEVENLABS_CHARS_ALERT_THRESHOLD) {
+    const shouldAlert = alertState !== 'low' || hoursSinceAlert >= 24
+    if (shouldAlert) {
+      const tgResult = await tgApi('sendMessage', {
+        chat_id: OWNER_ID,
+        text: `⚠️ ElevenLabs символы на исходе!\n\nОсталось: ${remaining.toLocaleString('ru')} из ${result.limit.toLocaleString('ru')}\nПорог: ${ELEVENLABS_CHARS_ALERT_THRESHOLD.toLocaleString('ru')}\n\nПополнить: https://elevenlabs.io/app/subscription`,
+      })
+      if (tgResult?.ok) {
+        await setSetting('elevenlabs_chars_alert_state', 'low')
+        await setSetting('elevenlabs_chars_alert_at',    new Date().toISOString())
+      } else {
+        console.error(`${tag} tg alert failed:`, JSON.stringify(tgResult))
+      }
+    }
+    return
+  }
+
+  if (alertState === 'low') {
+    const tgResult = await tgApi('sendMessage', {
+      chat_id: OWNER_ID,
+      text: `✅ ElevenLabs символы восстановлены\n\nОсталось: ${remaining.toLocaleString('ru')} из ${result.limit.toLocaleString('ru')}`,
+    })
+    if (tgResult?.ok) {
+      await setSetting('elevenlabs_chars_alert_state', '')
+      await setSetting('elevenlabs_chars_alert_at',    '')
+    } else {
+      console.error(`${tag} restored alert failed:`, JSON.stringify(tgResult))
+    }
+  }
+}
+
+// ── APIHOST ruble balance ──────────────────────────────────────────────────────
+async function fetchApihostBalance() {
+  const apiKey = process.env.APIHOST_API_KEY
+  if (!apiKey) return { error: 'no_key' }
+  const controller = new AbortController()
+  const t = setTimeout(() => controller.abort(), 10_000)
+  try {
+    const res = await fetch('https://apihost.ru/api/v1/balance', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    })
+    if (res.status === 401 || res.status === 403) return { error: 'unauthorized' }
+    if (!res.ok) return { error: 'unavailable' }
+    const data = await res.json()
+    const balance = data.balance ?? data.amount ?? data.rub ?? null
+    if (typeof balance !== 'number') return { error: 'unavailable' }
+    return { balance }
+  } catch {
+    return { error: 'unavailable' }
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+async function checkApihostBalance() {
+  const tag = '[apihost/balance]'
+  const result = await fetchApihostBalance()
+
+  if ('balance' in result) {
+    await setSetting('apihost_balance',    String(result.balance))
+    await setSetting('apihost_balance_ts', new Date().toISOString())
+    console.log(`${tag} balance=${result.balance} RUB`)
+  }
+
+  if (!OWNER_ID) return
+
+  if (result.error === 'no_key') { console.warn(`${tag} APIHOST_API_KEY not set on Railway — add to Railway env`); return }
+  if (result.error === 'unauthorized') { console.warn(`${tag} key unauthorized`); return }
+  if (result.error === 'unavailable')  { console.warn(`${tag} API unavailable, skipping`); return }
+
+  const { balance } = result
+  const alertState      = await getSetting('apihost_balance_alert_state')
+  const alertAt         = await getSetting('apihost_balance_alert_at')
+  const hoursSinceAlert = alertAt ? (Date.now() - new Date(alertAt).getTime()) / 3_600_000 : Infinity
+
+  if (balance < APIHOST_BALANCE_ALERT_THRESHOLD) {
+    const shouldAlert = alertState !== 'low' || hoursSinceAlert >= 24
+    if (shouldAlert) {
+      const tgResult = await tgApi('sendMessage', {
+        chat_id: OWNER_ID,
+        text: `⚠️ APIHOST баланс низкий!\n\nТекущий баланс: ${Number(balance).toLocaleString('ru-RU')} ₽\nПорог: ${APIHOST_BALANCE_ALERT_THRESHOLD.toLocaleString('ru-RU')} ₽\n\nПополнить: https://apihost.ru`,
+      })
+      if (tgResult?.ok) {
+        await setSetting('apihost_balance_alert_state', 'low')
+        await setSetting('apihost_balance_alert_at',    new Date().toISOString())
+      } else {
+        console.error(`${tag} tg alert failed:`, JSON.stringify(tgResult))
+      }
+    }
+    return
+  }
+
+  if (alertState === 'low') {
+    const tgResult = await tgApi('sendMessage', {
+      chat_id: OWNER_ID,
+      text: `✅ APIHOST баланс восстановлен\n\nТекущий баланс: ${Number(balance).toLocaleString('ru-RU')} ₽`,
+    })
+    if (tgResult?.ok) {
+      await setSetting('apihost_balance_alert_state', '')
+      await setSetting('apihost_balance_alert_at',    '')
+    } else {
+      console.error(`${tag} restored alert failed:`, JSON.stringify(tgResult))
+    }
+  }
+}
+
+// ── Balance check — every 30 minutes (fal.ai · ElevenLabs · APIHOST) ──────────
+// ELEVENLABS_API_KEY and APIHOST_API_KEY must be set as Railway env vars.
+// If missing, the corresponding check logs a warning and skips silently.
 cron.schedule('*/30 * * * *', async () => {
-  console.log('[cron] fal.ai balance check')
-  try { await checkFalBalance() } catch (err) { console.error('[cron/fal-balance]', err.message); Sentry.captureException(err, { extra: { cron: 'checkFalBalance' } }) }
+  console.log('[cron] balance check: fal / elevenlabs / apihost')
+  try { await checkFalBalance()        } catch (err) { console.error('[cron/fal-balance]', err.message);        Sentry.captureException(err, { extra: { cron: 'checkFalBalance' } }) }
+  try { await checkElevenLabsBalance() } catch (err) { console.error('[cron/elevenlabs-balance]', err.message); Sentry.captureException(err, { extra: { cron: 'checkElevenLabsBalance' } }) }
+  try { await checkApihostBalance()    } catch (err) { console.error('[cron/apihost-balance]', err.message);    Sentry.captureException(err, { extra: { cron: 'checkApihostBalance' } }) }
 }, { timezone: 'UTC' })
 
 // ── Daily DB backup cron — 03:00 UTC ─────────────────────────────────────────
@@ -4467,6 +4649,15 @@ async function processAudioJob(job) {
     Sentry.captureException(err, { extra: { jobId, engine: job.engine, project_id: job.project_id } })
     await updateAudioJob(jobId, { status: 'failed', error: msg })
     await refundAudioJobCredits(jobId, job.user_id, job.project_id)
+    // Detect billing exhaustion for ElevenLabs-based resellers (SecretVoicer / Voicer).
+    // SecretVoicer: HTTP 402 → "SecretVoicer HTTP 402: ..." | FAILED status.error_message may include "quota"/"balance".
+    // Voicer: same patterns. Unknown reseller strings will miss here; Sentry captures full err above.
+    if (job.engine === 'secretvoicer' || job.engine === 'voicer') {
+      if (/HTTP 402|quota|balance|credit|insufficient|payment required/i.test(msg)) {
+        const svcName = job.engine === 'secretvoicer' ? 'SecretVoicer' : 'Voicer'
+        await notifyBillingErrorRailway(svcName, `/audio-job:${jobId}`).catch(() => {})
+      }
+    }
   }
 }
 
@@ -4477,6 +4668,12 @@ const PORT = parseInt(process.env.PORT || '3001', 10)
 app.listen(PORT, async () => {
   console.log(`ytgen-video-server on :${PORT}`)
   await loadSettingsFromDB().catch(err => console.warn('[bot] settings load failed:', err.message))
+  // Write thresholds to bot_settings so the Vercel admin panel can read them
+  await Promise.all([
+    setSetting('fal_balance_threshold',        String(FAL_BALANCE_THRESHOLD)),
+    setSetting('elevenlabs_chars_threshold',   String(ELEVENLABS_CHARS_ALERT_THRESHOLD)),
+    setSetting('apihost_balance_threshold',    String(APIHOST_BALANCE_ALERT_THRESHOLD)),
+  ]).catch(err => console.warn('[startup] threshold write failed:', err.message))
   console.log('[bot] starting cron jobs...')
 
   const ownerId = process.env.TELEGRAM_OWNER_ID

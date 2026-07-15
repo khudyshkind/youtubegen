@@ -41,6 +41,28 @@ function unconfigured(base: Omit<ServiceResult, 'status' | 'metrics'>, varName: 
   return { ...base, status: 'unconfigured', metrics: [], error: `${varName} не задан` }
 }
 
+// Read a single bot_settings value; returns null on any error.
+async function readBotSetting(key: string): Promise<string | null> {
+  try {
+    const svc = createServiceClient()
+    const { data } = await svc.from('bot_settings').select('value').eq('key', key).single()
+    return (data as { value?: string } | null)?.value ?? null
+  } catch { return null }
+}
+
+// Read billing_alert_ts:{service} — null means no billing error ever recorded.
+async function readBillingAlertTs(service: string): Promise<string | null> {
+  return readBotSetting(`billing_alert_ts:${service}`)
+}
+
+// Format billing_alert_ts for display; return ['нет', false] when absent.
+function fmtBillingAlert(ts: string | null): [string, boolean] {
+  if (!ts) return ['нет', false]
+  const d = new Date(ts)
+  const recent = (Date.now() - d.getTime()) < 24 * 3_600_000
+  return [d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }), recent]
+}
+
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
   const h = Math.floor((seconds % 86400) / 3600)
@@ -59,18 +81,25 @@ async function checkAnthropic(): Promise<ServiceResult> {
   const apiKey = env('ANTHROPIC_API_KEY')
   if (!apiKey) return unconfigured(base, 'ANTHROPIC_API_KEY')
   try {
-    const res = await safeFetch('https://api.anthropic.com/v1/models', {
-      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    })
+    const [res, alertTs] = await Promise.all([
+      safeFetch('https://api.anthropic.com/v1/models', {
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      }),
+      readBillingAlertTs('anthropic'),
+    ])
     if (res.status === 401 || res.status === 403) return { ...base, status: 'error', metrics: [], error: 'Ключ недействителен' }
     if (!res.ok) return { ...base, status: 'error', metrics: [], error: `HTTP ${res.status}` }
     const data = await res.json()
     const modelCount = Array.isArray(data.data) ? data.data.length : '?'
+    const [lastError, recentError] = fmtBillingAlert(alertTs)
     return {
-      ...base, status: 'ok',
+      ...base, status: recentError ? 'warn' : 'ok',
+      ...(recentError ? { statusLabel: 'Billing-ошибка < 24ч' } : {}),
       metrics: [
         { label: 'Статус', value: '✓ Ключ активен' },
         { label: 'Доступно моделей', value: String(modelCount) },
+        { label: 'Баланс', value: 'Недоступен по API' },
+        { label: 'Последняя ошибка биллинга', value: lastError },
         { label: 'Биллинг', value: '↗ Console Billing', url: 'https://console.anthropic.com/settings/billing' },
       ],
     }
@@ -85,15 +114,22 @@ async function checkOpenAI(): Promise<ServiceResult> {
   const apiKey = env('OPENAI_API_KEY')
   if (!apiKey) return unconfigured(base, 'OPENAI_API_KEY')
   try {
-    const res = await safeFetch('https://api.openai.com/v1/models', {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    })
+    const [res, alertTs] = await Promise.all([
+      safeFetch('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      }),
+      readBillingAlertTs('openai'),
+    ])
     if (res.status === 401 || res.status === 403) return { ...base, status: 'error', metrics: [], error: 'Ключ недействителен' }
     if (!res.ok) return { ...base, status: 'error', metrics: [], error: `HTTP ${res.status}` }
+    const [lastError, recentError] = fmtBillingAlert(alertTs)
     return {
-      ...base, status: 'ok',
+      ...base, status: recentError ? 'warn' : 'ok',
+      ...(recentError ? { statusLabel: 'Billing-ошибка < 24ч' } : {}),
       metrics: [
         { label: 'Статус', value: '✓ Ключ активен' },
+        { label: 'Баланс', value: 'Недоступен по API' },
+        { label: 'Последняя ошибка биллинга', value: lastError },
         { label: 'Использование', value: '↗ Platform Usage', url: 'https://platform.openai.com/usage' },
       ],
     }
@@ -131,11 +167,16 @@ async function checkElevenLabs(): Promise<ServiceResult> {
     const resetDate = sub.next_character_count_reset_unix
       ? new Date(sub.next_character_count_reset_unix * 1000).toLocaleDateString('ru-RU')
       : '—'
+    const thresholdRaw = await readBotSetting('elevenlabs_chars_threshold')
+    const thresholdStr = thresholdRaw
+      ? `${parseInt(thresholdRaw).toLocaleString('ru')} символов осталось`
+      : '—'
     return {
       ...base, status, ...(statusLabel ? { statusLabel } : {}),
       metrics: [
         { label: 'Символов использовано', value: `${used.toLocaleString('ru')} / ${limit.toLocaleString('ru')}` },
         { label: 'Осталось', value: `${remaining.toLocaleString('ru')} (${100 - pct}%)` },
+        { label: 'Порог алерта', value: thresholdStr },
         { label: 'Тариф', value: sub.tier ?? '—' },
         { label: 'Сброс счётчика', value: resetDate },
       ],
@@ -485,12 +526,17 @@ async function checkApihost(): Promise<ServiceResult> {
     const data = await res.json() as Record<string, unknown>
     const balance = (data.balance ?? data.amount ?? data.rub ?? null) as number | null
     const balanceStr = balance !== null ? `${Number(balance).toLocaleString('ru-RU')} ₽` : '—'
-    const status: Status = balance !== null && balance < 50 ? 'warn' : 'ok'
+    const thresholdRaw = await readBotSetting('apihost_balance_threshold')
+    const threshold = thresholdRaw ? parseFloat(thresholdRaw) : 100
+    const thresholdStr = `${threshold.toLocaleString('ru-RU')} ₽`
+    const status: Status = balance !== null && balance < threshold ? 'warn' : 'ok'
+    const statusLabel = status === 'warn' ? 'Баланс низкий' : undefined
     return {
-      ...base, status,
+      ...base, status, ...(statusLabel ? { statusLabel } : {}),
       metrics: [
         { label: 'Статус', value: '✓ Ключ активен' },
         { label: 'Баланс', value: balanceStr },
+        { label: 'Порог алерта', value: thresholdStr },
       ],
     }
   } catch (err) {
@@ -698,27 +744,37 @@ async function checkSecretVoicer(): Promise<ServiceResult> {
       return { ...base, status: 'error', metrics: [], error: 'Ключ недействителен' }
     }
     if (res.ok) {
-      const raw = await res.json().catch(() => null) as unknown
+      const [raw, alertTs] = await Promise.all([
+        res.json().catch(() => null) as Promise<unknown>,
+        readBillingAlertTs('secretvoicer'),
+      ])
       const apiCount = Array.isArray(raw) ? raw.length
         : (Array.isArray((raw as Record<string, unknown> | null)?.voices)
           ? ((raw as { voices: unknown[] }).voices.length) : null)
+      const [lastError, recentError] = fmtBillingAlert(alertTs)
       return {
-        ...base, status: 'ok',
+        ...base, status: recentError ? 'warn' : 'ok',
+        ...(recentError ? { statusLabel: 'Billing-ошибка < 24ч' } : {}),
         metrics: [
           { label: 'Статус', value: '✓ Ключ активен' },
           { label: 'Голосов (API)', value: apiCount !== null ? String(apiCount) : '—' },
           { label: 'Голосов (каталог)', value: '102' },
+          { label: 'Баланс', value: 'Недоступен по API' },
+          { label: 'Последняя ошибка биллинга', value: lastError },
           { label: 'Движок', value: 'ElevenLabs-based (async)' },
           { label: 'Сайт', value: '↗ secret-voicer.ru', url: 'https://secret-voicer.ru' },
         ],
       }
     }
     // Non-2xx, non-401/403: endpoint unexpected response
+    const alertTs = await readBillingAlertTs('secretvoicer')
+    const [lastError, recentError] = fmtBillingAlert(alertTs)
     return {
-      ...base, status: 'warn',
+      ...base, status: recentError ? 'warn' : 'warn',
       metrics: [
         { label: 'Статус', value: `✓ Ключ настроен · API HTTP ${res.status}` },
         { label: 'Голосов (каталог)', value: '102' },
+        { label: 'Последняя ошибка биллинга', value: lastError },
         { label: 'Сайт', value: '↗ secret-voicer.ru', url: 'https://secret-voicer.ru' },
       ],
     }
@@ -741,10 +797,15 @@ async function checkVoicer(): Promise<ServiceResult> {
     if (res.status === 401 || res.status === 403) {
       return { ...base, status: 'error', metrics: [], error: 'Ключ недействителен' }
     }
+    const alertTs = await readBillingAlertTs('voicer')
+    const [lastError, recentError] = fmtBillingAlert(alertTs)
     return {
-      ...base, status: 'ok',
+      ...base, status: recentError ? 'warn' : 'ok',
+      ...(recentError ? { statusLabel: 'Billing-ошибка < 24ч' } : {}),
       metrics: [
         { label: 'Статус', value: '✓ Ключ активен' },
+        { label: 'Баланс', value: 'Недоступен по API' },
+        { label: 'Последняя ошибка биллинга', value: lastError },
         { label: 'Движок', value: 'ElevenLabs (реселлер)' },
         { label: 'Сайт', value: '↗ voicer.mat3u.com', url: 'https://voicer.mat3u.com' },
       ],
@@ -829,14 +890,20 @@ async function checkVGF(statsP: Promise<RailwayStats | null>): Promise<ServiceRe
     const vgf = data.vgf
     if (!vgf?.keySet) return unconfigured(base, 'VGF_API_KEY')
 
-    const status: Status = vgf.status === 'ok' ? 'ok' : vgf.status === 'error' ? 'error' : 'warn'
+    const [alertTs] = await Promise.all([readBillingAlertTs('vgf')])
+    const [lastError, recentError] = fmtBillingAlert(alertTs)
+    const baseStatus: Status = vgf.status === 'ok' ? 'ok' : vgf.status === 'error' ? 'error' : 'warn'
+    const status: Status = recentError ? 'warn' : baseStatus
     return {
       ...base, status,
+      ...(recentError ? { statusLabel: 'Billing-ошибка < 24ч' } : {}),
       metrics: [
-        { label: 'Ключ',   value: '✓ Настроен (Railway)' },
-        { label: 'API',    value: vgf.statusNote ?? '—' },
-        { label: 'Рендер', value: 'verygoodffmpeg.com (Cloud FFmpeg)' },
-        { label: 'Панель', value: '↗ VGF Dashboard', url: 'https://verygoodffmpeg.com' },
+        { label: 'Ключ',                     value: '✓ Настроен (Railway)' },
+        { label: 'API',                       value: vgf.statusNote ?? '—' },
+        { label: 'Баланс',                    value: 'Недоступен по API' },
+        { label: 'Последняя ошибка биллинга', value: lastError },
+        { label: 'Рендер',                    value: 'verygoodffmpeg.com (Cloud FFmpeg)' },
+        { label: 'Панель',                    value: '↗ VGF Dashboard', url: 'https://verygoodffmpeg.com' },
       ],
     }
   } catch (err) {
