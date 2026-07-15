@@ -3081,6 +3081,13 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
   console.log('[vgf] input_files:', JSON.stringify(inputFiles))
   console.log('[vgf] ffmpeg_command:', cmd)
 
+  // Pre-flight: every {{in_*}} placeholder in the command must resolve to a non-empty string.
+  const inputRefs = [...new Set([...cmd.matchAll(/\{\{(in_[^}]+)\}\}/g)].map(m => m[1]))]
+  const missingInputs = inputRefs.filter(k => typeof inputFiles[k] !== 'string' || !inputFiles[k])
+  if (missingInputs.length > 0) {
+    throw new Error(`VGF pre-flight: command references ${missingInputs.join(', ')} but input_files has no value (keys present: ${Object.keys(inputFiles).join(',')})`)
+  }
+
   // Submit with retry for transient 5xx / network errors.
   let submitRes = null
   for (let attempt = 1; attempt <= VGF_SUBMIT_RETRIES + 1; attempt++) {
@@ -3132,10 +3139,16 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
     console.log(`[vgf] job ${jobId} status: ${status.status}`)
     if (status.status === 'succeeded') {
       const result = {}
+      const missing = []
       for (const [key, filename] of Object.entries(outputFiles)) {
-        result[key] = status.output_files?.[filename]
+        const url = status.output_files?.[filename]
+        if (typeof url !== 'string' || !url) missing.push(filename)
+        result[key] = url
       }
-      console.log('[vgf] ✓ outputs:', Object.keys(result).join(', '))
+      if (missing.length > 0) {
+        throw new Error(`VGF job ${jobId}: succeeded but output missing: ${missing.join(', ')} (output_files keys: ${Object.keys(status.output_files ?? {}).join(',')})`)
+      }
+      console.log('[vgf] ✓ outputs:', Object.entries(result).map(([k, v]) => `${k}=${String(v).slice(-40)}`).join(', '))
       return result
     }
     if (status.status === 'failed') {
@@ -3360,7 +3373,10 @@ async function xfadeBatchPassVGF(clipUrls, clipDurations, transition, td, batchI
 async function concatBatchVGF(clipUrls, batchId, timeoutMs = 600_000, crf = 28) {
   if (clipUrls.length === 1) return clipUrls[0]
   const inputFiles = {}
-  for (let i = 0; i < clipUrls.length; i++) inputFiles[`in_${i + 1}`] = clipUrls[i]
+  for (let i = 0; i < clipUrls.length; i++) {
+    if (typeof clipUrls[i] !== 'string' || !clipUrls[i]) throw new Error(`concatBatch ${batchId}: clip[${i}] URL is ${String(clipUrls[i])} — missing clip URL`)
+    inputFiles[`in_${i + 1}`] = clipUrls[i]
+  }
   const filterStr = clipUrls.map((_, i) => `[${i}:v]`).join('') + `concat=n=${clipUrls.length}:v=1[vout]`
   const inputArgs = clipUrls.map((_, i) => `-i {{in_${i + 1}}}`).join(' ')
   const result = await runFFmpegOnVGF(
@@ -3516,17 +3532,25 @@ async function processVideoJob(jobId, body) {
           const clipCmd = hasKenBurns
             ? `-loop 1 -i {{in_1}} -vf "${vfFilter}" -t ${clipDur} -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -an {{out_1}}`
             : `-loop 1 -r 25 -t ${clipDur} -i {{in_1}} -vf "${vfFilter}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
-          try {
-            const result = await runFFmpegOnVGF(
-              { in_1: img.url },
-              { out_1: `clip_${i}.mp4` },
-              clipCmd,
-              clipTimeout
-            )
-            console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
-            return result.out_1
-          } catch (err) {
-            throw new Error(`clip_${i}(engine=${img.engine ?? 'flux'},url=${img.url?.slice(-50) ?? 'null'}): ${err.message}`)
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              const result = await runFFmpegOnVGF(
+                { in_1: img.url },
+                { out_1: `clip_${i}.mp4` },
+                clipCmd,
+                clipTimeout
+              )
+              if (attempt > 1) console.log(`[vgf] clip_${i} retry succeeded`)
+              console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
+              return result.out_1
+            } catch (err) {
+              if (attempt < 2) {
+                console.warn(`[vgf] clip_${i} attempt 1 failed, retrying in 5s: ${err.message}`)
+                await new Promise(r => setTimeout(r, 5000))
+                continue
+              }
+              throw new Error(`clip_${i}(engine=${img.engine ?? 'flux'},url=${img.url?.slice(-50) ?? 'null'}): ${err.message}`)
+            }
           }
         })
       ))
@@ -3614,17 +3638,25 @@ async function processVideoJob(jobId, body) {
           const clipCmd = hasKenBurns
             ? `-loop 1 -i {{in_1}} -vf "${vfFilter}" -t ${durations[i].toFixed(3)} -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -an {{out_1}}`
             : `-loop 1 -r 25 -t ${durations[i].toFixed(3)} -i {{in_1}} -vf "${vfFilter}" -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -an {{out_1}}`
-          try {
-            const result = await runFFmpegOnVGF(
-              { in_1: img.url },
-              { out_1: `clip_${i}.mp4` },
-              clipCmd,
-              clipTimeout
-            )
-            console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
-            return result.out_1
-          } catch (err) {
-            throw new Error(`clip_${i}(engine=${img.engine ?? 'flux'},url=${img.url?.slice(-50) ?? 'null'}): ${err.message}`)
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              const result = await runFFmpegOnVGF(
+                { in_1: img.url },
+                { out_1: `clip_${i}.mp4` },
+                clipCmd,
+                clipTimeout
+              )
+              if (attempt > 1) console.log(`[vgf] clip_${i} retry succeeded`)
+              console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
+              return result.out_1
+            } catch (err) {
+              if (attempt < 2) {
+                console.warn(`[vgf] clip_${i} attempt 1 failed, retrying in 5s: ${err.message}`)
+                await new Promise(r => setTimeout(r, 5000))
+                continue
+              }
+              throw new Error(`clip_${i}(engine=${img.engine ?? 'flux'},url=${img.url?.slice(-50) ?? 'null'}): ${err.message}`)
+            }
           }
         })
       ))
