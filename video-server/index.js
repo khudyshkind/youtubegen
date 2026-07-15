@@ -4420,8 +4420,18 @@ async function processAudioJob(job) {
       }
     }
 
-    // 9. Upload to Supabase Storage → deterministic public URL
-    const publicUrl = await uploadToSupabaseStorage(finalBuffer, job.user_id, job.project_id)
+    // 9. Upload to B2 (no per-file size limit; Supabase Free capped at 50 MB → 413 for >53 min)
+    let publicUrl
+    try {
+      publicUrl = await uploadBytesToB2(
+        finalBuffer,
+        `audio/${job.user_id}/${job.project_id}/audio.mp3`,
+        'audio/mpeg',
+      )
+    } catch (uploadErr) {
+      console.error(`[audio-job:${jobId}] upload failed (${(finalBuffer.byteLength / 1024 / 1024).toFixed(2)} MB):`, uploadErr.message)
+      throw new Error('Не удалось сохранить озвучку. Попробуйте ещё раз.')
+    }
     console.log(`[audio-job:${jobId}] uploaded: ${publicUrl.slice(0, 100)}`)
 
     // 10. Mark audio_jobs completed (client polls this for real-time status)
