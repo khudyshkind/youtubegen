@@ -232,7 +232,7 @@ export async function POST(request: NextRequest) {
     const enhancedBase = await enhancePrompt(prompt, styleConfig.enhanceSystemHint)
     const enhancedPrompt = `${enhancedBase}, ${styleConfig.fluxSuffix}`
     console.log(`[image-single] engine=${engine} scene_index=${scene_index} style="${image_style ?? 'default'}"`)
-    console.log(`[image-single] FINAL flux prompt: "${enhancedPrompt.slice(0, 180)}"`)
+    console.log(`[image-single] FINAL flux prompt: "${enhancedPrompt}"`)
     console.log(`[image-single] NEGATIVE prompt: "${styleConfig.negativePrompt}"`)
 
     const { data: projectRow } = await supabase

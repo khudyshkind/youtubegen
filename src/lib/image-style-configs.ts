@@ -7,8 +7,11 @@
 //
 // negativePrompt is ONLY forwarded to fal-ai/flux/dev (image-single:260, images:723).
 // flux_schnell, nano_banana and gpt_mini silently ignore it — their API has no such field.
-// NO_TEXT_POSITIVE is therefore injected into every fluxSuffix via getStyleConfig() so the
-// anti-text constraint reaches all four engines as a positive directive.
+// Anti-text for those engines is handled by "NO TEXT, NO NUMBERS..." appended inside each
+// engine function. Do NOT duplicate this in fluxSuffix — extra tail tokens dilute attention.
+//
+// illustrative: true  → images/route.ts uses illustration-mode system prompt (no photo/3D terms)
+// illustrative: false → uses photographic/cinematic system prompt (default)
 
 export interface StyleConfig {
   claudeInstruction: string     // replaces generic "Cinematic lighting, photorealistic" in Claude prompts
@@ -16,11 +19,8 @@ export interface StyleConfig {
   negativePrompt: string        // concepts to avoid — sent as negative_prompt to Flux (NOT inline "NOT X")
   enhanceSystemHint: string     // injected into enhancePrompt system prompt for single-image regen
   fallbackPrompt: string        // template for failed/missing scene prompts ({topic} is replaced)
+  illustrative?: boolean        // true = flat/2D/painted art; scene prompts use illustration rules (no photo/3D)
 }
-
-// Injected into every fluxSuffix by getStyleConfig() — works on ALL engines (flux, schnell, NB, GPT)
-// because those engines have no negativePrompt field. Positive constraint is the only reliable lever.
-export const NO_TEXT_POSITIVE = 'clean wordless illustration, no speech bubbles, no signs, no labels, no captions, no written words or letters anywhere, characters express meaning through poses gestures and facial expressions only'
 
 export const STYLE_CONFIGS: Record<string, StyleConfig> = {
   'hand-drawn illustration, pencil sketch style, artistic line art': {
@@ -29,6 +29,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     negativePrompt: 'photorealistic, photograph, color, cinematic lighting, cartoon, watercolor, digital art, oil painting, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Hand-drawn pencil sketch style. Black and white. No color, no photo, no cinematic.',
     fallbackPrompt: 'Hand-drawn pencil sketch of scene related to {topic}, black and white line art, detailed hatching',
+    illustrative: true,
   },
   'cartoon style, vibrant colors, animated illustration, bold lines': {
     claudeInstruction: 'Cartoon illustration. Bold outlines, vibrant flat colors, animated style. Describe characters and scenes as cartoon visuals. 20–25 words.',
@@ -36,6 +37,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     negativePrompt: 'photorealistic, photograph, cinematic lighting, pencil sketch, watercolor, realistic texture, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Cartoon illustration style. Bold colors, animated. No photorealism, no cinematic.',
     fallbackPrompt: 'Cartoon illustration of scene related to {topic}, bold outlines, vibrant colors',
+    illustrative: true,
   },
   'watercolor painting style, soft colors, textured paper, artistic': {
     claudeInstruction: 'Watercolor painting. Soft blended colors, textured paper. Describe subjects with painterly vocabulary: washes, wet-on-wet, soft edges. 20–25 words.',
@@ -43,6 +45,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     negativePrompt: 'photorealistic, photograph, cinematic lighting, sharp lines, pencil sketch, cartoon, digital art, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Watercolor painting style. Soft blended colors. No sharp lines, no photo, no cinematic.',
     fallbackPrompt: 'Watercolor painting of scene related to {topic}, soft blended colors, textured paper',
+    illustrative: true,
   },
   'cinematic photography, dramatic lighting, movie still, wide-angle': {
     claudeInstruction: 'Cinematic movie still frame. CRITICAL: first describe the actual subject, action and setting from the scene text — what is happening, who or what is in frame, and where. Apply cinematic treatment (dramatic lighting, wide-angle, depth of field) only as framing around that concrete content. The subject and action must stay clearly identifiable, never replaced by mood words. 25-35 words.',
@@ -52,11 +55,12 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fallbackPrompt: 'Cinematic scene related to {topic}, dramatic lighting, movie still, wide angle',
   },
   'flat 2D doodle cartoon, minimalist stick figures, bold black outlines, simple comedic style': {
-    claudeInstruction: 'Doodle cartoon scene. Stick-figure characters — humans AND animals are all drawn as simple doodles with round heads, dot eyes and thin limbs (a doodle monkey is a stick figure with monkey ears/tail, not a realistic monkey) — but ALWAYS describe a full, specific environment around them (place, background objects, weather/season, colorful details). Never describe signs, labels, books with visible text, banners, screens with text, or characters speaking in bubbles. The illustration must be wordless — convey meaning through action, posture and objects. Simple characters, rich scene. 35–45 words.',
+    claudeInstruction: 'Doodle cartoon scene. Stick-figure characters — humans AND animals are all drawn as simple doodles with round heads, dot eyes and thin limbs (a doodle monkey is a stick figure with monkey ears/tail, not a realistic monkey) — but ALWAYS describe a full, specific environment around them (place, background objects, weather/season, colorful details). When characters talk or react, describe their open mouths, raised arms and expressive body poses — never speech bubbles or caption boxes. When a scene involves text in the world (signs, books, whiteboards), show the environment and the person interacting with it — never the text itself. Simple characters, rich scene. 35–45 words.',
     fluxSuffix: 'flat 2D doodle cartoon illustration, ALL characters — humans and animals alike — drawn as simple stick-figure doodles with round heads, dot eyes and thin limbs, bold thick black outlines, vibrant saturated flat colors, no shading, no 3D volume, colorful cartoon background environment with props and scenery, playful expressive poses',
     negativePrompt: 'photorealistic, photograph, 3d render, 3d volume, shading, fur texture, detailed animals, realistic animals, pixar style, rendered characters, realistic anatomy, complex textures, cinematic lighting, watercolor, pencil sketch, detailed faces, white background, empty background, plain background, blank canvas, isolated object, sparse composition, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Doodle cartoon style: all creatures — humans and animals — drawn in the same flat stick-figure doodle manner with round heads and dot eyes, bold outlines, vibrant flat colors, in a full colorful scene with background environment. Simple characters, rich world.',
     fallbackPrompt: 'Doodle cartoon scene related to {topic}, stick figure characters with round heads, bold black outlines, vibrant saturated flat colors, no shading, colorful cartoon background environment',
+    illustrative: true,
   },
   'neon cyberpunk style, vibrant neon colors, futuristic dystopia': {
     claudeInstruction: 'Neon cyberpunk aesthetic. Futuristic urban dystopia, glowing neon lights. Describe city scenes with neon glow vocabulary. 20–25 words.',
@@ -78,6 +82,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     negativePrompt: 'photorealistic, photograph, 3d render, western cartoon, pencil sketch, watercolor, oil painting, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Anime illustration style. Cel shading, clean linework. No photorealism, no western cartoon.',
     fallbackPrompt: 'Anime-style illustration of scene related to {topic}, cel shading, vibrant colors, expressive characters',
+    illustrative: true,
   },
   '3D animated render, Pixar style, volumetric lighting, polished CGI': {
     claudeInstruction: '3D animated render in polished Pixar-like style. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with soft volumetric lighting, smooth rounded forms, rich detail. 20-25 words.',
@@ -92,6 +97,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     negativePrompt: 'photorealistic, photograph, 3d render, digital art, cartoon, anime, pencil sketch, flat colors, cgi, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Classical oil painting style. Visible brushstrokes, impasto texture. No photorealism, no digital art.',
     fallbackPrompt: 'Oil painting of scene related to {topic}, visible brushstrokes, rich textured colors, classical style',
+    illustrative: true,
   },
   'dark atmospheric, low-key lighting, deep shadows, moody cinematic': {
     claudeInstruction: 'Dark atmospheric cinematic scene. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with deep shadows, moody low-key lighting, muted desaturated tones, heavy atmosphere. 25-35 words.',
@@ -111,8 +117,5 @@ export const DEFAULT_STYLE_CONFIG: StyleConfig = {
 }
 
 export function getStyleConfig(imageStyle?: string | null): StyleConfig {
-  const base = imageStyle ? (STYLE_CONFIGS[imageStyle] ?? DEFAULT_STYLE_CONFIG) : DEFAULT_STYLE_CONFIG
-  // NO_TEXT_POSITIVE appended here — single injection point that reaches ALL engines
-  // (flux, flux_schnell, nano_banana, gpt_mini) as a positive constraint.
-  return { ...base, fluxSuffix: `${base.fluxSuffix}, ${NO_TEXT_POSITIVE}` }
+  return imageStyle ? (STYLE_CONFIGS[imageStyle] ?? DEFAULT_STYLE_CONFIG) : DEFAULT_STYLE_CONFIG
 }
