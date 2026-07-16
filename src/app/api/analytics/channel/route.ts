@@ -78,7 +78,9 @@ interface DeepVideoItem {
   caption: boolean; url: string; thumbnail: string
 }
 
-function computeDeepStats(videos: DeepVideoItem[]) {
+// allCommentsDisabled: true when every video had commentCount absent from API response.
+// When absent → YouTube omits the field (comments disabled on video), not truly zero.
+function computeDeepStats(videos: DeepVideoItem[], allCommentsDisabled = false) {
   const n = videos.length
   if (!n) return null
   const durations = videos.map(v => v.duration_sec).filter(d => d > 0)
@@ -94,8 +96,12 @@ function computeDeepStats(videos: DeepVideoItem[]) {
   }
   const captionPct = Math.round(videos.filter(v => v.caption).length / n * 100)
   const engVideos = videos.filter(v => v.views > 0)
+  // When comments are disabled, use only likes to avoid silently understating engagement
   const avgEngRate = engVideos.length
-    ? parseFloat((engVideos.reduce((s, v) => s + (v.likes + v.comments) / v.views, 0) / engVideos.length * 100).toFixed(2))
+    ? parseFloat((engVideos.reduce((s, v) => {
+        const c = allCommentsDisabled ? 0 : v.comments
+        return s + (v.likes + c) / v.views
+      }, 0) / engVideos.length * 100).toFixed(2))
     : 0
   const tagCounts: Record<string, number> = {}
   for (const v of videos) for (const tag of v.tags) { const t = tag.toLowerCase(); tagCounts[t] = (tagCounts[t] ?? 0) + 1 }
@@ -118,7 +124,7 @@ function computeDeepStats(videos: DeepVideoItem[]) {
   const yearly = Object.entries(yearMap)
     .map(([y, { count, totalViews }]) => ({ year: parseInt(y), count, avg_views: count > 0 ? Math.round(totalViews / count) : 0 }))
     .sort((a, b) => a.year - b.year)
-  return { total_deep: n, avg_duration_sec: avgDurSec, median_duration_sec: medDurSec, caption_pct: captionPct, avg_engagement_rate: avgEngRate, top_tags: topTags, hit_tags: hitTags, dud_tags: dudTags, duration_buckets: buckets, yearly }
+  return { total_deep: n, avg_duration_sec: avgDurSec, median_duration_sec: medDurSec, caption_pct: captionPct, avg_engagement_rate: avgEngRate, all_comments_disabled: allCommentsDisabled, top_tags: topTags, hit_tags: hitTags, dud_tags: dudTags, duration_buckets: buckets, yearly }
 }
 
 // ── Claude prompts ────────────────────────────────────────────────────────────
@@ -397,6 +403,7 @@ export async function POST(req: NextRequest) {
 
     let deepVideos: DeepVideoItem[] = []
     let shortsOnly = false
+    let allDeepCommentsDisabled = false
 
     if (allPlaylistItems.length > 0) {
       // Batch videos.list for all collected IDs (50 per call, in parallel)
@@ -410,7 +417,13 @@ export async function POST(req: NextRequest) {
       quotaUsed += batches.length
       console.log(`[channel] videos.list: ${batches.length} batches total_quota=${quotaUsed}`)
 
-      deepVideos = batchResults.flatMap(r => r.items ?? []).map(v => ({
+      const rawItems = batchResults.flatMap(r => r.items ?? [])
+      // commentCount absent from statistics → comments disabled on that video (field omitted by API)
+      const allCommentsDisabled = rawItems.length > 0 && rawItems.every(v => v.statistics?.commentCount === undefined)
+      allDeepCommentsDisabled = allCommentsDisabled
+      console.log(`[channel] allCommentsDisabled=${allCommentsDisabled} (from ${rawItems.length} videos)`)
+
+      deepVideos = rawItems.map(v => ({
         title:        v.snippet?.title ?? '',
         views:        parseInt(v.statistics?.viewCount  ?? '0'),
         likes:        parseInt(v.statistics?.likeCount  ?? '0'),
@@ -450,7 +463,7 @@ export async function POST(req: NextRequest) {
     const postsPerWeek  = allPlaylistItems.length > 0 && deepVideos.length > 1
       ? longsPerWeek(deepVideos.map(v => ({ published: new Date(v.published) })))
       : 0
-    const deepStats     = computeDeepStats(deepVideos)
+    const deepStats     = computeDeepStats(deepVideos, allDeepCommentsDisabled)
 
     // Oldest → newest (already sorted above)
     const chronoLong = deepVideos

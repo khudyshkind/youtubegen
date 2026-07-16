@@ -64,7 +64,7 @@ interface ChannelResult {
   deep_videos?: Array<{ title: string; views: number; likes: number; comments: number; published: string; duration: string; duration_sec: number; tags: string[]; caption: boolean; url: string; thumbnail?: string }>
   deep_stats?: {
     total_deep: number; avg_duration_sec: number; median_duration_sec: number
-    caption_pct: number; avg_engagement_rate: number
+    caption_pct: number; avg_engagement_rate: number; all_comments_disabled?: boolean
     top_tags: Array<[string, number]>; hit_tags: string[]; dud_tags: string[]
     duration_buckets: { under5m: number; m5to15: number; m15to30: number; m30to60: number; over60m: number }
     yearly: Array<{ year: number; count: number; avg_views: number }>
@@ -2229,7 +2229,9 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                 <Card>
                   <SectionTitle>Вовлечённость</SectionTitle>
                   <p className="text-2xl font-bold text-white mb-1">{ds.avg_engagement_rate}%</p>
-                  <p className="text-xs text-slate-500 mb-2">(лайки + комменты) / просмотры</p>
+                  <p className="text-xs text-slate-500 mb-2">
+                    {ds.all_comments_disabled ? 'только лайки / просмотры (комментарии отключены)' : '(лайки + комменты) / просмотры'}
+                  </p>
                   <p className="text-xs text-slate-400">
                     {ds.avg_engagement_rate >= 5 ? 'Высокая — аудитория активна'
                       : ds.avg_engagement_rate >= 2 ? 'Средняя'
