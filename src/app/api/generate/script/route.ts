@@ -4,7 +4,7 @@ import OpenAI from 'openai'
 import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
-import { isBillingError, notifyBillingError } from '@/lib/telegram'
+import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
 import type { ScriptParams, PlanSection, ScriptModel } from '@/lib/types'
@@ -147,8 +147,11 @@ function calcMaxTokens(durationMinutes: number, model: ScriptModel): number {
 
 type GenResult = { text: string; stopReason: string | null }
 
+const scriptSleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+
 async function generateWithClaude(prompt: string, opus: boolean, maxTokens: number): Promise<GenResult> {
-  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+  // timeout: 120_000 — leaves room for one API retry within maxDuration=300s
+  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
   const modelId = opus ? 'claude-opus-4-5' : 'claude-sonnet-4-6'
   const message = await anthropic.messages.create({
     model: modelId,
@@ -338,7 +341,7 @@ function buildSectionUserMessage(
 }
 
 async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): Promise<string | null> {
-  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 240_000 })
   const opus = p.model === 'claude-opus'
   const modelId = opus ? 'claude-opus-4-5' : 'claude-sonnet-4-6'
   const systemPrompt = buildSystemPrompt(p)
@@ -417,7 +420,7 @@ export async function POST(request: NextRequest) {
 
     if (scriptParams.duration_minutes >= CHUNKED_THRESHOLD) {
       // ── Chunked path: parallel section generation ─────────────────────────
-      const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+      const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 240_000 })
       let usedSections: PlanSection[]
 
       if (plan_sections && plan_sections.length > 0) {
@@ -474,7 +477,18 @@ export async function POST(request: NextRequest) {
     // GPT-4o uses 'length' for the same concept as Claude's 'max_tokens'
     const normaliseStop = (r: string | null) => r === 'length' ? 'max_tokens' : r
 
-    let gen = await callGenerate()
+    // API-level retry: catches network failures, Anthropic 429/529, and our 120s timeout.
+    // Math: 120s (attempt1) + 5s delay + 120s (attempt2) = 245s < maxDuration=300s.
+    // Distinct from the guard-retry below (which handles truncated output, not API errors).
+    let gen: GenResult
+    try {
+      gen = await callGenerate()
+    } catch (apiErr1) {
+      const e1 = apiErr1 instanceof Error ? apiErr1.message.slice(0, 120) : String(apiErr1)
+      console.warn(`[generate/script] api attempt 1 failed: ${e1} — retrying in 5s`)
+      await scriptSleep(5000)
+      gen = await callGenerate()  // throws on attempt 2 failure → outer catch
+    }
     let normStop = normaliseStop(gen.stopReason)
 
     if (!gen.text) {
@@ -523,7 +537,14 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/script]', msg)
-    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/script').catch(() => {})
-    return NextResponse.json({ ok: false, error: 'Ошибка генерации сценария' }, { status: 500 })
+    if (isBillingError(msg)) {
+      await notifyBillingError('Anthropic', '/generate/script').catch(() => {})
+    } else {
+      await notifyError('/generate/script', msg).catch(() => {})
+    }
+    const userMsg = /timeout|TimeoutError|ETIMEDOUT/i.test(msg)
+      ? 'Модель не ответила вовремя — попробуйте ещё раз.'
+      : 'Ошибка генерации сценария'
+    return NextResponse.json({ ok: false, error: userMsg }, { status: 500 })
   }
 }

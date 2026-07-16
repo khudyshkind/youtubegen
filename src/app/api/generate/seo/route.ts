@@ -182,7 +182,7 @@ export async function POST(request: NextRequest) {
 ${script.slice(0, 2500)}
 ${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, description, hashtags, tags) strictly in ${lang}.` : ''}`
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 60_000 })
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2500,

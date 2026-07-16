@@ -132,7 +132,7 @@ export async function PATCH(
       const textSnippet = generate_from.trim().slice(0, 1500)
       const fallback = textSnippet.slice(0, 60).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
       try {
-        const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+        const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 12_000 })
         const msg = await client.messages.create({
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 60,

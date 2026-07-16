@@ -356,7 +356,7 @@ async function generateScenesFromSubtitles(
   subtitleBlocks: SubtitleBlock[],
   styleConfig: StyleConfig,
 ): Promise<SceneInfo[]> {
-  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 240_000 })
 
   const groups = splitSubtitlesIntoGroups(subtitleBlocks, imageCount)
   const scenesWithText = groups.map((group, i) => {
@@ -513,7 +513,7 @@ async function generateScenesFromScript(
   imageCount: number,
   styleConfig: StyleConfig,
 ): Promise<SceneInfo[]> {
-  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 240_000 })
 
   const blocks = splitScriptByWords(script, imageCount)
   const blocksWithTimecodes = calculateTimecodes(blocks, durationSec)

@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     const planMaxTokens = sectionCount * 150 + 500
     const prompt = buildPrompt(topic, duration_minutes ?? 5, language ?? 'ru', narrative_style ?? 'storytelling', tone ?? 'neutral')
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 60_000 })
 
     async function callPlan() {
       const message = await anthropic.messages.create({

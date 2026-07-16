@@ -281,7 +281,7 @@ export async function POST(req: NextRequest) {
 
     // ── Claude: two small requests ────────────────────────────────────────────
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
 
     const dataCtx = `Топ каналы: ${JSON.stringify(channelsData.slice(0, 5))}
 Топ видео: ${JSON.stringify(videosData.slice(0, 5))}

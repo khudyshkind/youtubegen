@@ -314,7 +314,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Step 7: Claude analysis with real video titles ────────────────────────
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
 
     const channelsSummary = enriched.map((ch, i) => {
       const videoLines = ch.top_videos.length > 0

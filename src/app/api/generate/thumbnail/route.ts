@@ -60,7 +60,7 @@ async function analyzeImageForTextOverlay(bgDataUrl: string, title: string, refS
     const mediaType = (bgDataUrl.split(';')[0].split(':')[1] ?? 'image/jpeg') as
       'image/jpeg' | 'image/png' | 'image/webp'
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 250,
@@ -137,7 +137,7 @@ async function generateFluxPromptWithText(
   hasRefUrl?: boolean,
 ): Promise<string> {
   try {
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
     // refStyle (uploaded reference) wins unconditionally — single unambiguous style source
     const effectiveStyle = refStyle || imageStyle || 'cinematic photography'
 
@@ -300,7 +300,7 @@ async function generateFluxPromptBackground(
   imageStyle?: string,
 ): Promise<string> {
   try {
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 150,

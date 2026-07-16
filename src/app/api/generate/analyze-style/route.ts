@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     const mediaType = (allowedTypes.includes(file.type) ? file.type : 'image/jpeg') as
       'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 25_000 })
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 150,

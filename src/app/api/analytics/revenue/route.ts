@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
 
     const countryLabel = COUNTRY_LABELS[country] ?? 'Смешанная / глобальная аудитория'
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 50_000 })
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 600,

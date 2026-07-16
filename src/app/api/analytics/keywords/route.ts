@@ -327,7 +327,7 @@ export async function POST(req: NextRequest) {
 
     const keywordsList = filteredSuggestions.map(s => `- "${s}"`).join('\n')
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
 
     const [msg1, msg2] = await Promise.all([
       anthropic.messages.create({

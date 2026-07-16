@@ -273,7 +273,7 @@ export async function POST(req: NextRequest) {
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
 
     const uiLangFull = resolveUserLang(req, ui_lang)
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
 
     // Fetch user's recent video projects for personalized context (Task 1: relevance filter)
     let userProjectsCtx = ''

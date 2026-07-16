@@ -309,7 +309,7 @@ export async function POST(request: NextRequest) {
     const inputWords = countWords(script)
     const maxTokens  = calcMaxTokens(script)
     console.log(`[uniqueize] mode=${mode} output_lang=${outputLang} maxTokens=${maxTokens} inputWords=${inputWords}`)
-    const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
     let result: string
 
     if (mode === 'unique') {

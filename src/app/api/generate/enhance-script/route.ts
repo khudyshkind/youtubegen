@@ -157,7 +157,7 @@ export async function POST(request: NextRequest) {
     let outputLang = Object.keys(LANG_NAMES).includes(output_lang) ? output_lang : 'ru'
     const hookType = Object.keys(HOOK_LABELS_RU).includes(hook_type) ? hook_type : 'question'
 
-    const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
 
     // Resolve actual language from DB (authoritative) or detect from script when DB has null.
     // Overrides the client default 'ru' so pasted EN scripts are enhanced in English.

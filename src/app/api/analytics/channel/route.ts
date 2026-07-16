@@ -469,7 +469,7 @@ export async function POST(req: NextRequest) {
     const chronoLong = deepVideos
 
     // ── Claude context ────────────────────────────────────────────────────────
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
 
     const lines: string[] = [
       `Канал: "${channelData.name}", ${channelData.subscribers_display} подписчиков, ${channelData.total_videos} видео, ${fmtN(channelData.total_views)} просмотров.`,

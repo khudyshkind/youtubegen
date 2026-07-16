@@ -273,7 +273,7 @@ export async function POST(req: NextRequest) {
       .map((c, i) => `${i + 1}. ${c}`)
       .join('\n')
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1200,

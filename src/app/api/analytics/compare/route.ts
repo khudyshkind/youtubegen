@@ -276,7 +276,7 @@ ${channelBlocks}
 Верни JSON строго в этом формате, только JSON, никакого текста до или после:
 {"insights":["Конкретный факт о различии в контенте"],"recommendations":["Конкретное действие которое нужно сделать"],"opportunities":["Конкретная незанятая тема или формат"],"steal_ideas":[{"from_channel":"Название канала","idea":"Что именно перенять конкретно","example_video":"Точное название конкретного видео для вдохновения"}]}`
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
 
     const [msg1, msg2] = await Promise.all([
       anthropic.messages.create({

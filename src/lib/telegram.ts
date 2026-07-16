@@ -29,6 +29,44 @@ export function isBillingError(msg: string): boolean {
   )
 }
 
+// Generic generation-error alert with 1-hour dedup per route+error-class.
+// Covers timeouts, overload (529), rate-limit (429), and unexpected crashes.
+// Safe to call with .catch(() => {}) — never throws to the caller.
+export async function notifyError(route: string, msg: string): Promise<void> {
+  const errorClass = /timeout|TimeoutError|ETIMEDOUT/i.test(msg) ? 'timeout'
+    : /529|overloaded/i.test(msg) ? 'overload'
+    : /429|rate.?limit/i.test(msg) ? 'rate_limit'
+    : 'error'
+  try {
+    const svc = createServiceClient()
+    const threshold = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const now = new Date().toISOString()
+    const alertKey = `error_alert_ts:${route}:${errorClass}`
+    const { data: updated } = await svc
+      .from('bot_settings')
+      .update({ value: now })
+      .eq('key', alertKey)
+      .lt('value', threshold)
+      .select('key')
+    if ((updated?.length ?? 0) > 0) {
+      await sendTelegramAlert(
+        `🟡 <b>Generation error</b>\nRoute: <code>${route}</code>\nClass: <b>${errorClass}</b>\n<code>${msg.slice(0, 200)}</code>\n${new Date().toUTCString()}`
+      )
+      return
+    }
+    const { error: insertErr } = await svc.from('bot_settings').insert({ key: alertKey, value: now })
+    if (!insertErr) {
+      await sendTelegramAlert(
+        `🟡 <b>Generation error</b>\nRoute: <code>${route}</code>\nClass: <b>${errorClass}</b>\n<code>${msg.slice(0, 200)}</code>\n${new Date().toUTCString()}`
+      )
+    }
+  } catch {
+    await sendTelegramAlert(
+      `🟡 <b>Generation error</b>\nRoute: <code>${route}</code>\nClass: <b>${errorClass}</b>\n<code>${msg.slice(0, 200)}</code>\n${new Date().toUTCString()}`
+    ).catch(() => {})
+  }
+}
+
 // Send a billing-exhaustion alert to Telegram with 1-hour dedup via bot_settings.
 // Uses atomic UPDATE-if-old + INSERT-if-missing to avoid sending N alerts under parallel load.
 // Safe to call with .catch(() => {}) — never throws to the caller.
