@@ -20,6 +20,19 @@ export const maxDuration = 300
 // stale FAL CDN URL that will expire and break the video pipeline.
 async function sleep(ms: number) { await new Promise((r) => setTimeout(r, ms)) }
 
+// One-shot retry for transient FAL failures. gpt_mini has its own internal
+// retry loop (MAX_RETRIES=6) and is excluded from this wrapper.
+async function withImageRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`[images] ${label} attempt 1 failed, retrying in 2s: ${msg.slice(0, 120)}`)
+    await sleep(2000)
+    return fn()
+  }
+}
+
 async function uploadFalToStorage(
   falUrl: string,
   storagePath: string,
@@ -824,13 +837,17 @@ export async function POST(request: NextRequest) {
               console.log(`[images] scene ${i + 1} FINAL flux prompt: "${styledPrompt}"`)
               console.log(`[images] scene ${i + 1} NEGATIVE prompt: "${styleConfig.negativePrompt}"`)
               try {
+                const sceneLabel = `scene ${i + 1}`
                 const url = engine === 'gpt_mini'
                   ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
-                  : engine === 'flux_schnell'
-                  ? await generateImageFluxSchnell(styledPrompt, user.id, project_id, i, serviceClient)
-                  : engine === 'nano_banana'
-                  ? await generateImageNanoBanana(styledPrompt, user.id, project_id, i, serviceClient)
-                  : await generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient)
+                  : await withImageRetry(
+                      () => engine === 'flux_schnell'
+                        ? generateImageFluxSchnell(styledPrompt, user.id, project_id, i, serviceClient)
+                        : engine === 'nano_banana'
+                        ? generateImageNanoBanana(styledPrompt, user.id, project_id, i, serviceClient)
+                        : generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient),
+                      sceneLabel,
+                    )
                 const audioFp = duration_sec != null ? Math.round(duration_sec) : undefined
                 const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine, audio_fingerprint: audioFp }
                 sceneImages[i] = img
@@ -859,6 +876,19 @@ export async function POST(request: NextRequest) {
             total: scenes.length,
             images: batchNewImages,
           }))
+
+          // Persist after every batch: if Vercel kills the function the user keeps
+          // all paid images. filter(Boolean) strips uninitialised (undefined) slots
+          // for future batches; null-url slots (failed FAL calls) are kept so the
+          // video renderer knows which scenes need re-generation.
+          if (project_id) {
+            await supabase
+              .from('projects')
+              .update({ scene_images: sceneImages.filter(Boolean) })
+              .eq('id', project_id)
+              .eq('user_id', user.id)
+            console.log(`[images] incremental save: ${sceneImages.filter(Boolean).length}/${scenes.length} scenes persisted`)
+          }
         }
 
         console.log(`[images] done: success=${successCount} failed=${failCount} total=${scenes.length}`)

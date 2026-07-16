@@ -378,8 +378,12 @@ export default function Step5Images() {
         }),
       })
 
-      // Pre-stream errors (401, 402, 400) are plain JSON
+      // Pre-stream errors (401, 402, 400, 504) come as JSON or plain text.
+      // Check content-type first so a Vercel gateway timeout ("An error occurred…")
+      // yields a human-readable message instead of a raw SyntaxError.
       if (!res.ok) {
+        const ct = res.headers.get('content-type') ?? ''
+        if (!ct.includes('application/json')) throw new Error(t('step5.err_timeout'))
         const json = await res.json()
         if (json.code === 'NO_CREDITS') { setError(`${t('step5.err_gen')} (${creditCost} ${t('nav.credits_suffix')})`); return }
         if (json.code === 'TOO_MANY_FOR_GPT_MINI') { setShowGptLimitModal(true); return }
@@ -390,6 +394,7 @@ export default function Step5Images() {
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let completedNormally = false  // set to true when type:'done' is received
 
       while (true) {
         const { done, value } = await reader.read()
@@ -433,6 +438,7 @@ export default function Step5Images() {
                 setSceneImages(merged.sort((a, b) => a.scene_index - b.scene_index))
               }
             } else if (data.type === 'done') {
+              completedNormally = true
               const ts = Date.now()
               setSceneImages((data.images ?? []).map((img) => ({
                 ...img,
@@ -447,6 +453,12 @@ export default function Step5Images() {
             throw parseErr
           }
         }
+      }
+
+      // Stream closed without type:'done' — Vercel killed the function mid-run.
+      // Incremental saves mean completed images are already in the DB; tell the user.
+      if (!completedNormally) {
+        setError(t('step5.err_interrupted'))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step5.err_gen'))
