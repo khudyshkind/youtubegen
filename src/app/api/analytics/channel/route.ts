@@ -64,6 +64,63 @@ function extractTopicCategories(urls?: string[]): string {
     .join(', ')
 }
 
+// ── Deep scan helpers ────────────────────────────────────────────────────────
+
+function parseDurationSec(iso: string): number {
+  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
+  if (!m) return 0
+  return (parseInt(m[1] ?? '0') * 3600) + (parseInt(m[2] ?? '0') * 60) + parseInt(m[3] ?? '0')
+}
+
+interface DeepVideoItem {
+  title: string; views: number; likes: number; comments: number
+  published: string; duration: string; duration_sec: number; tags: string[]
+  caption: boolean; url: string; thumbnail: string
+}
+
+function computeDeepStats(videos: DeepVideoItem[]) {
+  const n = videos.length
+  if (!n) return null
+  const durations = videos.map(v => v.duration_sec).filter(d => d > 0)
+  const avgDurSec = durations.length ? Math.round(durations.reduce((s, d) => s + d, 0) / durations.length) : 0
+  const medDurSec = medianOf(durations)
+  const buckets = { under5m: 0, m5to15: 0, m15to30: 0, m30to60: 0, over60m: 0 }
+  for (const d of durations) {
+    if (d < 300) buckets.under5m++
+    else if (d < 900) buckets.m5to15++
+    else if (d < 1800) buckets.m15to30++
+    else if (d < 3600) buckets.m30to60++
+    else buckets.over60m++
+  }
+  const captionPct = Math.round(videos.filter(v => v.caption).length / n * 100)
+  const engVideos = videos.filter(v => v.views > 0)
+  const avgEngRate = engVideos.length
+    ? parseFloat((engVideos.reduce((s, v) => s + (v.likes + v.comments) / v.views, 0) / engVideos.length * 100).toFixed(2))
+    : 0
+  const tagCounts: Record<string, number> = {}
+  for (const v of videos) for (const tag of v.tags) { const t = tag.toLowerCase(); tagCounts[t] = (tagCounts[t] ?? 0) + 1 }
+  const topTags: Array<[string, number]> = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 20)
+  const viewSorted = [...videos].sort((a, b) => b.views - a.views)
+  const qSize = Math.max(1, Math.ceil(n / 4))
+  const hitTagCounts: Record<string, number> = {}
+  const dudTagCounts: Record<string, number> = {}
+  for (const v of viewSorted.slice(0, qSize)) v.tags.forEach(t => { const k = t.toLowerCase(); hitTagCounts[k] = (hitTagCounts[k] ?? 0) + 1 })
+  for (const v of viewSorted.slice(-qSize)) v.tags.forEach(t => { const k = t.toLowerCase(); dudTagCounts[k] = (dudTagCounts[k] ?? 0) + 1 })
+  const hitTags = Object.entries(hitTagCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([t]) => t)
+  const dudTags = Object.entries(dudTagCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([t]) => t)
+  const yearMap: Record<number, { count: number; totalViews: number }> = {}
+  for (const v of videos) {
+    const year = new Date(v.published).getFullYear()
+    yearMap[year] ??= { count: 0, totalViews: 0 }
+    yearMap[year].count++
+    yearMap[year].totalViews += v.views
+  }
+  const yearly = Object.entries(yearMap)
+    .map(([y, { count, totalViews }]) => ({ year: parseInt(y), count, avg_views: count > 0 ? Math.round(totalViews / count) : 0 }))
+    .sort((a, b) => a.year - b.year)
+  return { total_deep: n, avg_duration_sec: avgDurSec, median_duration_sec: medDurSec, caption_pct: captionPct, avg_engagement_rate: avgEngRate, top_tags: topTags, hit_tags: hitTags, dud_tags: dudTags, duration_buckets: buckets, yearly }
+}
+
 // ── Claude prompts ────────────────────────────────────────────────────────────
 
 function getChannelPrompt1(lang: string): string {
@@ -210,8 +267,8 @@ export async function POST(req: NextRequest) {
 
     console.log(`[channel] start input="${channelInput}" lang=${lang}`)
 
-    // v4: thumbnail + full ISO timestamp + schedule/title blocks
-    const cacheKey = channelInput.toLowerCase().replace(/\s+/g, '-') + `|${lang}|v4`
+    // v5: deep scan (playlistItems+videos.list up to 200), deep_videos + deep_stats
+    const cacheKey = channelInput.toLowerCase().replace(/\s+/g, '-') + `|${lang}|v5`
 
     // ── Cache check ──────────────────────────────────────────────────────────
     try {
@@ -312,37 +369,91 @@ export async function POST(req: NextRequest) {
     }
     console.log(`[channel] name="${channelData.name}" subs=${channelData.subscribers} total_quota=${quotaUsed}`)
 
-    // ── Steps 2+3: RSS feeds — 0 quota units ─────────────────────────────────
-    console.log('[channel] step 2: RSS UULF (long) + UULP (popular) — 0 quota units')
-    const [rssLong, rssPopular] = await Promise.all([
-      fetchChannelFeed(channelId, 'long'),    // last 15 long-form videos
-      fetchChannelFeed(channelId, 'popular'), // top 15 all-time
-    ])
-    console.log(`[channel] RSS long=${rssLong.length} popular=${rssPopular.length} total_quota=${quotaUsed}`)
+    // ── Steps 2+3: UULP RSS (0 units) + UULF deep scan via API ──────────────
+    console.log('[channel] step 2: UULP RSS + UULF playlistItems deep scan')
+    const bare = channelId.replace(/^UC/, '')
 
-    // Fallback for shorts-only channels: UULF empty → fetch UU (all recent) feed.
+    // Parallel: popular RSS (0 units) + first UULF playlist page (1 unit)
+    type PIItem = { snippet?: { title?: string; resourceId?: { videoId?: string } }; contentDetails?: { videoPublishedAt?: string } }
+    type PIPage = { items?: PIItem[]; nextPageToken?: string }
+    type VItem  = { id: string; snippet?: { title?: string; publishedAt?: string; tags?: string[]; thumbnails?: { maxres?: { url?: string }; high?: { url?: string }; medium?: { url?: string } } }; contentDetails?: { duration?: string; caption?: string }; statistics?: { viewCount?: string; likeCount?: string; commentCount?: string } }
+
+    const [rssPopular, pi1Raw] = await Promise.all([
+      fetchChannelFeed(channelId, 'popular'),
+      ytf('/playlistItems', { part: 'snippet,contentDetails', playlistId: `UULF${bare}`, maxResults: '50' }),
+    ])
+    const pi1 = pi1Raw as PIPage
+    quotaUsed += 1
+
+    const allPlaylistItems: PIItem[] = [...(pi1.items ?? [])]
+    let piNextToken = pi1.nextPageToken
+    while (piNextToken && allPlaylistItems.length < 200) {
+      const pg = await ytf('/playlistItems', { part: 'snippet,contentDetails', playlistId: `UULF${bare}`, maxResults: '50', pageToken: piNextToken }) as PIPage
+      quotaUsed += 1
+      allPlaylistItems.push(...(pg.items ?? []))
+      piNextToken = pg.nextPageToken
+    }
+    console.log(`[channel] UULF playlist: ${allPlaylistItems.length} videos total_quota=${quotaUsed}`)
+
+    let deepVideos: DeepVideoItem[] = []
     let shortsOnly = false
-    let effectiveVideos = rssLong
-    if (rssLong.length === 0) {
+
+    if (allPlaylistItems.length > 0) {
+      // Batch videos.list for all collected IDs (50 per call, in parallel)
+      const videoIds = allPlaylistItems.slice(0, 200).map(i => i.snippet?.resourceId?.videoId ?? '').filter(Boolean)
+      const batches: string[][] = []
+      for (let i = 0; i < videoIds.length; i += 50) batches.push(videoIds.slice(i, i + 50))
+
+      const batchResults = await Promise.all(batches.map(ids =>
+        ytf('/videos', { part: 'snippet,contentDetails,statistics', id: ids.join(','), maxResults: '50' })
+      )) as Array<{ items?: VItem[] }>
+      quotaUsed += batches.length
+      console.log(`[channel] videos.list: ${batches.length} batches total_quota=${quotaUsed}`)
+
+      deepVideos = batchResults.flatMap(r => r.items ?? []).map(v => ({
+        title:        v.snippet?.title ?? '',
+        views:        parseInt(v.statistics?.viewCount  ?? '0'),
+        likes:        parseInt(v.statistics?.likeCount  ?? '0'),
+        comments:     parseInt(v.statistics?.commentCount ?? '0'),
+        published:    v.snippet?.publishedAt ?? '',
+        duration:     v.contentDetails?.duration ?? '',
+        duration_sec: parseDurationSec(v.contentDetails?.duration ?? ''),
+        tags:         v.snippet?.tags ?? [],
+        caption:      v.contentDetails?.caption === 'true',
+        url:          `https://youtube.com/watch?v=${v.id}`,
+        thumbnail:    v.snippet?.thumbnails?.maxres?.url ?? v.snippet?.thumbnails?.high?.url ?? v.snippet?.thumbnails?.medium?.url ?? '',
+      }))
+      deepVideos.sort((a, b) => a.published.localeCompare(b.published))  // oldest → newest
+
+    } else {
+      // Shorts-only fallback: UU RSS (0 units)
+      console.log('[channel] UULF empty — shorts-only fallback to RSS')
       const rssAll = await fetchChannelFeed(channelId, 'all')
-      console.log(`[channel] UULF empty — fallback UU feed: ${rssAll.length} entries`)
       if (rssAll.length > 0) {
-        effectiveVideos = rssAll
         shortsOnly = rssAll.every(v => v.isShort)
+        deepVideos = rssAll
+          .sort((a, b) => a.published.getTime() - b.published.getTime())
+          .map(v => ({
+            title: v.title, views: v.views, likes: v.likes, comments: 0,
+            published: v.published.toISOString(), duration: '', duration_sec: 0,
+            tags: [], caption: false, url: v.url, thumbnail: v.thumbnail,
+          }))
       }
     }
 
-    // ── Metrics from RSS ──────────────────────────────────────────────────────
-    const avgViewsLong  = effectiveVideos.length > 0
-      ? Math.round(effectiveVideos.reduce((s, v) => s + v.views, 0) / effectiveVideos.length)
+    // ── Metrics — from deep scan (up to 200 videos) ───────────────────────────
+    const avgViewsLong  = deepVideos.length > 0
+      ? Math.round(deepVideos.reduce((s, v) => s + v.views, 0) / deepVideos.length)
       : 0
-    const medianViews   = medianOf(effectiveVideos.map(v => v.views))
-    const engagementPct = avgEngagementRate(effectiveVideos)
-    // longs_per_week is 0 for shorts-only channels — they publish no long-form
-    const postsPerWeek  = rssLong.length > 0 ? longsPerWeek(rssLong) : 0
+    const medianViews   = medianOf(deepVideos.map(v => v.views))
+    const engagementPct = avgEngagementRate(deepVideos)
+    const postsPerWeek  = allPlaylistItems.length > 0 && deepVideos.length > 1
+      ? longsPerWeek(deepVideos.map(v => ({ published: new Date(v.published) })))
+      : 0
+    const deepStats     = computeDeepStats(deepVideos)
 
-    // Chronological order (oldest first) for trend analysis in Claude
-    const chronoLong = [...effectiveVideos].sort((a, b) => a.published.getTime() - b.published.getTime())
+    // Oldest → newest (already sorted above)
+    const chronoLong = deepVideos
 
     // ── Claude context ────────────────────────────────────────────────────────
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
@@ -356,15 +467,27 @@ export async function POST(req: NextRequest) {
     if (shortsOnly) lines.push('ВАЖНО: У канала нет длинных роликов — он публикует только шортсы (Shorts). Учитывай это при анализе форматов и частоты публикаций.')
     lines.push(`Средние просмотры: ${fmtN(avgViewsLong)}, медиана: ${fmtN(medianViews)}, вовлечённость: ${engagementPct}%, частота: ${postsPerWeek} длинных/нед.`)
 
+    if (deepStats) {
+      const avgMin = Math.round(deepStats.avg_duration_sec / 60)
+      const medMin = Math.round(deepStats.median_duration_sec / 60)
+      lines.push(`Длина роликов: ср. ${avgMin} мин, медиана ${medMin} мин.`)
+      lines.push(`Субтитры: ${deepStats.caption_pct}% роликов.`)
+      lines.push(`Вовлечённость (лайки+комменты/просмотры): ${deepStats.avg_engagement_rate}%.`)
+      if (deepStats.top_tags.length > 0) {
+        lines.push(`Топ теги: ${deepStats.top_tags.slice(0, 10).map(([t, c]) => `${t}(${c})`).join(', ')}.`)
+      }
+      if (deepStats.yearly.length > 0) {
+        lines.push(`По годам: ${deepStats.yearly.map(y => `${y.year}: ${y.count} вид., ср. ${fmtN(y.avg_views)}`).join('; ')}.`)
+      }
+    }
+
     if (chronoLong.length > 0) {
+      const oldest5 = chronoLong.slice(0, 5)
+      const newest5 = chronoLong.slice(-5)
+      const sample  = chronoLong.length <= 10 ? chronoLong : [...oldest5, ...newest5]
       lines.push('')
-      lines.push(`Последние ${chronoLong.length} ${shortsOnly ? 'шортсов' : 'длинных видео'} (от старых к новым):`)
-      lines.push(JSON.stringify(chronoLong.map(v => ({
-        title: v.title,
-        date:  v.published.toISOString().slice(0, 10),
-        views: v.views,
-        likes: v.likes,
-      }))))
+      lines.push(`${shortsOnly ? 'Шортсы' : 'Ролики'} (первые и последние из ${chronoLong.length}, от старых к новым):`)
+      lines.push(JSON.stringify(sample.map(v => ({ title: v.title, date: v.published.slice(0, 10), views: v.views, likes: v.likes }))))
     }
     if (rssPopular.length > 0) {
       lines.push('')
@@ -417,11 +540,12 @@ export async function POST(req: NextRequest) {
     console.log(`[channel] total quota used: ${quotaUsed} units`)
 
     // ── Merge analysis ────────────────────────────────────────────────────────
-    // Use effectiveVideos (fallback to UU if rssLong was empty) for top/worst
-    const topByViews     = [...effectiveVideos].sort((a, b) => b.views - a.views)
+    const topByViews     = [...deepVideos].sort((a, b) => b.views - a.views)
     const top5Long       = topByViews.slice(0, 5).map(v => ({ title: v.title, views: v.views, url: v.url }))
     const worst3Long     = topByViews.slice(-3).reverse().map(v => ({ title: v.title, views: v.views, url: v.url }))
     const top5Alltime    = rssPopular.slice(0, 5).map(v => ({ title: v.title, views: v.views, url: v.url, thumbnail: v.thumbnail }))
+    // Recent 15 for backward-compat UI block (newest first)
+    const recent15       = [...deepVideos].reverse().slice(0, 15)
 
     const analysis = {
       // ── Existing fields (UI contract — unchanged) ──────────────────────────
@@ -459,11 +583,19 @@ export async function POST(req: NextRequest) {
       worst_videos:    worst3Long,
       // ── New fields ─────────────────────────────────────────────────────────
       top_videos_alltime: top5Alltime,
-      recent_videos: chronoLong.map(v => ({
+      recent_videos: recent15.map(v => ({
         title: v.title, views: v.views, likes: v.likes,
-        published: v.published.toISOString(),  // full ISO — UI formats to local time
-        isShort: v.isShort, url: v.url, thumbnail: v.thumbnail,
+        published: v.published,
+        isShort: false, url: v.url, thumbnail: v.thumbnail || undefined,
       })),
+      // ── Deep scan fields (v5) ──────────────────────────────────────────────
+      deep_videos: deepVideos.map(v => ({
+        title: v.title, views: v.views, likes: v.likes, comments: v.comments,
+        published: v.published, duration: v.duration, duration_sec: v.duration_sec,
+        tags: v.tags, caption: v.caption, url: v.url,
+        thumbnail: v.thumbnail || undefined,
+      })),
+      deep_stats: deepStats,
     }
 
     console.log('[channel] analysis merged ok')
