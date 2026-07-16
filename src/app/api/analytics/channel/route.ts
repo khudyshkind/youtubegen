@@ -210,8 +210,8 @@ export async function POST(req: NextRequest) {
 
     console.log(`[channel] start input="${channelInput}" lang=${lang}`)
 
-    // v3: bumped from v2 — response now includes rss-derived fields
-    const cacheKey = channelInput.toLowerCase().replace(/\s+/g, '-') + `|${lang}|v3`
+    // v4: thumbnail + full ISO timestamp + schedule/title blocks
+    const cacheKey = channelInput.toLowerCase().replace(/\s+/g, '-') + `|${lang}|v4`
 
     // ── Cache check ──────────────────────────────────────────────────────────
     try {
@@ -421,7 +421,7 @@ export async function POST(req: NextRequest) {
     const topByViews     = [...effectiveVideos].sort((a, b) => b.views - a.views)
     const top5Long       = topByViews.slice(0, 5).map(v => ({ title: v.title, views: v.views, url: v.url }))
     const worst3Long     = topByViews.slice(-3).reverse().map(v => ({ title: v.title, views: v.views, url: v.url }))
-    const top5Alltime    = rssPopular.slice(0, 5).map(v => ({ title: v.title, views: v.views, url: v.url }))
+    const top5Alltime    = rssPopular.slice(0, 5).map(v => ({ title: v.title, views: v.views, url: v.url, thumbnail: v.thumbnail }))
 
     const analysis = {
       // ── Existing fields (UI contract — unchanged) ──────────────────────────
@@ -458,11 +458,11 @@ export async function POST(req: NextRequest) {
       top_videos:      top5Long,
       worst_videos:    worst3Long,
       // ── New fields ─────────────────────────────────────────────────────────
-      top_videos_alltime: top5Alltime,                          // NEW: UULP top 5
-      recent_videos: chronoLong.map(v => ({                    // NEW: for history / UI future
+      top_videos_alltime: top5Alltime,
+      recent_videos: chronoLong.map(v => ({
         title: v.title, views: v.views, likes: v.likes,
-        published: v.published.toISOString().slice(0, 10),
-        isShort: v.isShort, url: v.url,
+        published: v.published.toISOString(),  // full ISO — UI formats to local time
+        isShort: v.isShort, url: v.url, thumbnail: v.thumbnail,
       })),
     }
 

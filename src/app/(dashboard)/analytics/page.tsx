@@ -59,8 +59,8 @@ interface ChannelResult {
   recommendations: string[]
   top_videos: Array<{ title: string; views: number; url: string }>
   worst_videos: Array<{ title: string; views: number; url: string }>
-  top_videos_alltime?: Array<{ title: string; views: number; url: string }>
-  recent_videos?: Array<{ title: string; views: number; likes: number; published: string; isShort: boolean; url: string }>
+  top_videos_alltime?: Array<{ title: string; views: number; url: string; thumbnail?: string }>
+  recent_videos?: Array<{ title: string; views: number; likes: number; published: string; isShort: boolean; url: string; thumbnail?: string }>
 }
 
 interface RevenueResult {
@@ -1889,6 +1889,93 @@ function TrendsTab({ externalResult, onClearExternal }: {
   )
 }
 
+// ─── Channel analytics helpers ────────────────────────────────────────────────
+
+const MSK_OFFSET_MS = 3 * 60 * 60 * 1000
+const DAY_NAMES_RU  = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+
+function scheduleAnalysis(videos: { published: string; views: number }[]) {
+  const byDay: Record<number, number[]>  = {}
+  const byHour: Record<number, number[]> = {}
+  for (const v of videos) {
+    const d    = new Date(new Date(v.published).getTime() + MSK_OFFSET_MS)
+    const day  = d.getUTCDay()
+    const hour = d.getUTCHours()
+    ;(byDay[day]   ??= []).push(v.views)
+    ;(byHour[hour] ??= []).push(v.views)
+  }
+  const avg = (arr: number[]) => Math.round(arr.reduce((s, x) => s + x, 0) / arr.length)
+  const dayStats = Object.entries(byDay)
+    .map(([d, vs]) => ({ day: +d, name: DAY_NAMES_RU[+d] ?? '?', count: vs.length, avg: avg(vs) }))
+    .sort((a, b) => b.count - a.count)
+  const hourStats = Object.entries(byHour)
+    .map(([h, vs]) => ({ hour: +h, count: vs.length, avg: avg(vs) }))
+    .sort((a, b) => b.count - a.count)
+  const bestDay  = [...dayStats].sort((a, b) => b.avg - a.avg)[0]
+  const bestHour = [...hourStats].sort((a, b) => b.avg - a.avg)[0]
+  return { dayStats, hourStats, bestDay, bestHour }
+}
+
+const RU_STOP = new Set(['и','в','на','с','от','до','о','а','но','за','к','по','не','это','как','из','что','для','же','ли','бы','его','её','их','мы','вы','он','она','они','то','так','при','все','или'])
+const EN_STOP = new Set(['the','a','an','in','on','at','of','to','is','it','and','or','for','this','that','with','i','my','we','you','he','she','they','are','was','be','by','as','but'])
+
+function titleAnalysis(titles: string[]) {
+  if (!titles.length) return null
+  const withNumbers  = titles.filter(t => /\d/.test(t)).length
+  const withEmoji    = titles.filter(t => /\p{Emoji_Presentation}/u.test(t)).length
+  const withQuestion = titles.filter(t => t.includes('?')).length
+  const withExcl     = titles.filter(t => t.includes('!')).length
+  const hashtags     = [...new Set(titles.flatMap(t => t.match(/#[\wА-Яа-яёЁ]+/g) ?? []))]
+  const words: Record<string, number> = {}
+  for (const t of titles) {
+    for (const raw of t.split(/[\s,.!?;:()\[\]"'«»|\/\\#@\d]+/)) {
+      const w = raw.toLowerCase().trim()
+      if (w.length < 3 || RU_STOP.has(w) || EN_STOP.has(w)) continue
+      words[w] = (words[w] ?? 0) + 1
+    }
+  }
+  const topWords = Object.entries(words).sort((a, b) => b[1] - a[1]).slice(0, 10)
+  const avgLen   = Math.round(titles.reduce((s, t) => s + t.length, 0) / titles.length)
+  const avgWords = Math.round(titles.reduce((s, t) => s + t.split(/\s+/).filter(Boolean).length, 0) / titles.length)
+  return { n: titles.length, withNumbers, withEmoji, withQuestion, withExcl, hashtags, topWords, avgLen, avgWords }
+}
+
+function fmtPub(iso: string): string {
+  // Format "2026-07-16 · 09:23" in UTC+3
+  const d = new Date(new Date(iso).getTime() + MSK_OFFSET_MS)
+  const date = d.toISOString().slice(0, 10)
+  const hhmm = d.toISOString().slice(11, 16)
+  return `${date} · ${hhmm}`
+}
+
+function ViewsChart({ videos }: { videos: { title: string; views: number; published: string }[] }) {
+  const items = [...videos].sort((a, b) => a.published.localeCompare(b.published))
+  if (items.length < 2) return null
+  const maxV = Math.max(...items.map(v => v.views), 1)
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 80 }}>
+        {items.map((v, i) => (
+          <div key={i} title={`${v.title}\n${fmtNum(v.views)}`}
+            style={{
+              flex: 1, borderRadius: '3px 3px 0 0',
+              height: `${Math.max(4, Math.round((v.views / maxV) * 100))}%`,
+              background: `rgba(139,92,246,${0.4 + 0.6 * (v.views / maxV)})`,
+              cursor: 'default', transition: 'opacity .15s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.7' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+          />
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+        <span className="text-xs text-slate-600">{items[0]?.published.slice(0, 10)}</span>
+        <span className="text-xs text-slate-600">{items.at(-1)?.published.slice(0, 10)}</span>
+      </div>
+    </div>
+  )
+}
+
 // ─── Channel Tab ──────────────────────────────────────────────────────────────
 
 function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromRisingStars, onBackToRisingStars }: {
@@ -2023,13 +2110,28 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                 </div>
               ))}
             </div>
-            {/* Verdict: hit-driven channel if median < 50% of avg — threshold 0.5 flags strong right-skew */}
+            {/* Verdict 1: gap between all-time peak and current average.
+                Threshold 10×: if the all-time best is an order-of-magnitude above recent avg,
+                the channel had proven viral potential that current content isn't matching. */}
+            {(() => {
+              const avg      = displayResult.overview?.avg_views
+              const alltime  = displayResult.top_videos_alltime
+              if (!avg || !alltime?.length) return null
+              const peak = Math.max(...alltime.map(v => v.views))
+              if (peak <= avg * 10) return null
+              return (
+                <p className="mt-4 text-xs border rounded-lg px-3 py-2" style={{ color: '#f87171', borderColor: 'rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.06)' }}>
+                  Канал умел собирать <strong>{fmtNum(peak)}</strong> просмотров, сейчас в среднем <strong>{fmtNum(avg)}</strong> — потенциал ниши доказан, текущий контент не работает.
+                </p>
+              )
+            })()}
+            {/* Verdict 2: hit within recent 15 — median < 50% of avg signals right-skew */}
             {(() => {
               const avg = displayResult.overview?.avg_views
               const med = displayResult.overview?.median_views
               if (!avg || !med || med >= avg * 0.5) return null
               return (
-                <p className="mt-4 text-xs text-amber-400/80 border border-amber-500/20 rounded-lg px-3 py-2">
+                <p className="mt-2 text-xs text-amber-400/80 border border-amber-500/20 rounded-lg px-3 py-2">
                   Канал живёт отдельными хитами: медиана <strong>{fmtNum(med)}</strong> против среднего <strong>{fmtNum(avg)}</strong> — большинство видео собирают меньше половины среднего.
                 </p>
               )
@@ -2144,6 +2246,96 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
             )}
           </div>
 
+          {/* Chart: views dynamics (п.7) */}
+          {displayResult.recent_videos && displayResult.recent_videos.length >= 3 && (
+            <Card>
+              <SectionTitle>Динамика просмотров — последние {displayResult.recent_videos.length} роликов</SectionTitle>
+              <ViewsChart videos={displayResult.recent_videos} />
+              <p className="text-xs text-slate-500 mt-2">Наведите на бар для просмотра названия и просмотров</p>
+            </Card>
+          )}
+
+          {/* Schedule: когда выходят ролики (п.5) */}
+          {displayResult.recent_videos && displayResult.recent_videos.length >= 3 && (() => {
+            const sched = scheduleAnalysis(displayResult.recent_videos!)
+            const { dayStats, hourStats, bestDay, bestHour } = sched
+            if (!dayStats.length) return null
+            return (
+              <Card>
+                <SectionTitle>Когда выходят ролики (UTC+3)</SectionTitle>
+                <div className="grid sm:grid-cols-2 gap-6">
+                  <div>
+                    <p className="text-xs text-slate-500 mb-2 uppercase tracking-wide">По дням</p>
+                    <div className="flex flex-col gap-1.5">
+                      {dayStats.map(d => (
+                        <div key={d.day} className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400 w-5 shrink-0">{d.name}</span>
+                          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                            <div className="h-full rounded-full" style={{ width: `${Math.round(d.count / dayStats[0]!.count * 100)}%`, background: 'rgba(139,92,246,0.6)' }} />
+                          </div>
+                          <span className="text-xs text-slate-500 shrink-0">{d.count} вид. · ø{fmtNum(d.avg)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 mb-2 uppercase tracking-wide">По часам (топ-5)</p>
+                    <div className="flex flex-col gap-1.5">
+                      {hourStats.slice(0, 5).map(h => (
+                        <div key={h.hour} className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400 w-10 shrink-0">{String(h.hour).padStart(2,'0')}:00</span>
+                          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                            <div className="h-full rounded-full" style={{ width: `${Math.round(h.count / hourStats[0]!.count * 100)}%`, background: 'rgba(52,211,153,0.6)' }} />
+                          </div>
+                          <span className="text-xs text-slate-500 shrink-0">{h.count} вид. · ø{fmtNum(h.avg)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {bestDay && bestHour && (
+                  <p className="mt-4 text-xs text-slate-400 border border-white/5 rounded-lg px-3 py-2">
+                    Наилучшие просмотры дают <strong className="text-white">{bestDay.name}</strong> в <strong className="text-white">{String(bestHour.hour).padStart(2,'0')}:00</strong> — выходи преимущественно тогда.
+                  </p>
+                )}
+              </Card>
+            )
+          })()}
+
+          {/* Title analysis (п.6) */}
+          {displayResult.recent_videos && displayResult.recent_videos.length >= 3 && (() => {
+            const ta = titleAnalysis(displayResult.recent_videos!.map(v => v.title))
+            if (!ta) return null
+            const pct = (n: number) => `${Math.round(n / ta.n * 100)}%`
+            return (
+              <Card>
+                <SectionTitle>Анализ заголовков ({ta.n} роликов)</SectionTitle>
+                <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-300 mb-3">
+                  <span><span className="text-slate-500">Avg длина:</span> {ta.avgLen} симв. / {ta.avgWords} слов</span>
+                  <span><span className="text-slate-500">С числами:</span> {ta.withNumbers}/{ta.n} ({pct(ta.withNumbers)})</span>
+                  <span><span className="text-slate-500">С эмодзи:</span> {ta.withEmoji}/{ta.n} ({pct(ta.withEmoji)})</span>
+                  <span><span className="text-slate-500">С ?:</span> {ta.withQuestion}/{ta.n}</span>
+                  <span><span className="text-slate-500">С !:</span> {ta.withExcl}/{ta.n}</span>
+                </div>
+                {ta.topWords.length > 0 && (
+                  <div className="mb-2">
+                    <p className="text-xs text-slate-500 mb-1.5">Топ слова:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {ta.topWords.map(([w, c]) => (
+                        <span key={w} className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(139,92,246,0.15)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.2)' }}>
+                          {w} <span className="opacity-60">×{c}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {ta.hashtags.length > 0 && (
+                  <p className="text-xs text-slate-500">Хэштеги: <span className="text-slate-400">{ta.hashtags.join(' ')}</span></p>
+                )}
+              </Card>
+            )
+          })()}
+
           {/* Two video blocks when new data available; fallback to legacy top_videos */}
           {(displayResult.top_videos_alltime?.length || displayResult.recent_videos?.length) ? (
             <div className="grid sm:grid-cols-2 gap-4">
@@ -2152,10 +2344,15 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                   <SectionTitle>Топ за всё время</SectionTitle>
                   {displayResult.top_videos_alltime.map((v, i) => (
                     <a key={i} href={v.url} target="_blank" rel="noreferrer"
-                      className="flex justify-between items-center py-2 hover:text-violet-300 transition-colors"
+                      className="flex items-center gap-3 py-2 hover:text-violet-300 transition-colors"
                       style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      <span className="text-sm text-white line-clamp-1 flex-1">{i + 1}. {v.title}</span>
-                      <span className="text-xs text-green-400 ml-3 shrink-0">{fmtNum(v.views)}</span>
+                      {v.thumbnail && (
+                        <img src={v.thumbnail} alt="" className="w-16 h-9 object-cover rounded shrink-0" loading="lazy" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm text-white line-clamp-2 leading-tight">{i + 1}. {v.title}</span>
+                        <span className="text-xs text-green-400 block mt-0.5">{fmtNum(v.views)}</span>
+                      </div>
                     </a>
                   ))}
                 </Card>
@@ -2165,13 +2362,16 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                   <SectionTitle>Последние ролики</SectionTitle>
                   {[...displayResult.recent_videos].reverse().slice(0, 8).map((v, i) => (
                     <a key={i} href={v.url} target="_blank" rel="noreferrer"
-                      className="flex justify-between items-center py-2 hover:text-violet-300 transition-colors"
+                      className="flex items-center gap-3 py-2 hover:text-violet-300 transition-colors"
                       style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      <div className="flex flex-col flex-1 min-w-0">
-                        <span className="text-sm text-white line-clamp-1">{v.title}</span>
-                        <span className="text-xs text-slate-500">{v.published}</span>
+                      {v.thumbnail && (
+                        <img src={v.thumbnail} alt="" className="w-16 h-9 object-cover rounded shrink-0" loading="lazy" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm text-white line-clamp-2 leading-tight">{v.title}</span>
+                        <span className="text-xs text-slate-500 block mt-0.5">{fmtPub(v.published)}</span>
                       </div>
-                      <span className="text-xs text-slate-400 ml-3 shrink-0">{fmtNum(v.views)}</span>
+                      <span className="text-xs text-slate-400 shrink-0">{fmtNum(v.views)}</span>
                     </a>
                   ))}
                 </Card>
@@ -3843,7 +4043,7 @@ export default function AnalyticsPage() {
         }
       `}</style>
 
-      <div className="max-w-3xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto px-4 py-8">
         {tab === null ? (
           /* ── Gallery ── */
           <>
