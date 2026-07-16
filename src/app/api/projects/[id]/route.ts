@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { createServerSupabase } from '@/lib/supabase-server'
+import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 
@@ -47,6 +47,39 @@ export async function DELETE(
     if (!user) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
+
+    // Confirm project exists and belongs to user before touching storage
+    const { data: project } = await supabase
+      .from('projects')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single()
+
+    if (!project) {
+      return NextResponse.json({ ok: false, error: 'Проект не найден' }, { status: 404 })
+    }
+
+    // Clean Supabase Storage (images + audio buckets). Best-effort: errors are logged, not fatal.
+    // B2 files (users/{uid}/{pid}/output_*.mp4) are handled by the nightly retention cron.
+    const svc = createServiceClient()
+    const storagePrefix = `${user.id}/${id}`
+    await Promise.allSettled([
+      (async () => {
+        const { data: files } = await svc.storage.from('images').list(storagePrefix)
+        if (files?.length) {
+          await svc.storage.from('images').remove(files.map(f => `${storagePrefix}/${f.name}`))
+          console.log(`[projects/:id DELETE] images removed: ${files.length} files for ${id}`)
+        }
+      })(),
+      (async () => {
+        const { data: files } = await svc.storage.from('audio').list(storagePrefix)
+        if (files?.length) {
+          await svc.storage.from('audio').remove(files.map(f => `${storagePrefix}/${f.name}`))
+          console.log(`[projects/:id DELETE] audio removed: ${files.length} files for ${id}`)
+        }
+      })(),
+    ])
 
     const { error } = await supabase
       .from('projects')
