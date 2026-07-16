@@ -34,7 +34,20 @@ interface TrendResult {
 
 interface ChannelResult {
   channel_name: string
-  overview: { subscribers: number; total_views: number; avg_views: number; upload_frequency: string }
+  overview: {
+    subscribers: number
+    subscribers_display?: string
+    total_views: number
+    avg_views: number
+    median_views?: number
+    upload_frequency: string
+    engagement_rate?: number
+    longs_per_week?: number
+    country?: string
+    created_at?: string
+    seo_tags?: string
+    topic_category?: string
+  }
   best_formats: Array<{ name: string; avg_views: number; examples?: string[] }>
   worst_formats: Array<{ name: string; avg_views: number }>
   best_topics: string[]
@@ -45,6 +58,8 @@ interface ChannelResult {
   recommendations: string[]
   top_videos: Array<{ title: string; views: number; url: string }>
   worst_videos: Array<{ title: string; views: number; url: string }>
+  top_videos_alltime?: Array<{ title: string; views: number; url: string }>
+  recent_videos?: Array<{ title: string; views: number; likes: number; published: string; isShort: boolean; url: string }>
 }
 
 interface RevenueResult {
@@ -1994,7 +2009,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
             <h2 className="text-lg font-bold text-white mb-4">{displayResult.channel_name}</h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
-                { label: t('analytics.subscribers'), value: fmtNum(displayResult.overview?.subscribers ?? 0) },
+                { label: t('analytics.subscribers'), value: displayResult.overview?.subscribers_display ?? fmtNum(displayResult.overview?.subscribers ?? 0) },
                 { label: t('analytics.total_views'), value: fmtNum(displayResult.overview?.total_views ?? 0) },
                 { label: t('analytics.avg_views'), value: fmtNum(displayResult.overview?.avg_views ?? 0) },
                 { label: t('analytics.upload_frequency'), value: displayResult.overview?.upload_frequency ?? '—' },
