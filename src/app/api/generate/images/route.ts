@@ -374,22 +374,28 @@ async function generateScenesFromSubtitles(
 
   console.log(`[images/subtitles] claude style instruction: "${styleConfig.claudeInstruction}"`)
   console.log(`[images/subtitles] characters found: ${characters.length}${characters.length > 0 ? ` (${characters.map(c => c.name).join(', ')})` : ''}`)
-  console.log(`[images/subtitles] scenes: ${scenesWithText.length}, chunks: ${Math.ceil(scenesWithText.length / CLAUDE_CHUNK)}`)
 
-  const allPromptResults: Array<{ scene: string; prompt: string }> = []
-  for (let chunkStart = 0; chunkStart < scenesWithText.length; chunkStart += CLAUDE_CHUNK) {
-    const chunk = scenesWithText.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
-    const chunkSize = chunk.length
-    const maxTokens = Math.max(4000, chunkSize * 130)
-    const chunkNum = Math.floor(chunkStart / CLAUDE_CHUNK) + 1
+  // Chunks are independent (charSection computed once above, disjoint scene slices).
+  // Run all in parallel — reduces wall-clock from Σ(chunk_times) to max(chunk_times).
+  const totalChunks = Math.ceil(scenesWithText.length / CLAUDE_CHUNK)
+  console.log(`[images/subtitles] scenes: ${scenesWithText.length}, chunks: ${totalChunks} (parallel)`)
 
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: maxTokens,
-      system: [{ type: 'text', text: buildScenesSystemPrompt(styleConfig.illustrative ?? false), cache_control: { type: 'ephemeral' } }],
-      messages: [{
-        role: 'user',
-        content: `Видео на тему: "${topic}". Ниже — ${chunkSize} сцен из реальной расшифровки аудио (Whisper).
+  const chunkOutputs = await Promise.all(
+    Array.from({ length: totalChunks }, async (_, ci) => {
+      const chunkStart = ci * CLAUDE_CHUNK
+      const chunk = scenesWithText.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
+      const chunkSize = chunk.length
+      const maxTokens = Math.max(4000, chunkSize * 130)
+      const label = `subtitles chunk ${ci + 1}/${totalChunks}`
+      const t0 = Date.now()
+
+      const callChunk = () => anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: maxTokens,
+        system: [{ type: 'text', text: buildScenesSystemPrompt(styleConfig.illustrative ?? false), cache_control: { type: 'ephemeral' } }],
+        messages: [{
+          role: 'user',
+          content: `Видео на тему: "${topic}". Ниже — ${chunkSize} сцен из реальной расшифровки аудио (Whisper).
 
 СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
 ${styleConfig.claudeInstruction}
@@ -398,21 +404,44 @@ ${charSection}
 ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${fmtSec(s.end)}]: "${s.text}"`).join('\n')}
 
 Ответь JSON массивом ровно ${chunkSize} элементов.`,
-      }],
-    })
-    console.log(`[images/subtitles] chunk ${chunkNum} tokens — input:${message.usage.input_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
+        }],
+      })
 
-    const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
-    const chunkResults = parseJsonArray(rawText) as Array<{ scene: string; prompt: string }>
-    if (chunkResults.length !== chunkSize) {
-      console.warn(`[images/subtitles] chunk deficit: got ${chunkResults.length} of ${chunkSize} (chunkStart=${chunkStart})`)
-    }
-    while (chunkResults.length < chunkSize) {
-      const absIdx = chunkStart + chunkResults.length
-      chunkResults.push({ scene: `Сцена ${absIdx + 1}`, prompt: styleConfig.fallbackPrompt.replace('{topic}', topic) })
-    }
-    allPromptResults.push(...chunkResults)
-  }
+      // One automatic retry on transient Haiku 429/529 — parallel calls slightly raise pressure
+      const message = await callChunk().catch(async (e1) => {
+        console.warn(`[images/subtitles] ${label} attempt 1 failed: ${e1 instanceof Error ? e1.message.slice(0, 100) : e1} — retrying in 3s`)
+        await sleep(3000)
+        return callChunk().catch((e2) => {
+          console.error(`[images/subtitles] ${label} permanently failed: ${e2 instanceof Error ? e2.message.slice(0, 100) : e2}`)
+          return null
+        })
+      })
+
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      if (!message) {
+        console.error(`[images/subtitles] ${label} failed after ${elapsed}s — filling ${chunkSize} scenes with fallbacks`)
+        return Array.from({ length: chunkSize }, (_, j) => ({
+          scene: `Сцена ${chunkStart + j + 1}`,
+          prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
+        }))
+      }
+
+      console.log(`[images/subtitles] ${label} done in ${elapsed}s — input:${message.usage.input_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
+      const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
+      const chunkResults = parseJsonArray(rawText) as Array<{ scene: string; prompt: string }>
+      if (chunkResults.length !== chunkSize) {
+        console.warn(`[images/subtitles] ${label} deficit: got ${chunkResults.length} of ${chunkSize}`)
+      }
+      while (chunkResults.length < chunkSize) {
+        const absIdx = chunkStart + chunkResults.length
+        chunkResults.push({ scene: `Сцена ${absIdx + 1}`, prompt: styleConfig.fallbackPrompt.replace('{topic}', topic) })
+      }
+      return chunkResults
+    })
+  )
+
+  // Promise.all preserves insertion order → flat() restores scene index sequence
+  const allPromptResults = chunkOutputs.flat()
 
   let promptResults = allPromptResults
   if (promptResults.length > imageCount) promptResults = promptResults.slice(0, imageCount)
@@ -496,22 +525,26 @@ async function generateScenesFromScript(
 
   console.log(`[images/script] claude style instruction: "${styleConfig.claudeInstruction}"`)
   console.log(`[images/script] characters found: ${characters.length}${characters.length > 0 ? ` (${characters.map(c => c.name).join(', ')})` : ''}`)
-  console.log(`[images/script] scenes: ${blocksWithTimecodes.length}, chunks: ${Math.ceil(blocksWithTimecodes.length / CLAUDE_CHUNK)}`)
 
-  const allPromptResults: Array<{ scene: string; prompt: string }> = []
-  for (let chunkStart = 0; chunkStart < blocksWithTimecodes.length; chunkStart += CLAUDE_CHUNK) {
-    const chunk = blocksWithTimecodes.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
-    const chunkSize = chunk.length
-    const maxTokens = Math.max(4000, chunkSize * 130)
-    const chunkNum = Math.floor(chunkStart / CLAUDE_CHUNK) + 1
+  const totalChunks = Math.ceil(blocksWithTimecodes.length / CLAUDE_CHUNK)
+  console.log(`[images/script] scenes: ${blocksWithTimecodes.length}, chunks: ${totalChunks} (parallel)`)
 
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: maxTokens,
-      system: [{ type: 'text', text: buildScenesSystemPrompt(styleConfig.illustrative ?? false), cache_control: { type: 'ephemeral' } }],
-      messages: [{
-        role: 'user',
-        content: `Видео на тему: "${topic}". Ниже — ${chunkSize} отрывков сценария с тайм-кодами.
+  const chunkOutputs = await Promise.all(
+    Array.from({ length: totalChunks }, async (_, ci) => {
+      const chunkStart = ci * CLAUDE_CHUNK
+      const chunk = blocksWithTimecodes.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
+      const chunkSize = chunk.length
+      const maxTokens = Math.max(4000, chunkSize * 130)
+      const label = `script chunk ${ci + 1}/${totalChunks}`
+      const t0 = Date.now()
+
+      const callChunk = () => anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: maxTokens,
+        system: [{ type: 'text', text: buildScenesSystemPrompt(styleConfig.illustrative ?? false), cache_control: { type: 'ephemeral' } }],
+        messages: [{
+          role: 'user',
+          content: `Видео на тему: "${topic}". Ниже — ${chunkSize} отрывков сценария с тайм-кодами.
 
 СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
 ${styleConfig.claudeInstruction}
@@ -520,24 +553,48 @@ ${charSection}
 ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${fmtSec(b.end)}]:\n"${b.text.slice(0, 400)}"`).join('\n\n')}
 
 Ответь JSON массивом ровно ${chunkSize} элементов.`,
-      }],
-    })
-    console.log(`[images/script] chunk ${chunkNum} tokens — input:${message.usage.input_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
-
-    const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
-    const chunkResults = parseJsonArray(rawText) as Array<{ scene: string; prompt: string }>
-    if (chunkResults.length !== chunkSize) {
-      console.warn(`[images/script] chunk deficit: got ${chunkResults.length} of ${chunkSize} (chunkStart=${chunkStart})`)
-    }
-    while (chunkResults.length < chunkSize) {
-      const absIdx = chunkStart + chunkResults.length
-      chunkResults.push({
-        scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
-        prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
+        }],
       })
-    }
-    allPromptResults.push(...chunkResults)
-  }
+
+      const message = await callChunk().catch(async (e1) => {
+        console.warn(`[images/script] ${label} attempt 1 failed: ${e1 instanceof Error ? e1.message.slice(0, 100) : e1} — retrying in 3s`)
+        await sleep(3000)
+        return callChunk().catch((e2) => {
+          console.error(`[images/script] ${label} permanently failed: ${e2 instanceof Error ? e2.message.slice(0, 100) : e2}`)
+          return null
+        })
+      })
+
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      if (!message) {
+        console.error(`[images/script] ${label} failed after ${elapsed}s — filling ${chunkSize} scenes with fallbacks`)
+        return Array.from({ length: chunkSize }, (_, j) => {
+          const absIdx = chunkStart + j
+          return {
+            scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
+            prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
+          }
+        })
+      }
+
+      console.log(`[images/script] ${label} done in ${elapsed}s — input:${message.usage.input_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
+      const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
+      const chunkResults = parseJsonArray(rawText) as Array<{ scene: string; prompt: string }>
+      if (chunkResults.length !== chunkSize) {
+        console.warn(`[images/script] ${label} deficit: got ${chunkResults.length} of ${chunkSize}`)
+      }
+      while (chunkResults.length < chunkSize) {
+        const absIdx = chunkStart + chunkResults.length
+        chunkResults.push({
+          scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
+          prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
+        })
+      }
+      return chunkResults
+    })
+  )
+
+  const allPromptResults = chunkOutputs.flat()
 
   let promptResults = allPromptResults
   if (promptResults.length > imageCount) promptResults = promptResults.slice(0, imageCount)
