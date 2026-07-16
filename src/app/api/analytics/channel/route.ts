@@ -428,17 +428,18 @@ export async function POST(req: NextRequest) {
       channel_name: channelData.name,
       overview: {
         subscribers:         channelData.subscribers,
-        subscribers_display: channelData.subscribers_display,   // NEW: "≈1.8 млн"
+        subscribers_display: channelData.subscribers_display,
         total_views:         channelData.total_views,
+        total_videos:        channelData.total_videos,
         avg_views:           avgViewsLong,
-        median_views:        medianViews,                       // NEW
+        median_views:        medianViews,
         upload_frequency:    overview.upload_frequency ?? '',
-        engagement_rate:     engagementPct,                     // NEW: avg likes/views %
-        longs_per_week:      postsPerWeek,                      // NEW: computed
-        country:             channelData.country,               // NEW
-        created_at:          channelData.created_at.slice(0, 10), // NEW
-        seo_tags:            channelData.seo_tags,              // NEW
-        topic_category:      channelData.topic_category,        // NEW
+        engagement_rate:     engagementPct,
+        longs_per_week:      postsPerWeek,
+        country:             channelData.country,
+        created_at:          channelData.created_at.slice(0, 10),
+        seo_tags:            channelData.seo_tags,
+        topic_category:      channelData.topic_category,
       },
       growth_trend: overview.growth_trend ?? '',
       best_formats: (formats.best_formats ?? []).map(f =>

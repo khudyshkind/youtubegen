@@ -47,6 +47,7 @@ interface ChannelResult {
     created_at?: string
     seo_tags?: string
     topic_category?: string
+    total_videos?: number
   }
   best_formats: Array<{ name: string; avg_views: number; examples?: string[] }>
   worst_formats: Array<{ name: string; avg_views: number }>
@@ -2007,12 +2008,14 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
 
           <Card>
             <h2 className="text-lg font-bold text-white mb-4">{displayResult.channel_name}</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
                 { label: t('analytics.subscribers'), value: displayResult.overview?.subscribers_display ?? fmtNum(displayResult.overview?.subscribers ?? 0) },
                 { label: t('analytics.total_views'), value: fmtNum(displayResult.overview?.total_views ?? 0) },
                 { label: t('analytics.avg_views'), value: fmtNum(displayResult.overview?.avg_views ?? 0) },
+                ...(displayResult.overview?.median_views != null ? [{ label: 'Медиана просмотров', value: fmtNum(displayResult.overview.median_views) }] : []),
                 { label: t('analytics.upload_frequency'), value: displayResult.overview?.upload_frequency ?? '—' },
+                ...(displayResult.overview?.engagement_rate != null ? [{ label: 'Вовлечённость', value: `${displayResult.overview.engagement_rate}%` }] : []),
               ].map(m => (
                 <div key={m.label}>
                   <p className="text-xs text-slate-500 mb-1">{m.label}</p>
@@ -2020,7 +2023,45 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                 </div>
               ))}
             </div>
+            {/* Verdict: hit-driven channel if median < 50% of avg — threshold 0.5 flags strong right-skew */}
+            {(() => {
+              const avg = displayResult.overview?.avg_views
+              const med = displayResult.overview?.median_views
+              if (!avg || !med || med >= avg * 0.5) return null
+              return (
+                <p className="mt-4 text-xs text-amber-400/80 border border-amber-500/20 rounded-lg px-3 py-2">
+                  Канал живёт отдельными хитами: медиана <strong>{fmtNum(med)}</strong> против среднего <strong>{fmtNum(avg)}</strong> — большинство видео собирают меньше половины среднего.
+                </p>
+              )
+            })()}
           </Card>
+
+          {/* Паспорт канала */}
+          {(displayResult.overview?.created_at || displayResult.overview?.country || displayResult.overview?.topic_category || displayResult.overview?.seo_tags) && (
+            <Card>
+              <SectionTitle>Паспорт канала</SectionTitle>
+              <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-300 mb-3">
+                {displayResult.overview?.created_at && (
+                  <span><span className="text-slate-500">Создан:</span> {displayResult.overview.created_at}</span>
+                )}
+                {displayResult.overview?.country && (
+                  <span><span className="text-slate-500">Страна:</span> {displayResult.overview.country}</span>
+                )}
+                {displayResult.overview?.total_videos != null && displayResult.overview.total_videos > 0 && (
+                  <span><span className="text-slate-500">Всего роликов:</span> {fmtNum(displayResult.overview.total_videos)}</span>
+                )}
+                {displayResult.overview?.topic_category && (
+                  <span><span className="text-slate-500">Категория:</span> {displayResult.overview.topic_category}</span>
+                )}
+              </div>
+              {displayResult.overview?.seo_tags && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Теги канала <span className="italic">(скрыты от зрителей, выставлены автором)</span></p>
+                  <p className="text-xs text-slate-400 leading-relaxed">{displayResult.overview.seo_tags}</p>
+                </div>
+              )}
+            </Card>
+          )}
 
           <div className="grid sm:grid-cols-3 gap-4">
             <Card>
@@ -2103,7 +2144,40 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
             )}
           </div>
 
-          {displayResult.top_videos?.length > 0 && (
+          {/* Two video blocks when new data available; fallback to legacy top_videos */}
+          {(displayResult.top_videos_alltime?.length || displayResult.recent_videos?.length) ? (
+            <div className="grid sm:grid-cols-2 gap-4">
+              {displayResult.top_videos_alltime && displayResult.top_videos_alltime.length > 0 && (
+                <Card>
+                  <SectionTitle>Топ за всё время</SectionTitle>
+                  {displayResult.top_videos_alltime.map((v, i) => (
+                    <a key={i} href={v.url} target="_blank" rel="noreferrer"
+                      className="flex justify-between items-center py-2 hover:text-violet-300 transition-colors"
+                      style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <span className="text-sm text-white line-clamp-1 flex-1">{i + 1}. {v.title}</span>
+                      <span className="text-xs text-green-400 ml-3 shrink-0">{fmtNum(v.views)}</span>
+                    </a>
+                  ))}
+                </Card>
+              )}
+              {displayResult.recent_videos && displayResult.recent_videos.length > 0 && (
+                <Card>
+                  <SectionTitle>Последние ролики</SectionTitle>
+                  {[...displayResult.recent_videos].reverse().slice(0, 8).map((v, i) => (
+                    <a key={i} href={v.url} target="_blank" rel="noreferrer"
+                      className="flex justify-between items-center py-2 hover:text-violet-300 transition-colors"
+                      style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <span className="text-sm text-white line-clamp-1">{v.title}</span>
+                        <span className="text-xs text-slate-500">{v.published}</span>
+                      </div>
+                      <span className="text-xs text-slate-400 ml-3 shrink-0">{fmtNum(v.views)}</span>
+                    </a>
+                  ))}
+                </Card>
+              )}
+            </div>
+          ) : displayResult.top_videos?.length > 0 && (
             <Card>
               <SectionTitle>{t('analytics.top_videos')}</SectionTitle>
               {displayResult.top_videos.map((v, i) => (
