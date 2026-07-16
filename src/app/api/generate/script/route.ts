@@ -537,6 +537,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/script]', msg)
+    Sentry.captureException(error)
     if (isBillingError(msg)) {
       await notifyBillingError('Anthropic', '/generate/script').catch(() => {})
     } else {

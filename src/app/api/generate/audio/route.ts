@@ -7,6 +7,7 @@ import { trackEvent } from '@/lib/analytics'
 import { audioCost, ENGINE_DISPLAY } from '@/lib/types'
 import type { AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { env } from '@/lib/env'
+import { notifyError } from '@/lib/telegram'
 
 export const maxDuration = 300
 
@@ -843,6 +844,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/audio] unexpected error:', msg)
+    Sentry.captureException(error)
+    await notifyError('/generate/audio', msg).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка генерации аудио' }, { status: 500 })
   }
 }

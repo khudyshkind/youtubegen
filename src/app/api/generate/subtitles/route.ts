@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
+import { notifyError } from '@/lib/telegram'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
@@ -135,14 +136,16 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, data: { subtitle_blocks } })
   } catch (error) {
-    console.error('[generate/subtitles]', error)
     const msg = error instanceof Error ? error.message : String(error)
+    console.error('[generate/subtitles]', error)
+    Sentry.captureException(error)
     if (msg.includes('429') || (error as { status?: number }).status === 429) {
       return NextResponse.json(
         { ok: false, error: 'Сервис распознавания речи временно перегружен — попробуйте через несколько минут' },
         { status: 402 }
       )
     }
+    await notifyError('/generate/subtitles', msg).catch(() => {})
     return NextResponse.json(
       { ok: false, error: 'Ошибка генерации субтитров' },
       { status: 500 }

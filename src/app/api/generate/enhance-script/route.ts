@@ -4,7 +4,7 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
-import { isBillingError, notifyBillingError } from '@/lib/telegram'
+import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 import {
   countWords, calcMaxTokens, isGuardOk,
   runChunked, ChunkCallFn, CHUNK_THRESHOLD,
@@ -259,6 +259,7 @@ export async function POST(request: NextRequest) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/enhance-script] error:', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/enhance-script').catch(() => {})
+    else await notifyError('/generate/enhance-script', msg).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка усиления текста' }, { status: 500 })
   }
 }

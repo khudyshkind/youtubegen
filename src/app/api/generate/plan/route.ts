@@ -6,7 +6,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJsonArray } from '@/lib/parse-claude-json'
 import type { PlanSection } from '@/lib/types'
-import { isBillingError, notifyBillingError } from '@/lib/telegram'
+import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 
 const LANGUAGE_NAMES: Record<string, string> = {
   ru: 'Russian', en: 'English', es: 'Spanish', fr: 'French',
@@ -141,6 +141,7 @@ export async function POST(request: NextRequest) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/plan]', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/plan').catch(() => {})
+    else await notifyError('/generate/plan', msg).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка генерации плана' }, { status: 500 })
   }
 }

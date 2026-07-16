@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { fal } from '@fal-ai/client'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
-import { isBillingError, notifyBillingError } from '@/lib/telegram'
+import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SceneImage } from '@/lib/types'
@@ -288,6 +288,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: msg }, { status: 403 })
     }
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/image-single').catch(() => {})
+    else await notifyError('/generate/image-single', msg).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка генерации иллюстрации' }, { status: 500 })
   }
 }

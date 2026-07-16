@@ -4,7 +4,7 @@ import { fal } from '@fal-ai/client'
 import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { hasCredits, spendCredits } from '@/lib/credits'
-import { isBillingError, notifyBillingError } from '@/lib/telegram'
+import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS, ENGINE_DISPLAY, IMAGE_COUNT_MAX } from '@/lib/types'
 import type { SceneImage, SubtitleBlock } from '@/lib/types'
@@ -970,7 +970,9 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error)
         console.error('[generate/images] stream error:', msg)
+        Sentry.captureException(error)
         if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/images').catch(() => {})
+        else await notifyError('/generate/images', msg).catch(() => {})
         try {
           controller.enqueue(send({ type: 'error', error: 'Ошибка генерации иллюстраций' }))
           controller.close()

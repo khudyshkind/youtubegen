@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
-import { isBillingError, notifyBillingError } from '@/lib/telegram'
+import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 
 export const maxDuration = 30
 
@@ -91,6 +91,7 @@ export async function POST(request: NextRequest) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analyze-style]', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/analyze-style').catch(() => {})
+    else await notifyError('/generate/analyze-style', msg).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка анализа стиля' }, { status: 500 })
   }
 }

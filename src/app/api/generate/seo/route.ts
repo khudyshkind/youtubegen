@@ -6,7 +6,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 import type { SeoData, SubtitleBlock } from '@/lib/types'
-import { isBillingError, notifyBillingError } from '@/lib/telegram'
+import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 
 interface SeoRequest {
   script: string
@@ -231,6 +231,7 @@ ${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, descrip
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/seo]', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/seo').catch(() => {})
+    else await notifyError('/generate/seo', msg).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка генерации SEO' }, { status: 500 })
   }
 }
