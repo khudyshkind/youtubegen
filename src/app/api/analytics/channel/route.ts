@@ -320,16 +320,29 @@ export async function POST(req: NextRequest) {
     ])
     console.log(`[channel] RSS long=${rssLong.length} popular=${rssPopular.length} total_quota=${quotaUsed}`)
 
+    // Fallback for shorts-only channels: UULF empty → fetch UU (all recent) feed.
+    let shortsOnly = false
+    let effectiveVideos = rssLong
+    if (rssLong.length === 0) {
+      const rssAll = await fetchChannelFeed(channelId, 'all')
+      console.log(`[channel] UULF empty — fallback UU feed: ${rssAll.length} entries`)
+      if (rssAll.length > 0) {
+        effectiveVideos = rssAll
+        shortsOnly = rssAll.every(v => v.isShort)
+      }
+    }
+
     // ── Metrics from RSS ──────────────────────────────────────────────────────
-    const avgViewsLong  = rssLong.length > 0
-      ? Math.round(rssLong.reduce((s, v) => s + v.views, 0) / rssLong.length)
+    const avgViewsLong  = effectiveVideos.length > 0
+      ? Math.round(effectiveVideos.reduce((s, v) => s + v.views, 0) / effectiveVideos.length)
       : 0
-    const medianViews   = medianOf(rssLong.map(v => v.views))
-    const engagementPct = avgEngagementRate(rssLong)
-    const postsPerWeek  = longsPerWeek(rssLong)
+    const medianViews   = medianOf(effectiveVideos.map(v => v.views))
+    const engagementPct = avgEngagementRate(effectiveVideos)
+    // longs_per_week is 0 for shorts-only channels — they publish no long-form
+    const postsPerWeek  = rssLong.length > 0 ? longsPerWeek(rssLong) : 0
 
     // Chronological order (oldest first) for trend analysis in Claude
-    const chronoLong = [...rssLong].sort((a, b) => a.published.getTime() - b.published.getTime())
+    const chronoLong = [...effectiveVideos].sort((a, b) => a.published.getTime() - b.published.getTime())
 
     // ── Claude context ────────────────────────────────────────────────────────
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') })
@@ -340,11 +353,12 @@ export async function POST(req: NextRequest) {
     if (channelData.created_at)    lines.push(`Создан: ${channelData.created_at.slice(0, 10)}.`)
     if (channelData.topic_category) lines.push(`Категория: ${channelData.topic_category}.`)
     if (channelData.seo_tags)       lines.push(`SEO-теги: ${channelData.seo_tags.slice(0, 200)}.`)
+    if (shortsOnly) lines.push('ВАЖНО: У канала нет длинных роликов — он публикует только шортсы (Shorts). Учитывай это при анализе форматов и частоты публикаций.')
     lines.push(`Средние просмотры: ${fmtN(avgViewsLong)}, медиана: ${fmtN(medianViews)}, вовлечённость: ${engagementPct}%, частота: ${postsPerWeek} длинных/нед.`)
 
     if (chronoLong.length > 0) {
       lines.push('')
-      lines.push(`Последние ${chronoLong.length} длинных видео (от старых к новым):`)
+      lines.push(`Последние ${chronoLong.length} ${shortsOnly ? 'шортсов' : 'длинных видео'} (от старых к новым):`)
       lines.push(JSON.stringify(chronoLong.map(v => ({
         title: v.title,
         date:  v.published.toISOString().slice(0, 10),
@@ -403,7 +417,8 @@ export async function POST(req: NextRequest) {
     console.log(`[channel] total quota used: ${quotaUsed} units`)
 
     // ── Merge analysis ────────────────────────────────────────────────────────
-    const topByViews     = [...rssLong].sort((a, b) => b.views - a.views)
+    // Use effectiveVideos (fallback to UU if rssLong was empty) for top/worst
+    const topByViews     = [...effectiveVideos].sort((a, b) => b.views - a.views)
     const top5Long       = topByViews.slice(0, 5).map(v => ({ title: v.title, views: v.views, url: v.url }))
     const worst3Long     = topByViews.slice(-3).reverse().map(v => ({ title: v.title, views: v.views, url: v.url }))
     const top5Alltime    = rssPopular.slice(0, 5).map(v => ({ title: v.title, views: v.views, url: v.url }))
