@@ -172,6 +172,18 @@ async function heartbeatProject(projectId) {
   }
 }
 
+// Refresh audio_jobs.updated_at so the watchdog (updated_at < now−20min) does not
+// kill a legitimately long synthesis job. Guard: &status=eq.processing prevents
+// resurrecting a watchdog-killed job. Errors logged, never thrown.
+async function heartbeatAudioJob(jobId) {
+  if (!jobId) return
+  try {
+    await sbPatch('audio_jobs', `id=eq.${jobId}&status=eq.processing`, { updated_at: new Date().toISOString() })
+  } catch (e) {
+    console.error('[heartbeat-audio]', jobId, e.message)
+  }
+}
+
 // ── Queue operations (bot_content_queue) ─────────────────────────────────────
 async function getQueue() {
   try {
@@ -4265,6 +4277,9 @@ const TTS_CHUNK_LIMITS = {
   voicer:       { maxChars: 195000, measureBytes: false },
 }
 
+const SV_CHUNK_TIMEOUT_MS     = parseInt(process.env.SV_CHUNK_TIMEOUT_MS     ?? '600000',  10) // 10 min default
+const VOICER_CHUNK_TIMEOUT_MS = parseInt(process.env.VOICER_CHUNK_TIMEOUT_MS ?? '1800000', 10) // 30 min default
+
 // Strip ID3v2 tag from start of MP3 buffer.
 // Applied to all non-first chunks before Buffer.concat to prevent PTS-reset drift
 // that causes audio-video sync loss in the final video.
@@ -4365,8 +4380,9 @@ async function runLimited(fns, limit) {
 
 // Submit one text chunk to SecretVoicer; poll until COMPLETED.
 // Returns Buffer (MP3). Throws on failure or timeout.
-async function synthesizeSecretVoicerChunk(text, voiceId, settings) {
+async function synthesizeSecretVoicerChunk(text, voiceId, settings, jobId) {
   const apiKey = process.env.SECRETVOICER_API_KEY
+  const chunkStart = Date.now()
   const res = await fetch(`${SV_BASE}/synthesize`, {
     method: 'POST',
     headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
@@ -4388,12 +4404,14 @@ async function synthesizeSecretVoicerChunk(text, voiceId, settings) {
   const taskId = j.task_id
   if (!taskId) throw new Error('SecretVoicer: no task_id in response')
 
-  const POLL_MS    = 2500
-  const TIMEOUT_MS = 275_000 // retained from Vercel; Railway has no Lambda limit — raise if needed
-  const deadline   = Date.now() + TIMEOUT_MS
+  const POLL_MS = 2500
+  const deadline = Date.now() + SV_CHUNK_TIMEOUT_MS
+  let ticks = 0
 
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, POLL_MS))
+    ticks++
+    if (ticks % 12 === 0) await heartbeatAudioJob(jobId)
     let status
     try {
       const pollRes = await fetch(`${SV_BASE}/task/${taskId}`, {
@@ -4408,21 +4426,24 @@ async function synthesizeSecretVoicerChunk(text, voiceId, settings) {
       if (!status.audio_url) throw new Error('SecretVoicer: COMPLETED but no audio_url')
       const dlRes = await fetch(status.audio_url)
       if (!dlRes.ok) throw new Error(`SecretVoicer download HTTP ${dlRes.status}`)
-      return Buffer.from(await dlRes.arrayBuffer())
+      const buf = Buffer.from(await dlRes.arrayBuffer())
+      console.log(`[audio-job:${jobId}] SV chunk done in ${((Date.now() - chunkStart) / 1000).toFixed(1)}s`)
+      return buf
     }
     if (status.status === 'FAILED') {
       throw new Error(`SecretVoicer FAILED: ${status.error_message ?? 'unknown'}`)
     }
     // PENDING / LOCAL_PROCESSING → continue polling
   }
-  throw new Error(`SecretVoicer: timeout after ${TIMEOUT_MS / 1000}s`)
+  throw new Error(`SecretVoicer: timeout after ${SV_CHUNK_TIMEOUT_MS / 1000}s`)
 }
 
 // Submit one text chunk to Voicer; poll until completed.
 // Returns Buffer (MP3). Throws on failure, timeout, or content-block.
-async function synthesizeVoicerChunk(text, voiceId, settings) {
+async function synthesizeVoicerChunk(text, voiceId, settings, jobId) {
   const apiKey     = process.env.VOICER_API_KEY
   const authHeader = `Bearer ${apiKey}`
+  const chunkStart = Date.now()
 
   const res = await fetch(`${VOICER_BASE}/voice/synthesize`, {
     method: 'POST',
@@ -4449,12 +4470,14 @@ async function synthesizeVoicerChunk(text, voiceId, settings) {
   const taskId = j.task_id
   if (!taskId) throw new Error('Voicer: no task_id in response')
 
-  const POLL_MS    = 2500
-  const TIMEOUT_MS = 280_000 // retained from Vercel; Railway has no Lambda limit — raise if needed
-  const deadline   = Date.now() + TIMEOUT_MS
+  const POLL_MS = 2500
+  const deadline = Date.now() + VOICER_CHUNK_TIMEOUT_MS
+  let ticks = 0
 
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, POLL_MS))
+    ticks++
+    if (ticks % 12 === 0) await heartbeatAudioJob(jobId)
     let status
     try {
       const pollRes = await fetch(`${VOICER_BASE}/voice/status/${taskId}`, {
@@ -4471,7 +4494,9 @@ async function synthesizeVoicerChunk(text, voiceId, settings) {
         headers: { Authorization: authHeader },
       })
       if (!dlRes.ok) throw new Error(`Voicer download HTTP ${dlRes.status}`)
-      return Buffer.from(await dlRes.arrayBuffer())
+      const buf = Buffer.from(await dlRes.arrayBuffer())
+      console.log(`[audio-job:${jobId}] Voicer chunk done in ${((Date.now() - chunkStart) / 1000).toFixed(1)}s`)
+      return buf
     }
     if (status.status === 'failed') {
       throw new Error(`Voicer FAILED: ${status.error_message ?? 'unknown'}`)
@@ -4481,7 +4506,7 @@ async function synthesizeVoicerChunk(text, voiceId, settings) {
     }
     // pending / processing → continue polling
   }
-  throw new Error(`Voicer: timeout after ${TIMEOUT_MS / 1000}s`)
+  throw new Error(`Voicer: timeout after ${VOICER_CHUNK_TIMEOUT_MS / 1000}s`)
 }
 
 // ── Async audio worker ────────────────────────────────────────────────────────
@@ -4554,7 +4579,7 @@ async function processAudioJob(job) {
       synthesizeFn = async (chunk, idx) => {
         for (let attempt = 0; attempt <= 1; attempt++) {
           try {
-            return await synthesizeSecretVoicerChunk(chunk, job.voice_id, settings)
+            return await synthesizeSecretVoicerChunk(chunk, job.voice_id, settings, jobId)
           } catch (e) {
             if (attempt === 1) throw e
             console.warn(`[audio-job:${jobId}] SV chunk ${idx + 1}/${chunks.length} retry:`, e.message)
@@ -4562,7 +4587,7 @@ async function processAudioJob(job) {
         }
       }
     } else if (job.engine === 'voicer') {
-      synthesizeFn = (chunk) => synthesizeVoicerChunk(chunk, job.voice_id, settings)
+      synthesizeFn = (chunk) => synthesizeVoicerChunk(chunk, job.voice_id, settings, jobId)
     } else {
       throw new Error(`engine '${job.engine}' is sync-only and must run on Vercel Lambda, not the async worker`)
     }
@@ -4571,9 +4596,10 @@ async function processAudioJob(job) {
     let doneChunks = 0
     const tasks = chunks.map((chunk, idx) => async () => {
       console.log(`[audio-job:${jobId}] chunk ${idx + 1}/${chunks.length} start`)
+      const t0 = Date.now()
       const buf = await synthesizeFn(chunk, idx)
       doneChunks++
-      console.log(`[audio-job:${jobId}] chunk ${idx + 1}/${chunks.length} done (${buf.byteLength} B)`)
+      console.log(`[audio-job:${jobId}] chunk ${idx + 1}/${chunks.length} done in ${((Date.now() - t0) / 1000).toFixed(1)}s (${buf.byteLength} B)`)
       if (chunks.length > 1) {
         const pct = Math.round(doneChunks / chunks.length * 100)
         await updateAudioJob(jobId, { progress: pct })

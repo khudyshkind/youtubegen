@@ -57,7 +57,7 @@ console.log(`\n👤 Owner: ${ownerProfile.email ?? OWNER_ID}`)
 // ── 1. Balance BEFORE ─────────────────────────────────────────────────────────
 const creditsBefore = ownerProfile.credits ?? 0
 console.log(`💰 Balance BEFORE render:   ${creditsBefore} кр.`)
-const windowStart = new Date(Date.now() - 5000).toISOString()   // 5s back for safety
+const windowStart = new Date(Date.now() - 10 * 60 * 1000).toISOString()   // 10 min back
 console.log(`\n🚀 Start a 1-image render from the browser NOW.`)
 console.log('   (render route will deduct credits and write credits_charged)')
 console.log('   Waiting for a new failed video_job to appear…\n')
