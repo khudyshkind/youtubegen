@@ -63,7 +63,7 @@ export const CREDIT_COSTS = {
 
 export const IMAGE_INTERVAL_MIN = 3    // seconds — lower bound for scene duration
 export const IMAGE_INTERVAL_MAX = 300  // seconds — upper bound for scene duration
-export const IMAGE_COUNT_MAX    = 200  // Vercel Pro maxDuration=300s fits ≤5 FAL batches × 40 = 200 scenes; 224 → 6 batches → timeout
+export const IMAGE_COUNT_MAX    = 450  // hard ceiling on scenes per generation (70 min ÷ 10 s = 420 → rounded up)
 
 export type AudioEngine = 'secretvoicer' | 'elevenlabs' | 'openai' | 'google' | 'apihost' | 'voicer'
 export type ApihostVoiceType = 'basic' | 'standard' | 'pro' | 'studio'
