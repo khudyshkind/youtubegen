@@ -2933,6 +2933,7 @@ async function uploadVideoToB2(filePath, projectId, userId) {
   const bucket = (process.env.B2_BUCKET || '').trim()
   const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
   const region = (process.env.B2_REGION || 'us-east-005').trim()
+  const b2PublicBase = (process.env.B2_PUBLIC_BASE || '').trim().replace(/\/$/, '')
   const fileSize = fs.statSync(filePath).size
 
   console.log(`[b2] node:${process.version}  endpoint: ${endpoint}  bucket: ${bucket}`)
@@ -2952,7 +2953,10 @@ async function uploadVideoToB2(filePath, projectId, userId) {
   const host = parsed.hostname
   const urlPath = parsed.pathname
 
+  const CC = 'public, max-age=31536000'
+
   // AWS SigV4 with actual body hash (B2 requires this, unlike R2 which accepted UNSIGNED-PAYLOAD)
+  // Cache-Control must be in canonical headers and signed — otherwise B2 returns 403.
   const now = new Date()
   const amzDate = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
   const dateStamp = amzDate.slice(0, 8)
@@ -2960,11 +2964,12 @@ async function uploadVideoToB2(filePath, projectId, userId) {
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
 
   const canonicalHeaders =
+    `cache-control:${CC}\n` +
     `content-type:video/mp4\n` +
     `host:${host}\n` +
     `x-amz-content-sha256:${bodyHash}\n` +
     `x-amz-date:${amzDate}\n`
-  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date'
+  const signedHeaders = 'cache-control;content-type;host;x-amz-content-sha256;x-amz-date'
   const canonicalRequest = ['PUT', urlPath, '', canonicalHeaders, signedHeaders, bodyHash].join('\n')
 
   const stringToSign = [
@@ -2984,6 +2989,7 @@ async function uploadVideoToB2(filePath, projectId, userId) {
   const res = await fetch(uploadUrl, {
     method: 'PUT',
     headers: {
+      'Cache-Control': CC,
       'Content-Type': 'video/mp4',
       'Content-Length': String(fileSize),
       'x-amz-content-sha256': bodyHash,
@@ -3000,7 +3006,9 @@ async function uploadVideoToB2(filePath, projectId, userId) {
     throw new Error(`[b2-upload] HTTP ${res.status}: ${errBody.slice(0, 400)}`)
   }
 
-  const publicUrl = `${endpoint}/${bucket}/${key}`
+  // Return CDN URL when B2_PUBLIC_BASE is set (new projects → CF cached).
+  // Old projects store the direct B2 URL in the DB and continue to work as-is.
+  const publicUrl = b2PublicBase ? `${b2PublicBase}/${key}` : `${endpoint}/${bucket}/${key}`
   console.log('[b2] uploaded:', publicUrl)
   return publicUrl
 }
@@ -3397,25 +3405,33 @@ async function getAudioDuration(url) {
   return dur
 }
 
-// Upload raw bytes to B2 (SRT subtitle temp files, etc.)
-async function uploadBytesToB2(buffer, key, contentType = 'application/octet-stream') {
-  const bucket   = (process.env.B2_BUCKET || '').trim()
-  const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
-  const region   = (process.env.B2_REGION || 'us-east-005').trim()
-  const uploadUrl = `${endpoint}/${bucket}/${key}`
-  const parsed = new URL(uploadUrl)
-  const now = new Date()
-  const amzDate    = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
-  const dateStamp  = amzDate.slice(0, 8)
-  const service    = 's3'
+// Upload raw bytes to B2 (audio, subtitle temp files, proxied images, etc.)
+// cacheControl: pass 'public, max-age=31536000' for permanent files (audio);
+// omit for temp files (subtitle ASS, proxied images) which are deleted after render.
+// Cache-Control is included in SigV4 canonical headers when provided.
+async function uploadBytesToB2(buffer, key, contentType = 'application/octet-stream', cacheControl = null) {
+  const bucket      = (process.env.B2_BUCKET || '').trim()
+  const endpoint    = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
+  const region      = (process.env.B2_REGION || 'us-east-005').trim()
+  const b2PublicBase = (process.env.B2_PUBLIC_BASE || '').trim().replace(/\/$/, '')
+  const uploadUrl   = `${endpoint}/${bucket}/${key}`
+  const parsed      = new URL(uploadUrl)
+  const now         = new Date()
+  const amzDate     = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  const dateStamp   = amzDate.slice(0, 8)
+  const service     = 's3'
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
-  const bodyHash = crypto.createHash('sha256').update(buffer).digest('hex')
+  const bodyHash    = crypto.createHash('sha256').update(buffer).digest('hex')
+  // cache-control sorts before content-type alphabetically — required by SigV4.
+  const ccLine      = cacheControl ? `cache-control:${cacheControl}\n` : ''
+  const ccSigned    = cacheControl ? 'cache-control;' : ''
   const canonicalHeaders =
+    ccLine +
     `content-type:${contentType}\n` +
     `host:${parsed.hostname}\n` +
     `x-amz-content-sha256:${bodyHash}\n` +
     `x-amz-date:${amzDate}\n`
-  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date'
+  const signedHeaders = `${ccSigned}content-type;host;x-amz-content-sha256;x-amz-date`
   const canonicalRequest = ['PUT', parsed.pathname, '', canonicalHeaders, signedHeaders, bodyHash].join('\n')
   const stringToSign = [
     'AWS4-HMAC-SHA256', amzDate, credentialScope,
@@ -3427,16 +3443,17 @@ async function uploadBytesToB2(buffer, key, contentType = 'application/octet-str
   const authorization =
     `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credentialScope}, ` +
     `SignedHeaders=${signedHeaders}, Signature=${signature}`
-  const res = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': contentType, 'x-amz-content-sha256': bodyHash, 'x-amz-date': amzDate, 'Authorization': authorization },
-    body: buffer,
-  })
+  const fetchHeaders = { 'Content-Type': contentType, 'x-amz-content-sha256': bodyHash, 'x-amz-date': amzDate, 'Authorization': authorization }
+  if (cacheControl) fetchHeaders['Cache-Control'] = cacheControl
+  const res = await fetch(uploadUrl, { method: 'PUT', headers: fetchHeaders, body: buffer })
   if (!res.ok) {
     const errBody = await res.text().catch(() => '')
     throw new Error(`[b2-bytes] HTTP ${res.status}: ${errBody.slice(0, 300)}`)
   }
-  return uploadUrl
+  // Return CDN URL for permanent files when B2_PUBLIC_BASE is configured.
+  // Temp files (no cacheControl) return the direct B2 URL — VGF accesses them during render
+  // and they are deleted afterwards, so CF caching provides no benefit.
+  return (b2PublicBase && cacheControl) ? `${b2PublicBase}/${key}` : uploadUrl
 }
 
 // Delete temp files from B2 by key list
@@ -4635,6 +4652,7 @@ async function processAudioJob(job) {
         finalBuffer,
         `audio/${job.user_id}/${job.project_id}/audio.mp3`,
         'audio/mpeg',
+        'public, max-age=31536000',
       )
     } catch (uploadErr) {
       console.error(`[audio-job:${jobId}] upload failed (${(finalBuffer.byteLength / 1024 / 1024).toFixed(2)} MB):`, uploadErr.message)
