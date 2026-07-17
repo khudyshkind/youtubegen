@@ -76,6 +76,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Guard: reject duplicate render if an active job already exists for this project.
+    // Returns 409 with the active job_id so the client can resume polling instead of
+    // creating a new job and double-charging credits.
+    const svc = createServiceClient()
+    const { data: activeJobs } = await svc
+      .from('video_jobs')
+      .select('id')
+      .eq('project_id', project_id)
+      .eq('user_id', user.id)
+      .in('status', ['pending', 'processing'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+    if (activeJobs?.length) {
+      return NextResponse.json(
+        { ok: false, error: 'Рендер уже выполняется — дождитесь завершения или обновите страницу', job_id: activeJobs[0].id },
+        { status: 409 }
+      )
+    }
+
     // Mark project as "render in progress" BEFORE calling Railway.
     // This closes the race window: any page reload after this point will see
     // status='generating_video' and inferStep → step 7, never the old video.
@@ -132,7 +151,6 @@ export async function POST(request: NextRequest) {
     await spendCredits(user.id, videoCost, 'video', project_id)
 
     // Record amount charged so refundVideoJobCredits can look it up atomically.
-    const svc = createServiceClient()
     const { error: chargeWriteErr } = await svc
       .from('video_jobs')
       .update({ credits_charged: videoCost })

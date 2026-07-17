@@ -130,6 +130,9 @@ export default function Step6Video() {
   const [renderState, setRenderState] = useState<RenderState>(videoUrl ? 'done' : 'idle')
   const [renderError, setRenderError] = useState('')
   const [renderProgress, setRenderProgress] = useState(0)
+  const [renderPhase, setRenderPhase] = useState<string | null>(null)
+  const [renderPhaseDone, setRenderPhaseDone] = useState<number | null>(null)
+  const [renderPhaseTotal, setRenderPhaseTotal] = useState<number | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollTickRef = useRef<(() => Promise<void>) | null>(null)
   const [burnIn, setBurnIn] = useState(true)
@@ -241,21 +244,35 @@ export default function Step6Video() {
     }
   }
 
-  function startPolling(jobId: string, deadlineMs = 45 * 60 * 1000) {
-    const deadline = Date.now() + deadlineMs
+  function startPolling(jobId: string) {
+    let consecutiveErrors = 0
+    const MAX_ERRORS = 5
 
     const tick = async () => {
-      if (Date.now() > deadline) {
-        clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
-        setRenderError(t('step6.render_timeout')); setRenderState('error')
-        return
-      }
       try {
         const res = await fetch(`/api/generate/video/status?job_id=${jobId}`)
-        const json = await res.json() as { ok: boolean; status?: string; progress?: number; video_url?: string; error_message?: string; credits_refunded?: number }
-        if (!res.ok || !json.ok) return
+        const json = await res.json() as { ok: boolean; status?: string; progress?: number; phase?: string; phase_done?: number; phase_total?: number; video_url?: string; error_message?: string; error?: string; credits_refunded?: number }
 
+        if (!res.ok || !json.ok) {
+          if (res.status === 404) {
+            // Job truly gone — stop polling, allow fresh start
+            clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
+            setRenderJobId(null)
+            setRenderError(json.error ?? 'Задание не найдено'); setRenderState('error')
+            return
+          }
+          if (++consecutiveErrors >= MAX_ERRORS) {
+            clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
+            setRenderError(t('step6.render_network_error')); setRenderState('error')
+          }
+          return
+        }
+
+        consecutiveErrors = 0
         setRenderProgress(json.progress ?? 0)
+        setRenderPhase(json.phase ?? null)
+        setRenderPhaseDone(json.phase_done ?? null)
+        setRenderPhaseTotal(json.phase_total ?? null)
 
         if (json.status === 'completed' && json.video_url) {
           clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
@@ -263,13 +280,18 @@ export default function Step6Video() {
           void refreshCredits(); setRenderState('done')
         } else if (json.status === 'failed') {
           clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
-          void refreshCredits()
+          void refreshCredits(); setRenderJobId(null)
           const refundNote = (json.credits_refunded ?? 0) > 0 ? `\n${json.credits_refunded} кр. возвращены на баланс` : ''
           setRenderError((json.error_message ?? 'Ошибка рендеринга') + refundNote); setRenderState('error')
         } else if (json.status === 'processing') {
           setRenderState('processing')
         }
-      } catch (_) {}
+      } catch (_) {
+        if (++consecutiveErrors >= MAX_ERRORS) {
+          clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
+          setRenderError(t('step6.render_network_error')); setRenderState('error')
+        }
+      }
     }
 
     pollTickRef.current = tick
@@ -310,7 +332,14 @@ export default function Step6Video() {
           effects,
         }),
       })
-      const json = await res.json() as { ok: boolean; data?: { job_id: string }; error?: string }
+      const json = await res.json() as { ok: boolean; data?: { job_id: string }; error?: string; job_id?: string }
+      if (res.status === 409 && json.job_id) {
+        // Active job already running — resume polling instead of starting a new one
+        setRenderJobId(json.job_id)
+        setRenderState('processing')
+        startPolling(json.job_id)
+        return
+      }
       if (!res.ok || !json.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
 
       const jobId = json.data!.job_id
@@ -715,7 +744,7 @@ export default function Step6Video() {
             <button
               type="button"
               onClick={handleRender}
-              disabled={!!mediaPurgedAt || !hasAudio || !hasImages || missingImageCount > 0}
+              disabled={!!mediaPurgedAt || !hasAudio || !hasImages || missingImageCount > 0 || !!renderJobId}
               className="w-full py-2.5 btn-gradient disabled:opacity-40 text-white font-semibold rounded-xl text-sm"
             >
               {t('step6.render_btn')}
@@ -763,7 +792,13 @@ export default function Step6Video() {
               />
             </div>
             <p className="text-xs text-blue-500 text-center">
-              {renderProgress < 10 ? t('step6.progress_prep')
+              {renderPhase === 'clips' && renderPhaseTotal
+                ? `${t('step6.phase_clips')}: ${renderPhaseDone ?? 0} ${t('step6.phase_of')} ${renderPhaseTotal}`
+                : renderPhase === 'concat' ? t('step6.phase_concat')
+                : renderPhase === 'mux' ? t('step6.phase_mux')
+                : renderPhase === 'subtitles' ? t('step6.phase_subtitles')
+                : renderPhase === 'upload' ? t('step6.phase_upload')
+                : renderProgress < 10 ? t('step6.progress_prep')
                 : renderProgress < 40 ? t('step6.progress_xfade')
                 : renderProgress < 65 ? t('step6.progress_effects')
                 : renderProgress < 85 ? t('step6.progress_subs')
@@ -810,14 +845,25 @@ export default function Step6Video() {
           <>
             <p className="text-sm font-semibold text-red-400 mb-1">{t('step6.render_error')}</p>
             <p className="text-xs text-red-400 mb-3">{renderError}</p>
-            <button
-              type="button"
-              onClick={() => { setRenderState('idle'); setRenderProgress(0); setRenderJobId(null) }}
-              className="px-4 py-2 text-white font-medium rounded-xl text-xs transition-colors"
-              style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.3)' }}
-            >
-              {t('step6.try_again')}
-            </button>
+            {renderJobId ? (
+              <button
+                type="button"
+                onClick={() => { setRenderState('processing'); startPolling(renderJobId!) }}
+                className="px-4 py-2 text-white font-medium rounded-xl text-xs transition-colors"
+                style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)' }}
+              >
+                {t('step6.resume_tracking')}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setRenderState('idle'); setRenderProgress(0) }}
+                className="px-4 py-2 text-white font-medium rounded-xl text-xs transition-colors"
+                style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.3)' }}
+              >
+                {t('step6.try_again')}
+              </button>
+            )}
           </>
         )}
       </div>

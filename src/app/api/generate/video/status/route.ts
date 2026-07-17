@@ -26,12 +26,12 @@ export async function GET(request: NextRequest) {
     const svc = createServiceClient()
 
     // Resolve job: by job_id (normal polling) or by project_id (resume after reload)
-    let job: { id: string; status: string; progress: number | null; video_url: string | null; error_message: string | null; project_id: string | null; user_id: string; credits_charged: number; credits_refunded_at: string | null } | null = null
+    let job: { id: string; status: string; progress: number | null; video_url: string | null; error_message: string | null; project_id: string | null; user_id: string; credits_charged: number; credits_refunded_at: string | null; phase: string | null; phase_done: number | null; phase_total: number | null } | null = null
 
     if (jobId) {
       const { data, error } = await svc
         .from('video_jobs')
-        .select('id, status, progress, video_url, error_message, project_id, user_id, credits_charged, credits_refunded_at')
+        .select('id, status, progress, video_url, error_message, project_id, user_id, credits_charged, credits_refunded_at, phase, phase_done, phase_total')
         .eq('id', jobId)
         .eq('user_id', user.id)
         .single()
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
       // Resume polling: find the latest non-failed job for this project
       const { data, error } = await svc
         .from('video_jobs')
-        .select('id, status, progress, video_url, error_message, project_id, user_id, credits_charged, credits_refunded_at')
+        .select('id, status, progress, video_url, error_message, project_id, user_id, credits_charged, credits_refunded_at, phase, phase_done, phase_total')
         .eq('project_id', projectIdParam!)
         .eq('user_id', user.id)
         .neq('status', 'failed')
@@ -160,6 +160,9 @@ export async function GET(request: NextRequest) {
       job_id: job.id,
       status: job.status,
       progress: job.progress,
+      phase: job.phase ?? null,
+      phase_done: job.phase_done ?? null,
+      phase_total: job.phase_total ?? null,
       video_url: job.video_url ?? null,
       error_message: job.error_message ?? null,
       credits_refunded: job.status === 'failed' && (job.credits_charged ?? 0) > 0 ? job.credits_charged : 0,

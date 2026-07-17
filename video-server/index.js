@@ -3651,7 +3651,7 @@ async function concatBatchVGF(clipUrls, batchId, timeoutMs = 600_000, crf = 28) 
 // ── Async video rendering pipeline (VGF) ─────────────────────────────────
 async function processVideoJob(jobId, body) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytgen-'))
-  await updateJob(jobId, { status: 'processing', progress: 5 })
+  await updateJob(jobId, { status: 'processing', progress: 0, phase: 'clips' })
   const T = (label) => `[${jobId.slice(0,8)}] ${label}`
   console.time(T('TOTAL'))
 
@@ -3774,6 +3774,10 @@ async function processVideoJob(jobId, body) {
     const outputPath = path.join(tmpDir, 'output.mp4')
     const clipPool = makePool(VGF_CLIP_CONCURRENCY)
 
+    let clipsDone = 0
+    let lastClipUpdate = 0
+    const totalClips = resolvedImages.length
+
     if (useXfade) {
       // ── Stage 2: Encode all clips via VGF (parallel, max 20 concurrent) ─────
       console.time(T('2_clips_encode'))
@@ -3802,6 +3806,12 @@ async function processVideoJob(jobId, body) {
               )
               if (attempt > 1) console.log(`[vgf] clip_${i} retry succeeded`)
               console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
+              const done = ++clipsDone
+              const now = Date.now()
+              if (done === totalClips || now - lastClipUpdate >= 2500) {
+                lastClipUpdate = now
+                await updateJob(jobId, { progress: Math.round(60 * done / totalClips), phase: 'clips', phase_done: done, phase_total: totalClips })
+              }
               return result.out_1
             } catch (err) {
               if (attempt < 2) {
@@ -3816,7 +3826,7 @@ async function processVideoJob(jobId, body) {
       ))
       console.log(`[vgf] all ${clipUrls.length} clips encoded`)
       console.timeEnd(T('2_clips_encode'))
-      await updateJob(jobId, { progress: 20 })
+      await updateJob(jobId, { progress: 60, phase: 'concat', phase_done: null, phase_total: null })
       await heartbeatProject(project_id)
 
       // ── Stage 3: Batch xfade → merge → mux+effects ──────────────────────────
@@ -3864,7 +3874,7 @@ async function processVideoJob(jobId, body) {
       let currentUrl = muxResult.out_1
       console.log(`[vgf] xfade+mux+effects done: ${transition}, effects=[${effects.join(', ')}]`)
       console.timeEnd(T('3_xfade'))
-      await updateJob(jobId, { progress: 60 })
+      await updateJob(jobId, { progress: 70, phase: 'mux', phase_done: null, phase_total: null })
       await heartbeatProject(project_id)
 
       // ── Stage 4: effects merged into Stage 3 mux pass ──────────────────────
@@ -3875,7 +3885,7 @@ async function processVideoJob(jobId, body) {
         console.time(T('5_subtitles'))
         currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId, longTimeout)
         console.timeEnd(T('5_subtitles'))
-        await updateJob(jobId, { progress: 80 })
+        await updateJob(jobId, { progress: 85, phase: 'subtitles', phase_done: null, phase_total: null })
         await heartbeatProject(project_id)
       } else {
         console.log('[perf] 5_subtitles: skipped (no burn-in)')
@@ -3908,6 +3918,12 @@ async function processVideoJob(jobId, body) {
               )
               if (attempt > 1) console.log(`[vgf] clip_${i} retry succeeded`)
               console.log(`[vgf] clip_${i} done (engine=${img.engine ?? 'flux'})`)
+              const done = ++clipsDone
+              const now = Date.now()
+              if (done === totalClips || now - lastClipUpdate >= 2500) {
+                lastClipUpdate = now
+                await updateJob(jobId, { progress: Math.round(60 * done / totalClips), phase: 'clips', phase_done: done, phase_total: totalClips })
+              }
               return result.out_1
             } catch (err) {
               if (attempt < 2) {
@@ -3921,7 +3937,7 @@ async function processVideoJob(jobId, body) {
         })
       ))
       console.timeEnd(T('2_clips_encode'))
-      await updateJob(jobId, { progress: 20 })
+      await updateJob(jobId, { progress: 60, phase: 'concat', phase_done: null, phase_total: null })
       await heartbeatProject(project_id)
 
       console.time(T('3_concat'))
@@ -3964,7 +3980,7 @@ async function processVideoJob(jobId, body) {
       let currentUrl = cutMuxResult.out_1
       console.log(`[vgf] concat+effects done: effects=[${effects.join(', ')}]`)
       console.timeEnd(T('3_concat'))
-      await updateJob(jobId, { progress: 60 })
+      await updateJob(jobId, { progress: 70, phase: 'mux', phase_done: null, phase_total: null })
       await heartbeatProject(project_id)
 
       // ── Stage 4: effects merged into concat pass ────────────────────────────
@@ -3975,7 +3991,7 @@ async function processVideoJob(jobId, body) {
         console.time(T('5_subtitles'))
         currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId, longTimeout)
         console.timeEnd(T('5_subtitles'))
-        await updateJob(jobId, { progress: 80 })
+        await updateJob(jobId, { progress: 85, phase: 'subtitles', phase_done: null, phase_total: null })
         await heartbeatProject(project_id)
       } else {
         console.log('[perf] 5_subtitles: skipped (no burn-in)')
@@ -3985,7 +4001,7 @@ async function processVideoJob(jobId, body) {
       await downloadFile(currentUrl, outputPath)
     }
 
-    await updateJob(jobId, { progress: 95 })
+    await updateJob(jobId, { progress: 95, phase: 'upload', phase_done: null, phase_total: null })
 
     // ── Stage 6: Upload to Backblaze B2 ────────────────────────────────────
     const fileSizeBytes = fs.statSync(outputPath).size
