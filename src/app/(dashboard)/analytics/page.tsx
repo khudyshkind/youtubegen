@@ -2153,7 +2153,9 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                 </p>
               )
             })()}
-            {/* Verdict 2: right-skew via normalized views_per_day (avoids age bias) */}
+            {/* Verdict 2: right-skew via normalized views_per_day.
+                Threshold 0.2 (5×): step-function distributions are normal on YouTube;
+                only flag when 1-2 outliers dominate (median < 20% of mean). */}
             {(() => {
               const vids = displayResult.deep_videos
               if (!vids?.length) return null
@@ -2165,10 +2167,18 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
               const m = Math.floor(sorted.length / 2)
               const med = sorted.length % 2 === 0 ? Math.round(((sorted[m - 1] ?? 0) + (sorted[m] ?? 0)) / 2) : (sorted[m] ?? 0)
               const avg = Math.round(vpds.reduce((s, v) => s + v, 0) / vpds.length)
-              if (!avg || !med || med >= avg * 0.5) return null
+              if (!avg || !med || med >= avg * 0.2) return null
+              const isGrowing = displayResult.growth_trend?.includes('Рас')
+              if (isGrowing) {
+                return (
+                  <p className="mt-2 text-xs text-slate-500 border border-white/5 rounded-lg px-3 py-2">
+                    Просмотры неравномерны: часть роликов ловит алгоритм (до <strong className="text-slate-300">{fmtNum(Math.max(...vpds))}/д</strong>), типичный ролик собирает <strong className="text-slate-300">{fmtNum(med)}/д</strong> — это нормально для YouTube при растущем тренде.
+                  </p>
+                )
+              }
               return (
                 <p className="mt-2 text-xs text-amber-400/80 border border-amber-500/20 rounded-lg px-3 py-2">
-                  Канал живёт отдельными хитами: медиана <strong>{fmtNum(med)}</strong> просм./день против среднего <strong>{fmtNum(avg)}</strong> — большинство видео набирают меньше половины среднего.
+                  Канал живёт 1–2 хитами: медиана <strong>{fmtNum(med)}</strong> просм./день против среднего <strong>{fmtNum(avg)}</strong> — разрыв в 5+ раз означает, что большинство роликов не попадает в алгоритм.
                 </p>
               )
             })()}
