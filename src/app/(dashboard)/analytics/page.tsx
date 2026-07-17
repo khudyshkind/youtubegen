@@ -61,7 +61,7 @@ interface ChannelResult {
   worst_videos: Array<{ title: string; views: number; url: string }>
   top_videos_alltime?: Array<{ title: string; views: number; url: string; thumbnail?: string }>
   recent_videos?: Array<{ title: string; views: number; likes: number; published: string; isShort: boolean; url: string; thumbnail?: string }>
-  deep_videos?: Array<{ title: string; views: number; likes: number; comments: number; published: string; duration: string; duration_sec: number; tags: string[]; caption: boolean; url: string; thumbnail?: string }>
+  deep_videos?: Array<{ title: string; views: number; likes: number; comments: number; published: string; duration: string; duration_sec: number; tags: string[]; caption: boolean; url: string; thumbnail?: string; views_per_day?: number }>
   deep_stats?: {
     total_deep: number; avg_duration_sec: number; median_duration_sec: number
     caption_pct: number; avg_engagement_rate: number; all_comments_disabled?: boolean
@@ -1912,15 +1912,19 @@ function fmtDuration(sec: number): string {
 const MSK_OFFSET_MS = 3 * 60 * 60 * 1000
 const DAY_NAMES_RU  = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 
-function scheduleAnalysis(videos: { published: string; views: number }[]) {
+function scheduleAnalysis(videos: { published: string; views: number; views_per_day?: number }[]) {
+  const now = Date.now()
   const byDay: Record<number, number[]>  = {}
   const byHour: Record<number, number[]> = {}
   for (const v of videos) {
-    const d    = new Date(new Date(v.published).getTime() + MSK_OFFSET_MS)
+    const pub  = new Date(v.published)
+    const d    = new Date(pub.getTime() + MSK_OFFSET_MS)
     const day  = d.getUTCDay()
     const hour = d.getUTCHours()
-    ;(byDay[day]   ??= []).push(v.views)
-    ;(byHour[hour] ??= []).push(v.views)
+    const daysOld = Math.max(1, Math.round((now - pub.getTime()) / 86400000))
+    const vpd = v.views_per_day ?? Math.round(v.views / daysOld)
+    ;(byDay[day]   ??= []).push(vpd)
+    ;(byHour[hour] ??= []).push(vpd)
   }
   const avg = (arr: number[]) => Math.round(arr.reduce((s, x) => s + x, 0) / arr.length)
   // All 7 days in Mon-Sun order (1..6, 0); dim if n < 3
@@ -2002,12 +2006,13 @@ function ViewsChart({ videos }: { videos: { title: string; views: number; publis
 
 // ─── Channel Tab ──────────────────────────────────────────────────────────────
 
-function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromRisingStars, onBackToRisingStars }: {
+function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromRisingStars, onBackToRisingStars, onGoToPlan }: {
   externalResult?: ChannelResult | null
   onClearExternal?: () => void
   initialChannel?: string
   cameFromRisingStars?: boolean
   onBackToRisingStars?: () => void
+  onGoToPlan?: (topic: string) => void
 }) {
   const { t, lang } = useLang()
   const router = useRouter()
@@ -2126,7 +2131,6 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                 { label: t('analytics.avg_views'), value: fmtNum(displayResult.overview?.avg_views ?? 0) },
                 ...(displayResult.overview?.median_views != null ? [{ label: 'Медиана просмотров', value: fmtNum(displayResult.overview.median_views) }] : []),
                 { label: t('analytics.upload_frequency'), value: displayResult.overview?.upload_frequency ?? '—' },
-                ...(displayResult.overview?.engagement_rate != null ? [{ label: 'Вовлечённость', value: `${displayResult.overview.engagement_rate}%` }] : []),
               ].map(m => (
                 <div key={m.label}>
                   <p className="text-xs text-slate-500 mb-1">{m.label}</p>
@@ -2149,14 +2153,22 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                 </p>
               )
             })()}
-            {/* Verdict 2: hit within recent 15 — median < 50% of avg signals right-skew */}
+            {/* Verdict 2: right-skew via normalized views_per_day (avoids age bias) */}
             {(() => {
-              const avg = displayResult.overview?.avg_views
-              const med = displayResult.overview?.median_views
+              const vids = displayResult.deep_videos
+              if (!vids?.length) return null
+              const now = Date.now()
+              const eligible = vids.filter(v => (now - new Date(v.published).getTime()) / 86400000 >= 7)
+              if (eligible.length < 3) return null
+              const vpds = eligible.map(v => v.views_per_day ?? Math.round(v.views / Math.max(1, Math.round((now - new Date(v.published).getTime()) / 86400000))))
+              const sorted = [...vpds].sort((a, b) => a - b)
+              const m = Math.floor(sorted.length / 2)
+              const med = sorted.length % 2 === 0 ? Math.round(((sorted[m - 1] ?? 0) + (sorted[m] ?? 0)) / 2) : (sorted[m] ?? 0)
+              const avg = Math.round(vpds.reduce((s, v) => s + v, 0) / vpds.length)
               if (!avg || !med || med >= avg * 0.5) return null
               return (
                 <p className="mt-2 text-xs text-amber-400/80 border border-amber-500/20 rounded-lg px-3 py-2">
-                  Канал живёт отдельными хитами: медиана <strong>{fmtNum(med)}</strong> против среднего <strong>{fmtNum(avg)}</strong> — большинство видео собирают меньше половины среднего.
+                  Канал живёт отдельными хитами: медиана <strong>{fmtNum(med)}</strong> просм./день против среднего <strong>{fmtNum(avg)}</strong> — большинство видео набирают меньше половины среднего.
                 </p>
               )
             })()}
@@ -2373,7 +2385,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
             )
           })()}
 
-          {/* Schedule: когда выходят ролики */}
+          {/* Расписание публикаций */}
           {(() => {
             const vids = displayResult.deep_videos ?? displayResult.recent_videos
             if (!vids || vids.length < 5) return null
@@ -2382,7 +2394,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
             const maxHourCount = Math.max(...hourStats.map(h => h.count), 1)
             return (
               <Card>
-                <SectionTitle>Когда выходят ролики (UTC+3, {vids.length} роликов)</SectionTitle>
+                <SectionTitle>Расписание публикаций канала (UTC+3, {vids.length} роликов)</SectionTitle>
                 <div className="grid sm:grid-cols-2 gap-6">
                   <div>
                     <p className="text-xs text-slate-500 mb-2 uppercase tracking-wide">По дням</p>
@@ -2394,7 +2406,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                             <div className="h-full rounded-full" style={{ width: `${d.count > 0 ? Math.round(d.count / maxDayCount * 100) : 0}%`, background: 'rgba(139,92,246,0.6)' }} />
                           </div>
                           {d.count > 0
-                            ? <span className="text-xs text-slate-500 shrink-0">{d.count} · ø{fmtNum(d.avg)}{d.count < 3 ? ' ⚠' : ''}</span>
+                            ? <span className="text-xs text-slate-500 shrink-0">{d.count} вид. · {fmtNum(d.avg)}/д{d.count < 3 ? ' ⚠' : ''}</span>
                             : <span className="text-xs text-slate-600 shrink-0">—</span>
                           }
                         </div>
@@ -2412,7 +2424,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                               <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
                                 <div className="h-full rounded-full" style={{ width: `${Math.round(h.count / maxHourCount * 100)}%`, background: 'rgba(52,211,153,0.6)' }} />
                               </div>
-                              <span className="text-xs text-slate-500 shrink-0">{h.count} · ø{fmtNum(h.avg)}{h.count < 3 ? ' ⚠' : ''}</span>
+                              <span className="text-xs text-slate-500 shrink-0">{h.count} вид. · {fmtNum(h.avg)}/д{h.count < 3 ? ' ⚠' : ''}</span>
                             </div>
                           ))}
                         </div>
@@ -2421,7 +2433,7 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                 </div>
                 {bestDay && bestHour ? (
                   <p className="mt-4 text-xs text-slate-400 border border-white/5 rounded-lg px-3 py-2">
-                    Наилучшие просмотры дают <strong className="text-white">{bestDay.name}</strong> в <strong className="text-white">{String(bestHour.hour).padStart(2,'0')}:00</strong> (UTC+3). ⚠ = бакет &lt;3 роликов, ненадёжно.
+                    Наилучшие просмотры/день дают <strong className="text-white">{bestDay.name}</strong> в <strong className="text-white">{String(bestHour.hour).padStart(2,'0')}:00</strong> (UTC+3). ⚠ = менее 3 роликов, данные ненадёжны.
                   </p>
                 ) : (
                   <p className="mt-4 text-xs text-slate-600">Сравнить не с чем — слишком мало данных для надёжного вывода.</p>
@@ -2480,30 +2492,44 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
                     </span>
                   ))}
                 </div>
-                {(ds.hit_tags.length > 0 || ds.dud_tags.length > 0) && (
-                  <div className="grid sm:grid-cols-2 gap-4 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                    {ds.hit_tags.length > 0 && (
-                      <div>
-                        <p className="text-xs text-slate-500 mb-1.5">Теги хитов (топ-25% по просмотрам)</p>
-                        <div className="flex flex-wrap gap-1">
-                          {ds.hit_tags.map(t => (
-                            <span key={t} className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(74,222,128,0.1)', color: '#4ade80' }}>{t}</span>
-                          ))}
+                {(ds.hit_tags.length > 0 || ds.dud_tags.length > 0) && (() => {
+                  const hitSet = new Set(ds.hit_tags)
+                  const dudSet = new Set(ds.dud_tags)
+                  const hitOnly = ds.hit_tags.filter(t => !dudSet.has(t))
+                  const dudOnly = ds.dud_tags.filter(t => !hitSet.has(t))
+                  const noSignal = hitOnly.length === 0 && dudOnly.length === 0
+                  return (
+                    <div className="pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <p className="text-xs text-slate-500 mb-2">Разница тегов: хиты (топ-25%) vs аутсайдеры (дно-25%)</p>
+                      {noSignal ? (
+                        <p className="text-xs text-slate-500 italic">Теги хитов и аутсайдеров совпадают — теги не объясняют разницу в просмотрах.</p>
+                      ) : (
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          {hitOnly.length > 0 && (
+                            <div>
+                              <p className="text-xs text-slate-500 mb-1.5">Только у хитов</p>
+                              <div className="flex flex-wrap gap-1">
+                                {hitOnly.map(t => (
+                                  <span key={t} className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(74,222,128,0.1)', color: '#4ade80' }}>{t}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {dudOnly.length > 0 && (
+                            <div>
+                              <p className="text-xs text-slate-500 mb-1.5">Только у аутсайдеров</p>
+                              <div className="flex flex-wrap gap-1">
+                                {dudOnly.map(t => (
+                                  <span key={t} className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171' }}>{t}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
-                    {ds.dud_tags.length > 0 && (
-                      <div>
-                        <p className="text-xs text-slate-500 mb-1.5">Теги аутсайдеров (дно-25%)</p>
-                        <div className="flex flex-wrap gap-1">
-                          {ds.dud_tags.map(t => (
-                            <span key={t} className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171' }}>{t}</span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  )
+                })()}
               </Card>
             )
           })()}
@@ -2583,10 +2609,13 @@ function ChannelTab({ externalResult, onClearExternal, initialChannel, cameFromR
             </Card>
           )}
 
-          <button onClick={() => goToStudio(displayResult.channel_name ? `видео в стиле канала ${displayResult.channel_name}` : 'видео на YouTube')}
-            className="no-print inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
-            {t('analytics.make_video')}
-          </button>
+          {onGoToPlan && (
+            <button
+              onClick={() => onGoToPlan(displayResult.overview?.topic_category || displayResult.channel_name || '')}
+              className="no-print inline-flex items-center gap-1.5 text-xs font-medium text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:border-violet-400 rounded-lg px-2.5 py-1 transition">
+              🚀 Составить план канала для этой ниши →
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -4364,6 +4393,7 @@ export default function AnalyticsPage() {
                 initialChannel={pendingChannelQuery ?? undefined}
                 cameFromRisingStars={cameFromRisingStars}
                 onBackToRisingStars={handleBackToRisingStars}
+                onGoToPlan={handleGoToPlan}
               />
             )}
             {tab === 'revenue' && (

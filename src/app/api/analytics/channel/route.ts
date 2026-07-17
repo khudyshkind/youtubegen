@@ -137,7 +137,7 @@ function getChannelPrompt1(lang: string): string {
 
 МЕТОДОЛОГИЯ:
 • upload_frequency — вычисли из реальных дат публикаций (например "2.1 длинных видео/нед."). Учти только длинные видео.
-• growth_trend — "Растёт" / "Стабильно" / "Снижается" — определи по динамике просмотров от старых к новым видео.
+• growth_trend — "Растёт" / "Стабильно" / "Снижается" — определи ТОЛЬКО по views_per_day (просмотры/день), а не по суммарным просмотрам. Видео с days_old < 7 ИГНОРИРУЙ в расчёте тренда — у них мало времени накопить просмотры, низкий счётчик НЕ означает провал. Сравни медиану views_per_day первой половины видео (старые) с медианой второй половины (новые).
 • best_topics — топ 3 темы с лучшими просмотрами (определи из названий).
 • worst_topics — 2 темы с наихудшими просмотрами.
 • strengths — 3 конкретные сильные стороны, основанные на данных.
@@ -153,7 +153,7 @@ DATA: channel metrics and last 15 long-form videos with REAL dates, views, and l
 
 METHODOLOGY:
 • upload_frequency — compute from actual publication dates (e.g. "2.1 longs/week"). Long-form only.
-• growth_trend — "Growing" / "Stable" / "Declining" — based on view trend from older to newer videos.
+• growth_trend — "Growing" / "Stable" / "Declining" — ONLY base this on views_per_day (views per day), not raw view counts. Videos with days_old < 7 MUST be IGNORED for trend — they haven't had time to accumulate views, a low count does NOT mean failure. Compare median views_per_day of first half (older) vs second half (newer videos).
 • best_topics — top 3 topics with best views (from titles).
 • worst_topics — 2 topics with lowest views.
 • strengths — 3 specific channel strengths based on actual data.
@@ -274,7 +274,7 @@ export async function POST(req: NextRequest) {
     console.log(`[channel] start input="${channelInput}" lang=${lang}`)
 
     // v5: deep scan (playlistItems+videos.list up to 200), deep_videos + deep_stats
-    const cacheKey = channelInput.toLowerCase().replace(/\s+/g, '-') + `|${lang}|v5`
+    const cacheKey = channelInput.toLowerCase().replace(/\s+/g, '-') + `|${lang}|v6`
 
     // ── Cache check ──────────────────────────────────────────────────────────
     try {
@@ -468,6 +468,21 @@ export async function POST(req: NextRequest) {
     // Oldest → newest (already sorted above)
     const chronoLong = deepVideos
 
+    const nowMs = Date.now()
+
+    // ── Server-side trend (views_per_day, excluding <7-day videos) ─────────────
+    let computedGrowthTrend = ''
+    {
+      const eligible = deepVideos.filter(v => (nowMs - new Date(v.published).getTime()) / 86400000 >= 7)
+      if (eligible.length >= 4) {
+        const half = Math.floor(eligible.length / 2)
+        const vpd = (v: DeepVideoItem) => Math.round(v.views / Math.max(1, (nowMs - new Date(v.published).getTime()) / 86400000))
+        const medOlder = medianOf(eligible.slice(0, half).map(vpd))
+        const medNewer = medianOf(eligible.slice(half).map(vpd))
+        computedGrowthTrend = medNewer >= medOlder * 1.1 ? 'Растёт' : medNewer <= medOlder * 0.9 ? 'Снижается' : 'Стабильно'
+      }
+    }
+
     // ── Claude context ────────────────────────────────────────────────────────
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 100_000 })
 
@@ -500,7 +515,10 @@ export async function POST(req: NextRequest) {
       const sample  = chronoLong.length <= 10 ? chronoLong : [...oldest5, ...newest5]
       lines.push('')
       lines.push(`${shortsOnly ? 'Шортсы' : 'Ролики'} (первые и последние из ${chronoLong.length}, от старых к новым):`)
-      lines.push(JSON.stringify(sample.map(v => ({ title: v.title, date: v.published.slice(0, 10), views: v.views, likes: v.likes }))))
+      lines.push(JSON.stringify(sample.map(v => {
+        const daysOld = Math.max(1, Math.round((nowMs - new Date(v.published).getTime()) / 86400000))
+        return { title: v.title, date: v.published.slice(0, 10), days_old: daysOld, views: v.views, views_per_day: Math.round(v.views / daysOld), likes: v.likes }
+      })))
     }
     if (rssPopular.length > 0) {
       lines.push('')
@@ -578,7 +596,7 @@ export async function POST(req: NextRequest) {
         seo_tags:            channelData.seo_tags,
         topic_category:      channelData.topic_category,
       },
-      growth_trend: overview.growth_trend ?? '',
+      growth_trend: computedGrowthTrend || overview.growth_trend || '',
       best_formats: (formats.best_formats ?? []).map(f =>
         typeof f === 'string'
           ? { name: f, avg_views: 0, examples: [] }
@@ -602,12 +620,16 @@ export async function POST(req: NextRequest) {
         isShort: false, url: v.url, thumbnail: v.thumbnail || undefined,
       })),
       // ── Deep scan fields (v5) ──────────────────────────────────────────────
-      deep_videos: deepVideos.map(v => ({
-        title: v.title, views: v.views, likes: v.likes, comments: v.comments,
-        published: v.published, duration: v.duration, duration_sec: v.duration_sec,
-        tags: v.tags, caption: v.caption, url: v.url,
-        thumbnail: v.thumbnail || undefined,
-      })),
+      deep_videos: deepVideos.map(v => {
+        const daysOld = Math.max(1, Math.round((nowMs - new Date(v.published).getTime()) / 86400000))
+        return {
+          title: v.title, views: v.views, likes: v.likes, comments: v.comments,
+          published: v.published, duration: v.duration, duration_sec: v.duration_sec,
+          tags: v.tags, caption: v.caption, url: v.url,
+          thumbnail: v.thumbnail || undefined,
+          views_per_day: Math.round(v.views / daysOld),
+        }
+      }),
       deep_stats: deepStats,
     }
 
