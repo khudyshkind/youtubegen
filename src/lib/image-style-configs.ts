@@ -18,7 +18,7 @@ export interface StyleConfig {
   fluxSuffix: string            // POSITIVE style descriptors only — appended to every Flux/GPT prompt
   negativePrompt: string        // concepts to avoid — sent as negative_prompt to Flux (NOT inline "NOT X")
   enhanceSystemHint: string     // injected into enhancePrompt system prompt for single-image regen
-  fallbackPrompt: string        // template for failed/missing scene prompts ({topic} is replaced)
+  fallbackPrompt: string        // pure visual scene for failed/missing scene prompts — no {topic} substitution
   illustrative?: boolean        // true = flat/2D/painted art; scene prompts use illustration rules (no photo/3D)
 }
 
@@ -28,7 +28,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fluxSuffix: 'hand-drawn pencil sketch, black and white line art, hatching technique, pencil strokes, monochrome illustration, monochrome pencil rendering, no color fills',
     negativePrompt: 'photorealistic, photograph, color, cinematic lighting, cartoon, watercolor, digital art, oil painting, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Hand-drawn pencil sketch style. Black and white. No color, no photo, no cinematic.',
-    fallbackPrompt: 'Hand-drawn pencil sketch of scene related to {topic}, black and white line art, detailed hatching',
+    fallbackPrompt: 'Hand-drawn pencil sketch of two figures in conversation at a table, black and white line art, detailed cross-hatching, monochrome, pencil strokes',
     illustrative: true,
   },
   'cartoon style, vibrant colors, animated illustration, bold lines': {
@@ -36,7 +36,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fluxSuffix: 'cartoon illustration, bold outlines, vibrant flat colors, animated style, 2d animation',
     negativePrompt: 'photorealistic, photograph, cinematic lighting, pencil sketch, watercolor, realistic texture, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Cartoon illustration style. Bold colors, animated. No photorealism, no cinematic.',
-    fallbackPrompt: 'Cartoon illustration of scene related to {topic}, bold outlines, vibrant colors',
+    fallbackPrompt: 'Cartoon illustration of two cheerful characters in a bright colorful room, bold outlines, vibrant flat colors, animated style',
     illustrative: true,
   },
   'watercolor painting style, soft colors, textured paper, artistic': {
@@ -44,7 +44,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fluxSuffix: 'watercolor painting, soft blended washes, wet-on-wet technique, textured paper background, artistic painting, soft bleeding edges, no sharp outlines',
     negativePrompt: 'photorealistic, photograph, cinematic lighting, sharp lines, pencil sketch, cartoon, digital art, 3d render, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Watercolor painting style. Soft blended colors. No sharp lines, no photo, no cinematic.',
-    fallbackPrompt: 'Watercolor painting of scene related to {topic}, soft blended colors, textured paper',
+    fallbackPrompt: 'Watercolor painting of a peaceful landscape with rolling hills and soft light, blended washes of green and blue, textured paper background, wet-on-wet technique',
     illustrative: true,
   },
   'cinematic photography, dramatic lighting, movie still, wide-angle': {
@@ -52,14 +52,14 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fluxSuffix: 'cinematic photography, dramatic lighting, movie still, wide-angle lens, film grain, depth of field, real film photography, live-action movie still, photographic realism, no cartoon, no illustration, no anime',
     negativePrompt: 'cartoon, sketch, watercolor, painting, illustration, anime, low quality, blurry, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Cinematic photography style. Dramatic lighting, movie still.',
-    fallbackPrompt: 'Cinematic scene related to {topic}, dramatic lighting, movie still, wide angle',
+    fallbackPrompt: 'Cinematic movie still: two people in conversation in a sunlit doorway, dramatic side lighting, wide-angle lens, film grain, shallow depth of field',
   },
   'flat 2D doodle cartoon, minimalist stick figures, bold black outlines, simple comedic style': {
     claudeInstruction: 'Doodle cartoon scene. Stick-figure characters — humans AND animals are all drawn as simple doodles with round heads, dot eyes and thin limbs (a doodle monkey is a stick figure with monkey ears/tail, not a realistic monkey) — but ALWAYS describe a full, specific environment around them (place, background objects, weather/season, colorful details). When characters talk or react, describe their open mouths, raised arms and expressive body poses — never speech bubbles or caption boxes. When a scene involves text in the world (signs, books, whiteboards), show the environment and the person interacting with it — never the text itself. Simple characters, rich scene.',
     fluxSuffix: 'flat 2D doodle cartoon illustration, ALL characters — humans and animals alike — drawn as simple stick-figure doodles with round heads, dot eyes and thin limbs, bold thick black outlines, vibrant saturated flat colors, no shading, no 3D volume, colorful cartoon background environment with props and scenery, playful expressive poses',
     negativePrompt: 'photorealistic, photograph, 3d render, 3d volume, shading, fur texture, detailed animals, realistic animals, pixar style, rendered characters, realistic anatomy, complex textures, cinematic lighting, watercolor, pencil sketch, detailed faces, white background, empty background, plain background, blank canvas, isolated object, sparse composition, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Doodle cartoon style: all creatures — humans and animals — drawn in the same flat stick-figure doodle manner with round heads and dot eyes, bold outlines, vibrant flat colors, in a full colorful scene with background environment. Simple characters, rich world.',
-    fallbackPrompt: 'Doodle cartoon scene related to {topic}, stick figure characters with round heads, bold black outlines, vibrant saturated flat colors, no shading, colorful cartoon background environment',
+    fallbackPrompt: 'flat doodle cartoon illustration: stick figure characters with round heads in a warm colorful indoor scene, expressive poses with raised arms, bold black outlines, vibrant saturated flat colors, no shading, colorful cartoon background environment',
     illustrative: true,
   },
   'neon cyberpunk style, vibrant neon colors, futuristic dystopia': {
@@ -67,21 +67,21 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fluxSuffix: 'neon cyberpunk aesthetic, glowing neon lights, futuristic city, dark dystopian atmosphere, vibrant neon colors, nighttime scene only, dark sky, wet reflective streets lit by neon signs, no daylight, no natural sunlight',
     negativePrompt: 'naturalistic, daytime countryside, watercolor, pencil sketch, cartoon, soft colors, pastel, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Neon cyberpunk style. Futuristic city, glowing neon. No naturalism, no soft colors.',
-    fallbackPrompt: 'Cyberpunk neon scene related to {topic}, futuristic city, glowing neon lights',
+    fallbackPrompt: 'Cyberpunk neon city at night: lone figure on a rain-soaked street, glowing neon signs reflecting in puddles, towering futuristic buildings, dark atmosphere, vibrant pink and blue neon',
   },
   'photorealistic, professional photography, detailed, shot on camera': {
     claudeInstruction: 'Photorealistic photograph. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render it with professional camera realism and sharp detail. The concrete content must be clearly described, not just photographic style. 25-35 words.',
     fluxSuffix: 'photorealistic, professional photography, sharp detail, shot on DSLR, 8K resolution',
     negativePrompt: 'cartoon, sketch, watercolor, painting, illustration, anime, low quality, blur, grain, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Photorealistic photography style. Professional camera, detailed.',
-    fallbackPrompt: 'Photorealistic scene related to {topic}, professional photography, detailed',
+    fallbackPrompt: 'Photorealistic scene of two people talking in a modern urban setting, professional photography, sharp detail, natural soft light, DSLR quality',
   },
   'anime style, cel shading, Japanese animation, expressive characters': {
     claudeInstruction: 'Anime illustration in modern Japanese animation style. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with clean cel-shaded lines, expressive eyes, vibrant colors.',
     fluxSuffix: 'anime style, cel shading, clean linework, expressive large eyes, vibrant colors, modern Japanese animation, Japanese anime aesthetic, no western cartoon style',
     negativePrompt: 'photorealistic, photograph, 3d render, western cartoon, pencil sketch, watercolor, oil painting, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Anime illustration style. Cel shading, clean linework. No photorealism, no western cartoon.',
-    fallbackPrompt: 'Anime-style illustration of scene related to {topic}, cel shading, vibrant colors, expressive characters',
+    fallbackPrompt: 'Anime-style illustration of an expressive character with large eyes standing in a detailed outdoor environment at golden hour, cel shading, vibrant colors, clean linework',
     illustrative: true,
   },
   '3D animated render, Pixar style, volumetric lighting, polished CGI': {
@@ -89,14 +89,14 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fluxSuffix: '3d animated render, pixar style, soft volumetric lighting, smooth rounded shapes, subsurface scattering, polished cgi',
     negativePrompt: 'photorealistic photograph, 2d flat, pencil sketch, watercolor, anime cel shading, oil painting, low poly, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: '3D Pixar-style render. Volumetric lighting, smooth shapes. No flat 2D, no photorealism.',
-    fallbackPrompt: '3D Pixar-style render of scene related to {topic}, soft lighting, smooth shapes, polished CGI',
+    fallbackPrompt: '3D Pixar-style render of a friendly character in a warmly lit colorful living room, soft volumetric lighting, smooth rounded shapes, rich interior details, polished CGI',
   },
   'oil painting, visible brushstrokes, impasto texture, classical palette': {
     claudeInstruction: 'Classical oil painting. First describe the actual subject, action and setting from the scene text — what is happening and who or what is in frame. Render with visible brushstrokes, rich textured impasto, warm classical palette.',
     fluxSuffix: 'oil painting, visible brushstrokes, textured impasto, rich classical palette, canvas texture, old master style, visible impasto brush strokes, rich tonal blending, no flat colors',
     negativePrompt: 'photorealistic, photograph, 3d render, digital art, cartoon, anime, pencil sketch, flat colors, cgi, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Classical oil painting style. Visible brushstrokes, impasto texture. No photorealism, no digital art.',
-    fallbackPrompt: 'Oil painting of scene related to {topic}, visible brushstrokes, rich textured colors, classical style',
+    fallbackPrompt: 'Oil painting of a sunlit table with flowers and fruit, visible impasto brushstrokes, warm classical palette, canvas texture, old master style, rich tonal blending',
     illustrative: true,
   },
   'dark atmospheric, low-key lighting, deep shadows, moody cinematic': {
@@ -104,7 +104,7 @@ export const STYLE_CONFIGS: Record<string, StyleConfig> = {
     fluxSuffix: 'dark atmospheric, low-key lighting, deep shadows, moody, muted desaturated colors, cinematic, dramatic chiaroscuro, dark low-key scene, nighttime or dim lighting only, muted desaturated palette, no bright daylight, no cheerful vibrant colors',
     negativePrompt: 'bright, cheerful, vibrant colors, cartoon, sketch, watercolor, high-key lighting, pastel, daytime, text, numbers, digits, numerals, typography, lettering, written words',
     enhanceSystemHint: 'Dark atmospheric style. Low-key lighting, deep shadows. No bright colors, no cartoon.',
-    fallbackPrompt: 'Dark atmospheric scene related to {topic}, deep shadows, moody lighting, muted tones',
+    fallbackPrompt: 'Dark atmospheric scene: solitary figure in a shadowed corridor, pools of dim light on wet floor, deep shadows, moody low-key lighting, muted desaturated tones',
   },
 }
 
@@ -113,7 +113,7 @@ export const DEFAULT_STYLE_CONFIG: StyleConfig = {
   fluxSuffix: 'cinematic lighting, photorealistic, detailed',
   negativePrompt: 'cartoon, sketch, watercolor, low quality, text, numbers, digits, numerals, typography, lettering, written words',
   enhanceSystemHint: 'Photorealistic style. Cinematic lighting.',
-  fallbackPrompt: 'Cinematic scene related to {topic}, dramatic lighting, photorealistic, wide shot',
+  fallbackPrompt: 'Cinematic scene: people in motion on an urban street, dramatic side lighting, photorealistic, wide-angle shot',
 }
 
 export function getStyleConfig(imageStyle?: string | null): StyleConfig {

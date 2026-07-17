@@ -364,9 +364,9 @@ function splitSubtitlesIntoGroups(blocks: SubtitleBlock[], n: number): SubtitleB
   return groups
 }
 
-// Max scenes per Claude call to stay within 8192-token output limit.
-// 75 scenes × ~80 tokens ≈ 6000 tokens — safe headroom.
-const CLAUDE_CHUNK = 75
+// Max scenes per Claude call — 50 scenes at typical Haiku latency ≈ 60s fits two 120s
+// attempts with 5s pause (245s total) comfortably within 300s maxDuration.
+const CLAUDE_CHUNK = 50
 
 function sanitizeScenePrompt(prompt: string, sceneIdx: number): string {
   const replacements: Array<[RegExp, string]> = [
@@ -400,7 +400,7 @@ async function generateScenesFromSubtitles(
   styleConfig: StyleConfig,
   fallbackTopic: string,
 ): Promise<SceneInfo[]> {
-  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 240_000 })
+  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
 
   const groups = splitSubtitlesIntoGroups(subtitleBlocks, imageCount)
   const scenesWithText = groups.map((group, i) => {
@@ -423,13 +423,16 @@ async function generateScenesFromSubtitles(
   // Run all in parallel — reduces wall-clock from Σ(chunk_times) to max(chunk_times).
   const totalChunks = Math.ceil(scenesWithText.length / CLAUDE_CHUNK)
   console.log(`[images/subtitles] scenes: ${scenesWithText.length}, chunks: ${totalChunks} (parallel)`)
+  console.log(`[images/subtitles] fallbackTopic: "${fallbackTopic}" (context only — not injected into prompts)`)
+  let sceneFallbackCount = 0
+  let lastChunkFailInfo = ''
 
   const chunkOutputs = await Promise.all(
     Array.from({ length: totalChunks }, async (_, ci) => {
       const chunkStart = ci * CLAUDE_CHUNK
       const chunk = scenesWithText.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
       const chunkSize = chunk.length
-      const maxTokens = Math.max(4000, chunkSize * 130)
+      const maxTokens = Math.min(64000, Math.max(4000, chunkSize * 150))
       const label = `subtitles chunk ${ci + 1}/${totalChunks}`
       const t0 = Date.now()
 
@@ -451,34 +454,49 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
         }],
       })
 
-      // One automatic retry on transient Haiku 429/529 — parallel calls slightly raise pressure
+      // Two attempts with 5s pause — worst-case 120+5+120=245s < 300s maxDuration
+      let e1Msg = '', e1Status = ''
+      const ta = Date.now()
       const message = await callChunk().catch(async (e1) => {
-        console.warn(`[images/subtitles] ${label} attempt 1 failed: ${e1 instanceof Error ? e1.message.slice(0, 100) : e1} — retrying in 3s`)
-        await sleep(3000)
+        e1Msg = e1 instanceof Error ? e1.message.slice(0, 150) : String(e1)
+        e1Status = String((e1 as { status?: number }).status ?? 'N/A')
+        const dur1 = ((Date.now() - ta) / 1000).toFixed(1)
+        console.warn(`[images/subtitles] ${label} attempt 1 failed (${dur1}s) status=${e1Status}: ${e1Msg} — retrying in 5s`)
+        await sleep(5000)
+        const tb = Date.now()
         return callChunk().catch((e2) => {
-          console.error(`[images/subtitles] ${label} permanently failed: ${e2 instanceof Error ? e2.message.slice(0, 100) : e2}`)
+          const e2Msg = e2 instanceof Error ? e2.message.slice(0, 150) : String(e2)
+          const e2Status = String((e2 as { status?: number }).status ?? 'N/A')
+          const dur2 = ((Date.now() - tb) / 1000).toFixed(1)
+          const failInfo = `${label}: a1=${dur1}s status=${e1Status} ${e1Msg.slice(0, 80)} | a2=${dur2}s status=${e2Status} ${e2Msg.slice(0, 80)}`
+          console.error(`[images/subtitles] ${failInfo}`)
+          lastChunkFailInfo = failInfo
           return null
         })
       })
 
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
       if (!message) {
+        sceneFallbackCount += chunkSize
         console.error(`[images/subtitles] ${label} failed after ${elapsed}s — filling ${chunkSize} scenes with fallbacks`)
         return Array.from({ length: chunkSize }, (_, j) => ({
           scene: `Сцена ${chunkStart + j + 1}`,
-          prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), chunkStart + j),
+          prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt, chunkStart + j),
         }))
       }
 
-      console.log(`[images/subtitles] ${label} done in ${elapsed}s — input:${message.usage.input_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
+      console.log(`[images/subtitles] ${label} done in ${elapsed}s — stop_reason:${message.stop_reason} input:${message.usage.input_tokens} output:${message.usage.output_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
       const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
       const chunkResults = parseJsonArray(rawText) as Array<{ scene: string; prompt: string }>
       if (chunkResults.length !== chunkSize) {
-        console.warn(`[images/subtitles] ${label} deficit: got ${chunkResults.length} of ${chunkSize}`)
+        const defInfo = `${label}: stop_reason:${message.stop_reason} output:${message.usage.output_tokens} deficit:${chunkResults.length}/${chunkSize}`
+        console.warn(`[images/subtitles] ${defInfo}`)
+        lastChunkFailInfo = defInfo
       }
       while (chunkResults.length < chunkSize) {
         const absIdx = chunkStart + chunkResults.length
-        chunkResults.push({ scene: `Сцена ${absIdx + 1}`, prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), absIdx) })
+        sceneFallbackCount++
+        chunkResults.push({ scene: `Сцена ${absIdx + 1}`, prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt, absIdx) })
       }
       return chunkResults
     })
@@ -491,10 +509,18 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
   if (promptResults.length > imageCount) promptResults = promptResults.slice(0, imageCount)
   while (promptResults.length < imageCount) {
     const fallbackIdx = promptResults.length
+    sceneFallbackCount++
     promptResults.push({
       scene: `Сцена ${fallbackIdx + 1}`,
-      prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), fallbackIdx),
+      prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt, fallbackIdx),
     })
+  }
+
+  if (sceneFallbackCount > 0 && sceneFallbackCount / imageCount > 0.1) {
+    const pct = ((sceneFallbackCount / imageCount) * 100).toFixed(0)
+    const alertMsg = `${sceneFallbackCount} of ${imageCount} scenes fallback (${pct}%)${lastChunkFailInfo ? ` — ${lastChunkFailInfo}` : ''}`
+    console.error(`[images/subtitles] ALERT scenes_fallback: ${alertMsg}`)
+    await notifyError('/generate/images/scenes', alertMsg).catch(() => {})
   }
 
   return promptResults.map((p, i) => ({
@@ -559,7 +585,7 @@ async function generateScenesFromScript(
   styleConfig: StyleConfig,
   fallbackTopic: string,
 ): Promise<SceneInfo[]> {
-  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 240_000 })
+  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
 
   const blocks = splitScriptByWords(script, imageCount)
   const blocksWithTimecodes = calculateTimecodes(blocks, durationSec)
@@ -574,13 +600,16 @@ async function generateScenesFromScript(
 
   const totalChunks = Math.ceil(blocksWithTimecodes.length / CLAUDE_CHUNK)
   console.log(`[images/script] scenes: ${blocksWithTimecodes.length}, chunks: ${totalChunks} (parallel)`)
+  console.log(`[images/script] fallbackTopic: "${fallbackTopic}" (context only — not injected into prompts)`)
+  let sceneFallbackCount = 0
+  let lastChunkFailInfo = ''
 
   const chunkOutputs = await Promise.all(
     Array.from({ length: totalChunks }, async (_, ci) => {
       const chunkStart = ci * CLAUDE_CHUNK
       const chunk = blocksWithTimecodes.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
       const chunkSize = chunk.length
-      const maxTokens = Math.max(4000, chunkSize * 130)
+      const maxTokens = Math.min(64000, Math.max(4000, chunkSize * 150))
       const label = `script chunk ${ci + 1}/${totalChunks}`
       const t0 = Date.now()
 
@@ -602,38 +631,54 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
         }],
       })
 
+      // Two attempts with 5s pause — worst-case 120+5+120=245s < 300s maxDuration
+      let e1Msg = '', e1Status = ''
+      const ta = Date.now()
       const message = await callChunk().catch(async (e1) => {
-        console.warn(`[images/script] ${label} attempt 1 failed: ${e1 instanceof Error ? e1.message.slice(0, 100) : e1} — retrying in 3s`)
-        await sleep(3000)
+        e1Msg = e1 instanceof Error ? e1.message.slice(0, 150) : String(e1)
+        e1Status = String((e1 as { status?: number }).status ?? 'N/A')
+        const dur1 = ((Date.now() - ta) / 1000).toFixed(1)
+        console.warn(`[images/script] ${label} attempt 1 failed (${dur1}s) status=${e1Status}: ${e1Msg} — retrying in 5s`)
+        await sleep(5000)
+        const tb = Date.now()
         return callChunk().catch((e2) => {
-          console.error(`[images/script] ${label} permanently failed: ${e2 instanceof Error ? e2.message.slice(0, 100) : e2}`)
+          const e2Msg = e2 instanceof Error ? e2.message.slice(0, 150) : String(e2)
+          const e2Status = String((e2 as { status?: number }).status ?? 'N/A')
+          const dur2 = ((Date.now() - tb) / 1000).toFixed(1)
+          const failInfo = `${label}: a1=${dur1}s status=${e1Status} ${e1Msg.slice(0, 80)} | a2=${dur2}s status=${e2Status} ${e2Msg.slice(0, 80)}`
+          console.error(`[images/script] ${failInfo}`)
+          lastChunkFailInfo = failInfo
           return null
         })
       })
 
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
       if (!message) {
+        sceneFallbackCount += chunkSize
         console.error(`[images/script] ${label} failed after ${elapsed}s — filling ${chunkSize} scenes with fallbacks`)
         return Array.from({ length: chunkSize }, (_, j) => {
           const absIdx = chunkStart + j
           return {
             scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
-            prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), absIdx),
+            prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt, absIdx),
           }
         })
       }
 
-      console.log(`[images/script] ${label} done in ${elapsed}s — input:${message.usage.input_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
+      console.log(`[images/script] ${label} done in ${elapsed}s — stop_reason:${message.stop_reason} input:${message.usage.input_tokens} output:${message.usage.output_tokens} cache_read:${message.usage.cache_read_input_tokens ?? 0}`)
       const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
       const chunkResults = parseJsonArray(rawText) as Array<{ scene: string; prompt: string }>
       if (chunkResults.length !== chunkSize) {
-        console.warn(`[images/script] ${label} deficit: got ${chunkResults.length} of ${chunkSize}`)
+        const defInfo = `${label}: stop_reason:${message.stop_reason} output:${message.usage.output_tokens} deficit:${chunkResults.length}/${chunkSize}`
+        console.warn(`[images/script] ${defInfo}`)
+        lastChunkFailInfo = defInfo
       }
       while (chunkResults.length < chunkSize) {
         const absIdx = chunkStart + chunkResults.length
+        sceneFallbackCount++
         chunkResults.push({
           scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
-          prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), absIdx),
+          prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt, absIdx),
         })
       }
       return chunkResults
@@ -646,10 +691,18 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
   if (promptResults.length > imageCount) promptResults = promptResults.slice(0, imageCount)
   while (promptResults.length < imageCount) {
     const i = promptResults.length
+    sceneFallbackCount++
     promptResults.push({
       scene: blocksWithTimecodes[i]?.text.slice(0, 80).trim() ?? `Сцена ${i + 1}`,
-      prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), i),
+      prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt, i),
     })
+  }
+
+  if (sceneFallbackCount > 0 && sceneFallbackCount / imageCount > 0.1) {
+    const pct = ((sceneFallbackCount / imageCount) * 100).toFixed(0)
+    const alertMsg = `${sceneFallbackCount} of ${imageCount} scenes fallback (${pct}%)${lastChunkFailInfo ? ` — ${lastChunkFailInfo}` : ''}`
+    console.error(`[images/script] ALERT scenes_fallback: ${alertMsg}`)
+    await notifyError('/generate/images/scenes', alertMsg).catch(() => {})
   }
 
   return promptResults.map((p, i) => ({
