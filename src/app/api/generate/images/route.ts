@@ -398,6 +398,7 @@ async function generateScenesFromSubtitles(
   durationSec: number,
   subtitleBlocks: SubtitleBlock[],
   styleConfig: StyleConfig,
+  fallbackTopic: string,
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 240_000 })
 
@@ -465,7 +466,7 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
         console.error(`[images/subtitles] ${label} failed after ${elapsed}s — filling ${chunkSize} scenes with fallbacks`)
         return Array.from({ length: chunkSize }, (_, j) => ({
           scene: `Сцена ${chunkStart + j + 1}`,
-          prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), chunkStart + j),
+          prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), chunkStart + j),
         }))
       }
 
@@ -477,7 +478,7 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
       }
       while (chunkResults.length < chunkSize) {
         const absIdx = chunkStart + chunkResults.length
-        chunkResults.push({ scene: `Сцена ${absIdx + 1}`, prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), absIdx) })
+        chunkResults.push({ scene: `Сцена ${absIdx + 1}`, prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), absIdx) })
       }
       return chunkResults
     })
@@ -492,7 +493,7 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
     const fallbackIdx = promptResults.length
     promptResults.push({
       scene: `Сцена ${fallbackIdx + 1}`,
-      prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), fallbackIdx),
+      prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), fallbackIdx),
     })
   }
 
@@ -556,6 +557,7 @@ async function generateScenesFromScript(
   durationSec: number,
   imageCount: number,
   styleConfig: StyleConfig,
+  fallbackTopic: string,
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 240_000 })
 
@@ -616,7 +618,7 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
           const absIdx = chunkStart + j
           return {
             scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
-            prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), absIdx),
+            prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), absIdx),
           }
         })
       }
@@ -631,7 +633,7 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
         const absIdx = chunkStart + chunkResults.length
         chunkResults.push({
           scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
-          prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), absIdx),
+          prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), absIdx),
         })
       }
       return chunkResults
@@ -646,7 +648,7 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
     const i = promptResults.length
     promptResults.push({
       scene: blocksWithTimecodes[i]?.text.slice(0, 80).trim() ?? `Сцена ${i + 1}`,
-      prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), i),
+      prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', fallbackTopic.split(/\s+/).slice(0, 15).join(' ')), i),
     })
   }
 
@@ -882,14 +884,16 @@ export async function POST(request: NextRequest) {
         // Read subtitle_blocks from DB — source of truth, avoids stale/empty client state
         // on page reload, and scales to 2000+ blocks for hour-long videos.
         let resolvedSubtitleBlocks: SubtitleBlock[] | null = null
+        let projectTitle = ''
         if (project_id) {
           const { data: projData } = await supabase
             .from('projects')
-            .select('subtitle_blocks')
+            .select('subtitle_blocks, title')
             .eq('id', project_id)
             .eq('user_id', user.id)
             .single()
           resolvedSubtitleBlocks = (projData?.subtitle_blocks as SubtitleBlock[] | null) ?? null
+          projectTitle = ((projData as Record<string, unknown> | null)?.title as string | undefined ?? '').trim()
         }
         // Fallback: client-supplied (for project_id-less calls, e.g. single-scene preview)
         if (!resolvedSubtitleBlocks?.length) resolvedSubtitleBlocks = subtitle_blocks ?? null
@@ -905,9 +909,26 @@ export async function POST(request: NextRequest) {
         const effectiveTopic = script.split(/\s+/).slice(0, 20).join(' ').trim()
           || topic.slice(0, 150)
 
+        // Short, clean label for fallback scene prompts — must NOT be narrative prose.
+        // Priority: user's typed topic (Step1Topic) → project title from DB → first 8 script words.
+        const rawUserTopic = (topic || '').trim()
+        let fallbackTopic: string
+        let fallbackTopicSource: string
+        if (rawUserTopic && rawUserTopic.length <= 120) {
+          fallbackTopic = rawUserTopic.split(/\s+/).slice(0, 8).join(' ')
+          fallbackTopicSource = 'user_topic'
+        } else if (projectTitle && projectTitle.length <= 120) {
+          fallbackTopic = projectTitle.split(/\s+/).slice(0, 8).join(' ')
+          fallbackTopicSource = 'project_title'
+        } else {
+          fallbackTopic = script.split(/\s+/).slice(0, 8).join(' ')
+          fallbackTopicSource = 'script_head'
+        }
+        console.log(`[scenes] fallbackTopic source: ${fallbackTopicSource} → "${fallbackTopic}"`)
+
         const scenes = hasSubtitles
-          ? await generateScenesFromSubtitles(effectiveTopic, count, duration_sec, resolvedSubtitleBlocks!, styleConfig)
-          : await generateScenesFromScript(script, effectiveTopic, duration_sec, count, styleConfig)
+          ? await generateScenesFromSubtitles(effectiveTopic, count, duration_sec, resolvedSubtitleBlocks!, styleConfig, fallbackTopic)
+          : await generateScenesFromScript(script, effectiveTopic, duration_sec, count, styleConfig, fallbackTopic)
 
         console.log(`[images] scenes generated: ${scenes.length}`)
 
