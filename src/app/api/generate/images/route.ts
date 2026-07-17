@@ -195,8 +195,27 @@ INSTEAD use illustration vocabulary:
 
 TEXT AND SPEECH:
 • If characters react or talk: describe their open mouths, raised arms, expressive body poses — NEVER speech bubbles or caption boxes
+• When a scene text says a character "says", "asks", or "tells" — convert to physical action: open mouth, animated hand gestures, expressive pose
 • NEVER thought bubbles, dream clouds, or floating overlays showing symbols or images above a character's head — instead show the character gesturing toward or pointing at the actual object: NOT "thought bubbles showing a wheel" BUT "character points at a wooden wheel lying nearby"
 • If a scene involves text in the world (signs, books, whiteboards, screens): describe the environment and person interacting with it — not the text itself
+
+═══ EMOTIONS AND ABSTRACT CONCEPTS ═══
+Express emotions through pose, facial expression, body language, and surrounding objects — NEVER through floating abstract symbols.
+• ✗ BANNED in prompts: question mark, uncertainty symbol, icon, arrow sign (unless a character physically holds the object — e.g. "character holds a wooden question-mark sign")
+• ✗ Wrong: "surrounded by question marks" → ✓ Correct: "figure scratching head with tilted head and raised shoulders, puzzled expression"
+• ✗ Wrong: "question mark transforming into heart symbol" → ✓ Correct: "figure with frowning expression slowly opening arms wide, warm glow spreading across a flat scene"
+
+═══ ONE LOCATION — ONE MOMENT ═══
+Every prompt must show exactly one location at one point in time — no montages, collages, or multi-panel compositions.
+• ✗ BANNED: montage, split screen, multiple panels, grid, comic panels, "in different settings", "various locations", "across scenes"
+• ✗ Wrong: "montage of therapy animals in hospital, nursing home, classroom" → ✓ Correct: "single hospital room scene with round-headed patient in bed, small flat animal sitting calmly on a chair beside them, warm yellow light"
+• If the scene text mentions several locations or time periods — pick the single most representative moment and place.
+
+═══ DIRECT VISUAL DESCRIPTION ═══
+Never use the pattern "X indicated by Y". Describe directly what is physically visible in the frame.
+• ✗ Wrong: "bond between characters indicated by soft background scenes" → ✓ Correct: "two figures seated close together on a flat bench, leaning toward each other in a warm-lit room"
+• ✗ Wrong: "history of moments indicated by background collage" → ✓ Correct: "warm sunlit room with a framed photo on the wall, figure and animal sitting together below it"
+• Physical properties (glow, color quality, atmospheric light) are acceptable as direct visual descriptions — do not use them as symbolic indicators of meaning.
 
 ═══ FEW-SHOT QUALITY EXAMPLES (ILLUSTRATION) ═══
 
@@ -349,6 +368,30 @@ function splitSubtitlesIntoGroups(blocks: SubtitleBlock[], n: number): SubtitleB
 // 75 scenes × ~80 tokens ≈ 6000 tokens — safe headroom.
 const CLAUDE_CHUNK = 75
 
+function sanitizeScenePrompt(prompt: string, sceneIdx: number): string {
+  const replacements: Array<[RegExp, string]> = [
+    [/question marks?/gi, 'tilted-head puzzled pose'],
+    [/uncertainty symbols?/gi, 'tilted-head puzzled pose'],
+    [/(speech|thought) bubble/gi, ''],
+    [/caption box/gi, ''],
+    [/montage of/gi, 'scene showing'],
+    [/split screen/gi, 'single scene showing'],
+    [/comic panels?/gi, 'single scene showing'],
+    [/multiple panels?/gi, 'single scene showing'],
+    [/\bgrid\b/gi, 'single scene showing'],
+    [/text overlay/gi, ''],
+    [/\bcaption\b/gi, ''],
+  ]
+  let result = prompt
+  for (const [pattern, replacement] of replacements) {
+    result = result.replace(pattern, (match) => {
+      console.log(`[sanitize] scene ${sceneIdx}: replaced "${match}" → "${replacement || '(removed)'}"`)
+      return replacement
+    })
+  }
+  return result.replace(/\s{2,}/g, ' ').trim()
+}
+
 async function generateScenesFromSubtitles(
   topic: string,
   imageCount: number,
@@ -422,7 +465,7 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
         console.error(`[images/subtitles] ${label} failed after ${elapsed}s — filling ${chunkSize} scenes with fallbacks`)
         return Array.from({ length: chunkSize }, (_, j) => ({
           scene: `Сцена ${chunkStart + j + 1}`,
-          prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
+          prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), chunkStart + j),
         }))
       }
 
@@ -434,7 +477,7 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
       }
       while (chunkResults.length < chunkSize) {
         const absIdx = chunkStart + chunkResults.length
-        chunkResults.push({ scene: `Сцена ${absIdx + 1}`, prompt: styleConfig.fallbackPrompt.replace('{topic}', topic) })
+        chunkResults.push({ scene: `Сцена ${absIdx + 1}`, prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), absIdx) })
       }
       return chunkResults
     })
@@ -446,9 +489,10 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
   let promptResults = allPromptResults
   if (promptResults.length > imageCount) promptResults = promptResults.slice(0, imageCount)
   while (promptResults.length < imageCount) {
+    const fallbackIdx = promptResults.length
     promptResults.push({
-      scene: `Сцена ${promptResults.length + 1}`,
-      prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
+      scene: `Сцена ${fallbackIdx + 1}`,
+      prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), fallbackIdx),
     })
   }
 
@@ -572,7 +616,7 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
           const absIdx = chunkStart + j
           return {
             scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
-            prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
+            prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), absIdx),
           }
         })
       }
@@ -587,7 +631,7 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
         const absIdx = chunkStart + chunkResults.length
         chunkResults.push({
           scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
-          prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
+          prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), absIdx),
         })
       }
       return chunkResults
@@ -602,7 +646,7 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
     const i = promptResults.length
     promptResults.push({
       scene: blocksWithTimecodes[i]?.text.slice(0, 80).trim() ?? `Сцена ${i + 1}`,
-      prompt: styleConfig.fallbackPrompt.replace('{topic}', topic),
+      prompt: sanitizeScenePrompt(styleConfig.fallbackPrompt.replace('{topic}', topic.split(/\s+/).slice(0, 15).join(' ')), i),
     })
   }
 
@@ -888,7 +932,8 @@ export async function POST(request: NextRequest) {
           await Promise.all(
             scenes.slice(batchStart, batchEnd).map(async (scn, batchIdx) => {
               const i = batchStart + batchIdx
-              const styledPrompt = `${scn.prompt}, ${styleConfig.fluxSuffix}`
+              const sanitizedPrompt = sanitizeScenePrompt(scn.prompt, i)
+              const styledPrompt = `${sanitizedPrompt}, ${styleConfig.fluxSuffix}`
               console.log(`[images] scene ${i + 1} REQUESTED style: "${image_style ?? 'default'}"`)
               console.log(`[images] scene ${i + 1} claude prompt result: "${scn.prompt}"`)
               console.log(`[images] scene ${i + 1} FINAL flux prompt: "${styledPrompt}"`)
