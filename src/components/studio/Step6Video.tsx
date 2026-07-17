@@ -116,7 +116,7 @@ function toSrt(blocks: SubtitleBlock[]): string {
 export default function Step6Video() {
   const {
     audioUrl, sceneImages, subtitleBlocks, subtitleStyle,
-    scriptParams, imageInterval, projectId, videoUrl, renderJobId,
+    scriptParams, imageInterval, projectId, videoUrl, renderJobId, mediaPurgedAt,
     setVideoUrl, setRenderJobId, setStep, setSubtitleStyle,
   } = useStudioStore()
 
@@ -279,6 +279,7 @@ export default function Step6Video() {
 
   async function handleRender() {
     if (!audioUrl || !hasImages || !projectId) return
+    if (mediaPurgedAt) return  // server will also reject with 422; guard here to save a round-trip
     if (!confirmRegenIfCompleted(t('regen_confirm.message'))) return
     if (missingImageCount > 0) {
       setRenderError(`${missingImageCount} ${t('step6.broken_images')}`)
@@ -330,6 +331,21 @@ export default function Step6Video() {
         <h2 className="text-lg font-semibold text-slate-100 mb-1">{t('step6.title')}</h2>
         <p className="text-sm text-slate-500">{t('step6.subtitle')}</p>
       </div>
+
+      {mediaPurgedAt && (
+        <div
+          className="flex items-start gap-2.5 rounded-xl px-4 py-3"
+          style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}
+        >
+          <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <p className="text-xs text-red-300 leading-relaxed">
+            {t('step6.media_purged')}
+          </p>
+        </div>
+      )}
 
       {/* Assets checklist */}
       <div className="rounded-xl p-4" style={cardStyle}>
@@ -699,7 +715,7 @@ export default function Step6Video() {
             <button
               type="button"
               onClick={handleRender}
-              disabled={!hasAudio || !hasImages || missingImageCount > 0}
+              disabled={!!mediaPurgedAt || !hasAudio || !hasImages || missingImageCount > 0}
               className="w-full py-2.5 btn-gradient disabled:opacity-40 text-white font-semibold rounded-xl text-sm"
             >
               {t('step6.render_btn')}

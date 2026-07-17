@@ -30,6 +30,41 @@ function formatDate(iso: string, lang: string) {
   })
 }
 
+function MediaBadge({ project, plan }: { project: Project; plan: string }) {
+  if (project.media_purged_at) {
+    return (
+      <span
+        className="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
+        style={{ background: 'rgba(100,116,139,0.15)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)' }}
+        title={`Медиа удалены ${new Date(project.media_purged_at).toLocaleDateString('ru-RU')}`}
+      >
+        Медиа удалены
+      </span>
+    )
+  }
+  // Only show countdown when project has any media worth warning about
+  const hasMedia = !!(project.audio_url || project.video_url || (project.scene_images && project.scene_images.length > 0))
+  if (!hasMedia) return null
+  // Skip projects currently generating — they're protected by the cron
+  if (project.status.startsWith('generating_')) return null
+
+  const thresholdHours = plan === 'free' ? 48 : 168
+  const expiresAt = new Date(project.updated_at).getTime() + thresholdHours * 3600 * 1000
+  const hoursLeft = (expiresAt - Date.now()) / 3600000
+  if (hoursLeft > 24 || hoursLeft <= 0) return null
+
+  const h = Math.max(1, Math.ceil(hoursLeft))
+  return (
+    <span
+      className="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
+      style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.3)' }}
+      title="Скачайте MP4/ZIP пока медиа ещё доступны"
+    >
+      Медиа удалятся через {h}ч — скачайте
+    </span>
+  )
+}
+
 function CreditsBar({ credits, plan }: { credits: number; plan: string }) {
   const max = PLAN_MAX_CREDITS[plan as keyof typeof PLAN_MAX_CREDITS] ?? PLAN_MAX_CREDITS.free
   const pct = Math.min(100, Math.round((credits / max) * 100))
@@ -229,6 +264,8 @@ export default function DashboardClient({ profile, projects }: Props) {
                 <span className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[project.status]}`}>
                   {statusLabel(project.status)}
                 </span>
+
+                <MediaBadge project={project} plan={profile?.plan ?? 'free'} />
 
                 <Link
                   href={`/studio?project=${project.id}`}

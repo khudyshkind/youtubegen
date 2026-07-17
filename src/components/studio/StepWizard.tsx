@@ -21,7 +21,8 @@ type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 const STEP_KEYS = ['step1', 'step2', 'step3', 'step4', 'step5', 'step6', 'step7', 'step8'] as const
 
 function inferStep(p: Project): Step {
-  if (p.status === 'generating_video') return 7   // render in progress → stay on video step
+  if (p.media_purged_at) return 6               // media purged → land on images step to regenerate
+  if (p.status === 'generating_video') return 7  // render in progress → stay on video step
   if (p.seo) return 8
   if (p.video_url) return 8
   if (p.scene_images && p.scene_images.length > 0) return 7
@@ -39,7 +40,7 @@ function StepWizardInner() {
   const { currentStep, reset, setStep, setProjectId, setScriptParams, setPlanSections, setScript,
     setVoiceId, setAudioUrl, setSubtitleBlocks, sceneImages, setSceneImages, setVideoUrl, setSeo,
     setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode,
-    setRenderJobId, setProjectStatus,
+    setRenderJobId, setProjectStatus, setMediaPurgedAt,
     script, scriptParams, subtitleBlocks, audioUrl, seo, projectId, ownScript,
     imageEngine, imageInterval, audioCostEstimate, setOwnScript } = useStudioStore()
 
@@ -152,6 +153,7 @@ function StepWizardInner() {
         }
 
         setProjectStatus(p.status)
+        setMediaPurgedAt(p.media_purged_at ?? null)
         setStep(inferStep(p))
       } catch {
         if (!cancelled) setRestoreError('Ошибка загрузки проекта')

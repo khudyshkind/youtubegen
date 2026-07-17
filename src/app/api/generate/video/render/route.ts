@@ -61,6 +61,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Block render if media have been purged — images/audio no longer exist in storage.
+    // Re-generate illustrations and audio before assembling video.
+    const { data: projCheck } = await supabase
+      .from('projects')
+      .select('media_purged_at')
+      .eq('id', project_id)
+      .eq('user_id', user.id)
+      .single()
+    if (projCheck?.media_purged_at) {
+      return NextResponse.json(
+        { ok: false, error: 'Медиа этого проекта были удалены автоматически — перегенерируйте иллюстрации и озвучку' },
+        { status: 422 }
+      )
+    }
+
     // Mark project as "render in progress" BEFORE calling Railway.
     // This closes the race window: any page reload after this point will see
     // status='generating_video' and inferStep → step 7, never the old video.

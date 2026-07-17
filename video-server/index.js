@@ -87,17 +87,11 @@ const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   : 'https://ytgen-video-server-production.up.railway.app'
 
 // ── Media retention policy ────────────────────────────────────────────────────
-// Thresholds are env-overridable; defaults are conservative for paid users.
-// Anchor for both categories = updated_at (DB trigger refreshes on every project write).
-const RETENTION_DAYS = {
-  free: {
-    abandoned: parseInt(process.env.RETENTION_FREE_ABANDONED  ?? '3'),
-    completed: parseInt(process.env.RETENTION_FREE_COMPLETED  ?? '7'),
-  },
-  paid: {
-    abandoned: parseInt(process.env.RETENTION_PAID_ABANDONED  ?? '14'),
-    completed: parseInt(process.env.RETENTION_PAID_COMPLETED  ?? '30'),
-  },
+// Single rule: project.updated_at + threshold → purge media, keep projects row.
+// Env-overridable; anchor = updated_at (DB trigger refreshes on every project write).
+const RETENTION_MEDIA_HOURS = {
+  free: parseInt(process.env.RETENTION_MEDIA_FREE_HOURS  ?? '48'),
+  paid: parseInt(process.env.RETENTION_MEDIA_PAID_HOURS  ?? '168'),
 }
 function retentionTier(plan) { return plan === 'free' ? 'free' : 'paid' }
 
@@ -2115,10 +2109,13 @@ async function supabaseStorageRemove(bucket, prefixes) {
 
 // ── Media retention: main cleanup function ────────────────────────────────────
 // Cron: daily 04:00 UTC. Safe default: dry-run unless RETENTION_DRY_RUN=false.
+// NEW MODEL: projects row is NEVER deleted. Only media (images/audio/video) are purged.
+// Sets media_purged_at on the project so UI can show banner and block render.
 async function cleanupExpiredMedia() {
   const DRY_RUN = process.env.RETENTION_DRY_RUN !== 'false'
   const tag = DRY_RUN ? '[retention/dry]' : '[retention]'
   console.log(`${tag} pass start, dry=${DRY_RUN}`)
+  console.log(`${tag} thresholds: free=${RETENTION_MEDIA_HOURS.free}h paid=${RETENTION_MEDIA_HOURS.paid}h`)
 
   // 1. Collect project_ids with active jobs (never touch these)
   const activeProjectIds = new Set()
@@ -2132,66 +2129,42 @@ async function cleanupExpiredMedia() {
   }
 
   const now = Date.now()
-  const iso = (d) => new Date(now - d * 86400_000).toISOString()
+  // Use narrowest threshold for initial DB query; per-plan filter applied in step 3.
+  const isoFreeThreshold = new Date(now - RETENTION_MEDIA_HOURS.free * 3600_000).toISOString()
 
-  // 2A. Abandoned candidates: video_url IS NULL, not generating.
-  // Anchor = updated_at (DB trigger refreshes on every project write → true "last touched").
-  // Initial filter uses free.abandoned (narrowest); per-plan check in step 3 may widen or drop.
-  let abandoned = []
+  // 2. Candidates: projects with media, not yet purged, not generating, updated_at older than free threshold.
+  let rawCandidates = []
   try {
-    abandoned = await sbGet('projects',
-      `select=id,user_id,updated_at,created_at,status,profiles!inner(plan)` +
-      `&video_url=is.null` +
+    rawCandidates = await sbGet('projects',
+      `select=id,user_id,updated_at,status,audio_url,video_url,scene_images,profiles!inner(plan)` +
+      `&media_purged_at=is.null` +
       `&status=not.like.generating_*` +
-      `&updated_at=lt.${iso(RETENTION_DAYS.free.abandoned)}` +
+      `&updated_at=lt.${isoFreeThreshold}` +
+      `&or=(audio_url.not.is.null,video_url.not.is.null,scene_images.not.is.null)` +
       `&limit=500`
     )
-  } catch (e) { console.error(`${tag} abandoned query:`, e.message) }
+  } catch (e) { console.error(`${tag} candidates query:`, e.message) }
 
-  // 2B. Completed candidates: video_url IS NOT NULL, older than free threshold
-  //     Anchor: completed_at if set, otherwise updated_at (legacy rows)
-  let completed = []
-  try {
-    const ageFilter = `or=(completed_at.lt.${iso(RETENTION_DAYS.free.completed)},and(completed_at.is.null,updated_at.lt.${iso(RETENTION_DAYS.free.completed)}))`
-    completed = await sbGet('projects',
-      `select=id,user_id,completed_at,updated_at,status,profiles!inner(plan)` +
-      `&video_url=not.is.null` +
-      `&${ageFilter}` +
-      `&limit=500`
-    )
-  } catch (e) { console.error(`${tag} completed query:`, e.message) }
-
-  // 3. Apply plan-specific thresholds and exclude active-job projects
+  // 3. Apply per-plan threshold and exclude active-job projects
   const candidates = []
-  for (const p of abandoned) {
+  for (const p of rawCandidates) {
     if (activeProjectIds.has(p.id)) continue
     const plan = p.profiles?.plan ?? 'free'
     const tier = retentionTier(plan)
-    const anchor = p.updated_at ?? p.created_at  // updated_at = last studio touch (DB trigger)
-    const ageDays = (now - new Date(anchor).getTime()) / 86400_000
-    if (ageDays >= RETENTION_DAYS[tier].abandoned) {
-      candidates.push({ ...p, _category: 'abandoned', _ageDays: ageDays.toFixed(1), _tier: tier })
+    const ageHours = (now - new Date(p.updated_at).getTime()) / 3600_000
+    if (ageHours >= RETENTION_MEDIA_HOURS[tier]) {
+      candidates.push({ ...p, _ageHours: ageHours.toFixed(1), _tier: tier })
     }
   }
-  for (const p of completed) {
-    if (activeProjectIds.has(p.id)) continue
-    const plan = p.profiles?.plan ?? 'free'
-    const tier = retentionTier(plan)
-    const anchor = p.completed_at ?? p.updated_at
-    const ageDays = (now - new Date(anchor).getTime()) / 86400_000
-    if (ageDays >= RETENTION_DAYS[tier].completed) {
-      candidates.push({ ...p, _category: 'completed', _ageDays: ageDays.toFixed(1), _tier: tier })
-    }
-  }
-  console.log(`${tag} ${candidates.length} candidate(s)`)
+  console.log(`${tag} ${rawCandidates.length} raw, ${candidates.length} after per-plan filter`)
 
-  // 4. Process each candidate
+  // 4. Process each candidate — purge media, mark project with media_purged_at
   let totalBytes = 0
-  const counts = { abandoned: { free: 0, paid: 0 }, completed: { free: 0, paid: 0 } }
+  const counts = { free: 0, paid: 0 }
 
   for (const project of candidates) {
-    const { id: pid, user_id: uid, _category: cat, _ageDays: age, _tier: tier } = project
-    console.log(`${tag} project=${pid} cat=${cat} tier=${tier} age=${age}d`)
+    const { id: pid, user_id: uid, _ageHours: age, _tier: tier } = project
+    console.log(`${tag} project=${pid} tier=${tier} age=${age}h`)
     let projectBytes = 0
 
     // 4A. Supabase audio bucket
@@ -2234,9 +2207,7 @@ async function cleanupExpiredMedia() {
           console.log(`${tag} would delete B2 video: ${b2Objects.length} object(s), ${(b2Bytes / 1024 / 1024).toFixed(2)} MB`)
         } else {
           const keys = b2Objects.map(o => o.key)
-          for (let i = 0; i < keys.length; i += 1000) {
-            await b2MediaDeleteObjects(keys.slice(i, i + 1000))
-          }
+          for (let i = 0; i < keys.length; i += 1000) { await b2MediaDeleteObjects(keys.slice(i, i + 1000)) }
           console.log(`${tag} deleted B2 video: ${b2Objects.length} object(s)`)
         }
       }
@@ -2252,26 +2223,24 @@ async function cleanupExpiredMedia() {
           console.log(`${tag} would delete B2 audio: ${b2AudioObjects.length} object(s), ${(b2AudioBytes / 1024 / 1024).toFixed(2)} MB`)
         } else {
           const keys = b2AudioObjects.map(o => o.key)
-          for (let i = 0; i < keys.length; i += 1000) {
-            await b2MediaDeleteObjects(keys.slice(i, i + 1000))
-          }
+          for (let i = 0; i < keys.length; i += 1000) { await b2MediaDeleteObjects(keys.slice(i, i + 1000)) }
           console.log(`${tag} deleted B2 audio: ${b2AudioObjects.length} object(s)`)
         }
       }
     } catch (e) { console.error(`${tag} B2 audio error ${pid}:`, e.message) }
 
-    // 4F. DB cleanup — delete project row + its video_jobs
+    // 4E. Mark project: set media_purged_at (keeps projects row intact)
     if (!DRY_RUN) {
       try {
-        const hdrs = sbHeaders()
-        await fetch(`${SUPABASE_URL}/rest/v1/video_jobs?project_id=eq.${pid}`, { method: 'DELETE', headers: hdrs })
-        await fetch(`${SUPABASE_URL}/rest/v1/projects?id=eq.${pid}`, { method: 'DELETE', headers: hdrs })
-        console.log(`${tag} deleted project row ${pid}`)
-      } catch (e) { console.error(`${tag} DB delete ${pid}:`, e.message) }
+        await sbPatch('projects', `id=eq.${pid}`, { media_purged_at: new Date(now).toISOString() })
+        console.log(`${tag} marked media_purged_at for ${pid}`)
+      } catch (e) { console.error(`${tag} mark media_purged_at error ${pid}:`, e.message) }
+    } else {
+      console.log(`${tag} would set media_purged_at for ${pid}`)
     }
 
     totalBytes += projectBytes
-    counts[cat][tier === 'free' ? 'free' : 'paid']++
+    counts[tier === 'free' ? 'free' : 'paid']++
   }
 
   // 5. B2 temp/ orphan cleanup — age-based (no project_id in path)
@@ -2298,15 +2267,15 @@ async function cleanupExpiredMedia() {
   // 6. Summary + Telegram alert
   const mbStr = (totalBytes / 1024 / 1024).toFixed(2)
   const tmpMbStr = (tempOrphanBytes / 1024 / 1024).toFixed(2)
-  const actionPrefix = DRY_RUN ? '🔍 [DRY RUN] БЫЛО БЫ удалено' : '🗑 Удалено'
+  const actionPrefix = DRY_RUN ? 'DRY RUN: БЫЛО БЫ очищено медиа' : 'Медиа очищены'
   const summary =
     `${actionPrefix}:\n` +
-    `├ Брошенных: ${counts.abandoned.free} free + ${counts.abandoned.paid} paid\n` +
-    `├ Завершённых: ${counts.completed.free} free + ${counts.completed.paid} paid\n` +
-    `├ temp/ сирот: ${tempOrphanCount} файл(ов), ~${tmpMbStr} МБ\n` +
-    `└ Итого: ${candidates.length} проектов, ~${mbStr} МБ`
+    `free: ${counts.free} проектов\n` +
+    `paid: ${counts.paid} проектов\n` +
+    `temp/ сирот: ${tempOrphanCount} файл(ов), ~${tmpMbStr} МБ\n` +
+    `Итого: ${candidates.length} проектов, ~${mbStr} МБ`
 
-  console.log(`${tag}`, summary.replace(/[├└─🔍🗑]/g, '').trim())
+  console.log(`${tag}`, summary.trim())
 
   if (OWNER_ID) {
     await tgApi('sendMessage', {
@@ -3256,6 +3225,34 @@ function getVfFilter(_img, dur, sceneIdx, hasKenBurns) {
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true }))
+
+// ── Purge-project: delete B2 objects for a specific project ──────────────────
+// Called by Vercel DELETE /api/projects/[id] when the user deletes a project.
+// Vercel lacks B2 credentials; this endpoint proxies the B2 cleanup.
+// Protected by RAILWAY_API_SECRET via verifySecret middleware.
+app.post('/purge-project', verifySecret, async (req, res) => {
+  const { project_id, user_id } = req.body || {}
+  if (!project_id || !user_id) {
+    return res.status(400).json({ ok: false, error: 'project_id and user_id required' })
+  }
+  let deleted = 0
+  const errors = []
+  for (const prefix of [`users/${user_id}/${project_id}/`, `audio/${user_id}/${project_id}/`]) {
+    try {
+      const objs = await b2MediaListObjects(prefix)
+      if (objs.length) {
+        const keys = objs.map(o => o.key)
+        for (let i = 0; i < keys.length; i += 1000) { await b2MediaDeleteObjects(keys.slice(i, i + 1000)) }
+        deleted += objs.length
+        console.log(`[purge-project] deleted ${objs.length} B2 object(s) at ${prefix}`)
+      }
+    } catch (e) {
+      errors.push(`${prefix}: ${e.message}`)
+      console.error(`[purge-project] error at ${prefix}:`, e.message)
+    }
+  }
+  res.json({ ok: true, deleted, errors })
+})
 
 // ── Admin stats endpoint (Railway-only data for admin panel) ─────────────────
 // Protected by RAILWAY_API_SECRET via verifySecret middleware.

@@ -59,6 +59,11 @@ interface StudioState {
   projectStatus: string | null
   setProjectStatus: (status: string | null) => void
 
+  // Set by retention cron when media (images/audio/video) have been purged.
+  // UI uses this to show a banner and block video render.
+  mediaPurgedAt: string | null
+  setMediaPurgedAt: (ts: string | null) => void
+
   // Global credits (synced from /api/profile, updated after each generation)
   credits: number | null
   setCredits: (n: number) => void
@@ -153,6 +158,7 @@ const initialState = {
   thumbnailBgUrl: null,
   thumbnailTextMode: 'overlay' as 'overlay' | 'ai' | 'none',
   projectStatus: null as string | null,
+  mediaPurgedAt: null as string | null,
   credits: null as number | null,
   isGenerating: false,
   generatingStep: null,
@@ -190,6 +196,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setThumbnailBgUrl: (url) => set({ thumbnailBgUrl: url }),
   setThumbnailTextMode: (mode) => set({ thumbnailTextMode: mode }),
   setProjectStatus: (status) => set({ projectStatus: status }),
+  setMediaPurgedAt: (ts) => set({ mediaPurgedAt: ts }),
   setCredits: (n) => set({ credits: n }),
   setGenerating: (isGenerating, step) =>
     set({ isGenerating, generatingStep: step ?? null }),

@@ -61,7 +61,6 @@ export async function DELETE(
     }
 
     // Clean Supabase Storage (images + audio buckets). Best-effort: errors are logged, not fatal.
-    // B2 files (users/{uid}/{pid}/output_*.mp4) are handled by the nightly retention cron.
     const svc = createServiceClient()
     const storagePrefix = `${user.id}/${id}`
     await Promise.allSettled([
@@ -80,6 +79,30 @@ export async function DELETE(
         }
       })(),
     ])
+
+    // Fire-and-forget to Railway: purge B2 objects (users/<uid>/<pid>/ + audio/<uid>/<pid>/).
+    // B2 credentials live only on Railway; this avoids duplicating secrets to Vercel.
+    // Timeout 10s; errors are logged but must not block the user-facing delete response.
+    ;(async () => {
+      try {
+        const railwayUrl = (process.env.RAILWAY_VIDEO_SERVER_URL ?? '').replace(/\/$/, '')
+        const railwaySecret = process.env.RAILWAY_API_SECRET ?? ''
+        if (!railwayUrl || !railwaySecret) return
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 10_000)
+        const res = await fetch(`${railwayUrl}/purge-project`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-secret': railwaySecret },
+          body: JSON.stringify({ project_id: id, user_id: user.id }),
+          signal: controller.signal,
+        })
+        clearTimeout(timer)
+        if (!res.ok) console.error(`[projects/:id DELETE] Railway purge-project failed: ${res.status}`)
+        else console.log(`[projects/:id DELETE] Railway B2 purge triggered for ${id}`)
+      } catch (e) {
+        console.error(`[projects/:id DELETE] Railway purge-project error:`, (e as Error).message)
+      }
+    })()
 
     const { error } = await supabase
       .from('projects')

@@ -249,6 +249,7 @@ export interface Project {
   credits_spent: number
   created_at: string
   updated_at: string
+  media_purged_at: string | null
 }
 
 export interface SubtitleBlock {

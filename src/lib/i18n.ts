@@ -712,6 +712,8 @@ export const translations = {
     'step5.ref_analyzing':   'Анализирую стиль...',
     'step5.ref_detected':    'Стиль:',
     'step5.audio_changed':   'Озвучка изменилась после генерации иллюстраций — тайминги могли устареть. Перегенерируйте иллюстрации для точного соответствия.',
+    'step5.media_purged':    'Медиа этого проекта были автоматически удалены для экономии места. Иллюстрации и озвучка недоступны — перегенерируйте их, чтобы продолжить.',
+    'step6.media_purged':    'Медиа этого проекта были автоматически удалены. Перегенерируйте иллюстрации и озвучку прежде чем собирать видео. Кнопка «Собрать MP4» заблокирована.',
     'step5.interval_hint':   'Интервал: 3–300 сек',
     'step5.count_capped':    'Максимум {N} иллюстраций — при этой длительности интервал будет ~{X} сек',
 
@@ -1794,6 +1796,8 @@ export const translations = {
     'step5.ref_analyzing':   'Analyzing style...',
     'step5.ref_detected':    'Style:',
     'step5.audio_changed':   'Audio changed after illustrations were generated — timings may be stale. Regenerate illustrations for accurate sync.',
+    'step5.media_purged':    'This project\'s media were automatically deleted to free up storage. Illustrations and audio are unavailable — regenerate them to continue.',
+    'step6.media_purged':    'This project\'s media were automatically deleted. Regenerate illustrations and audio before assembling the video. The "Assemble MP4" button is blocked.',
     'step5.interval_hint':   'Interval: 3–300 sec',
     'step5.count_capped':    'Maximum {N} illustrations — at this duration the interval will be ~{X} sec',
 
