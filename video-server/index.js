@@ -87,10 +87,17 @@ const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   : 'https://ytgen-video-server-production.up.railway.app'
 
 // ── Media retention policy ────────────────────────────────────────────────────
-// Edit thresholds here; logic reads from this object only.
+// Thresholds are env-overridable; defaults are conservative for paid users.
+// Anchor for both categories = updated_at (DB trigger refreshes on every project write).
 const RETENTION_DAYS = {
-  free: { abandoned: 1, completed: 2 },
-  paid: { abandoned: 3, completed: 5 },
+  free: {
+    abandoned: parseInt(process.env.RETENTION_FREE_ABANDONED  ?? '3'),
+    completed: parseInt(process.env.RETENTION_FREE_COMPLETED  ?? '7'),
+  },
+  paid: {
+    abandoned: parseInt(process.env.RETENTION_PAID_ABANDONED  ?? '14'),
+    completed: parseInt(process.env.RETENTION_PAID_COMPLETED  ?? '30'),
+  },
 }
 function retentionTier(plan) { return plan === 'free' ? 'free' : 'paid' }
 
@@ -2050,7 +2057,8 @@ async function b2MediaListObjects(prefix) {
   const xml = await res.text()
   const keys  = [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map(m => m[1])
   const sizes = [...xml.matchAll(/<Size>([^<]+)<\/Size>/g)].map(m => parseInt(m[1], 10))
-  return keys.map((key, i) => ({ key, size: sizes[i] || 0 }))
+  const times = [...xml.matchAll(/<LastModified>([^<]+)<\/LastModified>/g)].map(m => new Date(m[1]).getTime())
+  return keys.map((key, i) => ({ key, size: sizes[i] || 0, lastModified: times[i] || 0 }))
 }
 
 // Batch-delete keys from the main B2 bucket (S3 DeleteObjects, up to 1000/call)
@@ -2126,14 +2134,16 @@ async function cleanupExpiredMedia() {
   const now = Date.now()
   const iso = (d) => new Date(now - d * 86400_000).toISOString()
 
-  // 2A. Abandoned candidates: video_url IS NULL, not generating, older than free threshold
+  // 2A. Abandoned candidates: video_url IS NULL, not generating.
+  // Anchor = updated_at (DB trigger refreshes on every project write → true "last touched").
+  // Initial filter uses free.abandoned (narrowest); per-plan check in step 3 may widen or drop.
   let abandoned = []
   try {
     abandoned = await sbGet('projects',
-      `select=id,user_id,created_at,status,profiles!inner(plan)` +
+      `select=id,user_id,updated_at,created_at,status,profiles!inner(plan)` +
       `&video_url=is.null` +
       `&status=not.like.generating_*` +
-      `&created_at=lt.${iso(RETENTION_DAYS.free.abandoned)}` +
+      `&updated_at=lt.${iso(RETENTION_DAYS.free.abandoned)}` +
       `&limit=500`
     )
   } catch (e) { console.error(`${tag} abandoned query:`, e.message) }
@@ -2157,7 +2167,8 @@ async function cleanupExpiredMedia() {
     if (activeProjectIds.has(p.id)) continue
     const plan = p.profiles?.plan ?? 'free'
     const tier = retentionTier(plan)
-    const ageDays = (now - new Date(p.created_at).getTime()) / 86400_000
+    const anchor = p.updated_at ?? p.created_at  // updated_at = last studio touch (DB trigger)
+    const ageDays = (now - new Date(anchor).getTime()) / 86400_000
     if (ageDays >= RETENTION_DAYS[tier].abandoned) {
       candidates.push({ ...p, _category: 'abandoned', _ageDays: ageDays.toFixed(1), _tier: tier })
     }
@@ -2213,25 +2224,43 @@ async function cleanupExpiredMedia() {
       }
     } catch (e) { console.error(`${tag} images error ${pid}:`, e.message) }
 
-    // 4C. B2 main bucket (video + any per-project temp files)
+    // 4C. B2 video bucket (users/<uid>/<pid>/ — rendered .mp4)
     try {
       const b2Objects = await b2MediaListObjects(`users/${uid}/${pid}/`)
       if (b2Objects.length) {
         const b2Bytes = b2Objects.reduce((s, o) => s + o.size, 0)
         projectBytes += b2Bytes
         if (DRY_RUN) {
-          console.log(`${tag} would delete B2: ${b2Objects.length} object(s), ${(b2Bytes / 1024 / 1024).toFixed(2)} MB`)
+          console.log(`${tag} would delete B2 video: ${b2Objects.length} object(s), ${(b2Bytes / 1024 / 1024).toFixed(2)} MB`)
         } else {
           const keys = b2Objects.map(o => o.key)
           for (let i = 0; i < keys.length; i += 1000) {
             await b2MediaDeleteObjects(keys.slice(i, i + 1000))
           }
-          console.log(`${tag} deleted B2: ${b2Objects.length} object(s)`)
+          console.log(`${tag} deleted B2 video: ${b2Objects.length} object(s)`)
         }
       }
-    } catch (e) { console.error(`${tag} B2 error ${pid}:`, e.message) }
+    } catch (e) { console.error(`${tag} B2 video error ${pid}:`, e.message) }
 
-    // 4D. DB cleanup — delete project row + its video_jobs
+    // 4D. B2 audio bucket (audio/<uid>/<pid>/ — migrated from Supabase 2025-07-16)
+    try {
+      const b2AudioObjects = await b2MediaListObjects(`audio/${uid}/${pid}/`)
+      if (b2AudioObjects.length) {
+        const b2AudioBytes = b2AudioObjects.reduce((s, o) => s + o.size, 0)
+        projectBytes += b2AudioBytes
+        if (DRY_RUN) {
+          console.log(`${tag} would delete B2 audio: ${b2AudioObjects.length} object(s), ${(b2AudioBytes / 1024 / 1024).toFixed(2)} MB`)
+        } else {
+          const keys = b2AudioObjects.map(o => o.key)
+          for (let i = 0; i < keys.length; i += 1000) {
+            await b2MediaDeleteObjects(keys.slice(i, i + 1000))
+          }
+          console.log(`${tag} deleted B2 audio: ${b2AudioObjects.length} object(s)`)
+        }
+      }
+    } catch (e) { console.error(`${tag} B2 audio error ${pid}:`, e.message) }
+
+    // 4F. DB cleanup — delete project row + its video_jobs
     if (!DRY_RUN) {
       try {
         const hdrs = sbHeaders()
@@ -2245,13 +2274,36 @@ async function cleanupExpiredMedia() {
     counts[cat][tier === 'free' ? 'free' : 'paid']++
   }
 
-  // 5. Summary + Telegram alert
+  // 5. B2 temp/ orphan cleanup — age-based (no project_id in path)
+  // temp/subs_<jobId>.ass and temp/img_<jobId>_N.ext are deleted at render end,
+  // but crash-orphans accumulate. Safe threshold: 48 h (renders never exceed a few hours).
+  let tempOrphanCount = 0, tempOrphanBytes = 0
+  try {
+    const TEMP_ORPHAN_MAX_AGE_MS = 48 * 60 * 60 * 1000
+    const tempObjs = await b2MediaListObjects('temp/')
+    const stale = tempObjs.filter(o => o.lastModified && (now - o.lastModified) > TEMP_ORPHAN_MAX_AGE_MS)
+    tempOrphanCount = stale.length
+    tempOrphanBytes = stale.reduce((s, o) => s + o.size, 0)
+    console.log(`${tag} B2 temp/: ${tempObjs.length} total, ${stale.length} orphan(s) >48h, ${(tempOrphanBytes/1024/1024).toFixed(2)} MB`)
+    if (stale.length) {
+      if (DRY_RUN) {
+        console.log(`${tag} would delete B2 temp/ orphans: ${stale.map(o => o.key).join(', ')}`)
+      } else {
+        await b2MediaDeleteObjects(stale.map(o => o.key))
+        console.log(`${tag} deleted B2 temp/ orphans: ${stale.length} object(s)`)
+      }
+    }
+  } catch (e) { console.error(`${tag} B2 temp/ orphan cleanup:`, e.message) }
+
+  // 6. Summary + Telegram alert
   const mbStr = (totalBytes / 1024 / 1024).toFixed(2)
+  const tmpMbStr = (tempOrphanBytes / 1024 / 1024).toFixed(2)
   const actionPrefix = DRY_RUN ? '🔍 [DRY RUN] БЫЛО БЫ удалено' : '🗑 Удалено'
   const summary =
     `${actionPrefix}:\n` +
     `├ Брошенных: ${counts.abandoned.free} free + ${counts.abandoned.paid} paid\n` +
     `├ Завершённых: ${counts.completed.free} free + ${counts.completed.paid} paid\n` +
+    `├ temp/ сирот: ${tempOrphanCount} файл(ов), ~${tmpMbStr} МБ\n` +
     `└ Итого: ${candidates.length} проектов, ~${mbStr} МБ`
 
   console.log(`${tag}`, summary.replace(/[├└─🔍🗑]/g, '').trim())
