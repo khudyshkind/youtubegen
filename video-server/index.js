@@ -68,6 +68,9 @@ const VGF_API_KEY = process.env.VGF_API_KEY
 const VGF_CLIP_CONCURRENCY = 12
 // Retry count for transient HTTP 5xx errors on VGF submit (not job execution).
 const VGF_SUBMIT_RETRIES = 3
+// Active render jobs: used by SIGTERM handler to annotate phase/progress before exit.
+// Keys = jobId, values = { phase, clipsDone, totalClips }
+const renderActiveJobs = new Map()
 
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN
 
@@ -170,6 +173,20 @@ async function heartbeatProject(projectId) {
     await sbPatch('projects', `id=eq.${projectId}&status=eq.generating_video`, { status: 'generating_video' })
   } catch (e) {
     console.error('[heartbeat]', projectId, e.message)
+  }
+}
+
+// Returns a throttled heartbeat fn for use inside Stage 2 clip waves and concat/merge
+// loops — keeps projects.updated_at fresh without hammering Supabase on every operation.
+// Max one real heartbeat per 30 s per job; misses are logged but never thrown.
+function makeHeartbeat(projectId) {
+  let lastBeat = 0
+  return async function heartbeatThrottled() {
+    if (!projectId) return
+    const now = Date.now()
+    if (now - lastBeat < 30_000) return
+    lastBeat = now
+    await heartbeatProject(projectId)
   }
 }
 
@@ -2673,11 +2690,11 @@ async function runWatchdog() {
         await sbPatch('projects', `id=eq.${row.id}`, { status: 'failed' })
         try {
           const vJobs = await sbGet('video_jobs',
-            `project_id=eq.${row.id}&status=in.(pending,processing)&select=id,user_id,credits_charged,credits_refunded_at`)
+            `project_id=eq.${row.id}&status=in.(pending,processing)&select=id,user_id,credits_charged,credits_refunded_at,phase`)
           for (const vj of (Array.isArray(vJobs) ? vJobs : [])) {
             needsVideoRefund = !!(vj.credits_charged > 0 && !vj.credits_refunded_at)
             creditsCharged = vj.credits_charged ?? 0
-            await updateJob(vj.id, { status: 'failed', error_message: `watchdog: stuck in generating_video for ${ageMin} min` })
+            await updateJob(vj.id, { status: 'failed', error_message: `watchdog: no progress ${ageMin} min (phase: ${vj.phase ?? 'unknown'})` })
             await refundVideoJobCredits(vj.id, vj.user_id, row.id)
           }
         } catch (e) {
@@ -3674,6 +3691,8 @@ async function processVideoJob(jobId, body) {
       '| transition:', transition,
       '| effects:', effects,
       '| burnIn:', subtitle_style?.burnIn ?? false)
+    const heartbeat = makeHeartbeat(project_id)
+    renderActiveJobs.set(jobId, { phase: 'clips', clipsDone: 0, totalClips: images.length })
 
     const defaultDuration = Math.max(1, Number(image_interval) || 10)
     const effectFilters = (Array.isArray(effects) ? effects : []).map(e => EFFECT_FILTERS[e]).filter(Boolean)
@@ -3812,6 +3831,8 @@ async function processVideoJob(jobId, body) {
                 lastClipUpdate = now
                 await updateJob(jobId, { progress: Math.round(60 * done / totalClips), phase: 'clips', phase_done: done, phase_total: totalClips })
               }
+              renderActiveJobs.set(jobId, { phase: 'clips', clipsDone: done, totalClips })
+              await heartbeat()
               return result.out_1
             } catch (err) {
               if (attempt < 2) {
@@ -3842,6 +3863,8 @@ async function processVideoJob(jobId, body) {
         console.log(`[vgf] xfade batch ${bNum}: ${bClips.length} clips, ${bDurs.reduce((a, c) => a + c, 0).toFixed(1)}s`)
         const result = await xfadeBatchPassVGF(bClips, bDurs, transition, td, `batch_${bNum}`)
         batchResults.push(result)
+        renderActiveJobs.set(jobId, { phase: 'xfade_batch', clipsDone: Math.min(b + XFADE_BATCH_SIZE, clipUrls.length), totalClips })
+        await heartbeat()
       }
       console.log(`[vgf] ${batchResults.length} batch(es) ready, merging...`)
 
@@ -3857,6 +3880,8 @@ async function processVideoJob(jobId, body) {
         )
         accUrl = mergeResult.out_1
         accDur += batchResults[i].contentDuration
+        renderActiveJobs.set(jobId, { phase: 'xfade_merge', clipsDone: i, totalClips: batchResults.length - 1 })
+        await heartbeat()
       }
 
       // Phase C: mux audio + bake effects in one pass (saves a separate encode)
@@ -3924,6 +3949,8 @@ async function processVideoJob(jobId, body) {
                 lastClipUpdate = now
                 await updateJob(jobId, { progress: Math.round(60 * done / totalClips), phase: 'clips', phase_done: done, phase_total: totalClips })
               }
+              renderActiveJobs.set(jobId, { phase: 'clips', clipsDone: done, totalClips })
+              await heartbeat()
               return result.out_1
             } catch (err) {
               if (attempt < 2) {
@@ -3955,6 +3982,8 @@ async function processVideoJob(jobId, body) {
         const bNum   = Math.floor(b / CUT_CONCAT_BATCH)
         console.log(`[vgf] concat batch ${bNum}: ${bClips.length} clips`)
         concatBatches.push(await concatBatchVGF(bClips, `cutbatch_${bNum}`, vgfLongTimeout(audioDuration)))
+        renderActiveJobs.set(jobId, { phase: 'concat_batch', clipsDone: Math.min(b + CUT_CONCAT_BATCH, clipUrls.length), totalClips })
+        await heartbeat()
       }
 
       // Phase B: merge batches (skipped for ≤50 scenes; longTimeout for rare >50-scene videos)
@@ -3963,6 +3992,8 @@ async function processVideoJob(jobId, body) {
         mergedVideoUrl = concatBatches[0]
       } else {
         console.log(`[vgf] merging ${concatBatches.length} batches...`)
+        renderActiveJobs.set(jobId, { phase: 'concat_merge', clipsDone: concatBatches.length, totalClips })
+        await heartbeat()
         mergedVideoUrl = await concatBatchVGF(concatBatches, 'cutmerge', vgfLongTimeout(audioDuration), 20)
       }
 
@@ -4052,6 +4083,7 @@ async function processVideoJob(jobId, body) {
     await updateJob(jobId, { status: 'failed', error_message: err.message })
     await refundVideoJobCredits(jobId, body.user_id, body.project_id)
   } finally {
+    renderActiveJobs.delete(jobId)
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true })
     } catch (e) {
@@ -4770,6 +4802,63 @@ async function processAudioJob(job) {
   }
 }
 
+// ── SIGTERM: annotate active render jobs before process exit ──────────────────
+// Writes error_message only — status stays 'processing'; startup-recovery on the
+// next container boot will mark the job failed and refund credits.
+process.on('SIGTERM', () => {
+  console.log(`[SIGTERM] received — annotating ${renderActiveJobs.size} active render job(s)`)
+  const updates = []
+  for (const [jId, info] of renderActiveJobs) {
+    const detail = info.clipsDone != null
+      ? `, clips: ${info.clipsDone}/${info.totalClips}`
+      : ''
+    const msg = `SIGTERM mid-render, phase: ${info.phase}${detail}`
+    console.log(`[SIGTERM] job ${jId.slice(0, 8)}: ${msg}`)
+    updates.push(updateJob(jId, { error_message: msg }).catch(() => {}))
+  }
+  Promise.allSettled(updates).finally(() => {
+    console.log('[SIGTERM] annotation done, exiting')
+    process.exit(0)
+  })
+})
+
+// ── Startup recovery: mark jobs orphaned by previous container crash as failed ─
+// Safe because at startup time this process owns zero running renders — any job
+// still in 'processing' must have been abandoned by the previous container.
+async function recoverOrphanedJobs() {
+  try {
+    const orphans = await sbGet('video_jobs',
+      'status=eq.processing&select=id,user_id,project_id,phase,credits_charged,credits_refunded_at')
+    if (!orphans.length) { console.log('[startup/recovery] no orphaned jobs'); return }
+    console.log(`[startup/recovery] found ${orphans.length} orphaned job(s)`)
+    for (const job of (Array.isArray(orphans) ? orphans : [])) {
+      const phaseStr = job.phase ? ` (phase: ${job.phase})` : ''
+      console.log(`[startup/recovery] orphan ${job.id.slice(0, 8)} project:${(job.project_id ?? '?').slice(0, 8)}${phaseStr}`)
+      await updateJob(job.id, {
+        status: 'failed',
+        error_message: `orphaned by container restart${phaseStr}`,
+      })
+      if (job.project_id) {
+        await sbPatch('projects', `id=eq.${job.project_id}&status=eq.generating_video`, { status: 'failed' })
+          .catch(e => console.warn('[startup/recovery] project patch:', e.message))
+      }
+      await refundVideoJobCredits(job.id, job.user_id, job.project_id)
+        .catch(e => console.warn(`[startup/recovery] refund for ${job.id.slice(0, 8)}:`, e.message))
+      if (OWNER_ID) {
+        const credits = job.credits_charged ?? 0
+        const refundNote = (credits > 0 && !job.credits_refunded_at) ? `, ${credits} кр. возвращены` : ''
+        await tgApi('sendMessage', {
+          chat_id: OWNER_ID,
+          text: `🔴 Startup recovery\njob ${job.id.slice(0, 8)}${phaseStr} → failed${refundNote}\nproject: ${(job.project_id ?? '?').slice(0, 8)}`,
+        }).catch(e => console.warn('[startup/recovery] tg:', e.message))
+      }
+    }
+  } catch (e) {
+    console.error('[startup/recovery] failed:', e.message)
+    Sentry.captureException(e, { extra: { fn: 'recoverOrphanedJobs' } })
+  }
+}
+
 // Must be added AFTER all routes
 Sentry.setupExpressErrorHandler(app)
 
@@ -4777,6 +4866,7 @@ const PORT = parseInt(process.env.PORT || '3001', 10)
 app.listen(PORT, async () => {
   console.log(`ytgen-video-server on :${PORT}`)
   await loadSettingsFromDB().catch(err => console.warn('[bot] settings load failed:', err.message))
+  await recoverOrphanedJobs()
   // Write thresholds to bot_settings so the Vercel admin panel can read them
   await Promise.all([
     setSetting('fal_balance_threshold',        String(FAL_BALANCE_THRESHOLD)),
