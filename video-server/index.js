@@ -3558,13 +3558,13 @@ async function appendJobWarning(jobId, warnText) {
       if (jsonbOk) console.log(`[warn] ${jobId} warnings JSONB: ${warnText}`)
     }
   } catch {}
-  if (jsonbOk) return
-  // Fallback: error_message with [warn:] prefix — status/route.ts detects this prefix for the banner
+  // Always write error_message [warn:] prefix — status/route.ts reads this for subtitle_warn.
+  // Post-migration: warnings JSONB is the audit log; error_message is the live signal for the banner.
   try {
     await sbPatch('video_jobs', `id=eq.${jobId}`, { error_message: `[warn:${warnText}]` })
-    console.log(`[warn] ${jobId} error_message fallback: ${warnText}`)
+    console.log(`[warn] ${jobId} error_message: ${warnText}`)
   } catch (e) {
-    console.warn('[warn] appendJobWarning failed entirely:', e.message)
+    if (!jsonbOk) console.warn('[warn] appendJobWarning failed entirely:', e.message)
   }
 }
 
