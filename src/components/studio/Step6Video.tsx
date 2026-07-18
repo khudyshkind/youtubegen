@@ -135,6 +135,7 @@ export default function Step6Video() {
   const [renderPhaseTotal, setRenderPhaseTotal] = useState<number | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollTickRef = useRef<(() => Promise<void>) | null>(null)
+  const [subtitleWarn, setSubtitleWarn] = useState(false)
   const [burnIn, setBurnIn] = useState(true)
   const [transition, setTransition] = useState('cut')
   const [transitionDuration, setTransitionDuration] = useState(0.5)
@@ -255,7 +256,7 @@ export default function Step6Video() {
     const tick = async () => {
       try {
         const res = await fetch(`/api/generate/video/status?job_id=${jobId}`)
-        const json = await res.json() as { ok: boolean; status?: string; progress?: number; phase?: string; phase_done?: number; phase_total?: number; video_url?: string; error_message?: string; error?: string; credits_refunded?: number }
+        const json = await res.json() as { ok: boolean; status?: string; progress?: number; phase?: string; phase_done?: number; phase_total?: number; video_url?: string; error_message?: string; error?: string; credits_refunded?: number; subtitle_warn?: boolean }
 
         if (!res.ok || !json.ok) {
           if (res.status === 404) {
@@ -281,6 +282,7 @@ export default function Step6Video() {
         if (json.status === 'completed' && json.video_url) {
           clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
           setVideoUrl(json.video_url); setRenderJobId(null)
+          if (json.subtitle_warn) setSubtitleWarn(true)
           void refreshCredits(); setRenderState('done')
         } else if (json.status === 'failed') {
           clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
@@ -841,6 +843,11 @@ export default function Step6Video() {
         {renderState === 'done' && videoUrl && (
           <>
             <p className="text-sm font-semibold text-green-400 mb-3">{t('step6.video_done')}</p>
+            {subtitleWarn && (
+              <div className="mb-3 rounded-lg px-3 py-2.5 text-xs text-amber-300" style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.3)' }}>
+                🟡 Видео готово, но субтитры не удалось наложить (сбой обработки). Можно перезапустить рендер — субтитры сохранены.
+              </div>
+            )}
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
             <video
               key={videoUrl}
@@ -862,7 +869,7 @@ export default function Step6Video() {
               </a>
               <button
                 type="button"
-                onClick={() => { setRenderState('idle'); setRenderProgress(0); setRenderJobId(null) }}
+                onClick={() => { setRenderState('idle'); setRenderProgress(0); setRenderJobId(null); setSubtitleWarn(false) }}
                 className="px-4 py-2 btn-ghost-dark rounded-xl text-sm"
               >
                 {t('step6.reassemble')}

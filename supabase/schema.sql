@@ -477,3 +477,6 @@ create table if not exists public.sentry_alert_dedup (
   last_sent_at timestamptz not null default now()
 );
 grant all on public.sentry_alert_dedup to service_role;
+
+-- Migration: subtitle burn-in degradation warnings (run once in Supabase SQL Editor)
+alter table public.video_jobs add column if not exists warnings jsonb;

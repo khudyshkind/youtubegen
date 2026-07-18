@@ -165,6 +165,7 @@ export async function GET(request: NextRequest) {
       phase_total: job.phase_total ?? null,
       video_url: job.video_url ?? null,
       error_message: job.error_message ?? null,
+      subtitle_warn: typeof job.error_message === 'string' && job.error_message.startsWith('[warn:subtitles_burn_failed'),
       credits_refunded: job.status === 'failed' && (job.credits_charged ?? 0) > 0 ? job.credits_charged : 0,
     })
   } catch (error) {

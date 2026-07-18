@@ -3302,7 +3302,7 @@ app.get('/admin/stats', verifySecret, async (req, res) => {
 // outputFiles: { out_1: "output.mp4" }  ← converted internally to VGF array format
 // ffmpegCommand: "-i {{in_1}} -vf ... {{out_1}}"  (no leading "ffmpeg")
 // Returns: { out_1: "https://vgf-cdn.../output.mp4", ... }
-async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs = 600000) {
+async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs = 600000, onPoll = null) {
   if (!VGF_API_KEY) throw new Error('VGF_API_KEY not configured')
 
   // VGF uses output_files as array of filenames; replace {{out_N}} with {{filename}} in command
@@ -3371,6 +3371,7 @@ async function runFFmpegOnVGF(inputFiles, outputFiles, ffmpegCommand, timeoutMs 
     const pollBody = await pollRes.json()
     const status = pollBody.data ?? pollBody
     console.log(`[vgf] job ${jobId} status: ${status.status}`)
+    if (onPoll) await onPoll().catch(() => {})
     if (status.status === 'succeeded') {
       const result = {}
       const missing = []
@@ -3538,12 +3539,41 @@ async function deleteTempImagesFromB2(keys) {
 // Compute dynamic VGF timeout for full-video encode passes (mux, subtitle burn).
 // Base 10 min + 30s per minute of content, capped at 30 min.
 // Slideshow H.264 encodes fast (~300+ fps), but 60-min content needs headroom.
+async function appendJobWarning(jobId, warnText) {
+  // Try warnings JSONB column first (available after: ALTER TABLE video_jobs ADD COLUMN IF NOT EXISTS warnings jsonb)
+  let jsonbOk = false
+  try {
+    const readRes = await fetch(`${SUPABASE_URL}/rest/v1/video_jobs?id=eq.${jobId}&select=warnings`, {
+      headers: sbHeaders(), signal: AbortSignal.timeout(8000),
+    })
+    if (readRes.ok) {
+      const rows = await readRes.json()
+      const current = Array.isArray(rows[0]?.warnings) ? rows[0].warnings : []
+      const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/video_jobs?id=eq.${jobId}`, {
+        method: 'PATCH', headers: sbHeaders(),
+        body: JSON.stringify({ warnings: [...current, warnText] }),
+        signal: AbortSignal.timeout(8000),
+      })
+      jsonbOk = patchRes.ok
+      if (jsonbOk) console.log(`[warn] ${jobId} warnings JSONB: ${warnText}`)
+    }
+  } catch {}
+  if (jsonbOk) return
+  // Fallback: error_message with [warn:] prefix — status/route.ts detects this prefix for the banner
+  try {
+    await sbPatch('video_jobs', `id=eq.${jobId}`, { error_message: `[warn:${warnText}]` })
+    console.log(`[warn] ${jobId} error_message fallback: ${warnText}`)
+  } catch (e) {
+    console.warn('[warn] appendJobWarning failed entirely:', e.message)
+  }
+}
+
 function vgfLongTimeout(audioDurationSeconds) {
   const contentMinutes = Math.ceil(audioDurationSeconds / 60)
   return Math.min(1_800_000, 600_000 + contentMinutes * 30_000)
 }
 
-async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId, timeoutMs = 600_000) {
+async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId, projectId, timeoutMs = 600_000) {
   const assContent = blocksToAss(subtitle_blocks, subtitle_style)
   const assKey = `temp/subs_${jobId}.ass`
   let assUrl
@@ -3563,20 +3593,39 @@ async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId
        'BorderStyle=1', 'Outline=2', 'Shadow=1', 'Bold=1', 'Alignment='+alignment]
   const forceStyle = forceParams.join('\\\\,')
 
-  try {
-    const result = await runFFmpegOnVGF(
-      { in_1: videoUrl, in_2: assUrl },
-      { out_1: 'output_subs.mp4' },
-      `-i {{in_1}} -vf subtitles={{in_2}}:force_style=${forceStyle} -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`,
-      timeoutMs
-    )
-    console.log('[vgf] subtitle burn-in done')
-    return result.out_1
-  } catch (subsErr) {
-    console.warn('[vgf] subtitle burn-in failed, using video without subs:', subsErr.message)
-    Sentry.captureException(subsErr, { extra: { jobId, stage: 'subtitle_burn' } })
-    return videoUrl
+  // Budget: vgfLongTimeout max = 30 min per attempt; two attempts + 10 s pause = ≤60.2 min.
+  // onPoll heartbeat refreshes projects.updated_at → 40-min watchdog never fires during retry.
+  // Precedent b32adfb3: att1=16min(transient fail)+10s+att2≤30min ≈ 46min — safe with heartbeat.
+  const heartbeat = makeHeartbeat(projectId)
+  let lastErr = null
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const result = await runFFmpegOnVGF(
+        { in_1: videoUrl, in_2: assUrl },
+        { out_1: 'output_subs.mp4' },
+        `-i {{in_1}} -vf subtitles={{in_2}}:force_style=${forceStyle} -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`,
+        timeoutMs,
+        heartbeat,
+      )
+      console.log('[vgf] subtitle burn-in done')
+      return result.out_1
+    } catch (subsErr) {
+      lastErr = subsErr
+      console.warn(`[vgf] subtitle burn-in attempt ${attempt}/2 failed: ${subsErr.message}`)
+      if (attempt < 2) await new Promise(r => setTimeout(r, 10_000))
+    }
   }
+
+  // Both attempts failed — honest degradation.
+  // No refund: subtitle transcription is preserved in projects.subtitle_blocks and was not re-billed.
+  const warnDetail = lastErr.message.slice(0, 200)
+  await appendJobWarning(jobId, `subtitles_burn_failed: ${warnDetail}`)
+  await sendTo(OWNER_ID, `🟡 *Subtitle burn-in degraded* — job \`${jobId}\`\n${warnDetail.slice(0, 120)}`, {}).catch(() => {})
+  Sentry.captureMessage(`subtitle burn-in degraded job ${jobId}`, {
+    level: 'warning',
+    extra: { jobId, projectId, error: warnDetail },
+  })
+  return videoUrl
 }
 
 // ── Batch xfade helper (VGF) ───────────────────────────────────────────────
@@ -3874,7 +3923,7 @@ async function processVideoJob(jobId, body) {
       // ── Stage 5: Burn subtitles ─────────────────────────────────────────────
       if (subtitle_blocks?.length && subtitle_style?.burnIn) {
         console.time(T('5_subtitles'))
-        currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId, longTimeout)
+        currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId, project_id, longTimeout)
         console.timeEnd(T('5_subtitles'))
         await updateJob(jobId, { progress: 85, phase: 'subtitles', phase_done: null, phase_total: null })
         await heartbeatProject(project_id)
@@ -3986,7 +4035,7 @@ async function processVideoJob(jobId, body) {
       // ── Stage 5: Burn subtitles ─────────────────────────────────────────────
       if (subtitle_blocks?.length && subtitle_style?.burnIn) {
         console.time(T('5_subtitles'))
-        currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId, longTimeout)
+        currentUrl = await burnSubtitlesVGF(currentUrl, subtitle_blocks, subtitle_style, jobId, project_id, longTimeout)
         console.timeEnd(T('5_subtitles'))
         await updateJob(jobId, { progress: 85, phase: 'subtitles', phase_done: null, phase_total: null })
         await heartbeatProject(project_id)
