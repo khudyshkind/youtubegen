@@ -2854,19 +2854,19 @@ function verifySecret(req, res, next) {
 }
 
 // Upload final video to Cloudflare R2.
-// Three-attempt strategy to isolate TLS stack issues:
-//   1. fetch / undici (Node built-in, different TLS negotiation from https.request)
-//   2. curl (system libssl — completely independent of Node's bundled OpenSSL)
-// SigV4 signing is shared; only the HTTP transport differs.
+// Env vars: R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_PUBLIC_BASE.
+// NOTE: R2 keys use the same users/${userId}/${projectId}/... path format as B2.
+// Future retention cleanup will need an R2 S3-compatible client to enumerate and delete these keys.
 async function uploadVideoToR2(filePath, projectId, userId) {
-  const stat = fs.statSync(filePath)
-  const key = `users/${userId}/${projectId}/output.mp4`
-  const fileSize = stat.size
+  const accountId = (process.env.R2_ACCOUNT_ID || '').trim()
   const bucket = (process.env.R2_BUCKET || '').trim()
-  const endpoint = (process.env.R2_ENDPOINT || '').trim().replace(/\/$/, '')
-  const publicBase = (process.env.R2_PUBLIC_URL || '').trim().replace(/\/$/, '')
+  const publicBase = (process.env.R2_PUBLIC_BASE || '').trim().replace(/\/$/, '')
 
-  console.log(`[r2] node:${process.version} openssl:${process.versions.openssl}`)
+  const endpoint = `https://${accountId}.r2.cloudflarestorage.com`
+  const key = `users/${userId}/${projectId}/output_${Date.now()}.mp4`
+  const fileSize = fs.statSync(filePath).size
+
+  console.log(`[r2] node:${process.version}`)
   console.log(`[r2] endpoint: ${endpoint}  bucket: ${bucket}`)
   console.log(`[r2] uploading ${key} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`)
 
@@ -2875,7 +2875,7 @@ async function uploadVideoToR2(filePath, projectId, userId) {
   const host = parsed.hostname
   const urlPath = parsed.pathname
 
-  // AWS SigV4 — UNSIGNED-PAYLOAD allows streaming without body hash
+  // UNSIGNED-PAYLOAD avoids SHA256 of entire file body; R2 accepts it (unlike B2).
   const now = new Date()
   const amzDate = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
   const dateStamp = amzDate.slice(0, 8)
@@ -2905,67 +2905,33 @@ async function uploadVideoToR2(filePath, projectId, userId) {
     `AWS4-HMAC-SHA256 Credential=${process.env.R2_ACCESS_KEY_ID}/${credentialScope}, ` +
     `SignedHeaders=${signedHeaders}, Signature=${signature}`
 
-  const publicUrl = `${publicBase}/${key}`
-
-  // ── Attempt 1: fetch / undici ──────────────────────────────────────────────
-  console.log('[r2] attempt 1: fetch (undici)...')
-  let fetchErr = null
-  try {
-    const buf = fs.readFileSync(filePath)
-    const res = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'video/mp4',
-        'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
-        'x-amz-date': amzDate,
-        'Authorization': authorization,
-      },
-      body: buf,
-    })
-    if (res.ok) {
-      console.log('[r2] uploaded via fetch:', publicUrl)
-      return publicUrl
-    }
-    const errBody = await res.text().catch(() => '')
-    fetchErr = new Error(`HTTP ${res.status}: ${errBody.slice(0, 300)}`)
-    console.warn('[r2] fetch HTTP error:', fetchErr.message)
-  } catch (err) {
-    fetchErr = err
-    console.warn('[r2] fetch failed:', err.message)
-  }
-
-  // ── Attempt 2: curl (system libssl, independent of Node's OpenSSL) ─────────
-  console.log('[r2] attempt 2: curl...')
-  const curlOut = await new Promise((resolve, reject) => {
-    execFile('curl', [
-      '-sS', '-o', '/dev/null', '-w', '%{http_code}',
-      '--upload-file', filePath,
-      '-H', `Content-Type: video/mp4`,
-      '-H', `x-amz-content-sha256: UNSIGNED-PAYLOAD`,
-      '-H', `x-amz-date: ${amzDate}`,
-      '-H', `Authorization: ${authorization}`,
-      uploadUrl,
-    ], { maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err && !stdout) {
-        return reject(new Error(`[r2-curl] ${err.message}: ${(stderr || '').slice(0, 200)}`))
-      }
-      resolve(stdout || '')
-    })
+  // Stream file — avoids loading large videos into RAM (OOM risk on 1 GB+).
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'video/mp4',
+      'Content-Length': String(fileSize),
+      'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
+      'x-amz-date': amzDate,
+      'Authorization': authorization,
+    },
+    body: Readable.toWeb(fs.createReadStream(filePath)),
+    duplex: 'half',
+    signal: AbortSignal.timeout(600_000),
   })
 
-  const curlStatus = parseInt(curlOut.trim(), 10)
-  if (curlStatus >= 200 && curlStatus < 300) {
-    console.log('[r2] uploaded via curl:', publicUrl)
-    return publicUrl
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`[r2-upload] HTTP ${res.status}: ${errBody.slice(0, 400)}`)
   }
-  throw new Error(
-    `[r2] all upload attempts failed. curl=${curlStatus}; fetch: ${fetchErr?.message ?? 'n/a'}`
-  )
+
+  const publicUrl = `${publicBase}/${key}`
+  console.log('[r2] uploaded:', publicUrl)
+  return publicUrl
 }
 
 // Upload final video to Backblaze B2 (S3-compatible).
-// R2 was replaced because Cloudflare R2 rejects TLS handshakes from Railway IPs at WAF level.
-// Streams file to avoid loading large videos into RAM (OOM risk on Railway).
+// Used as fallback when R2 upload fails (both attempts). Streams file to avoid OOM on large videos.
 async function uploadVideoToB2(filePath, projectId, userId) {
   const key = `users/${userId}/${projectId}/output_${Date.now()}.mp4`
   const bucket = (process.env.B2_BUCKET || '').trim()
@@ -4034,12 +4000,25 @@ async function processVideoJob(jobId, body) {
 
     await updateJob(jobId, { progress: 95, phase: 'upload', phase_done: null, phase_total: null })
 
-    // ── Stage 6: Upload to Backblaze B2 ────────────────────────────────────
+    // ── Stage 6: Upload to Cloudflare R2 (fallback → Backblaze B2) ──────────
     const fileSizeBytes = fs.statSync(outputPath).size
     console.log(`[upload] file size: ${fileSizeBytes} bytes = ${(fileSizeBytes / 1024 / 1024).toFixed(2)} MB`)
-    console.time(T('6_b2_upload'))
-    const publicUrl = await uploadVideoToB2(outputPath, project_id, user_id ?? 'anon')
-    console.timeEnd(T('6_b2_upload'))
+    console.time(T('6_upload'))
+    let publicUrl
+    try {
+      publicUrl = await uploadVideoToR2(outputPath, project_id, user_id ?? 'anon')
+    } catch (r2Err) {
+      console.warn('[r2] attempt 1 failed:', r2Err.message, '— retrying...')
+      try {
+        publicUrl = await uploadVideoToR2(outputPath, project_id, user_id ?? 'anon')
+      } catch (r2Err2) {
+        const alertMsg = `[non-critical] R2 upload failed, fell back to B2: ${r2Err2.message}`
+        console.error(alertMsg)
+        Sentry.captureMessage(alertMsg, 'warning')
+        publicUrl = await uploadVideoToB2(outputPath, project_id, user_id ?? 'anon')
+      }
+    }
+    console.timeEnd(T('6_upload'))
     console.timeEnd(T('TOTAL'))
 
     await updateJob(jobId, {
