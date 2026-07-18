@@ -56,7 +56,7 @@ function parseSrt(text: string): SubtitleBlock[] {
 export default function Step4Subtitles() {
   const {
     audioUrl, projectId, scriptParams, subtitleBlocks, subtitleAudioTs,
-    setSubtitleBlocks, setSubtitleAudioTs, setStep,
+    setSubtitleBlocks, setSubtitleAudioTs, setSubtitlesConfirmedThisSession, setStep,
   } = useStudioStore()
 
   const { t } = useLang()
@@ -79,6 +79,7 @@ export default function Step4Subtitles() {
         return
       }
       setSubtitleBlocks(blocks)
+      setSubtitlesConfirmedThisSession(true)
     }
     reader.onerror = () => setSrtUploadError(t('step4.err_file'))
     reader.readAsText(file, 'UTF-8')
@@ -103,6 +104,7 @@ export default function Step4Subtitles() {
       }
       setSubtitleBlocks(json.data.subtitle_blocks)
       setSubtitleAudioTs(extractAudioTs(audioUrl))
+      setSubtitlesConfirmedThisSession(true)
       void refreshCredits()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step4.err_gen'))

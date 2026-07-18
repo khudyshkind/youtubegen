@@ -40,7 +40,7 @@ function StepWizardInner() {
   const { currentStep, reset, setStep, setProjectId, setScriptParams, setPlanSections, setScript,
     setVoiceId, setAudioUrl, setSubtitleBlocks, sceneImages, setSceneImages, setVideoUrl, setSeo,
     setImageInterval, setImageStyle, setThumbnailUrl, setThumbnailBgUrl, setThumbnailTextMode,
-    setRenderJobId, setProjectStatus, setMediaPurgedAt,
+    setRenderJobId, setProjectStatus, setMediaPurgedAt, setSubtitlesConfirmedThisSession,
     script, scriptParams, subtitleBlocks, audioUrl, seo, projectId, ownScript,
     imageEngine, imageInterval, audioCostEstimate, setOwnScript } = useStudioStore()
 
@@ -317,7 +317,7 @@ function StepWizardInner() {
               stepLabel={t('studio.step5')}
               primaryLabel={t('step4.next')}
               primaryDisabled={subtitleBlocks.length === 0}
-              onPrimary={() => setStep(6)}
+              onPrimary={() => { setSubtitlesConfirmedThisSession(true); setStep(6) }}
               secondaryLabel={t('step4.back')}
               onSecondary={() => setStep(4)}
             />

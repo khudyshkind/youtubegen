@@ -117,7 +117,7 @@ export default function Step6Video() {
   const {
     audioUrl, sceneImages, subtitleBlocks, subtitleStyle,
     scriptParams, imageInterval, projectId, videoUrl, renderJobId, mediaPurgedAt,
-    setVideoUrl, setRenderJobId, setStep, setSubtitleStyle,
+    setVideoUrl, setRenderJobId, setStep, setSubtitleStyle, subtitlesConfirmedThisSession,
   } = useStudioStore()
 
   const { t } = useLang()
@@ -146,7 +146,11 @@ export default function Step6Video() {
 
   const hasAudio = !!audioUrl
   const hasImages = sceneImages.length > 0
-  const hasSubs = subtitleBlocks.length > 0
+  // hasStoredSubs: blocks exist in store (may be from a previous session loaded via DB restore)
+  // enableSubs: user's intent to use them — defaults true only when confirmed this session
+  const hasStoredSubs = subtitleBlocks.length > 0
+  const [enableSubs, setEnableSubs] = useState(() => subtitlesConfirmedThisSession && hasStoredSubs)
+  const hasSubs = enableSubs
   const missingImageCount = sceneImages.filter((img) => !img.url).length
 
   // Video cost preview — mirrors server formula in render/route.ts
@@ -472,88 +476,115 @@ export default function Step6Video() {
       )}
 
       {/* Subtitle settings */}
-      {hasSubs ? (
+      {hasStoredSubs ? (
         <div
           className="rounded-xl p-4 flex flex-col gap-3"
           style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
         >
+          {/* Summary row: always visible when blocks exist */}
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-200">{t('step6.subs_settings')}</p>
-            <button
-              type="button"
-              onClick={downloadSrt}
-              className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors"
-            >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              SRT
-            </button>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-slate-200">{t('step6.subs_label')}</p>
+              <span className="text-xs text-slate-500">· {subtitleBlocks.length} {t('step6.blocks_count')}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setStep(5)}
+                className="text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors"
+              >
+                {t('step6.step4_link')}
+              </button>
+              {hasSubs && (
+                <button
+                  type="button"
+                  onClick={downloadSrt}
+                  className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  SRT
+                </button>
+              )}
+            </div>
           </div>
 
+          {/* Main enable toggle — defaults to false for DB-restored blocks */}
           <Toggle
-            checked={burnIn}
-            onChange={setBurnIn}
-            label={t('step6.burn_subs')}
-            hint={t('step6.burn_hint')}
+            checked={enableSubs}
+            onChange={setEnableSubs}
+            label={enableSubs ? t('step6.subs_settings') : t('step6.stale_subs_hint')}
           />
 
-          {burnIn && (
-            <div className="flex flex-col gap-3 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-              <div className="grid grid-cols-2 gap-3">
-                <ChipSelector<SubtitleSize>
-                  label={t('step4.size')}
-                  value={subtitleStyle.size}
-                  options={[
-                    { value: 'small',  label: t('size.small')  },
-                    { value: 'medium', label: t('size.medium') },
-                    { value: 'large',  label: t('size.large')  },
-                  ]}
-                  onChange={(v) => setSubtitleStyle({ size: v })}
-                />
-                <ChipSelector<SubtitleFont>
-                  label={t('step4.font')}
-                  value={subtitleStyle.font}
-                  options={[
-                    { value: 'sans',  label: t('font.sans')  },
-                    { value: 'serif', label: t('font.serif') },
-                  ]}
-                  onChange={(v) => setSubtitleStyle({ font: v })}
-                />
-              </div>
-
-              <ChipSelector<string>
-                label={t('step4.color')}
-                value={subtitleStyle.color}
-                options={[
-                  { value: '#FFFFFF', label: t('subs.color_white')  },
-                  { value: '#FFFF00', label: t('subs.color_yellow') },
-                  { value: '#000000', label: t('subs.color_black')  },
-                ]}
-                onChange={(v) => setSubtitleStyle({ color: v })}
+          {/* Style options — only when enabled */}
+          {hasSubs && (
+            <>
+              <Toggle
+                checked={burnIn}
+                onChange={setBurnIn}
+                label={t('step6.burn_subs')}
+                hint={t('step6.burn_hint')}
               />
 
-              <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                <Toggle
-                  checked={subtitleStyle.background}
-                  onChange={(v) => setSubtitleStyle({ background: v })}
-                  label={t('step4.bg_label')}
-                  hint={t('step4.bg_hint')}
-                />
-              </div>
+              {burnIn && (
+                <div className="flex flex-col gap-3 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <ChipSelector<SubtitleSize>
+                      label={t('step4.size')}
+                      value={subtitleStyle.size}
+                      options={[
+                        { value: 'small',  label: t('size.small')  },
+                        { value: 'medium', label: t('size.medium') },
+                        { value: 'large',  label: t('size.large')  },
+                      ]}
+                      onChange={(v) => setSubtitleStyle({ size: v })}
+                    />
+                    <ChipSelector<SubtitleFont>
+                      label={t('step4.font')}
+                      value={subtitleStyle.font}
+                      options={[
+                        { value: 'sans',  label: t('font.sans')  },
+                        { value: 'serif', label: t('font.serif') },
+                      ]}
+                      onChange={(v) => setSubtitleStyle({ font: v })}
+                    />
+                  </div>
 
-              <ChipSelector<SubtitlePosition>
-                label={t('step4.position')}
-                value={subtitleStyle.position}
-                options={[
-                  { value: 'bottom', label: t('pos.bottom') },
-                  { value: 'center', label: t('pos.center') },
-                  { value: 'top',    label: t('pos.top')    },
-                ]}
-                onChange={(v) => setSubtitleStyle({ position: v })}
-              />
-            </div>
+                  <ChipSelector<string>
+                    label={t('step4.color')}
+                    value={subtitleStyle.color}
+                    options={[
+                      { value: '#FFFFFF', label: t('subs.color_white')  },
+                      { value: '#FFFF00', label: t('subs.color_yellow') },
+                      { value: '#000000', label: t('subs.color_black')  },
+                    ]}
+                    onChange={(v) => setSubtitleStyle({ color: v })}
+                  />
+
+                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <Toggle
+                      checked={subtitleStyle.background}
+                      onChange={(v) => setSubtitleStyle({ background: v })}
+                      label={t('step4.bg_label')}
+                      hint={t('step4.bg_hint')}
+                    />
+                  </div>
+
+                  <ChipSelector<SubtitlePosition>
+                    label={t('step4.position')}
+                    value={subtitleStyle.position}
+                    options={[
+                      { value: 'bottom', label: t('pos.bottom') },
+                      { value: 'center', label: t('pos.center') },
+                      { value: 'top',    label: t('pos.top')    },
+                    ]}
+                    onChange={(v) => setSubtitleStyle({ position: v })}
+                  />
+                </div>
+              )}
+            </>
           )}
         </div>
       ) : (

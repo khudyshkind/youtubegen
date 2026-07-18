@@ -54,6 +54,12 @@ interface StudioState {
   thumbnailTextMode: 'overlay' | 'ai' | 'none'
   setThumbnailTextMode: (mode: 'overlay' | 'ai' | 'none') => void
 
+  // True only when subtitles were generated or confirmed in the current wizard session.
+  // Loaded-from-DB blocks leave this false so Step 7 defaults to "no burn-in" until
+  // the user explicitly visits Step 5 or enables the toggle.
+  subtitlesConfirmedThisSession: boolean
+  setSubtitlesConfirmedThisSession: (v: boolean) => void
+
   // Status of the project as it was when loaded from DB (null = new project).
   // Used to detect a completed project being re-generated after opening for review.
   projectStatus: string | null
@@ -146,6 +152,7 @@ const initialState = {
   subtitleBlocks: [],
   subtitleStyle: defaultSubtitleStyle,
   subtitleAudioTs: null,
+  subtitlesConfirmedThisSession: false,
   sceneImages: [],
   imageInterval: 10,
   imageStyle: null,
@@ -182,6 +189,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   setAudioUrl: (url) => set({ audioUrl: url }),
   setSubtitleBlocks: (blocks) => set({ subtitleBlocks: blocks }),
   setSubtitleAudioTs: (ts) => set({ subtitleAudioTs: ts }),
+  setSubtitlesConfirmedThisSession: (v) => set({ subtitlesConfirmedThisSession: v }),
   setSubtitleStyle: (style) =>
     set((s) => ({ subtitleStyle: { ...s.subtitleStyle, ...style } })),
   setSceneImages: (images) => set({ sceneImages: images }),
