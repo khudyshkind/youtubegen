@@ -56,6 +56,19 @@
 - Обновить docs/MEMORY.md и docs/PROGRESS.md
 - Сделать коммит
 
+## Инфраструктура деплоя
+
+### Railway (video-server)
+- Сервис: `ytgen-video-server` (serviceId `75bf2476-6da9-48d2-a3f1-7f37313295a7`)
+- Watch Paths: `["video-server/**"]` — Railway деплоит только при изменениях в папке `video-server/`
+- Настроено через GraphQL: `serviceInstanceUpdate(watchPatterns: ["video-server/**"])`
+- Изменения в `src/`, `supabase/`, конфигах корня → Railway пропускает (статус `SKIPPED`)
+
+### Vercel (веб-часть)
+- Триггерится на любой push в `main`
+- Папка сборки: корень проекта (`src/`, `public/`, конфиги Next.js)
+- Vercel игнорирует `video-server/` автоматически (не входит в билд Next.js)
+
 ## О проекте
 Этот проект — YouTubeGen, SaaS для автоматизации YouTube-контента.
 Пайплайн: Сценарий (Claude API) → Озвучка (Eleven Labs) → Субтитры (Whisper) → Иллюстрации (Flux) → Видео (FFmpeg) + SEO (Claude API).
