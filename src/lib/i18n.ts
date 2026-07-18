@@ -1,3 +1,4 @@
+// i18n — web-only, не затрагивает video-server
 export type Lang = 'ru' | 'en'
 
 export const translations = {
