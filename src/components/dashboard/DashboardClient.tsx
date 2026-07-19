@@ -30,37 +30,57 @@ function formatDate(iso: string, lang: string) {
   })
 }
 
-function MediaBadge({ project, plan }: { project: Project; plan: string }) {
+// Media lifecycle badge — three states:
+//   1. media_purged_at set → "Медиа удалены {дата}" (grey)
+//   2. media_expires_at in past (DRY_RUN or cron not yet run) → "в ближайшую уборку" (red)
+//   3. media_expires_at in future → "хранятся 72ч — ~Nч осталось" (yellow/green by urgency)
+// Badge is always shown when project has live media; no visibility window.
+function MediaBadge({ project }: { project: Project }) {
+  // State 1: already purged
   if (project.media_purged_at) {
+    const purgedDate = new Date(project.media_purged_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
     return (
       <span
         className="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
         style={{ background: 'rgba(100,116,139,0.15)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.3)' }}
-        title={`Медиа удалены ${new Date(project.media_purged_at).toLocaleDateString('ru-RU')}`}
       >
-        Медиа удалены
+        Медиа удалены {purgedDate}
       </span>
     )
   }
-  // Only show countdown when project has any media worth warning about
+
   const hasMedia = !!(project.audio_url || project.video_url || (project.scene_images && project.scene_images.length > 0))
   if (!hasMedia) return null
-  // Skip projects currently generating — they're protected by the cron
   if (project.status.startsWith('generating_')) return null
+  if (!project.media_expires_at) return null  // cron hasn't run yet after migration
 
-  const thresholdHours = plan === 'free' ? 48 : 168
-  const expiresAt = new Date(project.updated_at).getTime() + thresholdHours * 3600 * 1000
-  const hoursLeft = (expiresAt - Date.now()) / 3600000
-  if (hoursLeft > 24 || hoursLeft <= 0) return null
+  const hoursLeft = (new Date(project.media_expires_at).getTime() - Date.now()) / 3_600_000
 
-  const h = Math.max(1, Math.ceil(hoursLeft))
+  // State 2: overdue — past expiry but not yet purged (DRY_RUN or cron hasn't run today)
+  if (hoursLeft <= 0) {
+    return (
+      <span
+        className="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
+        style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
+        title="Медиа будут удалены при следующем запуске уборки (04:00 UTC)"
+      >
+        Удаление при ближайшей уборке — скачайте
+      </span>
+    )
+  }
+
+  // State 3: countdown — always visible while media is alive
+  const h = Math.ceil(hoursLeft)
+  const urgency = h <= 24
+    ? { bg: 'rgba(239,68,68,0.12)',    color: '#f87171', border: 'rgba(239,68,68,0.3)'    }
+    : { bg: 'rgba(245,158,11,0.12)',   color: '#fbbf24', border: 'rgba(245,158,11,0.3)'   }
   return (
     <span
       className="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
-      style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.3)' }}
-      title="Скачайте MP4/ZIP пока медиа ещё доступны"
+      style={{ background: urgency.bg, color: urgency.color, border: `1px solid ${urgency.border}` }}
+      title="Скачайте MP4 или ZIP пока медиа ещё доступны"
     >
-      Медиа удалятся через {h}ч — скачайте
+      Медиа хранятся 72ч — скачайте видео · ~{h}ч
     </span>
   )
 }
@@ -265,7 +285,7 @@ export default function DashboardClient({ profile, projects }: Props) {
                   {statusLabel(project.status)}
                 </span>
 
-                <MediaBadge project={project} plan={profile?.plan ?? 'free'} />
+                <MediaBadge project={project} />
 
                 <Link
                   href={`/studio?project=${project.id}`}

@@ -90,13 +90,108 @@ const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   : 'https://ytgen-video-server-production.up.railway.app'
 
 // ── Media retention policy ────────────────────────────────────────────────────
-// Single rule: project.updated_at + threshold → purge media, keep projects row.
-// Env-overridable; anchor = updated_at (DB trigger refreshes on every project write).
-const RETENTION_MEDIA_HOURS = {
-  free: parseInt(process.env.RETENTION_MEDIA_FREE_HOURS  ?? '48'),
-  paid: parseInt(process.env.RETENTION_MEDIA_PAID_HOURS  ?? '168'),
+// Single unified threshold: all plans, all users — no plan-based distinctions.
+// Env: RETENTION_MEDIA_HOURS (default 72).
+// Legacy RETENTION_MEDIA_FREE_HOURS / RETENTION_MEDIA_PAID_HOURS are ignored;
+// set RETENTION_MEDIA_HOURS=72 in Railway Variables (remove the legacy pair).
+const RETENTION_MEDIA_HOURS = parseInt(process.env.RETENTION_MEDIA_HOURS ?? '72')
+
+// Compute when a project's media should expire (ISO string).
+// Source of truth used by cron (writes media_expires_at to DB) and UI (countdown badge).
+function computeMediaExpiry(updatedAt) {
+  return new Date(new Date(updatedAt).getTime() + RETENTION_MEDIA_HOURS * 3_600_000).toISOString()
 }
-function retentionTier(plan) { return plan === 'free' ? 'free' : 'paid' }
+
+// ── R2 S3-compatible helpers for retention cleanup ────────────────────────────
+// Mirrors the AWS4 signing used in uploadVideoToR2 but for ListObjectsV2 and
+// DeleteObjects.  Returns [] / noop when R2 is not configured so callers are safe.
+
+async function r2ListObjects(prefix) {
+  const accountId = (process.env.R2_ACCOUNT_ID        || '').trim()
+  const bucket    = (process.env.R2_BUCKET             || '').trim()
+  const accessKey = (process.env.R2_ACCESS_KEY_ID      || '').trim()
+  const secretKey = (process.env.R2_SECRET_ACCESS_KEY  || '').trim()
+  if (!accountId || !bucket || !accessKey || !secretKey) return []
+
+  const host     = `${accountId}.r2.cloudflarestorage.com`
+  const now      = new Date()
+  const amzDate  = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  const dateStr  = amzDate.slice(0, 8)
+  const scope    = `${dateStr}/auto/s3/aws4_request`
+  const qs       = `list-type=2&prefix=${encodeURIComponent(prefix)}`
+  const urlPath  = `/${bucket}`
+  const hash     = 'UNSIGNED-PAYLOAD'
+  const canonHdr = `host:${host}\nx-amz-content-sha256:${hash}\nx-amz-date:${amzDate}\n`
+  const signHdr  = 'host;x-amz-content-sha256;x-amz-date'
+  const canonReq = ['GET', urlPath, qs, canonHdr, signHdr, hash].join('\n')
+  const hmacFn   = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
+  const sigKey   = hmacFn(hmacFn(hmacFn(hmacFn(`AWS4${secretKey}`, dateStr), 'auto'), 's3'), 'aws4_request')
+  const sig      = crypto.createHmac('sha256', sigKey).update(
+    ['AWS4-HMAC-SHA256', amzDate, scope, crypto.createHash('sha256').update(canonReq).digest('hex')].join('\n')
+  ).digest('hex')
+  const auth = `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${signHdr}, Signature=${sig}`
+
+  const res = await fetch(`https://${host}${urlPath}?${qs}`, {
+    headers: { 'x-amz-date': amzDate, 'x-amz-content-sha256': hash, Authorization: auth },
+    signal: AbortSignal.timeout(20_000),
+  })
+  if (!res.ok) throw new Error(`r2List: HTTP ${res.status} ${await res.text().catch(() => '')}`)
+  const xml = await res.text()
+  // Parse <Contents> blocks — Key always precedes Size in ListObjectsV2 response
+  const objects = []
+  const rx = /<Contents>([\s\S]*?)<\/Contents>/g
+  let cm
+  while ((cm = rx.exec(xml)) !== null) {
+    const block = cm[1]
+    const key   = (/<Key>([^<]+)<\/Key>/.exec(block)  ?? [])[1]
+    const size  = (/<Size>(\d+)<\/Size>/.exec(block)  ?? [])[1]
+    if (key && size !== undefined) objects.push({ key, size: parseInt(size, 10) })
+  }
+  return objects
+}
+
+async function r2DeleteObjects(keys) {
+  if (!keys.length) return
+  const accountId = (process.env.R2_ACCOUNT_ID        || '').trim()
+  const bucket    = (process.env.R2_BUCKET             || '').trim()
+  const accessKey = (process.env.R2_ACCESS_KEY_ID      || '').trim()
+  const secretKey = (process.env.R2_SECRET_ACCESS_KEY  || '').trim()
+  if (!accountId || !bucket || !accessKey || !secretKey) throw new Error('R2 env vars not set')
+
+  const host     = `${accountId}.r2.cloudflarestorage.com`
+  const xmlBody  = `<?xml version="1.0" encoding="UTF-8"?><Delete><Quiet>true</Quiet>${
+    keys.map(k => `<Object><Key>${k}</Key></Object>`).join('')
+  }</Delete>`
+  const bodyHash = crypto.createHash('sha256').update(xmlBody).digest('hex')
+  const now      = new Date()
+  const amzDate  = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  const dateStr  = amzDate.slice(0, 8)
+  const scope    = `${dateStr}/auto/s3/aws4_request`
+  const qs       = 'delete='
+  const urlPath  = `/${bucket}`
+  const canonHdr = `content-type:application/xml\nhost:${host}\nx-amz-content-sha256:${bodyHash}\nx-amz-date:${amzDate}\n`
+  const signHdr  = 'content-type;host;x-amz-content-sha256;x-amz-date'
+  const canonReq = ['POST', urlPath, qs, canonHdr, signHdr, bodyHash].join('\n')
+  const hmacFn   = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
+  const sigKey   = hmacFn(hmacFn(hmacFn(hmacFn(`AWS4${secretKey}`, dateStr), 'auto'), 's3'), 'aws4_request')
+  const sig      = crypto.createHmac('sha256', sigKey).update(
+    ['AWS4-HMAC-SHA256', amzDate, scope, crypto.createHash('sha256').update(canonReq).digest('hex')].join('\n')
+  ).digest('hex')
+  const auth = `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${signHdr}, Signature=${sig}`
+
+  const res = await fetch(`https://${host}${urlPath}?delete=`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/xml',
+      'x-amz-date': amzDate,
+      'x-amz-content-sha256': bodyHash,
+      Authorization: auth,
+    },
+    body: xmlBody,
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (!res.ok) throw new Error(`r2Delete: HTTP ${res.status} ${await res.text().catch(() => '')}`)
+}
 
 // ── Monitor config ────────────────────────────────────────────────────────────
 const RSS_SOURCES = [
@@ -2295,43 +2390,66 @@ async function cleanupExpiredMedia() {
   }
 
   const now = Date.now()
-  // Use narrowest threshold for initial DB query; per-plan filter applied in step 3.
-  const isoFreeThreshold = new Date(now - RETENTION_MEDIA_HOURS.free * 3600_000).toISOString()
 
-  // 2. Candidates: projects with media, not yet purged, not generating, updated_at older than free threshold.
+  // 2B. Plan media_expires_at for all live projects with media (runs in DRY_RUN too — safe, writes only dates).
+  // Single threshold for all plans — no profiles join needed.
+  let plannedCount = 0
+  try {
+    const liveRows = await sbGet('projects',
+      `select=id,updated_at,media_expires_at` +
+      `&media_purged_at=is.null` +
+      `&status=not.like.generating_*` +
+      `&or=(audio_url.not.is.null,video_url.not.is.null,scene_images.not.is.null)` +
+      `&limit=2000`
+    )
+    for (const p of liveRows) {
+      const expectedIso = computeMediaExpiry(p.updated_at)
+      const currentMs   = p.media_expires_at ? new Date(p.media_expires_at).getTime() : 0
+      const expectedMs  = new Date(expectedIso).getTime()
+      // Update if missing or drift >1 h (updated_at changed or threshold env changed)
+      if (Math.abs(currentMs - expectedMs) > 3_600_000) {
+        await sbPatch('projects', `id=eq.${p.id}`, { media_expires_at: expectedIso })
+        plannedCount++
+      }
+    }
+    console.log(`${tag} planned media_expires_at: updated ${plannedCount}/${liveRows.length} projects`)
+  } catch (e) {
+    console.error(`${tag} planning step error (non-fatal):`, e.message)
+    // Non-fatal: continue to deletion step
+  }
+
+  // 2. Candidates: projects with media, not yet purged, not generating, updated_at older than unified threshold.
+  const isoThreshold = new Date(now - RETENTION_MEDIA_HOURS * 3600_000).toISOString()
   let rawCandidates = []
   try {
     rawCandidates = await sbGet('projects',
-      `select=id,user_id,updated_at,status,audio_url,video_url,scene_images,profiles!inner(plan)` +
+      `select=id,user_id,updated_at,status,audio_url,video_url,scene_images` +
       `&media_purged_at=is.null` +
       `&status=not.like.generating_*` +
-      `&updated_at=lt.${isoFreeThreshold}` +
+      `&updated_at=lt.${isoThreshold}` +
       `&or=(audio_url.not.is.null,video_url.not.is.null,scene_images.not.is.null)` +
       `&limit=500`
     )
   } catch (e) { console.error(`${tag} candidates query:`, e.message) }
 
-  // 3. Apply per-plan threshold and exclude active-job projects
+  // 3. Exclude projects with active jobs (safety: never touch generating projects)
   const candidates = []
   for (const p of rawCandidates) {
     if (activeProjectIds.has(p.id)) continue
-    const plan = p.profiles?.plan ?? 'free'
-    const tier = retentionTier(plan)
     const ageHours = (now - new Date(p.updated_at).getTime()) / 3600_000
-    if (ageHours >= RETENTION_MEDIA_HOURS[tier]) {
-      candidates.push({ ...p, _ageHours: ageHours.toFixed(1), _tier: tier })
-    }
+    candidates.push({ ...p, _ageHours: ageHours.toFixed(1) })
   }
-  console.log(`${tag} ${rawCandidates.length} raw, ${candidates.length} after per-plan filter`)
+  console.log(`${tag} ${rawCandidates.length} raw, ${candidates.length} after active-job filter`)
 
   // 4. Process each candidate — purge media, mark project with media_purged_at
   let totalBytes = 0
-  const counts = { free: 0, paid: 0 }
+  let purgedCount = 0
 
   for (const project of candidates) {
-    const { id: pid, user_id: uid, _ageHours: age, _tier: tier } = project
-    console.log(`${tag} project=${pid} tier=${tier} age=${age}h`)
+    const { id: pid, user_id: uid, _ageHours: age } = project
+    console.log(`${tag} project=${pid} age=${age}h`)
     let projectBytes = 0
+    let purgeErrors  = 0  // media_purged_at only written when ALL steps succeeded
 
     // 4A. Supabase audio bucket
     try {
@@ -2346,7 +2464,7 @@ async function cleanupExpiredMedia() {
           console.log(`${tag} removed audio: ${paths.length} file(s)`)
         }
       }
-    } catch (e) { console.error(`${tag} audio error ${pid}:`, e.message) }
+    } catch (e) { console.error(`${tag} audio error ${pid}:`, e.message); purgeErrors++ }
 
     // 4B. Supabase images bucket
     try {
@@ -2361,7 +2479,7 @@ async function cleanupExpiredMedia() {
           console.log(`${tag} removed images: ${paths.length} file(s)`)
         }
       }
-    } catch (e) { console.error(`${tag} images error ${pid}:`, e.message) }
+    } catch (e) { console.error(`${tag} images error ${pid}:`, e.message); purgeErrors++ }
 
     // 4C. B2 video bucket (users/<uid>/<pid>/ — rendered .mp4)
     try {
@@ -2377,7 +2495,7 @@ async function cleanupExpiredMedia() {
           console.log(`${tag} deleted B2 video: ${b2Objects.length} object(s)`)
         }
       }
-    } catch (e) { console.error(`${tag} B2 video error ${pid}:`, e.message) }
+    } catch (e) { console.error(`${tag} B2 video error ${pid}:`, e.message); purgeErrors++ }
 
     // 4D. B2 audio bucket (audio/<uid>/<pid>/ — migrated from Supabase 2025-07-16)
     try {
@@ -2393,20 +2511,42 @@ async function cleanupExpiredMedia() {
           console.log(`${tag} deleted B2 audio: ${b2AudioObjects.length} object(s)`)
         }
       }
-    } catch (e) { console.error(`${tag} B2 audio error ${pid}:`, e.message) }
+    } catch (e) { console.error(`${tag} B2 audio error ${pid}:`, e.message); purgeErrors++ }
 
-    // 4E. Mark project: set media_purged_at (keeps projects row intact)
+    // 4F. R2 video bucket (users/<uid>/<pid>/ — Cloudflare R2, S3-compatible)
+    // Skipped silently when R2 env vars are absent; r2ListObjects returns [] in that case.
+    try {
+      const r2Objects = await r2ListObjects(`users/${uid}/${pid}/`)
+      if (r2Objects.length) {
+        const r2Bytes = r2Objects.reduce((s, o) => s + o.size, 0)
+        projectBytes += r2Bytes
+        if (DRY_RUN) {
+          console.log(`${tag} would delete R2: ${r2Objects.length} object(s), ${(r2Bytes / 1024 / 1024).toFixed(2)} MB`)
+        } else {
+          const keys = r2Objects.map(o => o.key)
+          for (let i = 0; i < keys.length; i += 1000) { await r2DeleteObjects(keys.slice(i, i + 1000)) }
+          console.log(`${tag} deleted R2: ${r2Objects.length} object(s)`)
+        }
+      }
+    } catch (e) { console.error(`${tag} R2 error ${pid}:`, e.message); purgeErrors++ }
+
+    // 4E. Mark project: set media_purged_at ONLY after all steps succeeded.
+    // Partial failure (purgeErrors > 0) leaves the row unmarked so the next cron retries.
     if (!DRY_RUN) {
-      try {
-        await sbPatch('projects', `id=eq.${pid}`, { media_purged_at: new Date(now).toISOString() })
-        console.log(`${tag} marked media_purged_at for ${pid}`)
-      } catch (e) { console.error(`${tag} mark media_purged_at error ${pid}:`, e.message) }
+      if (purgeErrors === 0) {
+        try {
+          await sbPatch('projects', `id=eq.${pid}`, { media_purged_at: new Date(now).toISOString() })
+          console.log(`${tag} marked media_purged_at for ${pid}`)
+        } catch (e) { console.error(`${tag} mark media_purged_at error ${pid}:`, e.message) }
+      } else {
+        console.warn(`${tag} skipping media_purged_at for ${pid}: ${purgeErrors} step(s) failed — will retry next run`)
+      }
     } else {
       console.log(`${tag} would set media_purged_at for ${pid}`)
     }
 
     totalBytes += projectBytes
-    counts[tier === 'free' ? 'free' : 'paid']++
+    purgedCount++
   }
 
   // 5. B2 temp/ orphan cleanup — age-based (no project_id in path)
@@ -2436,10 +2576,10 @@ async function cleanupExpiredMedia() {
   const actionPrefix = DRY_RUN ? 'DRY RUN: БЫЛО БЫ очищено медиа' : 'Медиа очищены'
   const summary =
     `${actionPrefix}:\n` +
-    `free: ${counts.free} проектов\n` +
-    `paid: ${counts.paid} проектов\n` +
-    `temp/ сирот: ${tempOrphanCount} файл(ов), ~${tmpMbStr} МБ\n` +
-    `Итого: ${candidates.length} проектов, ~${mbStr} МБ`
+    `порог: ${RETENTION_MEDIA_HOURS}ч (единый)\n` +
+    `expires обновлено: ${plannedCount} проектов\n` +
+    `к удалению: ${candidates.length} (очищено: ${purgedCount}), ~${mbStr} МБ\n` +
+    `temp/ сирот: ${tempOrphanCount} файл(ов), ~${tmpMbStr} МБ`
 
   console.log(`${tag}`, summary.trim())
 
