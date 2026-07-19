@@ -51,7 +51,10 @@ grant select on public.plan_events to authenticated;
 
 -- 3. extend_plan RPC: add N days to plan_expires_at, log in plan_events
 --    Returns: { ok, new_expires_at, days_added } or { ok: false, error }
---    Guards: user must exist and have a non-free plan.
+--    Guards:
+--      - user_not_found  : id does not exist
+--      - plan_is_free    : plan = 'free' (nothing to extend)
+--      - no_expiry_set   : plan_expires_at IS NULL (manually-activated plan, outside subscription model)
 create or replace function public.extend_plan(
   p_user_id     uuid,
   p_days        integer,
@@ -82,9 +85,14 @@ begin
     return jsonb_build_object('ok', false, 'error', 'plan_is_free');
   end if;
 
-  -- Extend from now if already expired; otherwise from the current expiry date
-  v_new_expires := greatest(coalesce(v_expires_at, now()), now())
-                   + (p_days || ' days')::interval;
+  -- NULL plan_expires_at = manually-activated plan without subscription expiry.
+  -- Extending it is outside the model: admin should set plan_expires_at explicitly first.
+  if v_expires_at is null then
+    return jsonb_build_object('ok', false, 'error', 'no_expiry_set');
+  end if;
+
+  -- Extend from now if already expired (cron missed), otherwise from current expiry
+  v_new_expires := greatest(v_expires_at, now()) + (p_days || ' days')::interval;
 
   update public.profiles
   set    plan_expires_at = v_new_expires

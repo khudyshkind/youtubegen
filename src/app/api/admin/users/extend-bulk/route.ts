@@ -5,8 +5,16 @@ import { createServerSupabase, createServiceClient } from '@/lib/supabase-server
 
 const ADMIN_EMAILS = ['khudyshkin.d@gmail.com', 'denis-region@mail.ru']
 
-// GET ?dryrun=true  → { ok, count }  (how many active paid users would be affected)
-export async function GET(request: NextRequest) {
+// Canonical WHERE for bulk extend:
+//   plan != 'free'           — paid user
+//   plan_expires_at IS NOT NULL — has a subscription expiry (excludes manually-activated plans)
+// Note: plan_expires_at < now() is intentionally NOT excluded — if the cron hasn't run yet
+//       the admin can still give compensation to users whose plans just expired.
+// Both GET (count) and POST (execute) use the exact same filter so the confirm number
+// matches what is actually processed.
+
+// GET → { ok, count }  (dry-run: how many users would be extended)
+export async function GET(_request: NextRequest) {
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -19,6 +27,7 @@ export async function GET(request: NextRequest) {
       .from('profiles')
       .select('id', { count: 'exact', head: true })
       .neq('plan', 'free')
+      .not('plan_expires_at', 'is', null)
 
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
     return NextResponse.json({ ok: true, count: count ?? 0 })
@@ -28,7 +37,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST { days, reason } → bulk extend all active paid users
+// POST { days, reason } → bulk extend, same WHERE as GET
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabase()
@@ -49,55 +58,46 @@ export async function POST(request: NextRequest) {
 
     const svc = createServiceClient()
 
-    // Extend all active paid users in one UPDATE
-    const { error: updateError } = await svc.rpc('extend_plans_bulk', {
-      p_days:        days,
-      p_reason:      reason.trim(),
-      p_actor_email: user.email,
-    })
+    // Fetch using the SAME WHERE as GET so confirm-count == actually-extended
+    const { data: paidUsers, error: fetchError } = await svc
+      .from('profiles')
+      .select('id, plan_expires_at')
+      .neq('plan', 'free')
+      .not('plan_expires_at', 'is', null)
 
-    if (updateError) {
-      // Fallback: direct SQL via RPC not available, use direct update
-      // extend_plans_bulk may not exist — do it manually
-      const { data: paidUsers, error: fetchError } = await svc
+    if (fetchError) return NextResponse.json({ ok: false, error: fetchError.message }, { status: 500 })
+
+    const users = paidUsers ?? []
+    let extended = 0
+    const errors: string[] = []
+
+    for (const u of users) {
+      // plan_expires_at is guaranteed non-null by the WHERE clause above
+      const currentExpiry = new Date(u.plan_expires_at as string)
+      // Extend from now if already expired (cron missed), otherwise from current expiry
+      const base = currentExpiry > new Date() ? currentExpiry : new Date()
+      const newExpiry = new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
+
+      const { error: upErr } = await svc
         .from('profiles')
-        .select('id, plan, plan_expires_at')
-        .neq('plan', 'free')
+        .update({ plan_expires_at: newExpiry.toISOString() })
+        .eq('id', u.id)
 
-      if (fetchError) return NextResponse.json({ ok: false, error: fetchError.message }, { status: 500 })
-
-      const users = paidUsers ?? []
-      let extended = 0
-      const errors: string[] = []
-
-      for (const u of users) {
-        const currentExpiry = u.plan_expires_at ? new Date(u.plan_expires_at) : new Date()
-        const base = currentExpiry > new Date() ? currentExpiry : new Date()
-        const newExpiry = new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
-
-        const { error: upErr } = await svc
-          .from('profiles')
-          .update({ plan_expires_at: newExpiry.toISOString() })
-          .eq('id', u.id)
-
-        if (upErr) { errors.push(u.id); continue }
-        extended++
-      }
-
-      // Log bulk event
-      await svc.from('plan_events').insert({
-        user_id: null,
-        operation: 'plan_extended_bulk',
-        days_added: days,
-        reason: reason.trim(),
-        actor_email: user.email,
-        metadata: { affected: extended, total: users.length, errors: errors.length },
-      })
-
-      return NextResponse.json({ ok: true, extended, errors: errors.length })
+      if (upErr) { errors.push(u.id); continue }
+      extended++
     }
 
-    return NextResponse.json({ ok: true })
+    // Log single bulk event in plan_events (user_id=null for bulk)
+    await svc.from('plan_events').insert({
+      user_id: null,
+      operation: 'plan_extended_bulk',
+      days_added: days,
+      reason: (reason as string).trim(),
+      actor_email: user.email,
+      metadata: { affected: extended, total: users.length, errors: errors.length },
+    })
+
+    return NextResponse.json({ ok: true, extended, errors: errors.length })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[admin/extend-bulk] error:', msg)

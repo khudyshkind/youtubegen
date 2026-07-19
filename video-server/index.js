@@ -672,7 +672,10 @@ const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Lefiro <noreply@lefi
 const APP_URL           = process.env.NEXT_PUBLIC_APP_URL || 'https://lefiro.co'
 
 async function sendRawEmail(to, subject, html) {
-  if (!RESEND_API_KEY) return
+  if (!RESEND_API_KEY) {
+    console.log('[email] skipped: no RESEND_API_KEY')
+    return
+  }
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
