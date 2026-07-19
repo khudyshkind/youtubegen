@@ -368,14 +368,44 @@ async function createSupportTicket(userTelegramId, username, category, descripti
   }
 }
 
-const PAY_PLANS = {
-  basic:        { name: 'Basic',       price: '$9',  usd: 9,   credits: 800  },
-  starter:      { name: 'Starter',     price: '$19', usd: 19,  credits: 2000 },
-  pro:          { name: 'Pro',         price: '$39', usd: 39,  credits: 5000 },
-  agency:       { name: 'Agency',      price: '$99', usd: 99,  credits: 15000 },
-  topup_500:    { name: '500 кредитов',  price: '$7',  usd: 7,   credits: 500  },
-  topup_2000:   { name: '2000 кредитов', price: '$26', usd: 26,  credits: 2000 },
-  topup_5000:   { name: '5000 кредитов', price: '$60', usd: 60,  credits: 5000 },
+// Fallback values mirror src/lib/types.ts (PLAN_CREDITS + TOPUP_PACKAGES).
+// DO NOT edit credits here — edit src/lib/types.ts instead.
+// refreshPlansFromVercel() overwrites .credits and .name at startup and every hour.
+let PAY_PLANS = {
+  basic:      { name: 'Basic',            price: '$9',  usd: 9,  credits: 80000  },
+  starter:    { name: 'Starter',          price: '$19', usd: 19, credits: 200000 },
+  pro:        { name: 'Pro',              price: '$39', usd: 39, credits: 500000 },
+  agency:     { name: 'Agency',           price: '$99', usd: 99, credits: 1500000 },
+  topup_500:  { name: '50 000 кредитов',  price: '$7',  usd: 7,  credits: 50000  },
+  topup_2000: { name: '200 000 кредитов', price: '$26', usd: 26, credits: 200000 },
+  topup_5000: { name: '500 000 кредитов', price: '$60', usd: 60, credits: 500000 },
+}
+
+function fmtCr(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+}
+
+async function refreshPlansFromVercel() {
+  try {
+    const res = await fetch(`${APP_URL}/api/plans`, { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const { plan_credits, topup_packages } = await res.json()
+    for (const key of ['basic', 'starter', 'pro', 'agency']) {
+      if (plan_credits[key] != null) PAY_PLANS[key].credits = plan_credits[key]
+    }
+    for (const pkg of (topup_packages ?? [])) {
+      if (PAY_PLANS[pkg.tg_key]) {
+        PAY_PLANS[pkg.tg_key].credits = pkg.credits
+        PAY_PLANS[pkg.tg_key].name    = pkg.label
+      }
+    }
+    console.log('[plans] refreshed from Vercel:', Object.fromEntries(
+      Object.entries(PAY_PLANS).map(([k, v]) => [k, v.credits])
+    ))
+  } catch (e) {
+    console.warn('[plans] refresh failed — using fallback values:', e.message)
+    if (typeof Sentry !== 'undefined') Sentry.captureMessage(`plans refresh failed: ${e.message}`, { level: 'warning' })
+  }
 }
 
 // ── USD → RUB rate (cached 1 hour in bot_settings) ───────────────────────────
@@ -523,17 +553,17 @@ function payPlanInline() {
   return {
     inline_keyboard: [
       [
-        { text: 'Basic $9',    callback_data: 'pay_plan_basic' },
-        { text: 'Starter $19', callback_data: 'pay_plan_starter' },
+        { text: `Basic — ${fmtCr(PAY_PLANS.basic.credits)} кр — $9`,    callback_data: 'pay_plan_basic' },
+        { text: `Starter — ${fmtCr(PAY_PLANS.starter.credits)} кр — $19`, callback_data: 'pay_plan_starter' },
       ],
       [
-        { text: 'Pro $39',     callback_data: 'pay_plan_pro' },
-        { text: 'Agency $99',  callback_data: 'pay_plan_agency' },
+        { text: `Pro — ${fmtCr(PAY_PLANS.pro.credits)} кр — $39`,      callback_data: 'pay_plan_pro' },
+        { text: `Agency — ${fmtCr(PAY_PLANS.agency.credits)} кр — $99`, callback_data: 'pay_plan_agency' },
       ],
       [
-        { text: 'Топап 500 кр $7',   callback_data: 'pay_plan_topup_500' },
-        { text: 'Топап 2000 кр $26', callback_data: 'pay_plan_topup_2000' },
-        { text: 'Топап 5000 кр $60', callback_data: 'pay_plan_topup_5000' },
+        { text: `Топап — ${fmtCr(PAY_PLANS.topup_500.credits)} кр — $7`,   callback_data: 'pay_plan_topup_500' },
+        { text: `Топап — ${fmtCr(PAY_PLANS.topup_2000.credits)} кр — $26`, callback_data: 'pay_plan_topup_2000' },
+        { text: `Топап — ${fmtCr(PAY_PLANS.topup_5000.credits)} кр — $60`, callback_data: 'pay_plan_topup_5000' },
       ],
     ],
   }
@@ -683,6 +713,8 @@ async function forwardProofToOwner(userChatId, message, pst) {
   const planInfo    = PAY_PLANS[pst.plan] || { name: pst.plan, price: '' }
   const userDisplay = pst.username ? `@${pst.username}` : (pst.firstName || String(userChatId))
   const methodLabel = pst.method === 'card' ? 'Карта МИР 💳' : 'Криптовалюта USDT ₿'
+  // claimId = unique per proof submission; used by activate/route to prevent double-credit.
+  const claimId     = `${userChatId}-${Date.now()}`
 
   if (OWNER_ID) {
     await tgApi('forwardMessage', { chat_id: OWNER_ID, from_chat_id: userChatId, message_id: message.message_id })
@@ -696,7 +728,7 @@ async function forwardProofToOwner(userChatId, message, pst) {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [[
-          { text: '✅ Активировать тариф', callback_data: `activate_${pst.plan}_${userChatId}` },
+          { text: '✅ Активировать тариф', callback_data: `activate::${pst.plan}::${userChatId}::${claimId}` },
         ]],
       },
     })
@@ -704,11 +736,11 @@ async function forwardProofToOwner(userChatId, message, pst) {
   await tgApi('sendMessage', { chat_id: userChatId, text: '✅ Получено! Мы активируем тариф в течение 1 часа.' })
 }
 
-async function activateUserPlan(email, plan) {
+async function activateUserPlan(email, plan, claimId = null) {
   const res = await fetch(`${APP_URL}/api/admin/users/activate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-secret': process.env.RAILWAY_API_SECRET || '' },
-    body: JSON.stringify({ email: email.trim().toLowerCase(), plan }),
+    body: JSON.stringify({ email: email.trim().toLowerCase(), plan, claim_id: claimId }),
   })
   const json = await res.json()
   if (!json.ok) throw new Error(json.error || 'Ошибка активации')
@@ -1450,13 +1482,24 @@ async function handleCallback(cq) {
     await clearButtons()
     await sendTo(chatId, '❌ Тема из плана отклонена')
 
-  } else if (data.startsWith('activate_')) {
-    const parts      = data.split('_')
-    const plan       = parts[1]
-    const userChatId = parts[2]
-    const planInfo   = PAY_PLANS[plan]
+  } else if (data.startsWith('activate::') || data.startsWith('activate_')) {
+    let plan, userChatId, claimId
+    if (data.startsWith('activate::')) {
+      // New format: activate::topup_500::12345678::claimId
+      const parts = data.split('::')
+      plan        = parts[1]
+      userChatId  = parts[2]
+      claimId     = parts[3] ?? null
+    } else {
+      // Legacy format (pre-topup fix, no claimId): activate_starter_12345678
+      const idx   = data.indexOf('_', 'activate_'.length)
+      plan        = data.slice('activate_'.length, idx === -1 ? undefined : idx)
+      userChatId  = idx === -1 ? '' : data.slice(idx + 1)
+      claimId     = null
+    }
+    const planInfo = PAY_PLANS[plan]
     if (!planInfo) return
-    awaitingActivate = { userChatId, plan, planInfo }
+    awaitingActivate = { userChatId, plan, planInfo, claimId }
     await clearButtons()
     await sendTo(chatId,
       `✅ *Активация тарифа ${planInfo.name}*\n\n` +
@@ -1596,7 +1639,7 @@ app.post('/telegram/webhook', async (req, res) => {
             chat_id: chatId,
             text:
               `💳 *Оплата тарифа ${planInfo.name}*\n\n` +
-              `📦 Тариф: *${planInfo.name}* — ${planInfo.credits} кредитов\n` +
+              `📦 Тариф: *${planInfo.name}* — ${fmtCr(planInfo.credits)} кредитов\n` +
               `💰 Стоимость: *${planInfo.price}*${rubNote}\n\n` +
               `Выбери способ оплаты:`,
             parse_mode: 'Markdown',
@@ -1641,21 +1684,40 @@ app.post('/telegram/webhook', async (req, res) => {
 
   // Owner: awaiting email for Russia payment activation
   if (awaitingActivate && text && !text.startsWith('/')) {
-    const { userChatId, plan, planInfo } = awaitingActivate
+    const { userChatId, plan, planInfo, claimId } = awaitingActivate
     awaitingActivate = null
     const email = text.trim()
-    await sendTo(chatId, `⏳ Активирую тариф *${planInfo.name}* для \`${email}\`...`)
+    await sendTo(chatId, `⏳ Активирую *${planInfo.name}* для \`${email}\`...`)
     try {
-      await activateUserPlan(email, plan)
-      await sendTo(chatId, `✅ Тариф *${planInfo.name}* активирован для *${email}*`)
-      await tgApi('sendMessage', {
-        chat_id: userChatId,
-        text:
-          `🎉 *Тариф активирован!*\n\n` +
-          `Тариф *${planInfo.name}* успешно активирован на вашем аккаунте.\n\n` +
-          `Войдите в Lefiro: ${APP_URL}`,
-        parse_mode: 'Markdown',
-      })
+      const result = await activateUserPlan(email, plan, claimId)
+      if (result.already_activated) {
+        await sendTo(chatId, `⚠️ Заявка уже была активирована ранее для *${email}* — повторное начисление пропущено.`)
+        return
+      }
+      if (result.data?.topup) {
+        // Topup: only credits added, plan unchanged
+        const creditsAdded = result.data.credits
+        await sendTo(chatId, `✅ Топап *${fmtCr(creditsAdded)} кредитов* начислен для *${email}*`)
+        await tgApi('sendMessage', {
+          chat_id: userChatId,
+          text:
+            `🎉 *Пополнение баланса!*\n\n` +
+            `*${fmtCr(creditsAdded)} кредитов* успешно добавлены на ваш аккаунт.\n\n` +
+            `Войдите в Lefiro: ${APP_URL}`,
+          parse_mode: 'Markdown',
+        })
+      } else {
+        // Subscription plan
+        await sendTo(chatId, `✅ Тариф *${planInfo.name}* активирован для *${email}*`)
+        await tgApi('sendMessage', {
+          chat_id: userChatId,
+          text:
+            `🎉 *Тариф активирован!*\n\n` +
+            `Тариф *${planInfo.name}* успешно активирован на вашем аккаунте.\n\n` +
+            `Войдите в Lefiro: ${APP_URL}`,
+          parse_mode: 'Markdown',
+        })
+      }
     } catch (err) {
       await sendTo(chatId, `❌ Ошибка активации: ${err.message}`)
     }
@@ -4894,6 +4956,10 @@ const PORT = parseInt(process.env.PORT || '3001', 10)
 app.listen(PORT, async () => {
   console.log(`ytgen-video-server on :${PORT}`)
   await loadSettingsFromDB().catch(err => console.warn('[bot] settings load failed:', err.message))
+  // Sync plan credit counts from Vercel /api/plans (single source of truth = src/lib/types.ts).
+  // Fallback values in PAY_PLANS above are used if Vercel is unreachable.
+  await refreshPlansFromVercel().catch(err => console.warn('[plans] startup refresh failed:', err.message))
+  setInterval(() => refreshPlansFromVercel().catch(console.warn), 60 * 60 * 1000)
   await recoverOrphanedJobs()
   // Write thresholds to bot_settings so the Vercel admin panel can read them
   await Promise.all([
