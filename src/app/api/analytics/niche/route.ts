@@ -6,6 +6,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 import { isBillingError, notifyBillingError } from '@/lib/telegram'
+import { planRequiredResponse } from '@/lib/analytics-gate'
 
 export const maxDuration = 120
 
@@ -147,6 +148,13 @@ export async function POST(req: NextRequest) {
     if (!topic) return NextResponse.json({ ok: false, error: 'Введите тему' }, { status: 400 })
 
     const svc = createServiceClient()
+
+    // Plan gate — check BEFORE cache (free users blocked from cached and live responses)
+    const { data: gateProfile } = await svc.from('profiles').select('plan').eq('id', user.id).single()
+    if ((gateProfile as { plan: string } | null)?.plan === 'free') {
+      return planRequiredResponse(uiLang)
+    }
+
     const key = cacheKey(topic, country, contentLang)
     console.log(`[niche] cache_key: "${key}" | topic="${topic}" country=${country} contentLang=${contentLang} uiLang=${uiLang}`)
 

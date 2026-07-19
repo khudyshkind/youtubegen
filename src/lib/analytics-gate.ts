@@ -80,12 +80,17 @@ export async function resolveAnalyticsContext(
   if (error || !data) return failOpen
 
   const plan: string = (data as { plan: string }).plan
+
+  // Gate: free plan is blocked from analytics regardless of BYOK key status
+  if (plan === 'free') {
+    return { ...failOpen, plan, gateRes: planRequiredResponse(lang) }
+  }
+
   const encryptedKey: string | null =
     (data as { encrypted_yt_key?: string | null }).encrypted_yt_key ?? null
   const hasEncryptedKey = !!encryptedKey
 
-  // Decrypt BEFORE gate decision so the gate knows the real key status,
-  // not just whether the field is non-null.
+  // Key resolution for paid users only
   let apiKey = sharedKey
   let fallbackKey: string | null = null
   let userHasKey = false
@@ -95,21 +100,10 @@ export async function resolveAnalyticsContext(
       const decrypted = decryptKey(encryptedKey)
       apiKey = decrypted
       userHasKey = true
-      // Paid users can fall back to shared key when their quota runs out
-      if (plan !== 'free') fallbackKey = sharedKey
+      fallbackKey = sharedKey // paid users can fall back when their quota runs out
     } catch {
-      if (plan === 'free') {
-        // Corrupted key = no working key for free plan → gate fires.
-        // Never fall back to shared quota for free users.
-        return { ...failOpen, plan, gateRes: byokRequiredResponse(lang) }
-      }
-      // Paid plan: decryption failed → shared key fallback, no discount
+      // Decryption failed for paid user → shared key fallback, no discount
     }
-  }
-
-  // Gate: analytics require a paid plan — free users are blocked regardless of BYOK
-  if (plan === 'free') {
-    return { ...failOpen, plan, gateRes: planRequiredResponse(lang) }
   }
 
   const cost = userHasKey
