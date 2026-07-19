@@ -27,7 +27,7 @@ export default function BillingPage() {
       price: '$0',
       period: '',
       highlight: false,
-      features: [t('billing.f_credits_once'), t('billing.f_all_tools')],
+      features: [t('billing.f_credits_once'), t('billing.f_all_tools'), t('billing.f_no_analytics')],
     },
     {
       id: 'basic' as Plan,
@@ -118,15 +118,19 @@ export default function BillingPage() {
             </p>
             {/* Wallet breakdown (paid plans) */}
             {profile && currentPlan !== 'free' && (
-              <p className="text-xs text-slate-500 mt-2">
-                {t('billing.wallet_plan')}: <span className="text-slate-300 font-medium">{(profile.plan_credits ?? 0).toLocaleString()}</span>
-                {profile.plan_expires_at && (
-                  <span className="text-slate-600">
-                    {' '}({t('billing.expires_on')} {new Date(profile.plan_expires_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })})
-                  </span>
-                )}
-                {' · '}
-                {t('billing.wallet_purchased')}: <span className="text-slate-300 font-medium">{(profile.purchased_credits ?? 0).toLocaleString()}</span>
+              <p className="text-xs text-slate-300 mt-2 flex flex-wrap gap-x-2">
+                <span>
+                  {t('billing.wallet_plan')}: <span className="text-violet-300 font-semibold">{(profile.plan_credits ?? 0).toLocaleString()}</span>
+                  {profile.plan_expires_at && (
+                    <span className="text-slate-400 ml-1">
+                      ({t('billing.expires_on')} {new Date(profile.plan_expires_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })})
+                    </span>
+                  )}
+                </span>
+                <span className="text-slate-500">·</span>
+                <span>
+                  {t('billing.wallet_purchased')}: <span className="text-green-400 font-semibold">{(profile.purchased_credits ?? 0).toLocaleString()}</span>
+                </span>
               </p>
             )}
           </div>
@@ -148,7 +152,8 @@ export default function BillingPage() {
       )}
 
       {/* Plans grid */}
-      <h2 className="text-lg font-semibold text-slate-200 mb-4">{t('billing.choose_plan')}</h2>
+      <h2 className="text-lg font-semibold text-slate-200 mb-1">{t('billing.choose_plan')}</h2>
+      <p className="text-xs text-slate-400 mb-4">{t('billing.subscription_note')}</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
         {PLANS.map((plan) => {
           const isCurrent = plan.id === currentPlan
@@ -231,7 +236,6 @@ export default function BillingPage() {
                   >
                     💬 {t('billing.tg_pay_btn')}
                   </a>
-                  <p className="text-xs text-slate-600 text-center mt-1">{t('billing.subscription_note')}</p>
                 </>
               )}
               </div>
@@ -245,7 +249,8 @@ export default function BillingPage() {
       {/* Topup section */}
       <div className="mt-10">
         <h2 className="text-lg font-semibold text-slate-200 mb-1">{t('billing.topup_title')}</h2>
-        <p className="text-sm text-slate-500 mb-4">{t('billing.topup_desc')}</p>
+        <p className="text-sm text-slate-400 mb-1">{t('billing.topup_desc')}</p>
+        <p className="text-xs text-slate-400 mb-4">{t('billing.subscription_note')}</p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {TOPUP_PACKAGES.map((pkg, i) => {
             const topupKeys = ['pay_topup_500', 'pay_topup_2000', 'pay_topup_5000'] as const
