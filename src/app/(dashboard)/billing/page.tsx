@@ -116,6 +116,19 @@ export default function BillingPage() {
                 {currentPlan} · {PLAN_CREDITS[currentPlan]} {t('billing.credits_unit')}{currentPlan !== 'free' ? t('billing.period') : ''}
               </span>
             </p>
+            {/* Wallet breakdown (paid plans) */}
+            {profile && currentPlan !== 'free' && (
+              <p className="text-xs text-slate-500 mt-2">
+                {t('billing.wallet_plan')}: <span className="text-slate-300 font-medium">{(profile.plan_credits ?? 0).toLocaleString()}</span>
+                {profile.plan_expires_at && (
+                  <span className="text-slate-600">
+                    {' '}({t('billing.expires_on')} {new Date(profile.plan_expires_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })})
+                  </span>
+                )}
+                {' · '}
+                {t('billing.wallet_purchased')}: <span className="text-slate-300 font-medium">{(profile.purchased_credits ?? 0).toLocaleString()}</span>
+              </p>
+            )}
           </div>
           <div className="flex flex-col gap-1 text-sm text-slate-400">
             <p className="font-medium text-slate-300">{t('billing.ops_title')}</p>
@@ -206,17 +219,20 @@ export default function BillingPage() {
                   {t('billing.downgrade')}
                 </div>
               ) : (
-                <a
-                  href={tgPayUrl(`pay_${plan.id}`)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`w-full py-2.5 rounded-xl text-sm font-semibold text-center transition-all block ${
-                    plan.highlight ? 'btn-gradient text-white' : 'text-slate-200 hover:opacity-80'
-                  }`}
-                  style={plan.highlight ? {} : { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
-                >
-                  💬 {t('billing.tg_pay_btn')}
-                </a>
+                <>
+                  <a
+                    href={tgPayUrl(`pay_${plan.id}`)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`w-full py-2.5 rounded-xl text-sm font-semibold text-center transition-all block ${
+                      plan.highlight ? 'btn-gradient text-white' : 'text-slate-200 hover:opacity-80'
+                    }`}
+                    style={plan.highlight ? {} : { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
+                  >
+                    💬 {t('billing.tg_pay_btn')}
+                  </a>
+                  <p className="text-xs text-slate-600 text-center mt-1">{t('billing.subscription_note')}</p>
+                </>
               )}
               </div>
             </div>

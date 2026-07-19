@@ -201,6 +201,12 @@ export interface Profile {
   avatar_url: string | null
   plan: Plan
   credits: number
+  plan_credits: number
+  purchased_credits: number
+  plan_activated_at: string | null
+  plan_expires_at: string | null
+  telegram_chat_id: string | null
+  last_expiry_notice_at: string | null
   encrypted_yt_key: string | null
   paddle_customer_id: string | null
   paddle_subscription_id: string | null

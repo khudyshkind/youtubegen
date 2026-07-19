@@ -666,6 +666,81 @@ function channelPostLink(res) {
   return msgId ? `https://t.me/lefiro_channel/${msgId}` : null
 }
 
+// ── Email helpers (Resend API, used by expiry notifications) ─────────────────
+const RESEND_API_KEY    = process.env.RESEND_API_KEY
+const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Lefiro <noreply@lefiro.co>'
+const APP_URL           = process.env.NEXT_PUBLIC_APP_URL || 'https://lefiro.co'
+
+async function sendRawEmail(to, subject, html) {
+  if (!RESEND_API_KEY) return
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ from: RESEND_FROM_EMAIL, to, subject, html }),
+    })
+    if (!res.ok) console.warn('[email] Resend error:', res.status, await res.text())
+  } catch (e) {
+    console.error('[email] send failed:', e.message)
+  }
+}
+
+function emailLayout(body) {
+  return `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:32px 0">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden">
+      <tr><td style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:32px;text-align:center">
+        <p style="margin:0;font-size:28px;font-weight:800;color:#fff">🎬 Lefiro</p>
+      </td></tr>
+      <tr><td style="padding:32px 40px">${body}</td></tr>
+      <tr><td style="background:#f9fafb;padding:16px 40px;text-align:center">
+        <p style="margin:0;font-size:12px;color:#9ca3af">© 2025 Lefiro · <a href="${APP_URL}" style="color:#ef4444;text-decoration:none">Открыть сайт</a></p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table></body></html>`
+}
+
+async function sendExpiryBurnEmail(to, { planName, burned, purchased }) {
+  const subject = `Тариф ${planName} истёк · Lefiro`
+  const body = `
+    <h2 style="margin:0 0 12px;font-size:20px;color:#111">Ваш тариф ${planName} истёк</h2>
+    <p style="margin:0 0 16px;font-size:15px;color:#4b5563;line-height:1.6">
+      Срок действия тарифа завершился. Вот что произошло с вашим балансом:
+    </p>
+    <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:20px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
+      <tr style="background:#fef2f2"><td style="padding:12px 16px;font-size:14px;color:#991b1b">🔥 Тарифные кредиты</td><td style="padding:12px 16px;font-size:14px;color:#991b1b;text-align:right;font-weight:700">−${burned.toLocaleString('ru-RU')} списаны</td></tr>
+      <tr style="background:#f0fdf4"><td style="padding:12px 16px;font-size:14px;color:#166534">🟢 Постоянные кредиты</td><td style="padding:12px 16px;font-size:14px;color:#166534;text-align:right;font-weight:700">${purchased.toLocaleString('ru-RU')} сохранены</td></tr>
+    </table>
+    <p style="margin:0 0 24px;font-size:14px;color:#6b7280">Продлите подписку, чтобы получить новые тарифные кредиты и продолжить работу.</p>
+    <div style="text-align:center;margin-bottom:8px">
+      <a href="${APP_URL}/billing" style="display:inline-block;background:#ef4444;color:#fff;padding:12px 28px;border-radius:10px;font-size:15px;font-weight:700;text-decoration:none">Продлить тариф →</a>
+    </div>`
+  await sendRawEmail(to, subject, emailLayout(body))
+}
+
+async function sendExpiryReminderEmail(to, { planName, expiresDate, planCredits }) {
+  const subject = `Тариф ${planName} истекает ${expiresDate} · Lefiro`
+  const body = `
+    <h2 style="margin:0 0 12px;font-size:20px;color:#111">⚠️ Ваш тариф ${planName} скоро истекает</h2>
+    <p style="margin:0 0 16px;font-size:15px;color:#4b5563;line-height:1.6">
+      Тариф действует до <strong>${expiresDate}</strong>. На тарифном балансе: <strong>${planCredits.toLocaleString('ru-RU')} кредитов</strong>.
+    </p>
+    <p style="margin:0 0 24px;font-size:14px;color:#6b7280">
+      После истечения тарифные кредиты сгорят, но докупленные кредиты останутся навсегда.
+      Продлите подписку, чтобы сохранить тарифный баланс.
+    </p>
+    <div style="text-align:center;margin-bottom:8px">
+      <a href="${APP_URL}/billing" style="display:inline-block;background:#ef4444;color:#fff;padding:12px 28px;border-radius:10px;font-size:15px;font-weight:700;text-decoration:none">Продлить тариф →</a>
+    </div>`
+  await sendRawEmail(to, subject, emailLayout(body))
+}
+
 // ── Russia payment helpers ────────────────────────────────────────────────────
 function cardPaymentText(planInfo, rubAmount) {
   const rubLine = rubAmount ? `Переведи: *${rubAmount} ₽*\n` : `Переведи сумму на карту:\n`
@@ -2743,9 +2818,10 @@ cron.schedule('0 9 * * *', async () => {
     const contentRange = allPaidRes.headers.get('content-range') ?? ''
     const totalPaid = parseInt(contentRange.split('/')[1] ?? '0', 10) || 0
 
-    // Find expired paid users
+    // Find expired paid users — include notification fields
     const expiredRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&plan_expires_at=lt.${now}&select=id,plan,plan_credits`,
+      `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&plan_expires_at=lt.${now}` +
+      `&select=id,plan,plan_credits,purchased_credits,telegram_chat_id,email`,
       { headers: sbHeaders() },
     )
     if (!expiredRes.ok) {
@@ -2757,51 +2833,115 @@ cron.schedule('0 9 * * *', async () => {
 
     if (N === 0) {
       console.log('[subscriptions] no expired plans')
-      return
-    }
+    } else {
+      // 20% mass-expiry protection
+      if (totalPaid > 0 && N / totalPaid > 0.20) {
+        const alertMsg = `⚠️ [subscriptions] suspicious mass expiry: ${N}/${totalPaid} paid users would be downgraded — ABORTED. Manual review required.`
+        console.error(alertMsg)
+        if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: alertMsg })
+      } else {
+        let successCount = 0
+        let totalBurned = 0
+        const errors = []
 
-    // 20% mass-expiry protection
-    if (totalPaid > 0 && N / totalPaid > 0.20) {
-      const alertMsg = `⚠️ [subscriptions] suspicious mass expiry: ${N}/${totalPaid} paid users would be downgraded — ABORTED. Manual review required.`
-      console.error(alertMsg)
-      if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: alertMsg })
-      return
-    }
+        for (const user of expired) {
+          try {
+            const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/expire_plan`, {
+              method: 'POST',
+              headers: sbHeaders(),
+              body: JSON.stringify({ p_user_id: user.id }),
+            })
+            if (!rpcRes.ok) {
+              errors.push(`${user.id}: HTTP ${rpcRes.status}`)
+              continue
+            }
+            const result = await rpcRes.json()
+            if (result.ok && !result.noop) {
+              successCount++
+              const burned = result.burned ?? 0
+              totalBurned += burned
 
-    let successCount = 0
-    let totalBurned = 0
-    const errors = []
-
-    for (const user of expired) {
-      try {
-        const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/expire_plan`, {
-          method: 'POST',
-          headers: sbHeaders(),
-          body: JSON.stringify({ p_user_id: user.id }),
-        })
-        if (!rpcRes.ok) {
-          errors.push(`${user.id}: HTTP ${rpcRes.status}`)
-          continue
+              // Notify user about expiry and credit burn
+              const planName = user.plan.charAt(0).toUpperCase() + user.plan.slice(1)
+              const purchased = user.purchased_credits ?? 0
+              if (user.telegram_chat_id) {
+                const msg = burned > 0
+                  ? `⏰ Ваш тариф *${planName}* истёк.\n\n🔥 Тарифные кредиты: *${burned.toLocaleString('ru-RU')}* — списаны.\n🟢 Постоянные кредиты: *${purchased.toLocaleString('ru-RU')}* — сохранены.\n\nПродлите тариф: ${APP_URL}/billing`
+                  : `⏰ Ваш тариф *${planName}* истёк. Вы переведены на Free-план.`
+                await sendTo(user.telegram_chat_id, msg).catch(() => {})
+              } else if (user.email) {
+                await sendExpiryBurnEmail(user.email, { planName, burned, purchased }).catch(() => {})
+              }
+            }
+          } catch (e) {
+            errors.push(`${user.id}: ${e.message}`)
+          }
         }
-        const result = await rpcRes.json()
-        if (result.ok && !result.noop) {
-          successCount++
-          totalBurned += result.burned ?? 0
+
+        const summary = `[subscriptions] expired ${successCount} plans, burned ${totalBurned} plan_credits`
+        console.log(summary)
+        if (errors.length > 0) console.error('[subscriptions] errors:', errors)
+
+        if (successCount > 0 && OWNER_ID) {
+          const tgMsg = `📊 Подписки: истекло ${successCount} тарифов\n` +
+            `Списано план-кредитов: ${totalBurned.toLocaleString()}\n` +
+            (errors.length > 0 ? `⚠️ Ошибок: ${errors.length}` : '✅ Без ошибок')
+          await tgApi('sendMessage', { chat_id: OWNER_ID, text: tgMsg })
         }
-      } catch (e) {
-        errors.push(`${user.id}: ${e.message}`)
       }
     }
 
-    const summary = `[subscriptions] expired ${successCount} plans, burned ${totalBurned} plan_credits`
-    console.log(summary)
-    if (errors.length > 0) console.error('[subscriptions] errors:', errors)
+    // ── Expiry reminders: users with plan expiring in 1–3 days ──────────────
+    const in1d    = new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString()
+    const in3d    = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+    const cut48h  = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
 
-    if (successCount > 0 && OWNER_ID) {
-      const tgMsg = `📊 Подписки: истекло ${successCount} тарифов\n` +
-        `Списано план-кредитов: ${totalBurned.toLocaleString()}\n` +
-        (errors.length > 0 ? `⚠️ Ошибок: ${errors.length}` : '✅ Без ошибок')
-      await tgApi('sendMessage', { chat_id: OWNER_ID, text: tgMsg })
+    const remindRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free` +
+      `&plan_expires_at=gte.${in1d}&plan_expires_at=lte.${in3d}` +
+      `&select=id,plan,plan_credits,telegram_chat_id,email,plan_expires_at,last_expiry_notice_at`,
+      { headers: sbHeaders() },
+    )
+    if (!remindRes.ok) {
+      console.error('[subscriptions/reminders] query failed:', await remindRes.text())
+    } else {
+      const candidates = await remindRes.json()
+      const toRemind = (Array.isArray(candidates) ? candidates : []).filter(u =>
+        !u.last_expiry_notice_at || new Date(u.last_expiry_notice_at) < new Date(cut48h)
+      )
+
+      let remindersSent = 0
+      for (const u of toRemind) {
+        try {
+          const expiresDate = new Date(u.plan_expires_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+          const planName = u.plan.charAt(0).toUpperCase() + u.plan.slice(1)
+          const planCredits = u.plan_credits ?? 0
+
+          let notified = false
+          if (u.telegram_chat_id) {
+            const msg = `⚠️ Ваш тариф *${planName}* истекает *${expiresDate}*.\n\nНа тарифном балансе: *${planCredits.toLocaleString('ru-RU')}* кредитов — они сгорят при истечении.\nДокупленные кредиты останутся.\n\nПродлите тариф: ${APP_URL}/billing`
+            await sendTo(u.telegram_chat_id, msg)
+            notified = true
+          } else if (u.email) {
+            await sendExpiryReminderEmail(u.email, { planName, expiresDate, planCredits })
+            notified = true
+          }
+
+          if (notified) {
+            // Anti-spam: mark last_expiry_notice_at so we don't re-send within 48h
+            await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${u.id}`, {
+              method: 'PATCH',
+              headers: { ...sbHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ last_expiry_notice_at: new Date().toISOString() }),
+            })
+            remindersSent++
+          }
+        } catch (e) {
+          console.error(`[subscriptions/reminders] user ${u.id}:`, e.message)
+        }
+      }
+
+      if (remindersSent > 0) console.log(`[subscriptions/reminders] sent ${remindersSent} reminders`)
     }
   } catch (err) {
     console.error('[cron/subscriptions] error:', err.message)

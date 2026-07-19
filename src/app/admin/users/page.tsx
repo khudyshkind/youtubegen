@@ -101,6 +101,7 @@ async function UsersList({ q, plan }: { q: string; plan: string }) {
     const paddleInfo = p.paddle_customer_id ? paddleSubs.get(p.paddle_customer_id) : undefined
     return {
       ...p,
+      plan_expires_at: (p.plan_expires_at as string | null) ?? null,
       projectCount: pcMap[p.id] ?? 0,
       lastActivity: null as string | null,
       subscriptionStatus: paddleInfo?.status ?? null,

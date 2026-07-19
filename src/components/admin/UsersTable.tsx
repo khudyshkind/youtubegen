@@ -10,6 +10,7 @@ interface UserRow {
   full_name: string | null
   plan: Plan
   credits: number
+  plan_expires_at: string | null
   referral_code: string | null
   referral_count: number
   created_at: string
@@ -28,7 +29,7 @@ interface Props {
   queryError?: string
 }
 
-const PLANS: Plan[] = ['free', 'starter', 'pro', 'agency']
+const PLANS: Plan[] = ['free', 'basic', 'starter', 'pro', 'agency']
 
 function fmtDate(iso: string | null) {
   if (!iso) return '—'
@@ -54,17 +55,35 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
   const searchParams = useSearchParams()
   const [, startTransition] = useTransition()
 
+  // ── credits modal ──────────────────────────────────────────────────────────
   const [editCreditsUser, setEditCreditsUser] = useState<UserRow | null>(null)
-  const [editPlanUser, setEditPlanUser] = useState<UserRow | null>(null)
-
   const [creditAmount, setCreditAmount] = useState('')
   const [creditReason, setCreditReason] = useState('')
   const [creditLoading, setCreditLoading] = useState(false)
   const [creditError, setCreditError] = useState('')
 
+  // ── plan modal ─────────────────────────────────────────────────────────────
+  const [editPlanUser, setEditPlanUser] = useState<UserRow | null>(null)
   const [newPlan, setNewPlan] = useState<Plan>('free')
   const [planLoading, setPlanLoading] = useState(false)
   const [planError, setPlanError] = useState('')
+
+  // ── extend-plan modal ──────────────────────────────────────────────────────
+  const [extendUser, setExtendUser] = useState<UserRow | null>(null)
+  const [extendDays, setExtendDays] = useState('')
+  const [extendReason, setExtendReason] = useState('')
+  const [extendLoading, setExtendLoading] = useState(false)
+  const [extendError, setExtendError] = useState('')
+  const [extendSuccess, setExtendSuccess] = useState('')
+
+  // ── bulk extend modal ──────────────────────────────────────────────────────
+  const [showBulk, setShowBulk] = useState(false)
+  const [bulkDays, setBulkDays] = useState('')
+  const [bulkReason, setBulkReason] = useState('')
+  const [bulkAffected, setBulkAffected] = useState<number | null>(null)
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkError, setBulkError] = useState('')
+  const [bulkSuccess, setBulkSuccess] = useState('')
 
   function updateParam(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString())
@@ -73,6 +92,7 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
     startTransition(() => router.push(`${pathname}?${params.toString()}`))
   }
 
+  // ── credits handler ────────────────────────────────────────────────────────
   async function handleSaveCredits() {
     if (!editCreditsUser) return
     const amount = parseInt(creditAmount)
@@ -84,7 +104,7 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount, reason: creditReason || 'admin_adjustment' }),
       })
-      const json = await res.json()
+      const json = await res.json() as { ok: boolean; error?: string }
       if (!json.ok) { setCreditError(json.error ?? 'Ошибка'); return }
       setEditCreditsUser(null); setCreditAmount(''); setCreditReason('')
       router.refresh()
@@ -92,6 +112,7 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
     finally { setCreditLoading(false) }
   }
 
+  // ── plan handler ───────────────────────────────────────────────────────────
   async function handleSavePlan() {
     if (!editPlanUser) return
     setPlanLoading(true); setPlanError('')
@@ -101,7 +122,7 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan: newPlan }),
       })
-      const json = await res.json()
+      const json = await res.json() as { ok: boolean; error?: string }
       if (!json.ok) { setPlanError(json.error ?? 'Ошибка'); return }
       setEditPlanUser(null)
       router.refresh()
@@ -109,8 +130,65 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
     finally { setPlanLoading(false) }
   }
 
+  // ── extend-plan handler ────────────────────────────────────────────────────
+  async function handleExtendPlan() {
+    if (!extendUser) return
+    const days = parseInt(extendDays)
+    if (isNaN(days) || days < 1 || days > 365) { setExtendError('Введите число от 1 до 365'); return }
+    if (!extendReason.trim() || extendReason.trim().length < 3) { setExtendError('Укажите причину'); return }
+    setExtendLoading(true); setExtendError(''); setExtendSuccess('')
+    try {
+      const res = await fetch(`/api/admin/users/${extendUser.id}/extend-plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days, reason: extendReason.trim() }),
+      })
+      const json = await res.json() as { ok: boolean; error?: string; new_expires_at?: string }
+      if (!json.ok) { setExtendError(json.error ?? 'Ошибка'); return }
+      const newDate = json.new_expires_at
+        ? new Date(json.new_expires_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+        : '—'
+      setExtendSuccess(`Подписка продлена до ${newDate}`)
+      setTimeout(() => { setExtendUser(null); setExtendDays(''); setExtendReason(''); setExtendSuccess(''); router.refresh() }, 1800)
+    } catch { setExtendError('Ошибка соединения') }
+    finally { setExtendLoading(false) }
+  }
+
+  // ── bulk extend handlers ───────────────────────────────────────────────────
+  async function handleBulkCheck() {
+    const days = parseInt(bulkDays)
+    if (isNaN(days) || days < 1 || days > 365) { setBulkError('Введите число от 1 до 365'); return }
+    setBulkLoading(true); setBulkError(''); setBulkAffected(null)
+    try {
+      const res = await fetch('/api/admin/users/extend-bulk')
+      const json = await res.json() as { ok: boolean; count?: number; error?: string }
+      if (!json.ok) { setBulkError(json.error ?? 'Ошибка'); return }
+      setBulkAffected(json.count ?? 0)
+    } catch { setBulkError('Ошибка соединения') }
+    finally { setBulkLoading(false) }
+  }
+
+  async function handleBulkConfirm() {
+    const days = parseInt(bulkDays)
+    if (!bulkReason.trim() || bulkReason.trim().length < 3) { setBulkError('Укажите причину'); return }
+    setBulkLoading(true); setBulkError(''); setBulkSuccess('')
+    try {
+      const res = await fetch('/api/admin/users/extend-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days, reason: bulkReason.trim() }),
+      })
+      const json = await res.json() as { ok: boolean; extended?: number; errors?: number; error?: string }
+      if (!json.ok) { setBulkError(json.error ?? 'Ошибка'); return }
+      setBulkSuccess(`Продлено ${json.extended ?? bulkAffected ?? 0} подписок${json.errors ? ` (ошибок: ${json.errors})` : ''}.`)
+      setTimeout(() => { setShowBulk(false); setBulkDays(''); setBulkReason(''); setBulkAffected(null); setBulkSuccess(''); router.refresh() }, 2000)
+    } catch { setBulkError('Ошибка соединения') }
+    finally { setBulkLoading(false) }
+  }
+
   function openCredits(u: UserRow) { setEditCreditsUser(u); setCreditAmount(''); setCreditReason(''); setCreditError('') }
   function openPlan(u: UserRow)    { setEditPlanUser(u); setNewPlan(u.plan); setPlanError('') }
+  function openExtend(u: UserRow)  { setExtendUser(u); setExtendDays(''); setExtendReason(''); setExtendError(''); setExtendSuccess('') }
 
   const planColors: Record<Plan, string> = {
     free: 'bg-gray-100 text-gray-600',
@@ -133,7 +211,7 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters + bulk action */}
       <div className="flex flex-wrap gap-3 mb-4">
         <input
           type="text"
@@ -150,7 +228,13 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
           <option value="">Все тарифы</option>
           {PLANS.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
-        <span className="ml-auto text-sm text-gray-500 self-center">{total} пользователей</span>
+        <button
+          onClick={() => { setShowBulk(true); setBulkDays(''); setBulkReason(''); setBulkAffected(null); setBulkError(''); setBulkSuccess('') }}
+          className="ml-auto px-3 py-2 text-xs bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 rounded-xl transition-colors"
+        >
+          📅 Продлить всем
+        </button>
+        <span className="text-sm text-gray-500 self-center">{total} пользователей</span>
       </div>
 
       {/* Table */}
@@ -181,6 +265,9 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${planColors[u.plan]}`}>
                     {u.plan}
                   </span>
+                  {u.plan !== 'free' && u.plan_expires_at && (
+                    <p className="text-xs text-gray-400 mt-0.5">до {fmtDate(u.plan_expires_at)}</p>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right font-semibold text-gray-700">{u.credits}</td>
                 <td className="px-4 py-3 text-right text-gray-600">{u.projectCount}</td>
@@ -216,6 +303,12 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
                       className="px-2 py-1 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors whitespace-nowrap">
                       Тариф
                     </button>
+                    {u.plan !== 'free' && (
+                      <button onClick={() => openExtend(u)}
+                        className="px-2 py-1 text-xs bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg transition-colors whitespace-nowrap">
+                        Продлить
+                      </button>
+                    )}
                     <a href={`/admin/view?user_id=${u.id}`}
                       className="px-2 py-1 text-xs bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg transition-colors whitespace-nowrap">
                       Просмотр
@@ -304,6 +397,117 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
               <button onClick={handleSavePlan} disabled={planLoading}
                 className="flex-1 py-2.5 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white font-semibold rounded-xl text-sm">
                 {planLoading ? 'Сохранение...' : 'Применить'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Extend Plan Modal (single user) */}
+      {extendUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-base font-semibold text-gray-900 mb-1">Продлить подписку</h3>
+            <p className="text-sm text-gray-500 mb-1">{extendUser.email}</p>
+            <p className="text-xs text-gray-400 mb-4">
+              Тариф: <strong className="text-gray-700">{extendUser.plan}</strong>
+              {extendUser.plan_expires_at && (
+                <> · истекает {fmtDate(extendUser.plan_expires_at)}</>
+              )}
+            </p>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Количество дней (1–365)</label>
+                <input
+                  type="number" min={1} max={365} value={extendDays}
+                  onChange={(e) => setExtendDays(e.target.value)}
+                  placeholder="7"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Причина (обязательно)</label>
+                <input
+                  type="text" value={extendReason}
+                  onChange={(e) => setExtendReason(e.target.value)}
+                  placeholder="Например: компенсация за сбой 19 июля"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                />
+              </div>
+              {extendError && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{extendError}</p>}
+              {extendSuccess && <p className="text-xs text-green-700 bg-green-50 px-3 py-2 rounded-lg">✓ {extendSuccess}</p>}
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setExtendUser(null)}
+                className="flex-1 py-2.5 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">
+                Отмена
+              </button>
+              <button onClick={handleExtendPlan} disabled={extendLoading || !!extendSuccess}
+                className="flex-1 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm">
+                {extendLoading ? 'Продление...' : 'Продлить'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Extend Modal */}
+      {showBulk && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-base font-semibold text-gray-900 mb-1">Продлить всем платным</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Добавить дни ко всем пользователям с тарифом, отличным от Free.
+            </p>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Количество дней (1–365)</label>
+                <input
+                  type="number" min={1} max={365} value={bulkDays}
+                  onChange={(e) => { setBulkDays(e.target.value); setBulkAffected(null) }}
+                  placeholder="7"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Причина (обязательно)</label>
+                <input
+                  type="text" value={bulkReason}
+                  onChange={(e) => setBulkReason(e.target.value)}
+                  placeholder="Например: компенсация за технический сбой"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                />
+              </div>
+
+              {bulkAffected === null ? (
+                <button
+                  onClick={handleBulkCheck}
+                  disabled={bulkLoading || !bulkDays}
+                  className="w-full py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 rounded-xl text-sm font-medium transition-colors"
+                >
+                  {bulkLoading ? 'Проверка...' : 'Проверить — сколько затронет'}
+                </button>
+              ) : (
+                <div className="rounded-xl bg-violet-50 border border-violet-200 px-4 py-3 text-sm text-violet-800">
+                  Будет затронуто <strong>{bulkAffected} пользователей</strong> с платным тарифом.
+                  Каждому прибавится <strong>+{bulkDays} дн.</strong> к текущей дате истечения.
+                </div>
+              )}
+
+              {bulkError && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{bulkError}</p>}
+              {bulkSuccess && <p className="text-xs text-green-700 bg-green-50 px-3 py-2 rounded-lg">✓ {bulkSuccess}</p>}
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setShowBulk(false)}
+                className="flex-1 py-2.5 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">
+                Отмена
+              </button>
+              <button
+                onClick={handleBulkConfirm}
+                disabled={bulkLoading || bulkAffected === null || !!bulkSuccess}
+                className="flex-1 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm"
+              >
+                {bulkLoading ? 'Обработка...' : `Подтвердить продление ${bulkAffected !== null ? `(${bulkAffected})` : ''}`}
               </button>
             </div>
           </div>
