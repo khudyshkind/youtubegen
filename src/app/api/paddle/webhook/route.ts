@@ -75,12 +75,25 @@ export async function POST(request: NextRequest) {
       }
 
       case 'subscription.canceled': {
-        // Do NOT downgrade plan immediately — access continues until plan_expires_at.
-        // Étape 2 cron will handle downgrade when plan_expires_at passes.
+        // Do NOT downgrade plan immediately — access continues until end of billing period.
+        // Étape 2 cron handles downgrade when plan_expires_at passes.
         const sub = event.data as Subscription
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const updateData: Record<string, unknown> = { paddle_subscription_id: null }
+
+        // Preserve access until the end of the current billing period if available
+        const periodEnd = sub.currentBillingPeriod?.endsAt
+        if (periodEnd) {
+          const endDate = new Date(periodEnd)
+          if (endDate > new Date()) {
+            updateData.plan_expires_at = endDate.toISOString()
+            console.log(`[paddle/webhook] canceled: access until ${endDate.toISOString()}`)
+          }
+        }
+
         await supabase
           .from('profiles')
-          .update({ paddle_subscription_id: null })
+          .update(updateData)
           .eq('paddle_customer_id', sub.customerId)
         break
       }

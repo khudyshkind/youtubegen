@@ -2723,6 +2723,92 @@ cron.schedule('0 * * * *', async () => {
   try { await postFromQueue() } catch (err) { console.error('[cron/plan]', err.message); Sentry.captureException(err, { extra: { cron: 'postFromQueue' } }) }
 }, { timezone: 'UTC' })
 
+// ── Subscription expiry cron — 09:00 UTC daily ───────────────────────────────
+// Downgrades paid users whose plan_expires_at < now().
+// 20% protection: if expired count > 20% of all paid users → abort, send alert.
+cron.schedule('0 9 * * *', async () => {
+  console.log('[cron/subscriptions] checking expired plans')
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    console.warn('[cron/subscriptions] Supabase not configured — skipping')
+    return
+  }
+  try {
+    const now = new Date().toISOString()
+
+    // Count all paid users for 20% protection threshold
+    const allPaidRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&select=id`,
+      { headers: { ...sbHeaders(), 'Prefer': 'count=exact' } },
+    )
+    const contentRange = allPaidRes.headers.get('content-range') ?? ''
+    const totalPaid = parseInt(contentRange.split('/')[1] ?? '0', 10) || 0
+
+    // Find expired paid users
+    const expiredRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&plan_expires_at=lt.${now}&select=id,plan,plan_credits`,
+      { headers: sbHeaders() },
+    )
+    if (!expiredRes.ok) {
+      console.error('[cron/subscriptions] query failed:', await expiredRes.text())
+      return
+    }
+    const expired = await expiredRes.json()
+    const N = Array.isArray(expired) ? expired.length : 0
+
+    if (N === 0) {
+      console.log('[subscriptions] no expired plans')
+      return
+    }
+
+    // 20% mass-expiry protection
+    if (totalPaid > 0 && N / totalPaid > 0.20) {
+      const alertMsg = `⚠️ [subscriptions] suspicious mass expiry: ${N}/${totalPaid} paid users would be downgraded — ABORTED. Manual review required.`
+      console.error(alertMsg)
+      if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: alertMsg })
+      return
+    }
+
+    let successCount = 0
+    let totalBurned = 0
+    const errors = []
+
+    for (const user of expired) {
+      try {
+        const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/expire_plan`, {
+          method: 'POST',
+          headers: sbHeaders(),
+          body: JSON.stringify({ p_user_id: user.id }),
+        })
+        if (!rpcRes.ok) {
+          errors.push(`${user.id}: HTTP ${rpcRes.status}`)
+          continue
+        }
+        const result = await rpcRes.json()
+        if (result.ok && !result.noop) {
+          successCount++
+          totalBurned += result.burned ?? 0
+        }
+      } catch (e) {
+        errors.push(`${user.id}: ${e.message}`)
+      }
+    }
+
+    const summary = `[subscriptions] expired ${successCount} plans, burned ${totalBurned} plan_credits`
+    console.log(summary)
+    if (errors.length > 0) console.error('[subscriptions] errors:', errors)
+
+    if (successCount > 0 && OWNER_ID) {
+      const tgMsg = `📊 Подписки: истекло ${successCount} тарифов\n` +
+        `Списано план-кредитов: ${totalBurned.toLocaleString()}\n` +
+        (errors.length > 0 ? `⚠️ Ошибок: ${errors.length}` : '✅ Без ошибок')
+      await tgApi('sendMessage', { chat_id: OWNER_ID, text: tgMsg })
+    }
+  } catch (err) {
+    console.error('[cron/subscriptions] error:', err.message)
+    Sentry.captureException(err, { extra: { cron: 'expire_plans' } })
+  }
+}, { timezone: 'UTC' })
+
 // ── Watchdog: stuck projects / audio_jobs ─────────────────────────────────────
 const WATCHDOG_DRY_RUN            = process.env.WATCHDOG_DRY_RUN !== 'false'
 const WATCHDOG_IMAGES_TIMEOUT_MIN = parseInt(process.env.WATCHDOG_IMAGES_TIMEOUT_MIN || '15', 10)

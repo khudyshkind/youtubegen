@@ -5,6 +5,20 @@ import { env } from './env'
 
 // ─── Response helpers ──────────────────────────────────────────────────────────
 
+export function planRequiredResponse(lang = 'ru'): NextResponse {
+  const isRu = lang !== 'en'
+  return NextResponse.json(
+    {
+      ok: false,
+      error: isRu
+        ? 'Аналитика доступна на платных тарифах. Перейдите на Basic или выше, чтобы использовать этот инструмент.'
+        : 'Analytics is available on paid plans. Upgrade to Basic or above to use this tool.',
+      code: 'plan_required',
+    },
+    { status: 403 }
+  )
+}
+
 export function byokRequiredResponse(lang = 'ru'): NextResponse {
   const isRu = lang !== 'en'
   return NextResponse.json(
@@ -93,9 +107,9 @@ export async function resolveAnalyticsContext(
     }
   }
 
-  // Gate: free plan requires a successfully decrypted working key
-  if (plan === 'free' && !userHasKey) {
-    return { ...failOpen, plan, gateRes: byokRequiredResponse(lang) }
+  // Gate: analytics require a paid plan — free users are blocked regardless of BYOK
+  if (plan === 'free') {
+    return { ...failOpen, plan, gateRes: planRequiredResponse(lang) }
   }
 
   const cost = userHasKey
@@ -122,8 +136,6 @@ export async function checkAnalyticsGate(
 
   if (error || !data) return null // fail open
   const plan: string = (data as { plan: string }).plan
-  const hasKey = !!(data as { encrypted_yt_key?: string | null }).encrypted_yt_key
-  if (plan !== 'free') return null
-  if (!hasKey) return byokRequiredResponse(lang)
+  if (plan === 'free') return planRequiredResponse(lang)
   return null
 }

@@ -6,6 +6,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 import { isBillingError, notifyBillingError } from '@/lib/telegram'
+import { planRequiredResponse } from '@/lib/analytics-gate'
 
 export const maxDuration = 60
 
@@ -73,6 +74,13 @@ export async function POST(req: NextRequest) {
 
     if (!niche) return NextResponse.json({ ok: false, error: 'Введите нишу' }, { status: 400 })
     if (views <= 0) return NextResponse.json({ ok: false, error: 'Введите количество просмотров' }, { status: 400 })
+
+    // Plan gate: analytics require paid plan — check BEFORE credits to avoid free-user spend
+    const gateSvc = createServiceClient()
+    const { data: gateProfile } = await gateSvc.from('profiles').select('plan').eq('id', user.id).single()
+    if ((gateProfile as { plan: string } | null)?.plan === 'free') {
+      return planRequiredResponse(lang)
+    }
 
     const check = await requireCredits(user.id, 'revenue_calc', supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
