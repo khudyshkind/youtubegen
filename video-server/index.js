@@ -669,7 +669,7 @@ function channelPostLink(res) {
 // ── Email helpers (Resend API, used by expiry notifications) ─────────────────
 const RESEND_API_KEY    = process.env.RESEND_API_KEY
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Lefiro <noreply@lefiro.co>'
-const APP_URL           = process.env.NEXT_PUBLIC_APP_URL || 'https://lefiro.co'
+// APP_URL already declared at module top (line 82)
 
 async function sendRawEmail(to, subject, html) {
   if (!RESEND_API_KEY) {
