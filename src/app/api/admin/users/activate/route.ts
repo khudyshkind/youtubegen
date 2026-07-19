@@ -95,8 +95,18 @@ export async function POST(request: NextRequest) {
         p_project_id: null,
       })
       if (credErr) {
-        console.error('[activate] topup add_purchased_credits error:', credErr.message)
-        return NextResponse.json({ ok: false, error: credErr.message }, { status: 500 })
+        // Pre-migration fallback: add_purchased_credits doesn't exist until migration 001 runs.
+        console.warn('[activate] add_purchased_credits unavailable, falling back to add_credits:', credErr.message)
+        const { error: legacyErr } = await svc.rpc('add_credits', {
+          p_user_id:    targetUser.id,
+          p_amount:     pkg.credits,
+          p_operation:  'topup_russia',
+          p_project_id: null,
+        })
+        if (legacyErr) {
+          console.error('[activate] topup fallback add_credits error:', legacyErr.message)
+          return NextResponse.json({ ok: false, error: legacyErr.message }, { status: 500 })
+        }
       }
       await markClaim()
       console.log(`[activate] topup plan=${plan} credits=${pkg.credits} user=${targetUser.id} email=${email}`)
