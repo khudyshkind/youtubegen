@@ -385,7 +385,7 @@ function fmtCr(n) {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
 }
 
-async function refreshPlansFromVercel() {
+async function refreshPlansFromVercel(alertOnFail = true) {
   try {
     const res = await fetch(`${APP_URL}/api/plans`, { signal: AbortSignal.timeout(8000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -404,7 +404,11 @@ async function refreshPlansFromVercel() {
     ))
   } catch (e) {
     console.warn('[plans] refresh failed — using fallback values:', e.message)
-    if (typeof Sentry !== 'undefined') Sentry.captureMessage(`plans refresh failed: ${e.message}`, { level: 'warning' })
+    // alertOnFail=false on first boot: Vercel may still be deploying the same push.
+    // The 5-min retry fires with alertOnFail=true; only then Sentry is notified.
+    if (alertOnFail && typeof Sentry !== 'undefined') {
+      Sentry.captureMessage(`plans refresh failed: ${e.message}`, { level: 'warning' })
+    }
   }
 }
 
@@ -4958,8 +4962,11 @@ app.listen(PORT, async () => {
   await loadSettingsFromDB().catch(err => console.warn('[bot] settings load failed:', err.message))
   // Sync plan credit counts from Vercel /api/plans (single source of truth = src/lib/types.ts).
   // Fallback values in PAY_PLANS above are used if Vercel is unreachable.
-  await refreshPlansFromVercel().catch(err => console.warn('[plans] startup refresh failed:', err.message))
-  setInterval(() => refreshPlansFromVercel().catch(console.warn), 60 * 60 * 1000)
+  // First attempt is silent (alertOnFail=false): Vercel may still be deploying the same push.
+  // One-time 5-min retry fires with alertOnFail=true → Sentry only if Vercel is genuinely down.
+  await refreshPlansFromVercel(false).catch(console.warn)
+  setTimeout(() => refreshPlansFromVercel(true).catch(console.warn), 5 * 60 * 1000)
+  setInterval(() => refreshPlansFromVercel(true).catch(console.warn), 60 * 60 * 1000)
   await recoverOrphanedJobs()
   // Write thresholds to bot_settings so the Vercel admin panel can read them
   await Promise.all([
