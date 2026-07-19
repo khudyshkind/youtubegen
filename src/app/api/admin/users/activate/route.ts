@@ -2,7 +2,8 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase-server'
-import { PLAN_CREDITS, TOPUP_PACKAGES } from '@/lib/types'
+import { activatePlan } from '@/lib/activate-plan'
+import { TOPUP_PACKAGES } from '@/lib/types'
 import type { Plan } from '@/lib/types'
 
 const VALID_PLANS: Plan[] = ['basic', 'starter', 'pro', 'agency']
@@ -22,8 +23,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
     }
 
-    const body = await request.json() as { email?: string; plan?: string; claim_id?: string | null }
-    const { email, plan, claim_id: claimId } = body
+    const body = await request.json() as {
+      email?: string
+      plan?: string
+      claim_id?: string | null
+      telegram_chat_id?: string | null
+    }
+    const { email, plan, claim_id: claimId, telegram_chat_id: telegramChatId } = body
 
     if (!email || !plan) {
       return NextResponse.json({ ok: false, error: 'email и plan обязательны' }, { status: 400 })
@@ -40,7 +46,7 @@ export async function POST(request: NextRequest) {
 
     const svc = createServiceClient()
 
-    // Idempotency: if a claimId was provided and already marked activated, bail out early.
+    // Idempotency: if this claimId was already processed, bail out early.
     if (claimId) {
       const { data: existing } = await svc
         .from('bot_settings')
@@ -62,61 +68,71 @@ export async function POST(request: NextRequest) {
 
     const targetUser = users.find(u => u.email?.toLowerCase() === email.toLowerCase())
     if (!targetUser) {
-      return NextResponse.json({ ok: false, error: `Пользователь с email ${email} не найден` }, { status: 404 })
+      return NextResponse.json(
+        { ok: false, error: `Пользователь с email ${email} не найден` },
+        { status: 404 },
+      )
     }
 
-    // Helper: mark claim as used to prevent double-credit on repeated owner clicks.
+    // Helper: mark claim as used to prevent double-credit on repeated owner button clicks.
     const markClaim = async () => {
       if (!claimId) return
       await svc
         .from('bot_settings')
-        .upsert({ key: `claim_${claimId}`, value: 'activated', updated_at: new Date().toISOString() }, { onConflict: 'key' })
+        .upsert(
+          { key: `claim_${claimId}`, value: 'activated', updated_at: new Date().toISOString() },
+          { onConflict: 'key' },
+        )
     }
 
-    // ── Topup path: add credits only, do NOT change plan ─────────────────────
+    // ── Topup path: add to eternal wallet only, do NOT change plan ────────────
     if (isTopup) {
       const pkg = TOPUP_PACKAGES[TOPUP_KEY_MAP[plan]]
-      const { error: credErr } = await svc.rpc('add_credits', {
+      const { error: credErr } = await svc.rpc('add_purchased_credits', {
         p_user_id:    targetUser.id,
         p_amount:     pkg.credits,
         p_operation:  'topup_russia',
         p_project_id: null,
       })
       if (credErr) {
-        console.error('[activate] topup add_credits error:', credErr.message)
+        console.error('[activate] topup add_purchased_credits error:', credErr.message)
         return NextResponse.json({ ok: false, error: credErr.message }, { status: 500 })
       }
       await markClaim()
       console.log(`[activate] topup plan=${plan} credits=${pkg.credits} user=${targetUser.id} email=${email}`)
-      return NextResponse.json({ ok: true, data: { userId: targetUser.id, plan, credits: pkg.credits, topup: true } })
+      return NextResponse.json({
+        ok: true,
+        data: { userId: targetUser.id, plan, credits: pkg.credits, topup: true },
+      })
     }
 
-    // ── Subscription plan path: update plan + add monthly credits ─────────────
-    const { error: planErr } = await svc
-      .from('profiles')
-      .update({ plan })
-      .eq('id', targetUser.id)
-
-    if (planErr) {
-      console.error('[activate] plan update error:', planErr.message)
-      return NextResponse.json({ ok: false, error: planErr.message }, { status: 500 })
+    // ── Subscription plan path: full activation via unified function ──────────
+    const result = await activatePlan(targetUser.id, plan as Plan, 'tg_manual')
+    if (!result.ok) {
+      console.error('[activate] activatePlan error:', result.error)
+      return NextResponse.json({ ok: false, error: result.error }, { status: 500 })
     }
 
-    const credits = PLAN_CREDITS[plan as Plan] ?? 0
-    const { error: credErr } = await svc.rpc('add_credits', {
-      p_user_id:    targetUser.id,
-      p_amount:     credits,
-      p_operation:  'russia_payment',
-      p_project_id: null,
-    })
-    if (credErr) {
-      console.error('[activate] add_credits error:', credErr.message)
-      return NextResponse.json({ ok: false, error: credErr.message }, { status: 500 })
+    // Save telegram_chat_id if the bot passed it (non-fatal)
+    if (telegramChatId) {
+      const { error: tgErr } = await svc
+        .from('profiles')
+        .update({ telegram_chat_id: String(telegramChatId) })
+        .eq('id', targetUser.id)
+      if (tgErr) {
+        console.warn('[activate] telegram_chat_id save error:', tgErr.message)
+      }
     }
 
     await markClaim()
-    console.log(`[activate] plan=${plan} credits=${credits} user=${targetUser.id} email=${email}`)
-    return NextResponse.json({ ok: true, data: { userId: targetUser.id, plan, credits } })
+    console.log(
+      `[activate] plan=${plan} plan_credits=${result.plan_credits} ` +
+      `expires=${result.expires_at} user=${targetUser.id} email=${email}`,
+    )
+    return NextResponse.json({
+      ok: true,
+      data: { userId: targetUser.id, plan, credits: result.plan_credits ?? 0 },
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[activate] error:', msg)

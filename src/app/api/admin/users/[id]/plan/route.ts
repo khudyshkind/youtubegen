@@ -1,11 +1,12 @@
 export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
+import { createServerSupabase } from '@/lib/supabase-server'
+import { activatePlan } from '@/lib/activate-plan'
 import type { Plan } from '@/lib/types'
 
 const ADMIN_EMAILS = ['khudyshkin.d@gmail.com', 'denis-region@mail.ru']
-const VALID_PLANS: Plan[] = ['free', 'starter', 'pro', 'agency']
+const VALID_PLANS: Plan[] = ['free', 'basic', 'starter', 'pro', 'agency']
 
 export async function PATCH(
   request: NextRequest,
@@ -27,15 +28,10 @@ export async function PATCH(
       return NextResponse.json({ ok: false, error: 'Недопустимый тариф' }, { status: 400 })
     }
 
-    const svc = createServiceClient()
-    const { error } = await svc
-      .from('profiles')
-      .update({ plan })
-      .eq('id', id)
-
-    if (error) {
-      console.error('[admin/plan] update error:', error.message)
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+    const result = await activatePlan(id, plan as Plan, 'admin')
+    if (!result.ok) {
+      console.error('[admin/plan] activatePlan error:', result.error)
+      return NextResponse.json({ ok: false, error: result.error }, { status: 500 })
     }
 
     return NextResponse.json({ ok: true })

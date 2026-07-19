@@ -3,8 +3,8 @@ import { Paddle, Environment } from '@paddle/paddle-node-sdk'
 import type { Subscription, Transaction } from '@paddle/paddle-node-sdk'
 import { createServiceClient } from '@/lib/supabase-server'
 import { addCredits } from '@/lib/credits'
+import { activatePlan } from '@/lib/activate-plan'
 import { env } from '@/lib/env'
-import { PLAN_CREDITS } from '@/lib/types'
 import type { Plan } from '@/lib/types'
 
 function getPaddle() {
@@ -50,20 +50,17 @@ export async function POST(request: NextRequest) {
         await supabase
           .from('profiles')
           .update({
-            paddle_customer_id: sub.customerId,
+            paddle_customer_id:     sub.customerId,
             paddle_subscription_id: sub.id,
-            plan,
           })
           .eq('id', userId)
 
-        const credits = PLAN_CREDITS[plan] ?? 0
-        if (credits > 0) {
-          await addCredits(userId, credits, 'purchase')
-        }
+        await activatePlan(userId, plan, 'paddle')
         break
       }
 
       case 'subscription.updated': {
+        // Plan label change only (no credit adjustment — user gets new plan's credits on next renewal).
         const sub = event.data as Subscription
         const customData = sub.customData as { plan?: Plan } | null
         const newPlan = customData?.plan
@@ -78,10 +75,12 @@ export async function POST(request: NextRequest) {
       }
 
       case 'subscription.canceled': {
+        // Do NOT downgrade plan immediately — access continues until plan_expires_at.
+        // Étape 2 cron will handle downgrade when plan_expires_at passes.
         const sub = event.data as Subscription
         await supabase
           .from('profiles')
-          .update({ plan: 'free', paddle_subscription_id: null })
+          .update({ paddle_subscription_id: null })
           .eq('paddle_customer_id', sub.customerId)
         break
       }
@@ -91,7 +90,7 @@ export async function POST(request: NextRequest) {
         const customData = tx.customData as { userId?: string; type?: string; credits?: number; plan?: Plan } | null
 
         if (!tx.subscriptionId) {
-          // One-time topup purchase
+          // One-time topup purchase → eternal wallet, no cap
           const userId = customData?.userId
           const credits = customData?.credits
           if (userId && credits && credits > 0) {
@@ -100,7 +99,7 @@ export async function POST(request: NextRequest) {
           break
         }
 
-        // Subscription renewal — top up based on current plan
+        // Subscription renewal — add this period's plan credit batch
         const { data: profile } = await supabase
           .from('profiles')
           .select('id, plan')
@@ -108,10 +107,7 @@ export async function POST(request: NextRequest) {
           .single()
 
         if (profile) {
-          const credits = PLAN_CREDITS[profile.plan as Plan] ?? 0
-          if (credits > 0) {
-            await addCredits(profile.id, credits, 'purchase')
-          }
+          await activatePlan(profile.id, profile.plan as Plan, 'paddle')
         }
         break
       }

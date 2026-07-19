@@ -740,11 +740,16 @@ async function forwardProofToOwner(userChatId, message, pst) {
   await tgApi('sendMessage', { chat_id: userChatId, text: '✅ Получено! Мы активируем тариф в течение 1 часа.' })
 }
 
-async function activateUserPlan(email, plan, claimId = null) {
+async function activateUserPlan(email, plan, claimId = null, telegramChatId = null) {
   const res = await fetch(`${APP_URL}/api/admin/users/activate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-secret': process.env.RAILWAY_API_SECRET || '' },
-    body: JSON.stringify({ email: email.trim().toLowerCase(), plan, claim_id: claimId }),
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+      plan,
+      claim_id:         claimId,
+      telegram_chat_id: telegramChatId ? String(telegramChatId) : null,
+    }),
   })
   const json = await res.json()
   if (!json.ok) throw new Error(json.error || 'Ошибка активации')
@@ -1693,7 +1698,7 @@ app.post('/telegram/webhook', async (req, res) => {
     const email = text.trim()
     await sendTo(chatId, `⏳ Активирую *${planInfo.name}* для \`${email}\`...`)
     try {
-      const result = await activateUserPlan(email, plan, claimId)
+      const result = await activateUserPlan(email, plan, claimId, userChatId)
       if (result.already_activated) {
         await sendTo(chatId, `⚠️ Заявка уже была активирована ранее для *${email}* — повторное начисление пропущено.`)
         return

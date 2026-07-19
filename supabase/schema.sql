@@ -45,6 +45,16 @@ alter table public.profiles add column if not exists referral_count integer not 
 alter table public.profiles add column if not exists referral_credits_earned integer not null default 0;
 alter table public.profiles add column if not exists encrypted_yt_key text;
 
+-- Migration: subscriptions v1 — two-wallet model
+alter table public.profiles add column if not exists plan_credits      integer     not null default 0;
+alter table public.profiles add column if not exists purchased_credits integer     not null default 0;
+alter table public.profiles add column if not exists plan_activated_at timestamptz;
+alter table public.profiles add column if not exists plan_expires_at   timestamptz;
+alter table public.profiles add column if not exists telegram_chat_id  text;
+
+-- Migration: wallet column on credit_transactions
+alter table public.credit_transactions add column if not exists wallet text;
+
 create table if not exists public.projects (
   id              uuid        default uuid_generate_v4() primary key,
   user_id         uuid        references public.profiles(id) on delete cascade not null,
@@ -162,38 +172,119 @@ create or replace trigger on_auth_user_created
 
 -- ─────────────────────────────────────────
 -- Credit functions (atomic, bypass RLS)
+-- Two-wallet model: plan_credits (expiring) + purchased_credits (eternal).
+-- profiles.credits is a materialized sum updated atomically by these RPCs only.
 -- ─────────────────────────────────────────
 
-create or replace function public.deduct_credits(
-  p_user_id   uuid,
-  p_amount    integer,
-  p_operation text,
+-- add_plan_credits: adds to expiring wallet; respects PLAN_MAX_CREDITS cap.
+-- Cap values MUST stay in sync with PLAN_MAX_CREDITS in src/lib/types.ts.
+create or replace function public.add_plan_credits(
+  p_user_id    uuid,
+  p_amount     integer,
+  p_operation  text,
+  p_project_id uuid default null
+)
+returns void as $$
+declare
+  v_plan     text;
+  v_max_cap  integer;
+  v_cur_plan integer;
+  v_to_add   integer;
+begin
+  select plan, plan_credits
+    into v_plan, v_cur_plan
+    from public.profiles
+    where id = p_user_id
+    for update;
+
+  v_max_cap := case v_plan
+    when 'basic'   then 160000
+    when 'starter' then 400000
+    when 'pro'     then 1000000
+    when 'agency'  then 3000000
+    else 10000  -- free
+  end;
+
+  v_to_add := greatest(0, least(p_amount, v_max_cap - v_cur_plan));
+
+  update public.profiles
+    set plan_credits = plan_credits + v_to_add,
+        credits      = credits      + v_to_add
+    where id = p_user_id;
+
+  insert into public.credit_transactions (user_id, amount, operation, project_id, wallet)
+    values (p_user_id, v_to_add, p_operation, p_project_id, 'plan');
+end;
+$$ language plpgsql security definer;
+
+-- add_purchased_credits: adds to eternal wallet, no cap.
+create or replace function public.add_purchased_credits(
+  p_user_id    uuid,
+  p_amount     integer,
+  p_operation  text,
+  p_project_id uuid default null
+)
+returns void as $$
+begin
+  update public.profiles
+    set purchased_credits = purchased_credits + p_amount,
+        credits           = credits           + p_amount
+    where id = p_user_id;
+
+  insert into public.credit_transactions (user_id, amount, operation, project_id, wallet)
+    values (p_user_id, p_amount, p_operation, p_project_id, 'purchased');
+end;
+$$ language plpgsql security definer;
+
+-- spend_credits: deducts plan_credits first, then purchased_credits.
+-- Returns {success, remaining, from_plan, from_purchased}.
+create or replace function public.spend_credits(
+  p_user_id    uuid,
+  p_amount     integer,
+  p_operation  text,
   p_project_id uuid default null
 )
 returns json as $$
 declare
-  v_credits integer;
+  v_plan_cr    integer;
+  v_purch_cr   integer;
+  v_from_plan  integer;
+  v_from_purch integer;
 begin
-  select credits into v_credits
-  from public.profiles
-  where id = p_user_id
-  for update;
+  select plan_credits, purchased_credits
+    into v_plan_cr, v_purch_cr
+    from public.profiles
+    where id = p_user_id
+    for update;
 
-  if v_credits < p_amount then
-    return json_build_object('success', false, 'remaining', v_credits);
+  if v_plan_cr + v_purch_cr < p_amount then
+    return json_build_object('success', false, 'remaining', v_plan_cr + v_purch_cr);
   end if;
 
+  v_from_plan  := least(p_amount, v_plan_cr);
+  v_from_purch := p_amount - v_from_plan;
+
   update public.profiles
-  set credits = credits - p_amount
-  where id = p_user_id;
+    set plan_credits      = plan_credits      - v_from_plan,
+        purchased_credits = purchased_credits - v_from_purch,
+        credits           = credits           - p_amount
+    where id = p_user_id;
 
-  insert into public.credit_transactions (user_id, amount, operation, project_id)
-  values (p_user_id, -p_amount, p_operation, p_project_id);
+  insert into public.credit_transactions (user_id, amount, operation, project_id, wallet)
+    values (p_user_id, -p_amount, p_operation, p_project_id, 'mixed');
 
-  return json_build_object('success', true, 'remaining', v_credits - p_amount);
+  return json_build_object(
+    'success',        true,
+    'remaining',      v_plan_cr + v_purch_cr - p_amount,
+    'from_plan',      v_from_plan,
+    'from_purchased', v_from_purch
+  );
 end;
 $$ language plpgsql security definer;
 
+-- add_credits: legacy entrypoint — routes to purchased_credits (eternal, no cap).
+-- All existing callers (refunds, Paddle topups, referral bonuses, admin adjustments)
+-- naturally belong in the eternal wallet. Use add_plan_credits() for subscriptions.
 create or replace function public.add_credits(
   p_user_id    uuid,
   p_amount     integer,
@@ -203,11 +294,57 @@ create or replace function public.add_credits(
 returns void as $$
 begin
   update public.profiles
-  set credits = credits + p_amount
-  where id = p_user_id;
+    set purchased_credits = purchased_credits + p_amount,
+        credits           = credits           + p_amount
+    where id = p_user_id;
 
-  insert into public.credit_transactions (user_id, amount, operation, project_id)
-  values (p_user_id, p_amount, p_operation, p_project_id);
+  insert into public.credit_transactions (user_id, amount, operation, project_id, wallet)
+    values (p_user_id, p_amount, p_operation, p_project_id, 'purchased');
+end;
+$$ language plpgsql security definer;
+
+-- deduct_credits: two-wallet spend; backward-compat return format {success, remaining}.
+create or replace function public.deduct_credits(
+  p_user_id    uuid,
+  p_amount     integer,
+  p_operation  text,
+  p_project_id uuid default null
+)
+returns json as $$
+declare
+  v_plan_cr    integer;
+  v_purch_cr   integer;
+  v_from_plan  integer;
+  v_from_purch integer;
+begin
+  select plan_credits, purchased_credits
+    into v_plan_cr, v_purch_cr
+    from public.profiles
+    where id = p_user_id
+    for update;
+
+  if v_plan_cr + v_purch_cr < p_amount then
+    return json_build_object('success', false, 'remaining', v_plan_cr + v_purch_cr);
+  end if;
+
+  v_from_plan  := least(p_amount, v_plan_cr);
+  v_from_purch := p_amount - v_from_plan;
+
+  update public.profiles
+    set plan_credits      = plan_credits      - v_from_plan,
+        purchased_credits = purchased_credits - v_from_purch,
+        credits           = credits           - p_amount
+    where id = p_user_id;
+
+  insert into public.credit_transactions (user_id, amount, operation, project_id, wallet)
+    values (p_user_id, -p_amount, p_operation, p_project_id, 'mixed');
+
+  return json_build_object(
+    'success',        true,
+    'remaining',      v_plan_cr + v_purch_cr - p_amount,
+    'from_plan',      v_from_plan,
+    'from_purchased', v_from_purch
+  );
 end;
 $$ language plpgsql security definer;
 
