@@ -64,7 +64,7 @@ function MediaBadge({ project }: { project: Project }) {
         style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
         title="Медиа будут удалены при следующем запуске уборки (04:00 UTC)"
       >
-        Удаление при ближайшей уборке — скачайте
+        ожидает уборки
       </span>
     )
   }
