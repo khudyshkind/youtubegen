@@ -396,9 +396,9 @@ export async function POST(req: NextRequest) {
       }),
     ])
 
-    const text1  = (msg1.content[0]  as { text: string }).text
-    const text2a = (msg2a.content[0] as { text: string }).text
-    const text2b = (msg2b.content[0] as { text: string }).text
+    const text1  = ((msg1.content  as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
+    const text2a = ((msg2a.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
+    const text2b = ((msg2b.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
     console.log('[channel-plan] claude1  tokens:', msg1.usage.input_tokens, 'out:', msg1.usage.output_tokens, 'stop:', msg1.stop_reason)
     console.log('[channel-plan] claude2a tokens:', msg2a.usage.input_tokens, 'out:', msg2a.usage.output_tokens)
     console.log('[channel-plan] claude2b tokens:', msg2b.usage.input_tokens, 'out:', msg2b.usage.output_tokens)

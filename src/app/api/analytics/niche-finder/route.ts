@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
     })
     console.log('[niche-finder] claude1 tokens:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0)
     if (msg1.stop_reason === 'max_tokens') console.warn('[niche-finder] claude1 truncated by max_tokens')
-    const text1 = (msg1.content[0] as { text: string }).text
+    const text1 = ((msg1.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
     const { niches } = parseClaudeJson<{ niches: NicheItem[] }>(text1, 'claude1')
     if (!niches?.length) throw new Error('No niches returned from Claude')
 
@@ -251,8 +251,8 @@ export async function POST(req: NextRequest) {
       }),
     ])
 
-    const text2a = (msg2a.content[0] as { text: string }).text
-    const text2b = (msg2b.content[0] as { text: string }).text
+    const text2a = ((msg2a.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
+    const text2b = ((msg2b.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
     console.log('[niche-finder] claude2a raw:', text2a.substring(0, 500))
     console.log('[niche-finder] claude2b raw:', text2b.substring(0, 500))
     console.log('[niche-finder] claude2a tokens:', msg2a.usage.input_tokens, 'out:', msg2a.usage.output_tokens)

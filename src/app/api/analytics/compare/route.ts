@@ -291,8 +291,8 @@ ${channelBlocks}
       }),
     ])
 
-    const text1 = (msg1.content[0] as { text: string }).text
-    const text2 = (msg2.content[0] as { text: string }).text
+    const text1 = ((msg1.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
+    const text2 = ((msg2.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
     console.log('[compare] claude1 raw:', text1.substring(0, 300))
     console.log('[compare] claude2 raw:', text2.substring(0, 300))
     if (msg1.stop_reason === 'max_tokens') console.warn('[compare] claude1 truncated by max_tokens')

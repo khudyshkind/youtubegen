@@ -350,7 +350,7 @@ ${videoLines}`
     console.log('[rising] cache input:', msg.usage.input_tokens, 'cache_read:', msg.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg.usage.cache_creation_input_tokens ?? 0)
     if (msg.stop_reason === 'max_tokens') console.warn('[rising-stars] claude truncated by max_tokens')
 
-    const claudeText = (msg.content[0] as { type: string; text: string }).text
+    const claudeText = ((msg.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
 
     let claudeResult: {
       channels: Array<{ name: string; growth_reason: string; strategy: string; key_takeaway: string }>

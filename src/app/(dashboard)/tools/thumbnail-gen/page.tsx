@@ -41,7 +41,6 @@ const STYLE_OPTIONS: { value: string; label: string }[] = [
 ]
 
 const BASE_COST = CREDIT_COSTS.thumbnail
-const REF_EXTRA  = 2
 
 function ThumbnailContent() {
   const { t } = useLang()
@@ -88,7 +87,7 @@ function ThumbnailContent() {
       .catch(() => {})
   }, [runId])
 
-  const cost = BASE_COST + (refUrl ? REF_EXTRA : 0)
+  const cost = BASE_COST
 
   async function handleRefUpload(file: File) {
     if (!file.type.startsWith('image/')) { setError('Поддерживаются только изображения'); return }

@@ -537,7 +537,7 @@ export async function POST(req: NextRequest) {
     })
     console.log('[channel] msg1 input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0)
     if (msg1.stop_reason === 'max_tokens') console.warn('[channel] claude1 truncated')
-    const text1 = (msg1.content[0] as { text: string }).text
+    const text1 = ((msg1.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
 
     interface Overview {
       upload_frequency: string
@@ -559,7 +559,7 @@ export async function POST(req: NextRequest) {
     })
     console.log('[channel] msg2 input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0)
     if (msg2.stop_reason === 'max_tokens') console.warn('[channel] claude2 truncated')
-    const text2 = (msg2.content[0] as { text: string }).text
+    const text2 = ((msg2.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
 
     interface Formats {
       best_formats: Array<{ name: string; avg_views: number; example?: string } | string>

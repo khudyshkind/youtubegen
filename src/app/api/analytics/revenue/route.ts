@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
       messages: [{ role: 'user', content: `Ниша: ${niche}\nРынок аудитории: ${countryLabel}` }],
     })
     if (msg.stop_reason === 'max_tokens') console.warn('[revenue] claude truncated by max_tokens')
-    const raw = (msg.content[0] as { text: string }).text
+    const raw = ((msg.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
 
     interface RpmData {
       rpm_min: number

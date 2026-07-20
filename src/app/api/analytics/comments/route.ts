@@ -280,7 +280,7 @@ export async function POST(req: NextRequest) {
       system: [{ type: 'text', text: getCommentsPrompt(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: `Видео/канал на тему: "${topic}"\n\n${selectedComments.length} комментариев:\n${commentsText}` }],
     })
-    const raw = (msg.content[0] as { text: string }).text
+    const raw = ((msg.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
     console.log('[comments] claude raw:', raw.substring(0, 300))
     console.log('[comments] cache input:', msg.usage.input_tokens, 'cache_read:', msg.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg.usage.cache_creation_input_tokens ?? 0)
     if (msg.stop_reason === 'max_tokens') console.warn('[comments] claude truncated by max_tokens')

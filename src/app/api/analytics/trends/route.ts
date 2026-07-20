@@ -247,7 +247,7 @@ export async function POST(req: NextRequest) {
     })
     console.log('[trends] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
     if (msg1.stop_reason === 'max_tokens') console.warn('[trends] claude1 truncated by max_tokens')
-    const text1 = (msg1.content[0] as { text: string }).text
+    const text1 = ((msg1.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
 
     interface TrendList {
       trends: Array<{ topic: string; urgency: string; reason: string }>
@@ -265,7 +265,7 @@ export async function POST(req: NextRequest) {
     })
     console.log('[trends] msg2 cache input:', msg2.usage.input_tokens, 'cache_read:', msg2.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg2.usage.cache_creation_input_tokens ?? 0)
     if (msg2.stop_reason === 'max_tokens') console.warn('[trends] claude2 truncated by max_tokens')
-    const text2 = (msg2.content[0] as { text: string }).text
+    const text2 = ((msg2.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
 
     interface VideoIdeas {
       video_ideas: Array<{ trend: string; ideas: string[] }>

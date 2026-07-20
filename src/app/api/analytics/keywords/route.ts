@@ -344,8 +344,8 @@ export async function POST(req: NextRequest) {
       }),
     ])
 
-    const text1 = (msg1.content[0] as { text: string }).text
-    const text2 = (msg2.content[0] as { text: string }).text
+    const text1 = ((msg1.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
+    const text2 = ((msg2.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text) ?? ''
     console.log('[keywords] claude1 raw:', text1.substring(0, 300))
     console.log('[keywords] claude2 raw:', text2.substring(0, 300))
     console.log('[keywords] msg1 cache input:', msg1.usage.input_tokens, 'cache_read:', msg1.usage.cache_read_input_tokens ?? 0, 'cache_write:', msg1.usage.cache_creation_input_tokens ?? 0)
