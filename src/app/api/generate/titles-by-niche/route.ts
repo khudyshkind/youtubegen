@@ -178,20 +178,17 @@ export async function POST(request: NextRequest) {
 
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-5',
-      max_tokens: 2000,
+      max_tokens: 4000,
       messages: [{ role: 'user', content: prompt }],
     })
 
     const block = msg.content[0]
-    if (block.type !== 'text') {
-      return NextResponse.json({ ok: false, error: 'Ошибка анализа' }, { status: 500 })
+    if (!block || block.type !== 'text' || !block.text) {
+      console.error('[titles-by-niche] unexpected Claude response:', JSON.stringify(msg.content).slice(0, 300))
+      return NextResponse.json({ ok: false, error: 'Нейросеть вернула неожиданный ответ — попробуйте ещё раз' }, { status: 500 })
     }
 
     const parsed = parseClaudeJson<TitlesOutput>(block.text, 'titles-by-niche')
-    if (!parsed || !Array.isArray(parsed.titles) || !Array.isArray(parsed.hooks)) {
-      console.error('[titles-by-niche] invalid Claude response:', block.text.slice(0, 300))
-      return NextResponse.json({ ok: false, error: 'Некорректный ответ от нейросети' }, { status: 500 })
-    }
 
     await spendCredits(user.id, cost, 'titles_by_niche')
 

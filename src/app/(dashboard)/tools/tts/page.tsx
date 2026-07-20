@@ -97,7 +97,9 @@ function TtsContent() {
   const audioRef   = useRef<HTMLAudioElement>(null)
   const previewRef = useRef<HTMLAudioElement>(null)
 
-  // Restore from ?run=
+  const LS_KEY = 'tts_last_run'
+
+  // Restore from ?run= query param (dashboard "open" link)
   useEffect(() => {
     if (!runId) return
     fetch(`/api/projects/${runId}`)
@@ -113,6 +115,42 @@ function TtsContent() {
       .catch(() => {})
   }, [runId])
 
+  // Restore in-progress async run from localStorage (closed-tab recovery)
+  useEffect(() => {
+    if (runId) return  // ?run= takes priority
+    try {
+      const raw = localStorage.getItem(LS_KEY)
+      if (!raw) return
+      const { id, startedAt } = JSON.parse(raw) as { id: string; startedAt: number }
+      const ageMs = Date.now() - startedAt
+      if (ageMs > 30 * 60 * 1000) { localStorage.removeItem(LS_KEY); return }  // 30 min max
+      fetch(`/api/projects/${id}`)
+        .then(r => r.json())
+        .then(json => {
+          const p = json.data?.project
+          if (!json.ok || !p) { localStorage.removeItem(LS_KEY); return }
+          if (p.audio_url) {
+            setAudioUrl(p.audio_url)
+            setSavedId(id)
+            localStorage.removeItem(LS_KEY)
+          } else if (p.status === 'failed') {
+            setError('Предыдущий синтез не удался — попробуйте снова')
+            localStorage.removeItem(LS_KEY)
+          } else if (p.status === 'generating_audio' && ageMs < 15 * 60 * 1000) {
+            setSavedId(id)
+            setPollId(id)
+            setProcessing(true)  // resume polling
+          } else {
+            // status still 'generating_audio' but >15 min = stale / orphan
+            setError('Синтез занял слишком долго — попробуйте снова')
+            localStorage.removeItem(LS_KEY)
+          }
+        })
+        .catch(() => {})
+    } catch { /* ignore localStorage parse errors */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Poll for audio_url when async synthesis is in progress
   useEffect(() => {
     if (!pollId || !processing) return
@@ -126,11 +164,13 @@ function TtsContent() {
           setAudioUrl(p.audio_url)
           setProcessing(false)
           setPollId(null)
+          localStorage.removeItem(LS_KEY)
           void refreshCredits()
         } else if (p.status === 'failed') {
           setError('Синтез не удался — попробуйте ещё раз')
           setProcessing(false)
           setPollId(null)
+          localStorage.removeItem(LS_KEY)
         }
       } catch { /* network error — keep polling */ }
     }, 4000)
@@ -280,10 +320,11 @@ function TtsContent() {
       }
 
       if (json.data?.processing && json.data.tool_run_id) {
-        // Async engine dispatched to Railway — start polling
+        // Async engine dispatched to Railway — start polling + persist for closed-tab recovery
         setSavedId(json.data.tool_run_id)
         setPollId(json.data.tool_run_id)
         setProcessing(true)
+        localStorage.setItem(LS_KEY, JSON.stringify({ id: json.data.tool_run_id, startedAt: Date.now() }))
       } else if (json.data?.audio_url) {
         // Sync engine — immediate result
         setAudioUrl(json.data.audio_url)
