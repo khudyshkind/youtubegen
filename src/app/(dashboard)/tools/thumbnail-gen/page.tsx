@@ -2,7 +2,6 @@
 
 import { useState, useRef, Suspense, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
-import Image from 'next/image'
 import Link from 'next/link'
 import { useLang } from '@/hooks/useLang'
 import { refreshCredits } from '@/lib/refresh-credits'
@@ -281,7 +280,8 @@ function ThumbnailContent() {
           </div>
           {refUrl ? (
             <div className="relative w-full rounded-xl overflow-hidden" style={{ paddingTop: '56.25%' }}>
-              <Image src={refPreview || refUrl} alt="reference" fill className="object-cover" />
+              <img src={refPreview || refUrl} alt="reference"
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
             </div>
           ) : (
             <label
@@ -299,7 +299,7 @@ function ThumbnailContent() {
                 : <span className="text-2xl">🖼️</span>
               }
               <span className="text-xs text-slate-500">
-                {refUploading ? 'Загрузка...' : 'Нажмите, чтобы выбрать референс (+2 кр.)'}
+                {refUploading ? 'Загрузка...' : 'Нажмите, чтобы выбрать референс'}
               </span>
             </label>
           )}
@@ -352,17 +352,27 @@ function ThumbnailContent() {
             </div>
 
             <div className="relative w-full rounded-xl overflow-hidden" style={{ paddingTop: '56.25%' }}>
-              <Image src={thumbUrl} alt={title} fill className="object-cover" />
+              <img src={thumbUrl} alt={title}
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <a
-                href={thumbUrl} download="thumbnail.png"
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const blob = await fetch(thumbUrl).then(r => r.blob())
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url; a.download = 'thumbnail.png'; a.click()
+                    URL.revokeObjectURL(url)
+                  } catch { window.open(thumbUrl, '_blank') }
+                }}
                 className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg"
                 style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', color: '#60a5fa' }}
               >
                 ↓ {t('tools.thumb_download')}
-              </a>
+              </button>
               {bgUrl && textMode !== 'ai' && (
                 <button
                   type="button" onClick={() => generate({ reuseBackground: true })} disabled={generating}
