@@ -41,6 +41,8 @@ interface AudioRequest {
   text: string
   voice_id: string
   project_id?: string
+  // tool_run=true → no project_id; route creates a tool_run DB record and returns tool_run_id
+  tool_run?: boolean
   // ownScript=true → text was typed by user (not AI-generated), apply TTS normalization
   own_script?: boolean
   script_lang?: string
@@ -545,6 +547,7 @@ export async function POST(request: NextRequest) {
       text,
       voice_id,
       project_id,
+      tool_run = false,
       own_script = false,
       script_lang = 'ru',
       stability = 0.5,
@@ -567,6 +570,14 @@ export async function POST(request: NextRequest) {
     const validEngines: AudioEngine[] = ['secretvoicer', 'elevenlabs', 'openai', 'google', 'apihost', 'voicer']
     if (!validEngines.includes(engine)) {
       return NextResponse.json({ ok: false, error: 'Неверный движок TTS' }, { status: 400 })
+    }
+
+    // tool_run mode only supports sync engines; async engines require a real project_id
+    if (tool_run && (engine === 'secretvoicer' || engine === 'voicer')) {
+      return NextResponse.json(
+        { ok: false, error: 'В режиме инструмента поддерживаются только синхронные движки (ElevenLabs/OpenAI/Google/APIHOST)' },
+        { status: 400 }
+      )
     }
 
     // Server-side plan gate: voicer is only available to paid plans
@@ -807,9 +818,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Получен пустой аудио буфер' }, { status: 502 })
     }
 
+    // In tool_run mode without a project_id: create a tool_run record first so the audio
+    // is stored under the record's UUID — retention can then find it via audio_url IS NOT NULL
+    let toolRunId: string | null = null
+    if (tool_run && !project_id) {
+      const { data: runRow } = await supabase.from('projects').insert({
+        user_id: user.id,
+        type: 'tool_run',
+        title: 'Озвучка текста',
+        topic: text.slice(0, 500),
+        status: 'completed',
+        image_style: 'tts',
+        credits_spent: cost,
+      }).select('id').single()
+      toolRunId = runRow?.id ?? null
+    }
+
     // Upload to Supabase Storage
     const serviceClient = createServiceClient()
-    const storagePath = `${user.id}/${project_id ?? 'tmp'}/audio.mp3`
+    const effectivePid = project_id ?? toolRunId ?? `tmp_${Date.now()}`
+    const storagePath = `${user.id}/${effectivePid}/audio.mp3`
 
     const { error: uploadError } = await serviceClient.storage
       .from('audio')
@@ -822,7 +850,7 @@ export async function POST(request: NextRequest) {
 
     const { data: { publicUrl } } = serviceClient.storage.from('audio').getPublicUrl(storagePath)
 
-    await spendCredits(user.id, cost, `audio_${engine}`, project_id)
+    await spendCredits(user.id, cost, `audio_${engine}`, project_id ?? toolRunId ?? undefined)
 
     if (project_id) {
       await supabase
@@ -835,12 +863,25 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', project_id)
         .eq('user_id', user.id)
+    } else if (toolRunId) {
+      // tool_run mode: only update audio_url, keep status=completed
+      await supabase
+        .from('projects')
+        .update({ audio_url: publicUrl })
+        .eq('id', toolRunId)
+        .eq('user_id', user.id)
     }
 
-    void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id, chunks: chunks.length })
+    void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id: project_id ?? toolRunId, chunks: chunks.length, tool_run })
     // DB stores the clean URL (publicUrl). The response adds ?v= so the browser
     // treats each generation as a distinct resource and doesn't replay cached audio.
-    return NextResponse.json({ ok: true, data: { audio_url: `${publicUrl}?v=${Date.now()}` } })
+    return NextResponse.json({
+      ok: true,
+      data: {
+        audio_url: `${publicUrl}?v=${Date.now()}`,
+        ...(toolRunId ? { tool_run_id: toolRunId } : {}),
+      },
+    })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/audio] unexpected error:', msg)

@@ -21,7 +21,7 @@ const MONTSERRAT_BLACK = readFileSync(
 export const maxDuration = 120
 
 interface ThumbnailRequest {
-  project_id: string
+  project_id?: string
   title: string
   topic: string
   bg_url?: string
@@ -598,9 +598,9 @@ export async function POST(request: NextRequest) {
     const body: ThumbnailRequest = await request.json()
     const { project_id, title, topic, bg_url, dry_run, custom_prompt, ref_style, ref_url, text_mode = 'overlay', image_style } = body
 
-    if (!project_id || !title?.trim() || !topic?.trim()) {
+    if (!title?.trim() || !topic?.trim()) {
       return NextResponse.json(
-        { ok: false, error: 'project_id, title и topic обязательны' },
+        { ok: false, error: 'title и topic обязательны' },
         { status: 400 },
       )
     }
@@ -628,6 +628,23 @@ export async function POST(request: NextRequest) {
     const check = await requireCredits(user.id, 'thumbnail', supabase)
     if (!check.ok) return NextResponse.json(check, { status: 402 })
 
+    // tool_run mode: no project_id supplied → create a placeholder record now so files are
+    // stored under its UUID and retention can find them via thumbnail_url IS NOT NULL
+    let toolRunId: string | null = null
+    if (!project_id) {
+      const { data: runRow } = await supabase.from('projects').insert({
+        user_id: user.id,
+        type: 'tool_run',
+        title: title.trim().slice(0, 200),
+        topic: topic.trim().slice(0, 500),
+        status: 'completed',
+        image_style: 'thumbnail-gen',
+        credits_spent: CREDIT_COSTS.thumbnail,
+      }).select('id').single()
+      toolRunId = runRow?.id ?? null
+    }
+    const effectivePid = project_id ?? toolRunId ?? `tmp_${Date.now()}`
+
     const serviceClient = createServiceClient()
     let bgDataUrl: string
     let storedBgUrl: string
@@ -638,7 +655,7 @@ export async function POST(request: NextRequest) {
       bgDataUrl = await fetchAsBase64(bg_url)
       const { data: { publicUrl } } = serviceClient.storage
         .from('images')
-        .getPublicUrl(`${user.id}/${project_id}/thumbnail_bg.jpg`)
+        .getPublicUrl(`${user.id}/${effectivePid}/thumbnail_bg.jpg`)
       storedBgUrl = publicUrl
     } else {
       const rawPrompt = custom_prompt?.trim() || (
@@ -674,7 +691,7 @@ export async function POST(request: NextRequest) {
       // Detect actual format to set correct content-type (GPT/Gemini return PNG, Flux JPEG)
       const bgMime = bgDataUrl.split(';')[0].split(':')[1] ?? 'image/jpeg'
       const bgExt = bgMime.includes('png') ? 'png' : 'jpg'
-      const bgPath = `${user.id}/${project_id}/thumbnail_bg.${bgExt}`
+      const bgPath = `${user.id}/${effectivePid}/thumbnail_bg.${bgExt}`
       const rawBuf = Buffer.from(bgDataUrl.split(',')[1], 'base64')
       await serviceClient.storage.from('images').upload(bgPath, rawBuf, {
         contentType: bgMime,
@@ -697,7 +714,7 @@ export async function POST(request: NextRequest) {
       thumbBuf = Buffer.from(bgDataUrl.split(',')[1], 'base64')
     }
 
-    const thumbPath = `${user.id}/${project_id}/thumbnail.png`
+    const thumbPath = `${user.id}/${effectivePid}/thumbnail.png`
     await serviceClient.storage.from('images').upload(thumbPath, thumbBuf, {
       contentType: 'image/png',
       upsert: true,
@@ -706,13 +723,21 @@ export async function POST(request: NextRequest) {
       .from('images')
       .getPublicUrl(thumbPath)
 
-    await supabase
-      .from('projects')
-      .update({ thumbnail_url: thumbUrl, thumbnail_text_mode: text_mode })
-      .eq('id', project_id)
-      .eq('user_id', user.id)
+    if (project_id) {
+      await supabase
+        .from('projects')
+        .update({ thumbnail_url: thumbUrl, thumbnail_text_mode: text_mode })
+        .eq('id', project_id)
+        .eq('user_id', user.id)
+    } else if (toolRunId) {
+      await supabase
+        .from('projects')
+        .update({ thumbnail_url: thumbUrl })
+        .eq('id', toolRunId)
+        .eq('user_id', user.id)
+    }
 
-    await spendCredits(user.id, CREDIT_COSTS.thumbnail, 'thumbnail', project_id)
+    await spendCredits(user.id, CREDIT_COSTS.thumbnail, 'thumbnail', project_id ?? toolRunId ?? undefined)
 
     const ts = Date.now()
     return NextResponse.json({
@@ -720,6 +745,7 @@ export async function POST(request: NextRequest) {
       data: {
         thumbnail_url: `${thumbUrl}?t=${ts}`,
         bg_url: `${storedBgUrl}?t=${ts}`,
+        ...(toolRunId ? { tool_run_id: toolRunId } : {}),
         // Included for testing: shows what parameters Claude chose for this specific image
         overlay_params: overlayParams,
       },

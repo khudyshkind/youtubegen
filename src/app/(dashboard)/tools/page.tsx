@@ -32,15 +32,36 @@ const TOOL_CARDS = [
     descKey: 'tools.card_uniqueizer_desc' as const,
     accent: { bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.2)', hover: 'rgba(245,158,11,0.35)', color: '#fbbf24' },
   },
+  {
+    slug: 'tts',
+    emoji: '🎙️',
+    titleKey: 'tools.card_tts' as const,
+    descKey: 'tools.card_tts_desc' as const,
+    accent: { bg: 'rgba(236,72,153,0.08)', border: 'rgba(236,72,153,0.2)', hover: 'rgba(236,72,153,0.35)', color: '#f472b6' },
+  },
+  {
+    slug: 'thumbnail-gen',
+    emoji: '🖼️',
+    titleKey: 'tools.card_thumb' as const,
+    descKey: 'tools.card_thumb_desc' as const,
+    accent: { bg: 'rgba(249,115,22,0.08)', border: 'rgba(249,115,22,0.2)', hover: 'rgba(249,115,22,0.35)', color: '#fb923c' },
+  },
+  {
+    slug: 'titles-by-niche',
+    emoji: '📊',
+    titleKey: 'tools.card_titles_niche' as const,
+    descKey: 'tools.card_titles_niche_desc' as const,
+    accent: { bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)', hover: 'rgba(6,182,212,0.35)', color: '#22d3ee' },
+  },
 ]
 
 export default function ToolsPage() {
   const { t } = useLang()
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-100">{t('tools.title')}</h1>
+        <h1 className="text-2xl font-bold text-slate-100">{t('tools.hub_title')}</h1>
         <p className="text-slate-500 text-sm mt-1">{t('tools.hub_subtitle')}</p>
       </div>
 

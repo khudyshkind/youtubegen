@@ -49,6 +49,9 @@ export const CREDIT_COSTS = {
   enhance:   630,
   repack:    700, // 3 repacked formats per run (TG post + Dzen article + thread)
 
+  // Titles & hooks by niche (YouTube search + Claude pattern analysis)
+  titles_by_niche:   900,
+
   // YouTube analytics
   niche_analysis:    1800,
   niche_finder:      7000,

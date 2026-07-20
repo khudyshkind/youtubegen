@@ -903,7 +903,8 @@ export const translations = {
     'tools.cost_info':     'симв. · Стоимость:',
 
     // ── Tools hub ─────────────────────────────────────────────────────────────
-    'tools.hub_subtitle':       'Быстрые инструменты без создания видео',
+    'tools.hub_title':          'Инструменты',
+    'tools.hub_subtitle':       'Быстрые инструменты — без создания видео целиком',
     'tools.card_script':        'Сценарий для видео',
     'tools.card_script_desc':   'Профессиональный сценарий по теме — с планом или без',
     'tools.card_seo':           'SEO-пакет для ролика',
@@ -912,6 +913,12 @@ export const translations = {
     'tools.card_repack_desc':   'Telegram-пост, статья для Дзена и тред за один запрос',
     'tools.card_uniqueizer':    'Уникализатор текста',
     'tools.card_uniqueizer_desc':'Перепишите текст для антиплагиата и живого звучания',
+    'tools.card_tts':            'Озвучка текста',
+    'tools.card_tts_desc':       'Синтез речи через ElevenLabs, OpenAI, Google или APIHOST',
+    'tools.card_thumb':          'Обложка для видео',
+    'tools.card_thumb_desc':     'Сгенерируйте превью с ИИ-картинкой и заголовком',
+    'tools.card_titles_niche':   'Названия по нише',
+    'tools.card_titles_niche_desc': 'Топ-50 YouTube → паттерны → 10 названий + 5 хуков',
 
     // ── Script-gen tool page ───────────────────────────────────────────────────
     'tools.script_title':       'Сценарий для видео',
@@ -961,6 +968,41 @@ export const translations = {
     'tools.repack_tg_label':    'Telegram-пост',
     'tools.repack_dzen_label':  'Статья для Дзена',
     'tools.repack_thread_label':'Тред',
+
+    // ── TTS tool ──────────────────────────────────────────────────────────────
+    'tools.tts_title':          'Озвучка текста',
+    'tools.tts_subtitle':       'Синтез речи через ElevenLabs, OpenAI, Google TTS или APIHOST',
+    'tools.tts_engine_label':   'Движок',
+    'tools.tts_voice_label':    'Голос',
+    'tools.tts_input_ph':       'Вставьте текст для озвучки...',
+    'tools.tts_gen_btn':        'Создать озвучку',
+    'tools.tts_generating':     'Синтезирую речь...',
+    'tools.tts_result_label':   'Результат',
+    'tools.tts_download':       'Скачать MP3',
+
+    // ── Thumbnail tool ────────────────────────────────────────────────────────
+    'tools.thumb_title':        'Обложка для видео',
+    'tools.thumb_subtitle':     'Сгенерируйте превью YouTube с ИИ-картинкой и заголовком',
+    'tools.thumb_title_label':  'Заголовок видео',
+    'tools.thumb_title_ph':     'Например: Топ-10 фактов о Луне',
+    'tools.thumb_topic_label':  'Тема / описание',
+    'tools.thumb_topic_ph':     'Кратко опишите содержание видео...',
+    'tools.thumb_gen_btn':      'Создать обложку',
+    'tools.thumb_generating':   'Генерирую обложку...',
+    'tools.thumb_result_label': 'Обложка',
+    'tools.thumb_download':     'Скачать PNG',
+    'tools.thumb_err_required': 'Введите заголовок и тему',
+
+    // ── Titles by niche tool ──────────────────────────────────────────────────
+    'tools.titles_title':         'Названия по нише',
+    'tools.titles_subtitle':      'Анализ топ-50 видео YouTube → паттерны → 10 названий + 5 хуков',
+    'tools.titles_niche_label':   'Ниша / ключевое слово',
+    'tools.titles_niche_ph':      'Например: история средневековья, психология денег...',
+    'tools.titles_gen_btn':       'Найти паттерны и создать названия',
+    'tools.titles_generating':    'Анализирую YouTube и генерирую названия...',
+    'tools.titles_patterns_label':'Паттерны из топ-50',
+    'tools.titles_list_label':    '10 названий для вашей ниши',
+    'tools.titles_hooks_label':   '5 хуков (первые 15-20 сек)',
 
     // ── Tool run shared ────────────────────────────────────────────────────────
     'tools.saving':             'Сохраняю в историю...',
@@ -2070,6 +2112,7 @@ export const translations = {
     'tools.cost_info':     'chars · Cost:',
 
     // ── Tools hub ─────────────────────────────────────────────────────────────
+    'tools.hub_title':          'Tools',
     'tools.hub_subtitle':       'Quick tools without creating a full video',
     'tools.card_script':        'Video Script',
     'tools.card_script_desc':   'Professional script on any topic — with or without an outline',
@@ -2079,6 +2122,12 @@ export const translations = {
     'tools.card_repack_desc':   'Telegram post, long-read article, and thread in one request',
     'tools.card_uniqueizer':    'Text Uniqueizer',
     'tools.card_uniqueizer_desc':'Rewrite text for plagiarism checks and natural sound',
+    'tools.card_tts':           'Text to Speech',
+    'tools.card_tts_desc':      'Synthesize voice via ElevenLabs, OpenAI, Google or APIHOST',
+    'tools.card_thumb':         'Video Thumbnail',
+    'tools.card_thumb_desc':    'Generate a preview with AI image and title overlay',
+    'tools.card_titles_niche':  'Titles by Niche',
+    'tools.card_titles_niche_desc': 'Top-50 YouTube → patterns → 10 titles + 5 hooks',
 
     // ── Script-gen tool page ───────────────────────────────────────────────────
     'tools.script_title':       'Video Script',
@@ -2124,6 +2173,41 @@ export const translations = {
     'tools.repack_tg_label':    'Social post',
     'tools.repack_dzen_label':  'Long-form article',
     'tools.repack_thread_label':'Thread',
+
+    // ── TTS tool ──────────────────────────────────────────────────────────────
+    'tools.tts_title':          'Text to Speech',
+    'tools.tts_subtitle':       'Synthesize voice from any text — choose engine and voice',
+    'tools.tts_engine_label':   'Synthesis engine',
+    'tools.tts_voice_label':    'Voice',
+    'tools.tts_input_ph':       'Paste text to synthesize...',
+    'tools.tts_gen_btn':        'Synthesize',
+    'tools.tts_generating':     'Synthesizing...',
+    'tools.tts_result_label':   'Audio result',
+    'tools.tts_download':       'Download MP3',
+
+    // ── Thumbnail tool ────────────────────────────────────────────────────────
+    'tools.thumb_title':        'Video Thumbnail',
+    'tools.thumb_subtitle':     'Generate a YouTube thumbnail with AI image and title overlay',
+    'tools.thumb_title_label':  'Video title',
+    'tools.thumb_title_ph':     'E.g. 10 AI Tools That Will Change Your Life',
+    'tools.thumb_topic_label':  'Topic or keywords',
+    'tools.thumb_topic_ph':     'E.g. productivity, AI, automation',
+    'tools.thumb_gen_btn':      'Generate thumbnail',
+    'tools.thumb_generating':   'Generating...',
+    'tools.thumb_result_label': 'Thumbnail',
+    'tools.thumb_download':     'Download PNG',
+    'tools.thumb_err_required': 'Enter title and topic',
+
+    // ── Titles by niche tool ──────────────────────────────────────────────────
+    'tools.titles_title':       'Titles by Niche',
+    'tools.titles_subtitle':    'Analyzes top-50 YouTube videos and generates 10 titles + 5 hooks',
+    'tools.titles_niche_label': 'Niche or keyword',
+    'tools.titles_niche_ph':    'E.g. AI tools, personal finance, fitness',
+    'tools.titles_gen_btn':     'Find patterns and generate',
+    'tools.titles_generating':  'Analyzing YouTube and generating...',
+    'tools.titles_patterns_label': 'Patterns from top videos',
+    'tools.titles_list_label':  'Generated titles',
+    'tools.titles_hooks_label': 'Hooks',
 
     // ── Tool run shared ────────────────────────────────────────────────────────
     'tools.saving':             'Saving to history...',

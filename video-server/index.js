@@ -2399,7 +2399,7 @@ async function cleanupExpiredMedia() {
       `select=id,updated_at,media_expires_at` +
       `&media_purged_at=is.null` +
       `&status=not.like.generating_*` +
-      `&or=(audio_url.not.is.null,video_url.not.is.null,scene_images.not.is.null)` +
+      `&or=(audio_url.not.is.null,video_url.not.is.null,scene_images.not.is.null,thumbnail_url.not.is.null)` +
       `&limit=2000`
     )
     for (const p of liveRows) {
@@ -2427,7 +2427,7 @@ async function cleanupExpiredMedia() {
       `&media_purged_at=is.null` +
       `&status=not.like.generating_*` +
       `&updated_at=lt.${isoThreshold}` +
-      `&or=(audio_url.not.is.null,video_url.not.is.null,scene_images.not.is.null)` +
+      `&or=(audio_url.not.is.null,video_url.not.is.null,scene_images.not.is.null,thumbnail_url.not.is.null)` +
       `&limit=500`
     )
   } catch (e) { console.error(`${tag} candidates query:`, e.message) }
