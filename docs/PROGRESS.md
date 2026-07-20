@@ -119,6 +119,22 @@
 
 ---
 
+---
+
+## Фаза 10 — Wave 1 Acceptance + Tools expansion
+
+- [x] ✅ `ScriptSettingsForm.tsx` — shared settings component (Step1Topic + script-gen tool parity)
+- [x] ✅ `Step1Topic.tsx` — uses ScriptSettingsForm instead of inline settings
+- [x] ✅ `/api/projects/from-tool/route.ts` — creates type='project' with pre-filled script+plan
+- [x] ✅ `tools/script-gen/page.tsx` — two-phase plan, ScriptSettingsForm, save errors, real project on "Use in Studio"
+- [x] ✅ `tools/seo`, `tools/repack`, `tools/uniqueize` — saveError visible, max-w-[1360px], "Use in Studio" via from-tool
+- [x] ✅ `src/lib/anthropic-retry.ts` — isAnthropicOverload + withAnthropicRetry (16±4s)
+- [x] ✅ script/plan/seo/repack routes — maxRetries:0, withAnthropicRetry, OVERLOADED response
+- [x] ✅ Tools pages — «Повторить →» button on 529 error, plan sections preserved
+- [ ] ⏳ **Owner:** Run Migration 005 SQL (adds `type` column to projects table) in Supabase Dashboard
+
+---
+
 ## Сводка
 
 | Фаза | Прогресс |
@@ -134,4 +150,5 @@
 | Фаза 7 — Рост и монетизация | 5 / 5 |
 | Фаза 8 — i18n + Уникализация + APIHOST TTS | 12 / 12 |
 | Фаза 9 — YouTube Analytics | 11 / 11 |
-| **Итого** | **75 / 75** ✅ |
+| Фаза 10 — Wave 1 Acceptance + Tools | 8 / 9 (pending Migration 005) |
+| **Итого** | **83 / 84** |

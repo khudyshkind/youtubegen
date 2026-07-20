@@ -115,6 +115,26 @@ NEXT_PUBLIC_APP_URL=
 <!-- ### YYYY-MM-DD — Краткое описание -->
 <!-- Что сделано, какие файлы созданы/изменены -->
 
+### 2026-07-20 — Wave 1 acceptance + 529 overload fix
+
+**Wave 1 acceptance (SHA 9b8a3b1):**
+- `src/components/shared/ScriptSettingsForm.tsx` — extracted shared settings form (language, duration, model, style, tone, audience, hook, CTA, scene_markers, pauses); используется в Step1Topic и script-gen tool
+- `src/components/studio/Step1Topic.tsx` — заменён inline на `<ScriptSettingsForm>` + `<LanguageSelect>`
+- `src/app/api/projects/from-tool/route.ts` — новый API: создаёт type='project' в projects table (script+plan_sections pre-filled); нужна Migration 005 (column type)
+- `src/app/(dashboard)/tools/script-gen/page.tsx` — полный ScriptSettingsForm, two-phase plan (400 кр. → редакт. разделы → script), save errors visible, "Use in Studio" создаёт реальный проект
+- seo/repack/uniqueize pages — saveError visible, max-w-[1360px]
+- `src/lib/i18n.ts` — ключи script_gen_plan_btn, script_gen_from_plan_btn, script_plan_label, script_plan_edit_hint, save_fail, use_studio_creating, err_overload, retry
+
+**529 overload fix (SHA 32fb7c8):**
+- `src/lib/anthropic-retry.ts` — `isAnthropicOverload()` (Anthropic.APIError status 529/503) + `withAnthropicRetry()` (16±4s delay, one retry)
+- script/plan/seo/repack routes — `maxRetries:0` в SDK, retry через withAnthropicRetry, OVERLOADED response code
+- script-gen/seo/repack pages — «Повторить →» кнопка в error block, plan sections НЕ сбрасываются при ошибке
+- Spend order CONFIRMED CORRECT везде (AFTER successful generation)
+- Root cause 529: script=2458 output tokens vs plan=~1100 (2.2×); SDK default retries слишком быстрые (0.5s+1s)
+
+**Pending owner action:** Migration 005 SQL — добавляет column `type` в projects table. Без неё from-tool inserts падают.
+Деплой: SHA 32fb7c8 → https://youtubegen.vercel.app
+
 ### 2026-06-16 — История отчётов аналитики (вкладка История)
 Реализовано сохранение и просмотр отчётов аналитики:
 - `supabase/schema.sql` — таблица `analytics_reports` (user_id, type, title, query, result, created_at)

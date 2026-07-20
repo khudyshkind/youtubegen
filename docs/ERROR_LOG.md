@@ -20,6 +20,19 @@
 
 ---
 
+### [2026-07-20] Антропик 529 на /generate/script (инструментный путь)
+**Симптом:** Plan генерируется стабильно, script в tools падает с 529 повторяемо
+**Причина:** Script запрашивает 2458 output tokens vs план ~1100 (2.2×). Под overload Anthropic первыми отклоняет тяжёлые запросы. SDK default retries (maxRetries=2, задержки 0.5s+1s) слишком быстрые — ретрай через 1 секунду ловит тот же overload.
+**Решение:**
+- `src/lib/anthropic-retry.ts` — `isAnthropicOverload()` (Anthropic.APIError status 529/503) + `withAnthropicRetry()` (16±4s jitter, один retry)
+- script/plan/seo/repack routes — `maxRetries: 0` в Anthropic client, app-level retry через withAnthropicRetry
+- Catch: OVERLOADED code → `{ ok: false, code: 'OVERLOADED', error: 'Нейросеть перегружена...' }` status 503
+- Tools pages — проверять `json.code === 'OVERLOADED'` → показывать tools.err_overload + кнопка «Повторить →»
+**Важно:** `Anthropic.APIStatusError` НЕ существует в используемой версии SDK — правильно `Anthropic.APIError` (имеет поле `.status`)
+**Файлы:** `src/lib/anthropic-retry.ts` (новый), `src/app/api/generate/script/route.ts`, `src/app/api/generate/plan/route.ts`, `src/app/api/generate/seo/route.ts`, `src/app/api/generate/repack/route.ts`, `src/lib/i18n.ts`, tools pages
+
+---
+
 ### [2026-06-16] История отчётов пустая — permission denied на analytics_reports
 **Симптом:** Вкладка "История" пустая, в логах Vercel: `[reports] fetch error: permission denied for table analytics_reports`
 **Причина:** Новые таблицы, созданные вручную в Supabase SQL Editor, не наследуют default privileges автоматически. `service_role` не получил GRANT на таблицу, хотя service_role должен обходить RLS.
