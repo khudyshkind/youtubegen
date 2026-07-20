@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase-server'
 import type { SeoData } from '@/lib/types'
 
 interface SaveRunRequest {
-  tool_type: 'script-gen' | 'seo' | 'repack'
+  tool_type: 'script-gen' | 'seo' | 'repack' | 'uniqueize'
   title: string
   input_text: string
   result_text?: string

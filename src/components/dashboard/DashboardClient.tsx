@@ -89,6 +89,7 @@ const TOOL_EMOJI: Record<string, string> = {
   'script-gen': '📝',
   'seo':        '🎯',
   'repack':     '🔁',
+  'uniqueize':  '✍️',
 }
 
 function toolRunHref(project: Project): string {
