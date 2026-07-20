@@ -572,13 +572,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Неверный движок TTS' }, { status: 400 })
     }
 
-    // tool_run mode only supports sync engines; async engines require a real project_id
-    if (tool_run && (engine === 'secretvoicer' || engine === 'voicer')) {
-      return NextResponse.json(
-        { ok: false, error: 'В режиме инструмента поддерживаются только синхронные движки (ElevenLabs/OpenAI/Google/APIHOST)' },
-        { status: 400 }
-      )
-    }
+
 
     // Server-side plan gate: voicer is only available to paid plans
     if (engine === 'voicer') {
@@ -606,7 +600,20 @@ export async function POST(request: NextRequest) {
     // ── Async path: SV/Voicer → Railway worker ───────────────────────────────
     // requireCreditsAmount already checked above; credits spent after job is confirmed
     if (engine === 'secretvoicer' || engine === 'voicer') {
-      if (!project_id) {
+      // tool_run without project_id: create a placeholder project so Railway can write audio_url back
+      let effectivePid = project_id ?? null
+      if (!effectivePid && tool_run) {
+        const { data: runRow } = await supabase.from('projects').insert({
+          user_id:     user.id,
+          type:        'tool_run',
+          title:       'Озвучка текста',
+          topic:       text.slice(0, 500),
+          status:      'generating_audio',
+          image_style: 'tts',
+        }).select('id').single()
+        effectivePid = runRow?.id ?? null
+      }
+      if (!effectivePid) {
         return NextResponse.json(
           { ok: false, error: 'project_id обязателен для async-озвучки' },
           { status: 400 }
@@ -618,14 +625,14 @@ export async function POST(request: NextRequest) {
         : (STYLE_EXAGGERATION[voice_style] ?? 0)
 
       // A. Upload raw script text — worker downloads via text_url and strips markers itself
-      const textUrl = await uploadTextToStorage(text, user.id, project_id)
+      const textUrl = await uploadTextToStorage(text, user.id, effectivePid)
 
       // B. Write dispatch inputs to projects; worker writes only result (audio_url + generating_subtitles)
       await supabase.from('projects').update({
         voice_id,
         status:  'generating_audio',
         ...(own_script && text ? { script: text } : {}),
-      }).eq('id', project_id).eq('user_id', user.id)
+      }).eq('id', effectivePid).eq('user_id', user.id)
 
       // C. Submit job to Railway worker
       const railwayUrl    = env('RAILWAY_VIDEO_SERVER_URL').replace(/\/$/, '')
@@ -635,7 +642,7 @@ export async function POST(request: NextRequest) {
         headers: { 'Content-Type': 'application/json', 'x-api-secret': railwaySecret },
         body: JSON.stringify({
           user_id:          user.id,
-          project_id,
+          project_id:       effectivePid,
           engine,
           voice_id,
           text_url:         textUrl,
@@ -658,13 +665,18 @@ export async function POST(request: NextRequest) {
       if (!job_id) throw new Error('Railway /synthesize-audio: no job_id in response')
 
       // D. Spend credits after job confirmed created — mirrors sync (spend after Storage upload)
-      await spendCredits(user.id, cost, `audio_${engine}`, project_id)
+      await spendCredits(user.id, cost, `audio_${engine}`, effectivePid)
 
       // E. Record credits_charged for future refund if worker reports failure (handled in Step 4-5)
       const asyncServiceClient = createServiceClient()
       await asyncServiceClient.from('audio_jobs').update({ credits_charged: cost }).eq('id', job_id)
 
-      void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id, async: true })
+      void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id: effectivePid, async: true })
+
+      // tool_run: return tool_run_id so frontend can poll for audio_url
+      if (tool_run) {
+        return NextResponse.json({ ok: true, data: { processing: true, tool_run_id: effectivePid } })
+      }
       return NextResponse.json({ ok: true, job_id, status: 'pending' })
     }
     // ── Sync path: ElevenLabs / OpenAI / Google / APIHOST ────────────────────

@@ -990,7 +990,9 @@ export const translations = {
     'tools.tts_text_label':     'Ваш текст',
     'tools.tts_input_ph':       'Вставьте текст для озвучки...',
     'tools.tts_gen_btn':        'Создать озвучку',
-    'tools.tts_generating':     'Синтезирую речь...',
+    'tools.tts_generating':      'Синтезирую речь...',
+    'tools.tts_processing':      'Озвучка генерируется в фоне...',
+    'tools.tts_processing_hint': 'Обычно занимает 1–3 минуты. Не закрывайте страницу.',
     'tools.tts_result_label':   'Результат',
     'tools.tts_download':       'Скачать MP3',
 
@@ -2209,7 +2211,9 @@ export const translations = {
     'tools.tts_text_label':      'Your text',
     'tools.tts_input_ph':        'Paste text to synthesize...',
     'tools.tts_gen_btn':         'Synthesize',
-    'tools.tts_generating':      'Synthesizing...',
+    'tools.tts_generating':       'Synthesizing...',
+    'tools.tts_processing':       'Generating audio in background...',
+    'tools.tts_processing_hint':  'Usually takes 1–3 minutes. Keep this page open.',
     'tools.tts_result_label':    'Audio result',
     'tools.tts_download':        'Download MP3',
 

@@ -16,37 +16,31 @@ function SpinnerIcon({ className }: { className?: string }) {
     </svg>
   )
 }
-
 function PlayIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  )
+  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
 }
 function StopIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <rect x="6" y="6" width="12" height="12" />
-    </svg>
-  )
+  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" /></svg>
 }
 
-const SYNC_ENGINES: AudioEngine[] = ['elevenlabs', 'openai', 'google', 'apihost']
+// All 6 engines in display order (secretvoicer = Voice Standard, voicer = Voice Pro)
+const ALL_ENGINES: AudioEngine[] = ['secretvoicer', 'elevenlabs', 'voicer', 'openai', 'apihost', 'google']
 
-interface EngineCardMeta { voices: string; langs: string; price: string; available: boolean }
+interface EngineCardMeta { voices: string; langs: string; price: string; available: boolean; async: boolean }
 const ENGINE_CARD_META: Record<string, EngineCardMeta> = {
-  elevenlabs: { voices: '321 голос',     langs: '28 языков',      price: `${CREDIT_COSTS.audio_elevenlabs_per_1000} кр / 1000 симв`, available: true  },
-  openai:     { voices: '6 голосов',     langs: 'мультиязычный',  price: `${CREDIT_COSTS.audio_openai_per_1000} кр / 1000 симв`,     available: true  },
-  google:     { voices: '100+ голосов',  langs: 'мультиязычный',  price: `${CREDIT_COSTS.audio_google_per_1000} кр / 1000 симв`,     available: false },
-  apihost:    { voices: '3000+ голосов', langs: '83 языка',        price: `${CREDIT_COSTS.audio_apihost_basic_per_1000}–${CREDIT_COSTS.audio_apihost_studio_per_1000} кр / 1000 симв`, available: true  },
+  secretvoicer: { voices: '101 голос',     langs: 'RU/EN/ES/PT',   price: `${CREDIT_COSTS.audio_secretvoicer_per_1000} кр / 1000 симв`,   available: true,  async: true  },
+  elevenlabs:   { voices: '321 голос',     langs: '28 языков',      price: `${CREDIT_COSTS.audio_elevenlabs_per_1000} кр / 1000 симв`,   available: true,  async: false },
+  voicer:       { voices: '101 голос',     langs: 'мультиязычный', price: `${CREDIT_COSTS.audio_voicer_per_1000} кр / 1000 симв`,       available: true,  async: true  },
+  openai:       { voices: '6 голосов',     langs: 'мультиязычный', price: `${CREDIT_COSTS.audio_openai_per_1000} кр / 1000 симв`,       available: true,  async: false },
+  apihost:      { voices: '3000+ голосов', langs: '83 языка',       price: `${CREDIT_COSTS.audio_apihost_basic_per_1000}–${CREDIT_COSTS.audio_apihost_studio_per_1000} кр / 1000 симв`, available: true, async: false },
+  google:       { voices: '100+ голосов',  langs: 'мультиязычный', price: `${CREDIT_COSTS.audio_google_per_1000} кр / 1000 симв`,       available: false, async: false },
 }
 
 const VOICE_STYLES = [
-  { key: 'neutral',        label: 'Нейтральный'  },
-  { key: 'conversational', label: 'Разговорный'  },
+  { key: 'neutral',        label: 'Нейтральный'   },
+  { key: 'conversational', label: 'Разговорный'   },
   { key: 'documentary',   label: 'Документальный' },
-  { key: 'emotional',     label: 'Эмоциональный' },
+  { key: 'emotional',     label: 'Эмоциональный'  },
 ]
 
 const OPENAI_VOICES = [
@@ -58,36 +52,45 @@ const OPENAI_VOICES = [
   { id: 'shimmer', label: 'Shimmer', gender: 'F' as const },
 ]
 
-interface NormVoice   { voice_id: string; name: string; preview_url: string | null; gender: 'M' | 'F' | null }
-interface GoogleVoice { name: string; languageCodes: string[]; gender: 'M' | 'F' | null }
+interface NormVoice      { voice_id: string; name: string; preview_url: string | null; gender: 'M' | 'F' | null }
+interface GoogleVoice    { name: string; languageCodes: string[]; gender: 'M' | 'F' | null }
 interface ApihostVoiceItem { voice_id: string; name: string; type: ApihostVoiceType; preview_url: string | null }
-
 type GenderFilter = 'all' | 'M' | 'F'
+
+// Engines that support ElevenLabs-style voice settings (style, stability, similarity, speed)
+const ELEVEN_SETTINGS_ENGINES: AudioEngine[] = ['secretvoicer', 'elevenlabs', 'voicer']
+// Engines with speed slider only
+const SPEED_ONLY_ENGINES: AudioEngine[] = ['openai']
+// Engines using secretvoicer voice list (same ElevenLabs voice IDs)
+const SV_VOICE_ENGINES: AudioEngine[] = ['secretvoicer', 'voicer']
 
 function TtsContent() {
   const { t, lang } = useLang()
   const searchParams = useSearchParams()
   const runId = searchParams.get('run')
 
-  const [text, setText]                   = useState('')
-  const [engine, setEngine]               = useState<AudioEngine>('elevenlabs')
-  const [voiceId, setVoiceId]             = useState('')
-  const [apihostType, setApihostType]     = useState<ApihostVoiceType>('standard')
-  const [outputLang, setOutputLang]       = useState('ru')
-  const [genderFilter, setGenderFilter]   = useState<GenderFilter>('all')
-  const [voiceStyle, setVoiceStyle]       = useState('neutral')
-  const [stability, setStability]         = useState(0.5)
-  const [similarity, setSimilarity]       = useState(0.75)
-  const [speed, setSpeed]                 = useState(1.0)
-  const [generating, setGenerating]       = useState(false)
-  const [error, setError]                 = useState('')
-  const [audioUrl, setAudioUrl]           = useState('')
-  const [savedId, setSavedId]             = useState<string | null>(null)
+  const [text, setText]               = useState('')
+  const [engine, setEngine]           = useState<AudioEngine>('secretvoicer')
+  const [voiceId, setVoiceId]         = useState('')
+  const [apihostType, setApihostType] = useState<ApihostVoiceType>('standard')
+  const [outputLang, setOutputLang]   = useState('ru')
+  const [genderFilter, setGenderFilter] = useState<GenderFilter>('all')
+  const [voiceStyle, setVoiceStyle]   = useState('neutral')
+  const [stability, setStability]     = useState(0.5)
+  const [similarity, setSimilarity]   = useState(0.75)
+  const [speed, setSpeed]             = useState(1.0)
+  const [generating, setGenerating]   = useState(false)
+  const [processing, setProcessing]   = useState(false)   // async poll in progress
+  const [pollId, setPollId]           = useState<string | null>(null)
+  const [error, setError]             = useState('')
+  const [audioUrl, setAudioUrl]       = useState('')
+  const [savedId, setSavedId]         = useState<string | null>(null)
   const [previewPlaying, setPreviewPlaying] = useState(false)
-  const [previewUrl, setPreviewUrl]       = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl]   = useState<string | null>(null)
 
-  const [elevenVoices, setElevenVoices]   = useState<NormVoice[]>([])
-  const [googleVoices, setGoogleVoices]   = useState<GoogleVoice[]>([])
+  const [svVoices, setSvVoices]         = useState<NormVoice[]>([])       // secretvoicer + voicer
+  const [elevenVoices, setElevenVoices] = useState<NormVoice[]>([])
+  const [googleVoices, setGoogleVoices] = useState<GoogleVoice[]>([])
   const [apihostVoices, setApihostVoices] = useState<ApihostVoiceItem[]>([])
   const [voicesLoading, setVoicesLoading] = useState(false)
 
@@ -110,6 +113,30 @@ function TtsContent() {
       .catch(() => {})
   }, [runId])
 
+  // Poll for audio_url when async synthesis is in progress
+  useEffect(() => {
+    if (!pollId || !processing) return
+    const timer = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/projects/${pollId}`)
+        const j = await r.json()
+        const p = j.data?.project
+        if (!j.ok || !p) return
+        if (p.audio_url) {
+          setAudioUrl(p.audio_url)
+          setProcessing(false)
+          setPollId(null)
+          void refreshCredits()
+        } else if (p.status === 'failed') {
+          setError('Синтез не удался — попробуйте ещё раз')
+          setProcessing(false)
+          setPollId(null)
+        }
+      } catch { /* network error — keep polling */ }
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [pollId, processing])
+
   // Load voices when engine or language changes
   useEffect(() => {
     setGenderFilter('all')
@@ -117,14 +144,21 @@ function TtsContent() {
     setPreviewPlaying(false)
     if (previewRef.current) { previewRef.current.pause(); previewRef.current.src = '' }
 
-    if (engine === 'openai') {
-      setVoiceId('alloy')
-      return
-    }
+    if (engine === 'openai') { setVoiceId('alloy'); return }
     setVoicesLoading(true)
     setVoiceId('')
 
-    if (engine === 'elevenlabs') {
+    if (SV_VOICE_ENGINES.includes(engine)) {
+      fetch(`/api/voices/secretvoicer?language=${outputLang}`)
+        .then(r => r.json())
+        .then(json => {
+          const voices: NormVoice[] = json.data?.voices ?? []
+          setSvVoices(voices)
+          if (voices[0]) { setVoiceId(voices[0].voice_id); setPreviewUrl(voices[0].preview_url ?? null) }
+        })
+        .catch(() => {})
+        .finally(() => setVoicesLoading(false))
+    } else if (engine === 'elevenlabs') {
       fetch(`/api/voices?language=${outputLang}`)
         .then(r => r.json())
         .then(json => {
@@ -150,28 +184,23 @@ function TtsContent() {
         .then(r => r.json())
         .then(json => {
           const voices: ApihostVoiceItem[] = (json.data?.voices ?? []).map((v: { voice_id: string; name: string; type?: string; preview_url?: string | null }) => ({
-            voice_id:    v.voice_id,
-            name:        v.name,
-            type:        (v.type ?? 'standard') as ApihostVoiceType,
-            preview_url: v.preview_url ?? null,
+            voice_id: v.voice_id, name: v.name,
+            type: (v.type ?? 'standard') as ApihostVoiceType, preview_url: v.preview_url ?? null,
           }))
           setApihostVoices(voices)
-          if (voices[0]) {
-            setVoiceId(voices[0].voice_id)
-            setApihostType(voices[0].type)
-            setPreviewUrl(voices[0].preview_url ?? null)
-          }
+          if (voices[0]) { setVoiceId(voices[0].voice_id); setApihostType(voices[0].type); setPreviewUrl(voices[0].preview_url ?? null) }
         })
         .catch(() => {})
         .finally(() => setVoicesLoading(false))
     }
   }, [engine, outputLang]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Filtered voice lists
-  const filteredEleven = genderFilter === 'all' ? elevenVoices : elevenVoices.filter(v => v.gender === genderFilter)
+  // Current voice list for render
+  const currentVoices: NormVoice[] = SV_VOICE_ENGINES.includes(engine) ? svVoices : elevenVoices
+  const filteredVoices = genderFilter === 'all' ? currentVoices : currentVoices.filter(v => v.gender === genderFilter)
   const filteredGoogle = genderFilter === 'all' ? googleVoices : googleVoices.filter(v => v.gender === genderFilter)
+  const showGenderFilter = engine === 'elevenlabs' || SV_VOICE_ENGINES.includes(engine) || engine === 'google'
 
-  // Dynamic cost
   const chars = text.length
   const cost = chars > 0 ? audioCost(chars, engine, engine === 'apihost' ? apihostType : undefined) : 0
   const ratePerK = engine === 'apihost'
@@ -180,7 +209,10 @@ function TtsContent() {
 
   function onVoiceChange(id: string) {
     setVoiceId(id)
-    if (engine === 'elevenlabs') {
+    if (SV_VOICE_ENGINES.includes(engine)) {
+      const v = svVoices.find(v => v.voice_id === id)
+      setPreviewUrl(v?.preview_url ?? null)
+    } else if (engine === 'elevenlabs') {
       const v = elevenVoices.find(v => v.voice_id === id)
       setPreviewUrl(v?.preview_url ?? null)
     } else if (engine === 'apihost') {
@@ -197,15 +229,12 @@ function TtsContent() {
 
   function togglePreview() {
     if (!previewUrl) return
-    if (previewPlaying) {
-      stopPreview()
-    } else {
-      if (previewRef.current) {
-        previewRef.current.src = previewUrl
-        previewRef.current.play().catch(() => {})
-        setPreviewPlaying(true)
-        previewRef.current.onended = () => setPreviewPlaying(false)
-      }
+    if (previewPlaying) { stopPreview(); return }
+    if (previewRef.current) {
+      previewRef.current.src = previewUrl
+      previewRef.current.play().catch(() => {})
+      setPreviewPlaying(true)
+      previewRef.current.onended = () => setPreviewPlaying(false)
     }
   }
 
@@ -215,25 +244,23 @@ function TtsContent() {
     setError('')
     setAudioUrl('')
     setSavedId(null)
+    setProcessing(false)
+    setPollId(null)
     setGenerating(true)
 
     try {
       const body: Record<string, unknown> = {
-        engine,
-        text,
-        voice_id:    voiceId,
-        tool_run:    true,
-        own_script:  true,
-        script_lang: outputLang,
+        engine, text, voice_id: voiceId,
+        tool_run: true, own_script: true, script_lang: outputLang,
         apihost_voice_type: apihostType,
       }
-      if (engine === 'elevenlabs') {
+      if (ELEVEN_SETTINGS_ENGINES.includes(engine)) {
         body.stability        = stability
         body.similarity_boost = similarity
         body.voice_style      = voiceStyle
         body.speech_rate      = speed
       }
-      if (engine === 'openai') {
+      if (SPEED_ONLY_ENGINES.includes(engine)) {
         body.speech_rate = speed
       }
 
@@ -241,14 +268,28 @@ function TtsContent() {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       })
       if (res.status === 504 || res.status === 524) throw new Error(t('tools.err_timeout'))
-      const json: { ok: boolean; data?: { audio_url: string; tool_run_id?: string }; error?: string; code?: string } = await res.json()
+      const json: {
+        ok: boolean
+        data?: { audio_url?: string; tool_run_id?: string; processing?: boolean }
+        error?: string; code?: string
+      } = await res.json()
+
       if (!json.ok) {
         if (json.code === 'NO_CREDITS') { setError(t('tools.err_credits')); return }
         throw new Error(json.error ?? t('tools.err_gen'))
       }
-      setAudioUrl(json.data!.audio_url)
-      if (json.data?.tool_run_id) setSavedId(json.data.tool_run_id)
-      void refreshCredits()
+
+      if (json.data?.processing && json.data.tool_run_id) {
+        // Async engine dispatched to Railway — start polling
+        setSavedId(json.data.tool_run_id)
+        setPollId(json.data.tool_run_id)
+        setProcessing(true)
+      } else if (json.data?.audio_url) {
+        // Sync engine — immediate result
+        setAudioUrl(json.data.audio_url)
+        if (json.data.tool_run_id) setSavedId(json.data.tool_run_id)
+        void refreshCredits()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('tools.err_gen'))
     } finally {
@@ -264,9 +305,9 @@ function TtsContent() {
       : { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)' }
   }
 
-  const showGenderFilter = engine === 'elevenlabs' || engine === 'google'
-  const showElevenSettings = engine === 'elevenlabs'
-  const showSpeedSetting   = engine === 'elevenlabs' || engine === 'openai'
+  const showElevenSettings = ELEVEN_SETTINGS_ENGINES.includes(engine)
+  const showSpeedOnly      = SPEED_ONLY_ENGINES.includes(engine)
+  const isAsync            = ENGINE_CARD_META[engine]?.async ?? false
 
   return (
     <div className="max-w-[860px] mx-auto px-4 sm:px-6 py-8">
@@ -281,13 +322,13 @@ function TtsContent() {
 
       <div className="rounded-2xl p-6 flex flex-col gap-6" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
 
-        {/* Engine cards 2×2 */}
+        {/* Engine cards 3×2 */}
         <div>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">{t('tools.tts_engine_label')}</p>
-          <div className="grid grid-cols-2 gap-2.5">
-            {SYNC_ENGINES.map(e => {
-              const meta  = ENGINE_CARD_META[e]!
-              const disp  = ENGINE_DISPLAY[e]!
+          <div className="grid grid-cols-3 gap-2.5">
+            {ALL_ENGINES.map(e => {
+              const meta = ENGINE_CARD_META[e]!
+              const disp = ENGINE_DISPLAY[e]!
               const active = engineActive(e)
               return (
                 <button
@@ -298,10 +339,10 @@ function TtsContent() {
                   className="flex flex-col gap-1.5 p-4 rounded-xl text-left transition-all"
                   style={engineStyle(e, meta.available)}
                 >
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center justify-between gap-1">
                     <span className={`text-sm font-semibold ${active ? 'text-violet-300' : 'text-slate-200'}`}>{disp.name}</span>
                     {!meta.available && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.08)', color: '#64748b' }}>Скоро</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0" style={{ background: 'rgba(255,255,255,0.08)', color: '#64748b' }}>Скоро</span>
                     )}
                   </div>
                   <p className="text-xs text-slate-400 leading-snug">{disp.descRu}</p>
@@ -317,7 +358,7 @@ function TtsContent() {
           </div>
         </div>
 
-        {/* Language selector */}
+        {/* Language + gender filter */}
         <div className="flex gap-3 flex-wrap">
           <div className="flex-1 min-w-[160px]">
             <label className="text-xs font-medium text-slate-400 block mb-1.5">{t('tools.tts_lang_label')}</label>
@@ -327,20 +368,15 @@ function TtsContent() {
               className="w-full px-3 py-2.5 rounded-xl text-sm text-slate-300 cursor-pointer outline-none"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
             >
-              <option value="ru"  className="bg-slate-900">🇷🇺 Русский</option>
-              <option value="en"  className="bg-slate-900">🇬🇧 English</option>
-              <option value="de"  className="bg-slate-900">🇩🇪 Deutsch</option>
-              <option value="es"  className="bg-slate-900">🇪🇸 Español</option>
-              <option value="fr"  className="bg-slate-900">🇫🇷 Français</option>
-              <option value="it"  className="bg-slate-900">🇮🇹 Italiano</option>
-              <option value="pt"  className="bg-slate-900">🇵🇹 Português</option>
-              <option value="zh"  className="bg-slate-900">🇨🇳 中文</option>
-              <option value="ja"  className="bg-slate-900">🇯🇵 日本語</option>
-              <option value="ko"  className="bg-slate-900">🇰🇷 한국어</option>
+              <option value="ru" className="bg-slate-900">🇷🇺 Русский</option>
+              <option value="en" className="bg-slate-900">🇬🇧 English</option>
+              <option value="de" className="bg-slate-900">🇩🇪 Deutsch</option>
+              <option value="es" className="bg-slate-900">🇪🇸 Español</option>
+              <option value="fr" className="bg-slate-900">🇫🇷 Français</option>
+              <option value="it" className="bg-slate-900">🇮🇹 Italiano</option>
+              <option value="pt" className="bg-slate-900">🇵🇹 Português</option>
             </select>
           </div>
-
-          {/* Gender filter */}
           {showGenderFilter && (
             <div className="min-w-[140px]">
               <label className="text-xs font-medium text-slate-400 block mb-1.5">{t('tools.tts_gender_label')}</label>
@@ -383,6 +419,7 @@ function TtsContent() {
               </button>
             )}
           </div>
+
           {engine === 'openai' ? (
             <select
               value={voiceId}
@@ -390,7 +427,7 @@ function TtsContent() {
               className="w-full px-3 py-2.5 rounded-xl text-sm text-slate-300 cursor-pointer outline-none"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
             >
-              {(genderFilter === 'all' ? OPENAI_VOICES : OPENAI_VOICES.filter(v => v.gender === genderFilter || v.gender === null)).map(v => (
+              {OPENAI_VOICES.map(v => (
                 <option key={v.id} value={v.id} className="bg-slate-900">
                   {v.gender === 'M' ? '♂ ' : v.gender === 'F' ? '♀ ' : ''}{v.label}
                 </option>
@@ -400,19 +437,6 @@ function TtsContent() {
             <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs text-slate-500" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}>
               <SpinnerIcon className="w-3 h-3 animate-spin" /> Загрузка голосов...
             </div>
-          ) : engine === 'elevenlabs' ? (
-            <select
-              value={voiceId}
-              onChange={e => onVoiceChange(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl text-sm text-slate-300 cursor-pointer outline-none"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
-            >
-              {(filteredEleven.length ? filteredEleven : elevenVoices).map(v => (
-                <option key={v.voice_id} value={v.voice_id} className="bg-slate-900">
-                  {v.gender === 'M' ? '♂ ' : v.gender === 'F' ? '♀ ' : ''}{v.name}
-                </option>
-              ))}
-            </select>
           ) : engine === 'google' ? (
             <select
               value={voiceId}
@@ -426,7 +450,7 @@ function TtsContent() {
                 </option>
               ))}
             </select>
-          ) : (
+          ) : engine === 'apihost' ? (
             <select
               value={voiceId}
               onChange={e => onVoiceChange(e.target.value)}
@@ -437,10 +461,24 @@ function TtsContent() {
                 <option key={v.voice_id} value={v.voice_id} className="bg-slate-900">{v.name} ({v.type})</option>
               ))}
             </select>
+          ) : (
+            // secretvoicer, elevenlabs, voicer — all use NormVoice with gender
+            <select
+              value={voiceId}
+              onChange={e => onVoiceChange(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl text-sm text-slate-300 cursor-pointer outline-none"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              {(filteredVoices.length ? filteredVoices : currentVoices).map(v => (
+                <option key={v.voice_id} value={v.voice_id} className="bg-slate-900">
+                  {v.gender === 'M' ? '♂ ' : v.gender === 'F' ? '♀ ' : ''}{v.name}
+                </option>
+              ))}
+            </select>
           )}
         </div>
 
-        {/* ElevenLabs: style selector */}
+        {/* Voice style (secretvoicer, elevenlabs, voicer) */}
         {showElevenSettings && (
           <div>
             <label className="text-xs font-medium text-slate-400 block mb-2">{t('tools.tts_style_label')}</label>
@@ -463,37 +501,29 @@ function TtsContent() {
           </div>
         )}
 
-        {/* Sliders: speed + ElevenLabs specific */}
-        {(showSpeedSetting || showElevenSettings) && (
+        {/* Sliders */}
+        {(showElevenSettings || showSpeedOnly) && (
           <div className="flex flex-col gap-4">
-            {showSpeedSetting && (
-              <SliderRow
-                label={t('tools.tts_speed_label')}
-                value={speed}
-                min={0.7} max={1.2} step={0.05}
-                leftLabel={t('tools.tts_slow')}
-                rightLabel={t('tools.tts_fast')}
-                valueDisplay={`${speed.toFixed(2)}×`}
-                onChange={setSpeed}
-              />
-            )}
+            <SliderRow
+              label={t('tools.tts_speed_label')}
+              value={speed} min={0.7} max={1.2} step={0.05}
+              leftLabel={t('tools.tts_slow')} rightLabel={t('tools.tts_fast')}
+              valueDisplay={`${speed.toFixed(2)}×`}
+              onChange={setSpeed}
+            />
             {showElevenSettings && (
               <>
                 <SliderRow
                   label={t('tools.tts_stability_label')}
-                  value={stability}
-                  min={0} max={1} step={0.05}
-                  leftLabel={t('tools.tts_expressive')}
-                  rightLabel={t('tools.tts_stable')}
+                  value={stability} min={0} max={1} step={0.05}
+                  leftLabel={t('tools.tts_expressive')} rightLabel={t('tools.tts_stable')}
                   valueDisplay={`${Math.round(stability * 100)}%`}
                   onChange={setStability}
                 />
                 <SliderRow
                   label={t('tools.tts_similarity_label')}
-                  value={similarity}
-                  min={0} max={1} step={0.05}
-                  leftLabel={t('tools.tts_free')}
-                  rightLabel={t('tools.tts_precise')}
+                  value={similarity} min={0} max={1} step={0.05}
+                  leftLabel={t('tools.tts_free')} rightLabel={t('tools.tts_precise')}
                   valueDisplay={`${Math.round(similarity * 100)}%`}
                   onChange={setSimilarity}
                 />
@@ -507,13 +537,9 @@ function TtsContent() {
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-xs font-medium text-slate-400">{t('tools.tts_text_label')}</label>
             <span className="text-xs text-slate-600">
-              {chars > 0 ? `${chars} симв. · ` : ''}
-              <span className={cost > 0 ? 'text-slate-400' : 'text-slate-600'}>
-                {cost > 0 ? `${cost} кр.` : `0 кр.`}
-              </span>
-              {chars > 0 && (
-                <span className="ml-1 text-slate-600">(~{ratePerK})</span>
-              )}
+              {chars > 0 && <>{chars} симв. · </>}
+              <span className={cost > 0 ? 'text-slate-400' : 'text-slate-600'}>{cost} кр.</span>
+              {chars > 0 && <span className="ml-1 text-slate-600">(~{ratePerK})</span>}
             </span>
           </div>
           <textarea
@@ -524,13 +550,18 @@ function TtsContent() {
             className="w-full px-4 py-3 rounded-xl text-sm resize-y leading-relaxed"
             style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', outline: 'none' }}
           />
+          {isAsync && (
+            <p className="text-[11px] text-slate-600 mt-1.5">
+              ⏱ Этот движок генерирует в фоне — результат появится через 1–3 мин после запуска
+            </p>
+          )}
         </div>
 
-        {/* Generate */}
+        {/* Generate button */}
         <button
           type="button"
           onClick={handleGenerate}
-          disabled={generating || chars === 0}
+          disabled={generating || processing || chars === 0}
           className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold rounded-xl btn-gradient text-white transition-all disabled:opacity-60"
         >
           {generating ? (
@@ -546,11 +577,25 @@ function TtsContent() {
           </div>
         )}
 
+        {/* Async processing indicator */}
+        {processing && (
+          <div className="rounded-xl px-4 py-4 flex items-center gap-3" style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.25)' }}>
+            <SpinnerIcon className="w-5 h-5 animate-spin text-violet-400 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-violet-300">{t('tools.tts_processing')}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{t('tools.tts_processing_hint')}</p>
+            </div>
+            {savedId && (
+              <span className="ml-auto text-xs text-slate-600">{t('tools.saved')}</span>
+            )}
+          </div>
+        )}
+
         {/* Result */}
         {audioUrl && (
           <div className="rounded-xl p-4 flex flex-col gap-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
             <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-slate-400">
+              <p className="text.xs font-medium text-slate-400">
                 {t('tools.tts_result_label')}
                 {savedId && <span className="ml-2 text-green-500">{t('tools.saved')}</span>}
               </p>
@@ -576,8 +621,7 @@ function SliderRow({
   label, value, min, max, step, leftLabel, rightLabel, valueDisplay, onChange,
 }: {
   label: string; value: number; min: number; max: number; step: number
-  leftLabel: string; rightLabel: string; valueDisplay: string
-  onChange: (v: number) => void
+  leftLabel: string; rightLabel: string; valueDisplay: string; onChange: (v: number) => void
 }) {
   return (
     <div>
@@ -586,9 +630,7 @@ function SliderRow({
         <span className="text-xs font-medium text-violet-400">{valueDisplay}</span>
       </div>
       <input
-        type="range"
-        min={min} max={max} step={step}
-        value={value}
+        type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(parseFloat(e.target.value))}
         className="w-full accent-violet-500"
       />
