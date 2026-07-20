@@ -182,13 +182,14 @@ export async function POST(request: NextRequest) {
       messages: [{ role: 'user', content: prompt }],
     })
 
-    const block = msg.content[0]
-    if (!block || block.type !== 'text' || !block.text) {
-      console.error('[titles-by-niche] unexpected Claude response:', JSON.stringify(msg.content).slice(0, 300))
+    // claude-sonnet-5 returns a thinking block first; find the text block by type
+    const textBlock = (msg.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')
+    if (!textBlock || !textBlock.text) {
+      console.error('[titles-by-niche] no text block in response. types:', msg.content.map(b => b.type).join(','))
       return NextResponse.json({ ok: false, error: 'Нейросеть вернула неожиданный ответ — попробуйте ещё раз' }, { status: 500 })
     }
 
-    const parsed = parseClaudeJson<TitlesOutput>(block.text, 'titles-by-niche')
+    const parsed = parseClaudeJson<TitlesOutput>(textBlock.text, 'titles-by-niche')
 
     await spendCredits(user.id, cost, 'titles_by_niche')
 
