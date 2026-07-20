@@ -52,6 +52,7 @@ function SeoContent() {
   const [error, setError] = useState('')
   const [savedId, setSavedId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   // Load existing run
   useEffect(() => {
@@ -99,6 +100,7 @@ function SeoContent() {
 
   async function saveRun(inputText: string, seo: SeoData) {
     setSaving(true)
+    setSaveError('')
     try {
       const res = await fetch('/api/tools/save-run', {
         method: 'POST',
@@ -113,6 +115,9 @@ function SeoContent() {
       })
       const json: { ok: boolean; data?: { project_id: string } } = await res.json()
       if (json.ok) setSavedId(json.data!.project_id)
+      else setSaveError(t('tools.save_fail'))
+    } catch {
+      setSaveError(t('tools.save_fail'))
     } finally {
       setSaving(false)
     }
@@ -131,7 +136,7 @@ function SeoContent() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-6">
         <Link href="/tools" className="text-xs text-slate-500 hover:text-slate-400 transition-colors">{t('tools.back_to_tools')}</Link>
         <h1 className="text-2xl font-bold text-slate-100 mt-2">{t('tools.seo_title')}</h1>
@@ -193,6 +198,7 @@ function SeoContent() {
               <p className="text-xs font-medium text-slate-400">
                 {saving && <span className="text-slate-600">{t('tools.saving')}</span>}
                 {savedId && !saving && <span className="text-green-500">{t('tools.saved')}</span>}
+                {saveError && !saving && <span className="text-red-400">{saveError}</span>}
               </p>
               <button
                 type="button"

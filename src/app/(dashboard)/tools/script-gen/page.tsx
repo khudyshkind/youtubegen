@@ -1,13 +1,15 @@
 'use client'
 
 import { useState, useEffect, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useLang } from '@/hooks/useLang'
 import { useStudioStore } from '@/lib/studio-store'
 import { refreshCredits } from '@/lib/refresh-credits'
-import { SCRIPT_LANGUAGES } from '@/lib/languages'
 import { CREDIT_COSTS } from '@/lib/types'
+import type { PlanSection } from '@/lib/types'
+import ScriptSettingsForm, { DEFAULT_SCRIPT_SETTINGS } from '@/components/shared/ScriptSettingsForm'
+import type { ScriptSettings } from '@/components/shared/ScriptSettingsForm'
 
 function SpinnerIcon({ className }: { className?: string }) {
   return (
@@ -18,43 +20,40 @@ function SpinnerIcon({ className }: { className?: string }) {
   )
 }
 
-const NARRATIVE_STYLES = [
-  { value: 'storytelling',   labelRu: 'Сторителлинг',      labelEn: 'Storytelling' },
-  { value: 'science',        labelRu: 'Научпоп',            labelEn: 'Science pop' },
-  { value: 'documentary',    labelRu: 'Документальный',     labelEn: 'Documentary' },
-  { value: 'conversational', labelRu: 'Разговорный',        labelEn: 'Conversational' },
-  { value: 'children',       labelRu: 'Детский',            labelEn: 'For children' },
-]
-
-const TONES = [
-  { value: 'neutral',    labelRu: 'Нейтральный',    labelEn: 'Neutral' },
-  { value: 'emotional',  labelRu: 'Эмоциональный',  labelEn: 'Emotional' },
-  { value: 'humorous',   labelRu: 'Юмористический', labelEn: 'Humorous' },
-  { value: 'dramatic',   labelRu: 'Драматический',  labelEn: 'Dramatic' },
-  { value: 'inspiring',  labelRu: 'Вдохновляющий',  labelEn: 'Inspiring' },
-]
-
-const PLAN_MIN_DURATION = 5
-
 function ScriptGenContent() {
-  const { t, lang } = useLang()
+  const { t } = useLang()
+  const router = useRouter()
   const searchParams = useSearchParams()
   const runId = searchParams.get('run')
 
+  // Form state
   const [topic, setTopic] = useState('')
-  const [duration, setDuration] = useState(5)
-  const [language, setLanguage] = useState('ru')
-  const [narrativeStyle, setNarrativeStyle] = useState('storytelling')
-  const [tone, setTone] = useState('neutral')
+  const [settings, setSettings] = useState<ScriptSettings>(DEFAULT_SCRIPT_SETTINGS)
   const [withPlan, setWithPlan] = useState(false)
+
+  // Plan phase
+  const [planSections, setPlanSections] = useState<PlanSection[] | null>(null)
+
+  // Result
   const [resultScript, setResultScript] = useState('')
+  const [resultPlanSections, setResultPlanSections] = useState<PlanSection[] | null>(null)
+
+  // Generation state
   const [generating, setGenerating] = useState<'plan' | 'script' | null>(null)
-  const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
+
+  // Save state
   const [savedId, setSavedId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
-  // Load existing run from dashboard
+  // UI state
+  const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [usingStudio, setUsingStudio] = useState(false)
+
+  const PLAN_MIN_DURATION = 5
+
+  // Load ?run= from dashboard
   useEffect(() => {
     if (!runId) return
     fetch(`/api/projects/${runId}`)
@@ -64,6 +63,9 @@ function ScriptGenContent() {
           setResultScript(json.data.script)
           setTopic(json.data.topic ?? '')
           setSavedId(runId)
+          if (json.data.plan_sections) {
+            setResultPlanSections(json.data.plan_sections as PlanSection[])
+          }
         }
       })
       .catch(() => {})
@@ -71,68 +73,48 @@ function ScriptGenContent() {
 
   // Auto-enable plan when duration crosses threshold
   useEffect(() => {
-    if (duration >= PLAN_MIN_DURATION && !withPlan) setWithPlan(true)
-  }, [duration]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (settings.duration_minutes >= PLAN_MIN_DURATION && !withPlan) {
+      setWithPlan(true)
+    }
+  }, [settings.duration_minutes]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const planCost = withPlan ? CREDIT_COSTS.plan : 0
-  const scriptCost = CREDIT_COSTS.script_sonnet
-  const totalCost = planCost + scriptCost
+  function scriptCost() {
+    if (settings.model === 'claude-opus') return CREDIT_COSTS.script_opus
+    if (settings.model === 'gpt-4o') return CREDIT_COSTS.script_gpt
+    return CREDIT_COSTS.script_sonnet
+  }
 
-  async function handleGenerate() {
+  const isGenerating = generating !== null
+  const hasPlan = planSections !== null && planSections.length > 0
+
+  // Phase A: generate plan only
+  async function handleGeneratePlan() {
     if (!topic.trim()) { setError(t('tools.err_empty')); return }
     setError('')
+    setPlanSections(null)
     setResultScript('')
     setSavedId(null)
-
-    const commonParams = { topic, duration_minutes: duration, language, narrative_style: narrativeStyle, tone }
+    setSaveError('')
+    setGenerating('plan')
 
     try {
-      let planSections = undefined
-
-      if (withPlan) {
-        setGenerating('plan')
-        const planRes = await fetch('/api/generate/plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(commonParams),
-        })
-        const planJson: { ok: boolean; data?: { sections: unknown[] }; error?: string; code?: string } = await planRes.json()
-        if (!planJson.ok) {
-          if (planJson.code === 'NO_CREDITS') { setError(t('tools.err_credits')); return }
-          throw new Error(planJson.error ?? t('tools.err_gen'))
-        }
-        planSections = planJson.data!.sections
-      }
-
-      setGenerating('script')
-      const scriptRes = await fetch('/api/generate/script', {
+      const res = await fetch('/api/generate/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...commonParams,
-          model: 'claude-sonnet',
-          target_audience: 'wide',
-          hook: true,
-          hook_type: 'question',
-          cta: true,
-          scene_markers: false,
-          pauses: false,
-          plan_sections: planSections,
+          topic,
+          duration_minutes: settings.duration_minutes,
+          language: settings.language,
+          narrative_style: settings.narrative_style,
+          tone: settings.tone,
         }),
       })
-      if (scriptRes.status === 504 || scriptRes.status === 524) throw new Error(t('tools.err_timeout'))
-      const scriptJson: { ok: boolean; data?: { script: string }; error?: string; code?: string } = await scriptRes.json()
-      if (!scriptJson.ok) {
-        if (scriptJson.code === 'NO_CREDITS') { setError(t('tools.err_credits')); return }
-        throw new Error(scriptJson.error ?? t('tools.err_gen'))
+      const json: { ok: boolean; data?: { sections: PlanSection[] }; error?: string; code?: string } = await res.json()
+      if (!json.ok) {
+        if (json.code === 'NO_CREDITS') { setError(t('tools.err_credits')); return }
+        throw new Error(json.error ?? t('tools.err_gen'))
       }
-
-      const script = scriptJson.data!.script
-      setResultScript(script)
-      void refreshCredits()
-
-      // Background save to history
-      void saveRun(topic, script, scriptCost + planCost, language)
+      setPlanSections(json.data!.sections)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('tools.err_gen'))
     } finally {
@@ -140,8 +122,59 @@ function ScriptGenContent() {
     }
   }
 
-  async function saveRun(inputTopic: string, script: string, credits: number, lang: string) {
+  // Phase B or direct: generate script (with or without plan)
+  async function handleGenerateScript() {
+    if (!topic.trim()) { setError(t('tools.err_empty')); return }
+    setError('')
+    setResultScript('')
+    setSavedId(null)
+    setSaveError('')
+    setGenerating('script')
+
+    const usedPlanSections = hasPlan ? planSections : undefined
+
+    try {
+      const res = await fetch('/api/generate/script', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic,
+          duration_minutes: settings.duration_minutes,
+          language: settings.language,
+          model: settings.model,
+          narrative_style: settings.narrative_style,
+          tone: settings.tone,
+          target_audience: settings.target_audience,
+          hook: settings.hook,
+          hook_type: settings.hook_type,
+          cta: settings.cta,
+          scene_markers: settings.scene_markers,
+          pauses: settings.pauses,
+          plan_sections: usedPlanSections,
+        }),
+      })
+      if (res.status === 504 || res.status === 524) throw new Error(t('tools.err_timeout'))
+      const json: { ok: boolean; data?: { script: string }; error?: string; code?: string } = await res.json()
+      if (!json.ok) {
+        if (json.code === 'NO_CREDITS') { setError(t('tools.err_credits')); return }
+        throw new Error(json.error ?? t('tools.err_gen'))
+      }
+
+      const script = json.data!.script
+      setResultScript(script)
+      setResultPlanSections(usedPlanSections ?? null)
+      void refreshCredits()
+      await saveRun(topic, script, scriptCost() + (hasPlan ? CREDIT_COSTS.plan : 0), settings.language, usedPlanSections ?? null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('tools.err_gen'))
+    } finally {
+      setGenerating(null)
+    }
+  }
+
+  async function saveRun(inputTopic: string, script: string, credits: number, lang: string, sections: PlanSection[] | null) {
     setSaving(true)
+    setSaveError('')
     try {
       const res = await fetch('/api/tools/save-run', {
         method: 'POST',
@@ -155,10 +188,65 @@ function ScriptGenContent() {
           language: lang,
         }),
       })
-      const json: { ok: boolean; data?: { project_id: string } } = await res.json()
-      if (json.ok) setSavedId(json.data!.project_id)
+      const json: { ok: boolean; data?: { project_id: string }; error?: string } = await res.json()
+      if (!json.ok) {
+        setSaveError(t('tools.save_fail'))
+      } else {
+        setSavedId(json.data!.project_id)
+      }
+    } catch {
+      setSaveError(t('tools.save_fail'))
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleUseInStudio() {
+    if (!resultScript.trim()) return
+    setUsingStudio(true)
+    try {
+      const res = await fetch('/api/projects/from-tool', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: topic || t('tools.card_script'),
+          duration_minutes: settings.duration_minutes,
+          language: settings.language,
+          script: resultScript,
+          plan_sections: resultPlanSections ?? undefined,
+          credits_spent: scriptCost() + (resultPlanSections ? CREDIT_COSTS.plan : 0),
+        }),
+      })
+      const json: { ok: boolean; data?: { project: { id: string } }; error?: string } = await res.json()
+      if (!json.ok) throw new Error(json.error)
+      const projectId = json.data!.project.id
+
+      // Pre-populate studio store so ?from=tools path picks it up without resetting
+      const store = useStudioStore.getState()
+      store.reset()
+      store.setProjectId(projectId)
+      store.setScriptParams({
+        topic: topic || t('tools.card_script'),
+        duration_minutes: settings.duration_minutes,
+        language: settings.language,
+        model: settings.model,
+        narrative_style: settings.narrative_style,
+        tone: settings.tone,
+        target_audience: settings.target_audience,
+        hook: settings.hook,
+        hook_type: settings.hook_type,
+        cta: settings.cta,
+        scene_markers: settings.scene_markers,
+        pauses: settings.pauses,
+      })
+      if (resultPlanSections) store.setPlanSections(resultPlanSections)
+      store.setScript(resultScript)
+      store.setStep(3)
+
+      router.push(`/studio?from=tools`)
+    } catch {
+      setError('Ошибка открытия студии — попробуй ещё раз')
+      setUsingStudio(false)
     }
   }
 
@@ -169,186 +257,187 @@ function ScriptGenContent() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  function handleUseInStudio() {
-    if (!resultScript.trim()) return
-    useStudioStore.getState().setScript(resultScript)
-    useStudioStore.getState().setStep(2)
-    window.location.href = '/studio?from=tools'
-  }
-
-  const isGenerating = generating !== null
-
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-6">
         <Link href="/tools" className="text-xs text-slate-500 hover:text-slate-400 transition-colors">{t('tools.back_to_tools')}</Link>
         <h1 className="text-2xl font-bold text-slate-100 mt-2">{t('tools.script_title')}</h1>
         <p className="text-slate-500 text-sm mt-1">{t('tools.script_subtitle')}</p>
       </div>
 
-      <div
-        className="rounded-2xl p-6 flex flex-col gap-5"
-        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
-      >
-        {/* Topic */}
-        <div>
-          <label className="text-xs font-medium text-slate-400 block mb-1.5">{t('tools.script_topic_label')}</label>
-          <input
-            type="text"
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            placeholder={t('tools.script_topic_ph')}
-            className="w-full px-4 py-3 rounded-xl text-sm"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', outline: 'none' }}
-          />
-        </div>
-
-        {/* Params row */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-6 lg:items-start">
+        {/* Left: form */}
+        <div className="rounded-2xl p-6 flex flex-col gap-5" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          {/* Topic */}
           <div>
-            <label className="text-xs font-medium text-slate-400 block mb-1.5">{t('tools.script_duration')}</label>
+            <label className="text-xs font-medium text-slate-400 block mb-1.5">{t('tools.script_topic_label')}</label>
             <input
-              type="number"
-              min={1}
-              max={60}
-              value={duration}
-              onChange={(e) => setDuration(Math.max(1, Math.min(60, Number(e.target.value))))}
-              className="w-full px-3 py-2 rounded-lg text-sm text-slate-300"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', outline: 'none' }}
+              type="text"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder={t('tools.script_topic_ph')}
+              className="w-full px-4 py-3 rounded-xl text-sm"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', outline: 'none' }}
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-slate-400 block mb-1.5">{t('tools.output_lang')}</label>
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg text-sm text-slate-300 cursor-pointer outline-none"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
-            >
-              {SCRIPT_LANGUAGES.map(l => (
-                <option key={l.code} value={l.code} className="bg-slate-900">{l.flag} {l.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-400 block mb-1.5">{lang === 'en' ? 'Style' : 'Стиль'}</label>
-            <select
-              value={narrativeStyle}
-              onChange={(e) => setNarrativeStyle(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg text-sm text-slate-300 cursor-pointer outline-none"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
-            >
-              {NARRATIVE_STYLES.map(s => (
-                <option key={s.value} value={s.value} className="bg-slate-900">
-                  {lang === 'en' ? s.labelEn : s.labelRu}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-400 block mb-1.5">{lang === 'en' ? 'Tone' : 'Тон'}</label>
-            <select
-              value={tone}
-              onChange={(e) => setTone(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg text-sm text-slate-300 cursor-pointer outline-none"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
-            >
-              {TONES.map(t => (
-                <option key={t.value} value={t.value} className="bg-slate-900">
-                  {lang === 'en' ? t.labelEn : t.labelRu}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
 
-        {/* Plan checkbox */}
-        <div
-          className="flex items-start gap-3 rounded-xl px-4 py-3 cursor-pointer"
-          style={{ background: withPlan ? 'rgba(124,58,237,0.08)' : 'rgba(255,255,255,0.03)', border: `1px solid ${withPlan ? 'rgba(124,58,237,0.25)' : 'rgba(255,255,255,0.08)'}` }}
-          onClick={() => setWithPlan(!withPlan)}
-        >
+          {/* Full settings from shared component */}
+          <ScriptSettingsForm value={settings} onChange={patch => setSettings(s => ({ ...s, ...patch }))} />
+
+          {/* Plan toggle */}
           <div
-            className="w-4 h-4 rounded flex items-center justify-center shrink-0 mt-0.5 transition-all"
-            style={{ background: withPlan ? '#7c3aed' : 'rgba(255,255,255,0.06)', border: withPlan ? 'none' : '1px solid rgba(255,255,255,0.2)' }}
+            className="flex items-start gap-3 rounded-xl px-4 py-3 cursor-pointer"
+            style={{ background: withPlan ? 'rgba(124,58,237,0.08)' : 'rgba(255,255,255,0.03)', border: `1px solid ${withPlan ? 'rgba(124,58,237,0.25)' : 'rgba(255,255,255,0.08)'}` }}
+            onClick={() => { setWithPlan(!withPlan); if (withPlan) setPlanSections(null) }}
           >
-            {withPlan && (
-              <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            )}
+            <div
+              className="w-4 h-4 rounded flex items-center justify-center shrink-0 mt-0.5 transition-all"
+              style={{ background: withPlan ? '#7c3aed' : 'rgba(255,255,255,0.06)', border: withPlan ? 'none' : '1px solid rgba(255,255,255,0.2)' }}
+            >
+              {withPlan && (
+                <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-300">{t('tools.script_with_plan')}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{t('tools.script_plan_hint')}</p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-medium text-slate-300">{t('tools.script_with_plan')}</p>
-            <p className="text-xs text-slate-500 mt-0.5">{t('tools.script_plan_hint')}</p>
-          </div>
+
+          {/* Action buttons */}
+          {withPlan && !hasPlan ? (
+            // Phase A: generate plan
+            <button
+              type="button"
+              onClick={handleGeneratePlan}
+              disabled={isGenerating}
+              className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold rounded-xl btn-gradient text-white transition-all disabled:opacity-60"
+            >
+              {generating === 'plan' ? (
+                <><SpinnerIcon className="w-4 h-4 animate-spin" />{t('tools.script_generating_plan')}</>
+              ) : (
+                <>{t('tools.script_gen_plan_btn')} · −{CREDIT_COSTS.plan} {t('nav.credits_suffix')}</>
+              )}
+            </button>
+          ) : hasPlan ? (
+            // Phase B: generate script from plan
+            <button
+              type="button"
+              onClick={handleGenerateScript}
+              disabled={isGenerating}
+              className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold rounded-xl btn-gradient text-white transition-all disabled:opacity-60"
+            >
+              {generating === 'script' ? (
+                <><SpinnerIcon className="w-4 h-4 animate-spin" />{t('tools.script_generating')}</>
+              ) : (
+                <>{t('tools.script_gen_from_plan_btn')} · −{scriptCost()} {t('nav.credits_suffix')}</>
+              )}
+            </button>
+          ) : (
+            // Direct: generate script without plan
+            <button
+              type="button"
+              onClick={handleGenerateScript}
+              disabled={isGenerating}
+              className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold rounded-xl btn-gradient text-white transition-all disabled:opacity-60"
+            >
+              {generating === 'script' ? (
+                <><SpinnerIcon className="w-4 h-4 animate-spin" />{t('tools.script_generating')}</>
+              ) : (
+                <>{t('tools.script_gen_btn')} · −{scriptCost()} {t('nav.credits_suffix')}</>
+              )}
+            </button>
+          )}
+
+          {error && (
+            <p className="text-sm text-red-400 rounded-xl px-4 py-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
+              {error}
+            </p>
+          )}
         </div>
 
-        {/* Generate button */}
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold rounded-xl btn-gradient text-white transition-all disabled:opacity-60"
-        >
-          {isGenerating ? (
-            <>
-              <SpinnerIcon className="w-4 h-4 animate-spin" />
-              {generating === 'plan' ? t('tools.script_generating_plan') : t('tools.script_generating')}
-            </>
-          ) : (
-            <>
-              {withPlan ? t('tools.script_gen_btn_plan') : t('tools.script_gen_btn')}
-              {' · −'}{totalCost} {t('nav.credits_suffix')}
-            </>
-          )}
-        </button>
-
-        {error && (
-          <p className="text-sm text-red-400 rounded-xl px-4 py-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-            {error}
-          </p>
-        )}
-
-        {/* Result */}
-        {resultScript && (
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-slate-400">
-                {t('tools.script_result_label')}
-                {saving && <span className="ml-2 text-slate-600">{t('tools.saving')}</span>}
-                {savedId && !saving && <span className="ml-2 text-green-500">{t('tools.saved')}</span>}
-              </label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg border transition-all"
-                  style={copied
-                    ? { borderColor: 'rgba(16,185,129,0.4)', background: 'rgba(16,185,129,0.1)', color: '#34D399' }
-                    : { borderColor: 'rgba(255,255,255,0.1)', color: '#64748B' }
-                  }
-                >
-                  {copied ? t('tools.copied') : t('tools.copy_result')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleUseInStudio}
-                  className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg transition-all"
-                  style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.25)', color: '#a78bfa' }}
-                >
-                  {t('tools.use_studio')}
-                </button>
+        {/* Right: plan + result */}
+        <div className="flex flex-col gap-4 mt-4 lg:mt-0">
+          {/* Editable plan (Phase B) */}
+          {hasPlan && !resultScript && (
+            <div className="rounded-2xl p-5 flex flex-col gap-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-300">{t('tools.script_plan_label')}</p>
+                <p className="text-xs text-slate-500">{t('tools.script_plan_edit_hint')}</p>
               </div>
+              {planSections!.map((section, i) => (
+                <div key={i} className="rounded-xl p-3 flex flex-col gap-2" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-violet-400 shrink-0">{i + 1}</span>
+                    <input
+                      value={section.title}
+                      onChange={e => {
+                        const updated = planSections!.map((s, j) => j === i ? { ...s, title: e.target.value } : s)
+                        setPlanSections(updated)
+                      }}
+                      className="flex-1 px-2 py-1 rounded-lg text-xs font-semibold text-slate-200 bg-transparent outline-none"
+                      style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+                    />
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={section.description}
+                    onChange={e => {
+                      const updated = planSections!.map((s, j) => j === i ? { ...s, description: e.target.value } : s)
+                      setPlanSections(updated)
+                    }}
+                    className="w-full px-2 py-1 rounded-lg text-xs text-slate-400 bg-transparent resize-none outline-none"
+                    style={{ border: '1px solid rgba(255,255,255,0.07)' }}
+                  />
+                </div>
+              ))}
             </div>
-            <textarea
-              rows={16}
-              value={resultScript}
-              onChange={(e) => setResultScript(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl text-sm resize-y leading-relaxed"
-            />
-          </div>
-        )}
+          )}
+
+          {/* Script result */}
+          {resultScript && (
+            <div className="rounded-2xl p-5 flex flex-col gap-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-400">
+                  {t('tools.script_result_label')}
+                  {saving && <span className="ml-2 text-slate-600">{t('tools.saving')}</span>}
+                  {savedId && !saving && <span className="ml-2 text-green-500">{t('tools.saved')}</span>}
+                  {saveError && !saving && <span className="ml-2 text-red-400">{saveError}</span>}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg border transition-all"
+                    style={copied
+                      ? { borderColor: 'rgba(16,185,129,0.4)', background: 'rgba(16,185,129,0.1)', color: '#34D399' }
+                      : { borderColor: 'rgba(255,255,255,0.1)', color: '#64748B' }
+                    }
+                  >
+                    {copied ? t('tools.copied') : t('tools.copy_result')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUseInStudio}
+                    disabled={usingStudio}
+                    className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg transition-all disabled:opacity-60"
+                    style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.25)', color: '#a78bfa' }}
+                  >
+                    {usingStudio ? t('tools.use_studio_creating') : t('tools.use_studio')}
+                  </button>
+                </div>
+              </div>
+              <textarea
+                rows={20}
+                value={resultScript}
+                onChange={(e) => setResultScript(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl text-sm resize-y leading-relaxed"
+              />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

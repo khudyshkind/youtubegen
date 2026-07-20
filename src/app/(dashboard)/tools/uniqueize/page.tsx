@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useEffect, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useLang } from '@/hooks/useLang'
 import { useStudioStore } from '@/lib/studio-store'
 import { refreshCredits } from '@/lib/refresh-credits'
@@ -35,6 +34,8 @@ function UniqueizeContent() {
   const [copied, setCopied] = useState(false)
   const [savedId, setSavedId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [usingStudio, setUsingStudio] = useState(false)
 
   useEffect(() => {
     setOutputLang(lang === 'en' ? 'en' : 'ru')
@@ -133,6 +134,7 @@ function UniqueizeContent() {
 
   async function saveRun(input: string, result: string, credits: number) {
     setSaving(true)
+    setSaveError('')
     try {
       const res = await fetch('/api/tools/save-run', {
         method: 'POST',
@@ -147,6 +149,9 @@ function UniqueizeContent() {
       })
       const json: { ok: boolean; data?: { project_id: string } } = await res.json()
       if (json.ok) setSavedId(json.data!.project_id)
+      else setSaveError(t('tools.save_fail'))
+    } catch {
+      setSaveError(t('tools.save_fail'))
     } finally {
       setSaving(false)
     }
@@ -159,17 +164,41 @@ function UniqueizeContent() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  function handleUseInStudio() {
+  async function handleUseInStudio() {
     if (!resultText.trim()) return
-    useStudioStore.getState().setScript(resultText)
-    useStudioStore.getState().setStep(2)
-    router.push('/studio?from=tools')
+    setUsingStudio(true)
+    try {
+      const res = await fetch('/api/projects/from-tool', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: inputText.slice(0, 100) || t('tools.card_uniqueizer'),
+          script: resultText,
+          language: outputLang,
+          credits_spent: 0,
+        }),
+      })
+      const json: { ok: boolean; data?: { project: { id: string } }; error?: string } = await res.json()
+      if (!json.ok) throw new Error(json.error)
+      const projectId = json.data!.project.id
+
+      const store = useStudioStore.getState()
+      store.reset()
+      store.setProjectId(projectId)
+      store.setScript(resultText)
+      store.setStep(3)
+
+      router.push('/studio?from=tools')
+    } catch {
+      setSaveError('Ошибка открытия студии')
+      setUsingStudio(false)
+    }
   }
 
   const isProcessing = processingMode !== null
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-6">
         <Link href="/tools" className="text-xs text-slate-500 hover:text-slate-400 transition-colors">{t('tools.back_to_tools')}</Link>
         <h1 className="text-2xl font-bold text-slate-100 mt-2">{t('tools.uniqueizer')}</h1>
@@ -290,6 +319,7 @@ function UniqueizeContent() {
                 {t('tools.result_label')}
                 {saving && <span className="ml-2 text-slate-600">{t('tools.saving')}</span>}
                 {savedId && !saving && <span className="ml-2 text-green-500">{t('tools.saved')}</span>}
+                {saveError && !saving && <span className="ml-2 text-red-400">{saveError}</span>}
               </label>
               <div className="flex gap-2">
                 <button
@@ -306,10 +336,11 @@ function UniqueizeContent() {
                 <button
                   type="button"
                   onClick={handleUseInStudio}
-                  className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg transition-all"
+                  disabled={usingStudio}
+                  className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg transition-all disabled:opacity-60"
                   style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.25)', color: '#a78bfa' }}
                 >
-                  {t('tools.use_studio')}
+                  {usingStudio ? t('tools.use_studio_creating') : t('tools.use_studio')}
                 </button>
               </div>
             </div>

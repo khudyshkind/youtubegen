@@ -923,9 +923,15 @@ export const translations = {
     'tools.script_plan_hint':   'Рекомендуется от 5 минут — без плана длинный сценарий может терять структуру',
     'tools.script_gen_btn':     'Создать сценарий',
     'tools.script_gen_btn_plan':'Создать план + сценарий',
+    'tools.script_gen_plan_btn':    'Составить план',
+    'tools.script_gen_from_plan_btn':'Сгенерировать сценарий',
     'tools.script_generating':  'Генерирую сценарий...',
     'tools.script_generating_plan': 'Строю план...',
     'tools.script_result_label':'Готовый сценарий',
+    'tools.script_plan_label':  'Структура видео',
+    'tools.script_plan_edit_hint': 'Отредактируй план — затем нажми «Сгенерировать сценарий»',
+    'tools.save_fail':          'Не удалось сохранить в историю',
+    'tools.use_studio_creating':'Открываю студию...',
 
     // ── SEO tool page ──────────────────────────────────────────────────────────
     'tools.seo_title':          'SEO-пакет для ролика',
@@ -2082,9 +2088,15 @@ export const translations = {
     'tools.script_plan_hint':   'Recommended for 5+ minutes — without an outline long scripts may lose structure',
     'tools.script_gen_btn':     'Generate script',
     'tools.script_gen_btn_plan':'Generate outline + script',
+    'tools.script_gen_plan_btn':    'Build outline',
+    'tools.script_gen_from_plan_btn':'Generate script',
     'tools.script_generating':  'Generating script...',
     'tools.script_generating_plan': 'Building outline...',
     'tools.script_result_label':'Script',
+    'tools.script_plan_label':  'Video structure',
+    'tools.script_plan_edit_hint': 'Edit the outline — then click "Generate script"',
+    'tools.save_fail':          'Failed to save to history',
+    'tools.use_studio_creating':'Opening studio...',
 
     // ── SEO tool page ──────────────────────────────────────────────────────────
     'tools.seo_title':          'SEO Package',
