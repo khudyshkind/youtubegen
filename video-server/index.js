@@ -5236,15 +5236,23 @@ async function processAudioJob(job) {
     //     voice_id and script are written by the Vercel dispatch Lambda (inputs, not results).
     //     Non-fatal: audio_jobs.result_url is the source of truth; projects drives the UI chain.
     try {
+      // tool_run projects (TTS tool) stop at 'completed'; studio projects continue to subtitles
+      let completionStatus = 'generating_subtitles'
+      try {
+        const rows = await sbGet('projects', `id=eq.${job.project_id}&select=type`)
+        if (Array.isArray(rows) && rows[0]?.type === 'tool_run') completionStatus = 'completed'
+      } catch (typeErr) {
+        console.warn(`[audio-job:${jobId}] project type fetch failed (using default):`, typeErr.message)
+      }
       await sbPatch(
         'projects',
         `id=eq.${job.project_id}&user_id=eq.${job.user_id}`,
         {
           audio_url: publicUrl,
-          status:    'generating_subtitles',
+          status:    completionStatus,
         }
       )
-      console.log(`[audio-job:${jobId}] projects.audio_url written`)
+      console.log(`[audio-job:${jobId}] projects.audio_url written, status=${completionStatus}`)
     } catch (projErr) {
       console.warn(`[audio-job:${jobId}] projects update non-fatal:`, projErr.message)
       Sentry.captureException(projErr, { extra: { jobId, project_id: job.project_id, stage: 'projects_audio_url' } })
