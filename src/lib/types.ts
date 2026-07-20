@@ -47,6 +47,7 @@ export const CREDIT_COSTS = {
   humanize:  660,
   uniqueize: 660,
   enhance:   630,
+  repack:    700, // 3 repacked formats per run (TG post + Dzen article + thread)
 
   // YouTube analytics
   niche_analysis:    1800,
@@ -232,10 +233,13 @@ export type ProjectStatus =
   | 'completed'
   | 'failed'
 
+export type ProjectType = 'project' | 'tool_run'
+
 export interface Project {
   id: string
   user_id: string
   title: string
+  type: ProjectType
   status: ProjectStatus
   topic: string
   duration_minutes: number

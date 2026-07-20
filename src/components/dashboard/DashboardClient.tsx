@@ -7,7 +7,7 @@ import { useStudioStore } from '@/lib/studio-store'
 import NewProjectButton from '@/components/shared/NewProjectButton'
 import DeleteProjectButton from '@/components/shared/DeleteProjectButton'
 import { PLAN_MAX_CREDITS } from '@/lib/types'
-import type { Profile, Project, ProjectStatus } from '@/lib/types'
+import type { Profile, Project, ProjectStatus, ProjectType } from '@/lib/types'
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
   draft: 'bg-white/5 text-slate-400 border border-white/10',
@@ -83,6 +83,17 @@ function MediaBadge({ project }: { project: Project }) {
       Медиа хранятся 72ч — скачайте видео · ~{h}ч
     </span>
   )
+}
+
+const TOOL_EMOJI: Record<string, string> = {
+  'script-gen': '📝',
+  'seo':        '🎯',
+  'repack':     '🔁',
+}
+
+function toolRunHref(project: Project): string {
+  const slug = project.image_style ?? 'script-gen'
+  return `/tools/${slug}?run=${project.id}`
 }
 
 function CreditsBar({ credits, plan }: { credits: number; plan: string }) {
@@ -246,59 +257,86 @@ export default function DashboardClient({ profile, projects }: Props) {
           </div>
         ) : (
           <div>
-            {projects.map((project) => (
-              <div
-                key={project.id}
-                className="flex items-center gap-4 px-6 py-4 transition-colors group hover:bg-white/[0.03]"
-                style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-              >
-                <Link
-                  href={`/studio?project=${project.id}`}
-                  className="w-20 h-12 rounded-lg shrink-0 overflow-hidden"
-                  style={{ background: 'rgba(255,255,255,0.06)' }}
+            {projects.map((project) => {
+              const isToolRun = (project.type as ProjectType) === 'tool_run'
+              const href = isToolRun ? toolRunHref(project) : `/studio?project=${project.id}`
+              return (
+                <div
+                  key={project.id}
+                  className="flex items-center gap-4 px-6 py-4 transition-colors group hover:bg-white/[0.03]"
+                  style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
                 >
-                  <ProjectThumbnail project={project} />
-                </Link>
+                  {isToolRun ? (
+                    <Link
+                      href={href}
+                      className="w-20 h-12 rounded-lg shrink-0 overflow-hidden flex items-center justify-center text-2xl"
+                      style={{ background: 'rgba(255,255,255,0.06)' }}
+                    >
+                      {TOOL_EMOJI[project.image_style ?? ''] ?? '🔧'}
+                    </Link>
+                  ) : (
+                    <Link
+                      href={href}
+                      className="w-20 h-12 rounded-lg shrink-0 overflow-hidden"
+                      style={{ background: 'rgba(255,255,255,0.06)' }}
+                    >
+                      <ProjectThumbnail project={project} />
+                    </Link>
+                  )}
 
-                <Link href={`/studio?project=${project.id}`} className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-200 truncate group-hover:text-violet-400 transition-colors">
-                    {project.title}
-                  </p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <p className="text-xs text-slate-500 truncate">{project.topic}</p>
-                    <span className="text-slate-700">·</span>
-                    <span className="text-xs text-slate-600 whitespace-nowrap">
-                      {formatDate(project.created_at, lang)}
+                  <Link href={href} className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-200 truncate group-hover:text-violet-400 transition-colors">
+                      {project.title}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <p className="text-xs text-slate-500 truncate">{project.topic}</p>
+                      <span className="text-slate-700">·</span>
+                      <span className="text-xs text-slate-600 whitespace-nowrap">
+                        {formatDate(project.created_at, lang)}
+                      </span>
+                      {project.credits_spent > 0 && (
+                        <>
+                          <span className="text-slate-700 hidden sm:block">·</span>
+                          <span className="text-xs text-amber-500/80 font-medium hidden sm:block whitespace-nowrap">
+                            {project.credits_spent} {t('nav.credits_suffix')}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </Link>
+
+                  {isToolRun ? (
+                    <span
+                      className="shrink-0 px-2.5 py-1 rounded-full text-xs font-medium"
+                      style={{ background: 'rgba(124,58,237,0.12)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.25)' }}
+                    >
+                      {t('dashboard.type_tool')}
                     </span>
-                    {project.credits_spent > 0 && (
-                      <>
-                        <span className="text-slate-700 hidden sm:block">·</span>
-                        <span className="text-xs text-amber-500/80 font-medium hidden sm:block whitespace-nowrap">
-                          {project.credits_spent} {t('nav.credits_suffix')}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </Link>
+                  ) : (
+                    <span className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[project.status]}`}>
+                      {statusLabel(project.status)}
+                    </span>
+                  )}
 
-                <span className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[project.status]}`}>
-                  {statusLabel(project.status)}
-                </span>
+                  <MediaBadge project={project} />
 
-                <MediaBadge project={project} />
+                  <Link
+                    href={href}
+                    className={`shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                      isToolRun || project.status === 'completed' ? 'btn-ghost-dark' : 'btn-gradient text-white'
+                    }`}
+                  >
+                    {isToolRun
+                      ? t('dashboard.open_result')
+                      : project.status === 'completed'
+                        ? t('dashboard.open')
+                        : t('dashboard.continue')}
+                  </Link>
 
-                <Link
-                  href={`/studio?project=${project.id}`}
-                  className={`shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                    project.status === 'completed' ? 'btn-ghost-dark' : 'btn-gradient text-white'
-                  }`}
-                >
-                  {project.status === 'completed' ? t('dashboard.open') : t('dashboard.continue')}
-                </Link>
-
-                <DeleteProjectButton projectId={project.id} />
-              </div>
-            ))}
+                  <DeleteProjectButton projectId={project.id} />
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

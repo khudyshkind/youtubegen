@@ -901,6 +901,68 @@ export const translations = {
     'tools.err_gen':       'Ошибка обработки текста',
     'tools.err_timeout':   'Превышено время ожидания — текст слишком длинный. Попробуйте разбить на части.',
     'tools.cost_info':     'симв. · Стоимость:',
+
+    // ── Tools hub ─────────────────────────────────────────────────────────────
+    'tools.hub_subtitle':       'Быстрые инструменты без создания видео',
+    'tools.card_script':        'Сценарий для видео',
+    'tools.card_script_desc':   'Профессиональный сценарий по теме — с планом или без',
+    'tools.card_seo':           'SEO-пакет для ролика',
+    'tools.card_seo_desc':      'Заголовок, описание, теги и хэштеги для YouTube',
+    'tools.card_repack':        'Посты из сценария',
+    'tools.card_repack_desc':   'Telegram-пост, статья для Дзена и тред за один запрос',
+    'tools.card_uniqueizer':    'Уникализатор текста',
+    'tools.card_uniqueizer_desc':'Перепишите текст для антиплагиата и живого звучания',
+
+    // ── Script-gen tool page ───────────────────────────────────────────────────
+    'tools.script_title':       'Сценарий для видео',
+    'tools.script_subtitle':    'Создайте структурированный сценарий по теме за несколько секунд',
+    'tools.script_topic_label': 'Тема видео',
+    'tools.script_topic_ph':    'Например: Топ 5 ИИ-инструментов для YouTube',
+    'tools.script_duration':    'Длительность (мин)',
+    'tools.script_with_plan':   'Составить план (+400 кр.)',
+    'tools.script_plan_hint':   'Рекомендуется от 5 минут — без плана длинный сценарий может терять структуру',
+    'tools.script_gen_btn':     'Создать сценарий',
+    'tools.script_gen_btn_plan':'Создать план + сценарий',
+    'tools.script_generating':  'Генерирую сценарий...',
+    'tools.script_generating_plan': 'Строю план...',
+    'tools.script_result_label':'Готовый сценарий',
+
+    // ── SEO tool page ──────────────────────────────────────────────────────────
+    'tools.seo_title':          'SEO-пакет для ролика',
+    'tools.seo_subtitle':       'Заголовок, описание, теги и хэштеги для загрузки видео на YouTube',
+    'tools.seo_script_label':   'Текст сценария',
+    'tools.seo_script_ph':      'Вставьте текст вашего сценария...',
+    'tools.seo_topic_label':    'Тема или ключевое слово',
+    'tools.seo_topic_ph':       'Например: монетизация YouTube в 2025',
+    'tools.seo_gen_btn':        'Создать SEO-пакет',
+    'tools.seo_generating':     'Генерирую SEO...',
+    'tools.seo_title_label':    'Заголовок',
+    'tools.seo_title_alt_label':'Альтернативный заголовок',
+    'tools.seo_desc_label':     'Описание',
+    'tools.seo_tags_label':     'Теги',
+    'tools.seo_hashtags_label': 'Хэштеги',
+    'tools.seo_copy_all':       'Скопировать всё',
+
+    // ── Repack tool page ───────────────────────────────────────────────────────
+    'tools.repack_title':       'Посты из сценария',
+    'tools.repack_subtitle':    'Три разных формата из одного текста — для Telegram, Дзена и тредов',
+    'tools.repack_input_label': 'Текст сценария',
+    'tools.repack_input_ph':    'Вставьте текст сценария или любой другой текст...',
+    'tools.repack_gen_btn':     'Создать посты',
+    'tools.repack_generating':  'Создаю форматы...',
+    'tools.repack_tg_label':    'Telegram-пост',
+    'tools.repack_dzen_label':  'Статья для Дзена',
+    'tools.repack_thread_label':'Тред',
+
+    // ── Tool run shared ────────────────────────────────────────────────────────
+    'tools.saving':             'Сохраняю в историю...',
+    'tools.saved':              'Сохранено в истории ✓',
+    'tools.back_to_tools':      '← Инструменты',
+
+    // ── Dashboard tool_run card ────────────────────────────────────────────────
+    'dashboard.open_result':    'Открыть результат',
+    'dashboard.type_tool':      'Инструмент',
+
     // ── Settings page ─────────────────────────────────────────────────────────
     'settings.title':          'Настройки',
     'settings.profile':        'Профиль',
@@ -1998,6 +2060,67 @@ export const translations = {
     'tools.err_gen':       'Text processing error',
     'tools.err_timeout':   'Request timed out — text is too long. Try splitting it into smaller parts.',
     'tools.cost_info':     'chars · Cost:',
+
+    // ── Tools hub ─────────────────────────────────────────────────────────────
+    'tools.hub_subtitle':       'Quick tools without creating a full video',
+    'tools.card_script':        'Video Script',
+    'tools.card_script_desc':   'Professional script on any topic — with or without an outline',
+    'tools.card_seo':           'SEO Package',
+    'tools.card_seo_desc':      'Title, description, tags, and hashtags for YouTube',
+    'tools.card_repack':        'Repack Script to Posts',
+    'tools.card_repack_desc':   'Telegram post, long-read article, and thread in one request',
+    'tools.card_uniqueizer':    'Text Uniqueizer',
+    'tools.card_uniqueizer_desc':'Rewrite text for plagiarism checks and natural sound',
+
+    // ── Script-gen tool page ───────────────────────────────────────────────────
+    'tools.script_title':       'Video Script',
+    'tools.script_subtitle':    'Generate a structured video script on any topic',
+    'tools.script_topic_label': 'Video topic',
+    'tools.script_topic_ph':    'E.g. Top 5 AI tools for YouTube creators',
+    'tools.script_duration':    'Duration (min)',
+    'tools.script_with_plan':   'Generate outline first (+400 cr.)',
+    'tools.script_plan_hint':   'Recommended for 5+ minutes — without an outline long scripts may lose structure',
+    'tools.script_gen_btn':     'Generate script',
+    'tools.script_gen_btn_plan':'Generate outline + script',
+    'tools.script_generating':  'Generating script...',
+    'tools.script_generating_plan': 'Building outline...',
+    'tools.script_result_label':'Script',
+
+    // ── SEO tool page ──────────────────────────────────────────────────────────
+    'tools.seo_title':          'SEO Package',
+    'tools.seo_subtitle':       'Title, description, tags, and hashtags for your YouTube video',
+    'tools.seo_script_label':   'Script text',
+    'tools.seo_script_ph':      'Paste your script text here...',
+    'tools.seo_topic_label':    'Topic or keyword',
+    'tools.seo_topic_ph':       'E.g. YouTube monetization in 2025',
+    'tools.seo_gen_btn':        'Generate SEO package',
+    'tools.seo_generating':     'Generating SEO...',
+    'tools.seo_title_label':    'Title',
+    'tools.seo_title_alt_label':'Alternative title',
+    'tools.seo_desc_label':     'Description',
+    'tools.seo_tags_label':     'Tags',
+    'tools.seo_hashtags_label': 'Hashtags',
+    'tools.seo_copy_all':       'Copy all',
+
+    // ── Repack tool page ───────────────────────────────────────────────────────
+    'tools.repack_title':       'Repack Script to Posts',
+    'tools.repack_subtitle':    'Three different formats from one text — social post, article, and thread',
+    'tools.repack_input_label': 'Script text',
+    'tools.repack_input_ph':    'Paste your script or any text here...',
+    'tools.repack_gen_btn':     'Generate posts',
+    'tools.repack_generating':  'Creating formats...',
+    'tools.repack_tg_label':    'Social post',
+    'tools.repack_dzen_label':  'Long-form article',
+    'tools.repack_thread_label':'Thread',
+
+    // ── Tool run shared ────────────────────────────────────────────────────────
+    'tools.saving':             'Saving to history...',
+    'tools.saved':              'Saved to history ✓',
+    'tools.back_to_tools':      '← Tools',
+
+    // ── Dashboard tool_run card ────────────────────────────────────────────────
+    'dashboard.open_result':    'Open result',
+    'dashboard.type_tool':      'Tool',
 
     // ── Settings page ─────────────────────────────────────────────────────────
     'settings.title':          'Settings',

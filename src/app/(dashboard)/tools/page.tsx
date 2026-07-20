@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useLang } from '@/hooks/useLang'
 import { useStudioStore } from '@/lib/studio-store'
@@ -17,10 +18,33 @@ function SpinnerIcon({ className }: { className?: string }) {
   )
 }
 
+const TOOL_CARDS = [
+  {
+    slug: 'script-gen',
+    emoji: '📝',
+    titleKey: 'tools.card_script' as const,
+    descKey: 'tools.card_script_desc' as const,
+    accent: { bg: 'rgba(124,58,237,0.08)', border: 'rgba(124,58,237,0.2)', hover: 'rgba(124,58,237,0.35)', color: '#a78bfa' },
+  },
+  {
+    slug: 'seo',
+    emoji: '🎯',
+    titleKey: 'tools.card_seo' as const,
+    descKey: 'tools.card_seo_desc' as const,
+    accent: { bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)', hover: 'rgba(59,130,246,0.35)', color: '#60a5fa' },
+  },
+  {
+    slug: 'repack',
+    emoji: '🔁',
+    titleKey: 'tools.card_repack' as const,
+    descKey: 'tools.card_repack_desc' as const,
+    accent: { bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)', hover: 'rgba(16,185,129,0.35)', color: '#34d399' },
+  },
+]
+
 export default function ToolsPage() {
   const { t, lang } = useLang()
   const router = useRouter()
-  const { setScript, setStep } = useStudioStore()
 
   const [inputText, setInputText] = useState('')
   const [outputLang, setOutputLang] = useState('ru')
@@ -31,25 +55,19 @@ export default function ToolsPage() {
   const [success, setSuccess] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  // Sync outputLang to UI language on first mount (after Zustand persist hydrates)
   useEffect(() => {
     setOutputLang(lang === 'en' ? 'en' : 'ru')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const charCount = inputText.length
 
-
   async function handleProcess(mode: 'unique' | 'human' | 'both') {
-    if (!inputText.trim()) {
-      setError(t('tools.err_empty'))
-      return
-    }
+    if (!inputText.trim()) { setError(t('tools.err_empty')); return }
     setError('')
     setSuccess(false)
     setProcessingMode(mode)
     try {
       if (mode === 'both') {
-        // Step 1: uniqueize
         setBothStep(1)
         const res1 = await fetch('/api/generate/uniqueize', {
           method: 'POST',
@@ -64,8 +82,6 @@ export default function ToolsPage() {
           throw new Error(json1.error ?? t('tools.err_gen'))
         }
         const uniqueized = json1.data!.script
-
-        // Step 2: humanize the uniqueized output (not the original text)
         setBothStep(2)
         const res2 = await fetch('/api/generate/uniqueize', {
           method: 'POST',
@@ -127,24 +143,39 @@ export default function ToolsPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-slate-100">{t('tools.title')}</h1>
-        <p className="text-slate-500 text-sm mt-1">{t('tools.subtitle')}</p>
+        <p className="text-slate-500 text-sm mt-1">{t('tools.hub_subtitle')}</p>
       </div>
 
-      {/* Card */}
+      {/* New tool cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
+        {TOOL_CARDS.map((card) => (
+          <Link
+            key={card.slug}
+            href={`/tools/${card.slug}`}
+            className="flex flex-col gap-2 p-5 rounded-2xl transition-all hover:scale-[1.02] active:scale-[0.98]"
+            style={{ background: card.accent.bg, border: `1px solid ${card.accent.border}` }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = card.accent.hover)}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = card.accent.border)}
+          >
+            <span className="text-2xl">{card.emoji}</span>
+            <span className="text-sm font-semibold" style={{ color: card.accent.color }}>{t(card.titleKey)}</span>
+            <span className="text-xs text-slate-500">{t(card.descKey)}</span>
+          </Link>
+        ))}
+      </div>
+
+      {/* Uniqueizer — inline as before */}
       <div
         className="rounded-2xl p-6 flex flex-col gap-5"
         style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
       >
-        {/* Card header */}
         <div>
           <h2 className="text-base font-semibold text-slate-100">{t('tools.uniqueizer')}</h2>
-          <p className="text-xs text-slate-500 mt-0.5">{t('tools.uniqueizer_desc')}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('tools.card_uniqueizer_desc')}</p>
         </div>
 
-        {/* Input */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-xs font-medium text-slate-400">{t('tools.input_label')}</label>
@@ -159,7 +190,6 @@ export default function ToolsPage() {
           />
         </div>
 
-        {/* Output language */}
         <div className="flex items-center gap-3">
           <label className="text-xs font-medium text-slate-400 whitespace-nowrap">{t('tools.output_lang')}</label>
           <select
@@ -174,7 +204,6 @@ export default function ToolsPage() {
           </select>
         </div>
 
-        {/* Action buttons */}
         <div className="flex flex-col gap-2">
           <div className="flex gap-2">
             <div className="flex-1">
@@ -227,7 +256,6 @@ export default function ToolsPage() {
             <p className="text-xs text-slate-500 mt-1 text-center">{t('tools.both_desc')}</p>
           </div>
 
-          {/* Cost info */}
           {charCount > 0 && (
             <p className="text-xs text-slate-600 text-right">
               {charCount} {t('tools.cost_info')} <span className="text-slate-400">{CREDIT_COSTS.uniqueize} / {CREDIT_COSTS.humanize} / {CREDIT_COSTS.uniqueize + CREDIT_COSTS.humanize} {t('nav.credits_suffix')}</span>
@@ -235,21 +263,18 @@ export default function ToolsPage() {
           )}
         </div>
 
-        {/* Error */}
         {error && (
           <p className="text-sm text-red-400 rounded-xl px-4 py-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
             {error}
           </p>
         )}
 
-        {/* Success notice */}
         {success && (
           <p className="text-xs font-medium rounded-xl px-3 py-2 text-center" style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', color: '#34d399' }}>
             {t('tools.done_ok')}
           </p>
         )}
 
-        {/* Result */}
         {resultText && (
           <div>
             <div className="flex items-center justify-between mb-1.5">
