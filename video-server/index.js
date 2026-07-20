@@ -5258,6 +5258,11 @@ async function processAudioJob(job) {
     Sentry.captureException(err, { extra: { jobId, engine: job.engine, project_id: job.project_id } })
     await updateAudioJob(jobId, { status: 'failed', error: msg })
     await refundAudioJobCredits(jobId, job.user_id, job.project_id)
+    // Mark project as failed so client polling can detect it (otherwise status stays 'generating_audio' forever)
+    if (job.project_id) {
+      await sbPatch('projects', `id=eq.${job.project_id}&user_id=eq.${job.user_id}`, { status: 'failed' })
+        .catch((projErr) => console.warn(`[audio-job:${jobId}] project failed-update error:`, projErr.message))
+    }
     // Detect billing exhaustion for ElevenLabs-based resellers (SecretVoicer / Voicer).
     // SecretVoicer: HTTP 402 → "SecretVoicer HTTP 402: ..." | FAILED status.error_message may include "quota"/"balance".
     // Voicer: same patterns. Unknown reseller strings will miss here; Sentry captures full err above.
@@ -5327,6 +5332,35 @@ async function recoverOrphanedJobs() {
   }
 }
 
+// ── Startup recovery: audio_jobs stuck in pending/processing (> 15 min) ────────
+// audio_jobs have no SIGTERM handler. Any job still running at boot must have been
+// abandoned. Mark failed, refund credits, update project status.
+async function recoverOrphanedAudioJobs() {
+  try {
+    const staleIso = new Date(Date.now() - 15 * 60 * 1000).toISOString()
+    const orphans = await sbGet('audio_jobs',
+      `or=(status.eq.pending,status.eq.processing)&created_at=lt.${staleIso}&select=id,user_id,project_id,credits_charged,credits_refunded_at`)
+    if (!Array.isArray(orphans) || !orphans.length) {
+      console.log('[startup/audio-recovery] no stale audio jobs')
+      return
+    }
+    console.log(`[startup/audio-recovery] found ${orphans.length} stale audio job(s)`)
+    for (const job of orphans) {
+      console.log(`[startup/audio-recovery] stale audio_job ${job.id.slice(0, 8)} project:${(job.project_id ?? '?').slice(0, 8)}`)
+      await updateAudioJob(job.id, { status: 'failed', error: 'Container restart — job abandoned' })
+      if (job.project_id) {
+        await sbPatch('projects', `id=eq.${job.project_id}&user_id=eq.${job.user_id}`, { status: 'failed' })
+          .catch(e => console.warn(`[startup/audio-recovery] project patch:`, e.message))
+      }
+      await refundAudioJobCredits(job.id, job.user_id, job.project_id)
+        .catch(e => console.warn(`[startup/audio-recovery] refund:`, e.message))
+    }
+  } catch (e) {
+    console.error('[startup/audio-recovery] failed:', e.message)
+    Sentry.captureException(e, { extra: { fn: 'recoverOrphanedAudioJobs' } })
+  }
+}
+
 // Must be added AFTER all routes
 Sentry.setupExpressErrorHandler(app)
 
@@ -5342,6 +5376,7 @@ app.listen(PORT, async () => {
   setTimeout(() => refreshPlansFromVercel(true).catch(console.warn), 5 * 60 * 1000)
   setInterval(() => refreshPlansFromVercel(true).catch(console.warn), 60 * 60 * 1000)
   await recoverOrphanedJobs()
+  await recoverOrphanedAudioJobs()
   // Write thresholds to bot_settings so the Vercel admin panel can read them
   await Promise.all([
     setSetting('fal_balance_threshold',        String(FAL_BALANCE_THRESHOLD)),
