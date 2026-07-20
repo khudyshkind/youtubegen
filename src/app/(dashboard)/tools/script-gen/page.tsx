@@ -48,6 +48,7 @@ function ScriptGenContent() {
 
   // UI state
   const [error, setError] = useState('')
+  const [lastAction, setLastAction] = useState<'plan' | 'script' | null>(null)
   const [copied, setCopied] = useState(false)
   const [usingStudio, setUsingStudio] = useState(false)
 
@@ -91,6 +92,7 @@ function ScriptGenContent() {
   async function handleGeneratePlan() {
     if (!topic.trim()) { setError(t('tools.err_empty')); return }
     setError('')
+    setLastAction('plan')
     setPlanSections(null)
     setResultScript('')
     setSavedId(null)
@@ -126,6 +128,7 @@ function ScriptGenContent() {
   async function handleGenerateScript() {
     if (!topic.trim()) { setError(t('tools.err_empty')); return }
     setError('')
+    setLastAction('script')
     setResultScript('')
     setSavedId(null)
     setSaveError('')
@@ -352,9 +355,19 @@ function ScriptGenContent() {
           )}
 
           {error && (
-            <p className="text-sm text-red-400 rounded-xl px-4 py-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-              {error}
-            </p>
+            <div className="rounded-xl px-4 py-3 flex items-center justify-between gap-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
+              <p className="text-sm text-red-400">{error}</p>
+              {lastAction && (
+                <button
+                  type="button"
+                  onClick={() => lastAction === 'plan' ? handleGeneratePlan() : handleGenerateScript()}
+                  className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all"
+                  style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171' }}
+                >
+                  {t('tools.retry')}
+                </button>
+              )}
+            </div>
           )}
         </div>
 

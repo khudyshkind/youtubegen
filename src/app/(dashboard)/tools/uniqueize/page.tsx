@@ -300,9 +300,9 @@ function UniqueizeContent() {
         </div>
 
         {error && (
-          <p className="text-sm text-red-400 rounded-xl px-4 py-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-            {error}
-          </p>
+          <div className="rounded-xl px-4 py-3 flex items-center justify-between gap-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
+            <p className="text-sm text-red-400">{error}</p>
+          </div>
         )}
 
         {success && (

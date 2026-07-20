@@ -7,6 +7,7 @@ import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 import type { SeoData, SubtitleBlock } from '@/lib/types'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
+import { isAnthropicOverload, withAnthropicRetry } from '@/lib/anthropic-retry'
 
 interface SeoRequest {
   script: string
@@ -182,13 +183,13 @@ export async function POST(request: NextRequest) {
 ${script.slice(0, 2500)}
 ${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, description, hashtags, tags) strictly in ${lang}.` : ''}`
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 60_000 })
-    const message = await anthropic.messages.create({
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 60_000, maxRetries: 0 })
+    const message = await withAnthropicRetry(() => anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2500,
       system: [{ type: 'text', text: SEO_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: userMessage }],
-    })
+    }), 'generate/seo')
     console.log(`[seo] lang=${lang ?? 'auto'} cache input:`, message.usage.input_tokens, 'cache_read:', message.usage.cache_read_input_tokens ?? 0, 'cache_write:', message.usage.cache_creation_input_tokens ?? 0)
 
     const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : ''
@@ -232,6 +233,9 @@ ${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, descrip
     console.error('[generate/seo]', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/seo').catch(() => {})
     else await notifyError('/generate/seo', msg).catch(() => {})
+    if (isAnthropicOverload(error)) {
+      return NextResponse.json({ ok: false, error: 'Нейросеть перегружена — попробуйте через минуту', code: 'OVERLOADED' }, { status: 503 })
+    }
     return NextResponse.json({ ok: false, error: 'Ошибка генерации SEO' }, { status: 500 })
   }
 }

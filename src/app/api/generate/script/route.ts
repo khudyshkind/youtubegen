@@ -11,6 +11,7 @@ import type { ScriptParams, PlanSection, ScriptModel } from '@/lib/types'
 import { CREDIT_COSTS } from '@/lib/types'
 import { isGuardOk, countWords, runParallelGuarded, MIN_TOKENS, MIN_OUTPUT_RATIO } from '@/lib/enhance-guard'
 import { parseClaudeJsonArray } from '@/lib/parse-claude-json'
+import { isAnthropicOverload } from '@/lib/anthropic-retry'
 
 export const maxDuration = 300
 
@@ -150,8 +151,8 @@ type GenResult = { text: string; stopReason: string | null }
 const scriptSleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
 async function generateWithClaude(prompt: string, opus: boolean, maxTokens: number): Promise<GenResult> {
-  // timeout: 120_000 — leaves room for one API retry within maxDuration=300s
-  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
+  // maxRetries:0 — we handle overload retries ourselves with a proper 16s delay
+  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000, maxRetries: 0 })
   const modelId = opus ? 'claude-opus-4-5' : 'claude-sonnet-4-6'
   const message = await anthropic.messages.create({
     model: modelId,
@@ -477,16 +478,18 @@ export async function POST(request: NextRequest) {
     // GPT-4o uses 'length' for the same concept as Claude's 'max_tokens'
     const normaliseStop = (r: string | null) => r === 'length' ? 'max_tokens' : r
 
-    // API-level retry: catches network failures, Anthropic 429/529, and our 120s timeout.
-    // Math: 120s (attempt1) + 5s delay + 120s (attempt2) = 245s < maxDuration=300s.
-    // Distinct from the guard-retry below (which handles truncated output, not API errors).
+    // API-level retry: on 529/503 (Anthropic overload) wait 16s and retry once.
+    // Non-overload errors (invalid key, 400, timeout) propagate immediately — no retry.
+    // Math: 120s attempt1 + 16-20s sleep + 120s attempt2 = 256-260s < maxDuration=300s.
     let gen: GenResult
     try {
       gen = await callGenerate()
     } catch (apiErr1) {
+      if (!isAnthropicOverload(apiErr1)) throw apiErr1  // fail fast for non-overload errors
+      const delay = 16_000 + Math.floor(Math.random() * 4_000)
       const e1 = apiErr1 instanceof Error ? apiErr1.message.slice(0, 120) : String(apiErr1)
-      console.warn(`[generate/script] api attempt 1 failed: ${e1} — retrying in 5s`)
-      await scriptSleep(5000)
+      console.warn(`[generate/script] overload attempt=1: ${e1} — retrying in ${Math.round(delay / 1000)}s`)
+      await scriptSleep(delay)
       gen = await callGenerate()  // throws on attempt 2 failure → outer catch
     }
     let normStop = normaliseStop(gen.stopReason)
@@ -542,6 +545,9 @@ export async function POST(request: NextRequest) {
       await notifyBillingError('Anthropic', '/generate/script').catch(() => {})
     } else {
       await notifyError('/generate/script', msg).catch(() => {})
+    }
+    if (isAnthropicOverload(error)) {
+      return NextResponse.json({ ok: false, error: 'Нейросеть перегружена — попробуйте через минуту', code: 'OVERLOADED' }, { status: 503 })
     }
     const userMsg = /timeout|TimeoutError|ETIMEDOUT/i.test(msg)
       ? 'Модель не ответила вовремя — попробуйте ещё раз.'

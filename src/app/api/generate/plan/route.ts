@@ -7,6 +7,7 @@ import { env } from '@/lib/env'
 import { parseClaudeJsonArray } from '@/lib/parse-claude-json'
 import type { PlanSection } from '@/lib/types'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
+import { isAnthropicOverload, withAnthropicRetry } from '@/lib/anthropic-retry'
 
 const LANGUAGE_NAMES: Record<string, string> = {
   ru: 'Russian', en: 'English', es: 'Spanish', fr: 'French',
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
     const planMaxTokens = sectionCount * 150 + 500
     const prompt = buildPrompt(topic, duration_minutes ?? 5, language ?? 'ru', narrative_style ?? 'storytelling', tone ?? 'neutral')
 
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 60_000 })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 60_000, maxRetries: 0 })
 
     async function callPlan() {
       const message = await anthropic.messages.create({
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
       return { raw: block.type === 'text' ? block.text : '', stopReason: message.stop_reason }
     }
 
-    let { raw, stopReason } = await callPlan()
+    let { raw, stopReason } = await withAnthropicRetry(callPlan, 'generate/plan')
 
     if (stopReason === 'max_tokens') {
       console.warn(`[generate/plan] max_tokens attempt=1 sections_n=${sectionCount} — retrying`)
@@ -142,6 +143,9 @@ export async function POST(request: NextRequest) {
     console.error('[generate/plan]', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/plan').catch(() => {})
     else await notifyError('/generate/plan', msg).catch(() => {})
+    if (isAnthropicOverload(error)) {
+      return NextResponse.json({ ok: false, error: 'Нейросеть перегружена — попробуйте через минуту', code: 'OVERLOADED' }, { status: 503 })
+    }
     return NextResponse.json({ ok: false, error: 'Ошибка генерации плана' }, { status: 500 })
   }
 }

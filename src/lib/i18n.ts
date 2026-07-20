@@ -932,6 +932,8 @@ export const translations = {
     'tools.script_plan_edit_hint': 'Отредактируй план — затем нажми «Сгенерировать сценарий»',
     'tools.save_fail':          'Не удалось сохранить в историю',
     'tools.use_studio_creating':'Открываю студию...',
+    'tools.err_overload':       'Нейросеть перегружена — попробуйте через минуту',
+    'tools.retry':              'Повторить →',
 
     // ── SEO tool page ──────────────────────────────────────────────────────────
     'tools.seo_title':          'SEO-пакет для ролика',
@@ -2095,8 +2097,6 @@ export const translations = {
     'tools.script_result_label':'Script',
     'tools.script_plan_label':  'Video structure',
     'tools.script_plan_edit_hint': 'Edit the outline — then click "Generate script"',
-    'tools.save_fail':          'Failed to save to history',
-    'tools.use_studio_creating':'Opening studio...',
 
     // ── SEO tool page ──────────────────────────────────────────────────────────
     'tools.seo_title':          'SEO Package',
@@ -2129,6 +2129,10 @@ export const translations = {
     'tools.saving':             'Saving to history...',
     'tools.saved':              'Saved to history ✓',
     'tools.back_to_tools':      '← Tools',
+    'tools.save_fail':          'Failed to save to history',
+    'tools.use_studio_creating':'Opening studio...',
+    'tools.err_overload':       'AI is overloaded — please try again in a minute',
+    'tools.retry':              'Retry →',
 
     // ── Dashboard tool_run card ────────────────────────────────────────────────
     'dashboard.open_result':    'Open result',

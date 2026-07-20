@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
+import { isAnthropicOverload, withAnthropicRetry } from '@/lib/anthropic-retry'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
@@ -110,13 +111,13 @@ export async function POST(request: NextRequest) {
     }
 
     const prompt = buildPrompt(script.trim(), language)
-    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 90_000 })
+    const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 90_000, maxRetries: 0 })
 
-    const message = await anthropic.messages.create({
+    const message = await withAnthropicRetry(() => anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }],
-    })
+    }), 'generate/repack')
 
     console.log(`[generate/repack] stop_reason=${message.stop_reason} usage=${JSON.stringify(message.usage)}`)
 
@@ -147,6 +148,9 @@ export async function POST(request: NextRequest) {
     console.error('[generate/repack]', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/repack').catch(() => {})
     else await notifyError('/generate/repack', msg).catch(() => {})
+    if (isAnthropicOverload(error)) {
+      return NextResponse.json({ ok: false, error: 'Нейросеть перегружена — попробуйте через минуту', code: 'OVERLOADED' }, { status: 503 })
+    }
     return NextResponse.json({ ok: false, error: 'Ошибка генерации' }, { status: 500 })
   }
 }
