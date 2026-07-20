@@ -47,9 +47,10 @@ function UniqueizeContent() {
     fetch(`/api/projects/${runId}`)
       .then(r => r.json())
       .then(json => {
-        if (json.ok && json.data?.script) {
-          setResultText(json.data.script)
-          setInputText(json.data.topic ?? '')
+        const p = json.data?.project
+        if (json.ok && p?.script) {
+          setResultText(p.script)
+          setInputText(p.topic ?? '')
           setSavedId(runId)
         }
       })
@@ -147,8 +148,8 @@ function UniqueizeContent() {
           credits_spent: credits,
         }),
       })
-      const json: { ok: boolean; data?: { project_id: string } } = await res.json()
-      if (json.ok) setSavedId(json.data!.project_id)
+      const json: { ok: boolean; data?: { project_id: string; script: string | null } } = await res.json()
+      if (json.ok && json.data?.script) setSavedId(json.data.project_id)
       else setSaveError(t('tools.save_fail'))
     } catch {
       setSaveError(t('tools.save_fail'))

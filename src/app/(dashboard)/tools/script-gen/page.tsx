@@ -51,6 +51,7 @@ function ScriptGenContent() {
   const [lastAction, setLastAction] = useState<'plan' | 'script' | null>(null)
   const [copied, setCopied] = useState(false)
   const [usingStudio, setUsingStudio] = useState(false)
+  const [planCollapsed, setPlanCollapsed] = useState(false)
 
   const PLAN_MIN_DURATION = 5
 
@@ -60,12 +61,13 @@ function ScriptGenContent() {
     fetch(`/api/projects/${runId}`)
       .then(r => r.json())
       .then(json => {
-        if (json.ok && json.data?.script) {
-          setResultScript(json.data.script)
-          setTopic(json.data.topic ?? '')
+        const p = json.data?.project
+        if (json.ok && p?.script) {
+          setResultScript(p.script)
+          setTopic(p.topic ?? '')
           setSavedId(runId)
-          if (json.data.plan_sections) {
-            setResultPlanSections(json.data.plan_sections as PlanSection[])
+          if (p.plan_sections) {
+            setResultPlanSections(p.plan_sections as PlanSection[])
           }
         }
       })
@@ -187,15 +189,16 @@ function ScriptGenContent() {
           title: t('tools.card_script'),
           input_text: inputTopic,
           result_text: script,
+          plan_sections: sections ?? undefined,
           credits_spent: credits,
           language: lang,
         }),
       })
-      const json: { ok: boolean; data?: { project_id: string }; error?: string } = await res.json()
-      if (!json.ok) {
+      const json: { ok: boolean; data?: { project_id: string; script: string | null }; error?: string } = await res.json()
+      if (!json.ok || !json.data?.script) {
         setSaveError(t('tools.save_fail'))
       } else {
-        setSavedId(json.data!.project_id)
+        setSavedId(json.data.project_id)
       }
     } catch {
       setSaveError(t('tools.save_fail'))
@@ -373,7 +376,7 @@ function ScriptGenContent() {
 
         {/* Right: plan + result */}
         <div className="flex flex-col gap-4 mt-4 lg:mt-0">
-          {/* Editable plan (Phase B) */}
+          {/* Editable plan (Phase B — before script ready) */}
           {hasPlan && !resultScript && (
             <div className="rounded-2xl p-5 flex flex-col gap-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
               <div className="flex items-center justify-between">
@@ -406,6 +409,31 @@ function ScriptGenContent() {
                   />
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Plan summary (collapsed above script after generation or on ?run= restore) */}
+          {resultScript && resultPlanSections && resultPlanSections.length > 0 && (
+            <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+              <button
+                type="button"
+                onClick={() => setPlanCollapsed(c => !c)}
+                className="w-full flex items-center justify-between px-5 py-3"
+                style={{ background: 'rgba(255,255,255,0.03)' }}
+              >
+                <span className="text-sm font-semibold text-slate-300">{t('tools.script_plan_label')}</span>
+                <span className="text-xs text-slate-500">{planCollapsed ? '▶ развернуть' : '▼ свернуть'}</span>
+              </button>
+              {!planCollapsed && (
+                <div className="px-5 pb-5 flex flex-col gap-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                  {resultPlanSections.map((section, i) => (
+                    <div key={i} className="rounded-xl px-3 py-2" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <p className="text-xs font-semibold text-violet-400">{i + 1}. {section.title}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{section.description}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

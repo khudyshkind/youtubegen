@@ -81,13 +81,14 @@ function RepackContent() {
     fetch(`/api/projects/${runId}`)
       .then(r => r.json())
       .then(json => {
-        if (json.ok && json.data?.script) {
+        const p = json.data?.project
+        if (json.ok && p?.script) {
           // Repack stores JSON in script field
           try {
-            const parsed = JSON.parse(json.data.script) as RepackFormats
+            const parsed = JSON.parse(p.script) as RepackFormats
             if (parsed.telegram && parsed.dzen && parsed.thread) {
               setResult(parsed)
-              setInputText(json.data.topic ?? '')
+              setInputText(p.topic ?? '')
               setSavedId(runId)
             }
           } catch { /* not JSON, skip */ }
@@ -140,8 +141,8 @@ function RepackContent() {
           credits_spent: CREDIT_COSTS.repack,
         }),
       })
-      const json: { ok: boolean; data?: { project_id: string } } = await res.json()
-      if (json.ok) setSavedId(json.data!.project_id)
+      const json: { ok: boolean; data?: { project_id: string; script: string | null } } = await res.json()
+      if (json.ok && json.data?.script) setSavedId(json.data.project_id)
       else setSaveError(t('tools.save_fail'))
     } catch {
       setSaveError(t('tools.save_fail'))

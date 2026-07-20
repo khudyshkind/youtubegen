@@ -60,9 +60,10 @@ function SeoContent() {
     fetch(`/api/projects/${runId}`)
       .then(r => r.json())
       .then(json => {
-        if (json.ok && json.data?.seo) {
-          setResult(json.data.seo as SeoData)
-          setTopic(json.data.topic ?? '')
+        const p = json.data?.project
+        if (json.ok && p?.seo) {
+          setResult(p.seo as SeoData)
+          setTopic(p.topic ?? '')
           setSavedId(runId)
         }
       })
@@ -113,8 +114,8 @@ function SeoContent() {
           credits_spent: CREDIT_COSTS.seo,
         }),
       })
-      const json: { ok: boolean; data?: { project_id: string } } = await res.json()
-      if (json.ok) setSavedId(json.data!.project_id)
+      const json: { ok: boolean; data?: { project_id: string; seo: unknown } } = await res.json()
+      if (json.ok && json.data?.seo) setSavedId(json.data.project_id)
       else setSaveError(t('tools.save_fail'))
     } catch {
       setSaveError(t('tools.save_fail'))
