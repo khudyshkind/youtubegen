@@ -135,6 +135,17 @@
 
 ---
 
+## Фаза 11 — Инструмент Субтитры по аудио (SHA 036b3a3)
+
+- [x] ✅ `/api/upload/sign` — тип `tool_audio` (без project_id), валидация MIME/ext/size ≤25MB
+- [x] ✅ `/api/tools/save-run` — тип `subtitles`, сохранение `subtitle_blocks`, удаление temp-аудио
+- [x] ✅ `/tools/subtitles/page.tsx` — drag&drop, селектор языка, cost note, SRT/VTT/TXT download, `?run=` restore
+- [x] ✅ `tools/page.tsx` — карточка Субтитры (teal акцент, emoji 🎧)
+- [x] ✅ `i18n.ts` — ключи `tools.card_subtitles*` + `tools.subtitles_*` (ru + en, 22 ключа)
+- [x] ✅ Vercel deploy — build success, SHA `036b3a3`
+
+---
+
 ## Сводка
 
 | Фаза | Прогресс |
@@ -151,4 +162,5 @@
 | Фаза 8 — i18n + Уникализация + APIHOST TTS | 12 / 12 |
 | Фаза 9 — YouTube Analytics | 11 / 11 |
 | Фаза 10 — Wave 1 Acceptance + Tools | 8 / 9 (pending Migration 005) |
-| **Итого** | **83 / 84** |
+| Фаза 11 — Субтитры по аудио | 6 / 6 |
+| **Итого** | **89 / 90** |

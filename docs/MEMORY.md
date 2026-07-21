@@ -115,6 +115,17 @@ NEXT_PUBLIC_APP_URL=
 <!-- ### YYYY-MM-DD — Краткое описание -->
 <!-- Что сделано, какие файлы созданы/изменены -->
 
+### 2026-07-21 — Инструмент «Субтитры по аудио» (SHA 036b3a3)
+
+Реализован самостоятельный инструмент транскрибации аудио (без создания проекта):
+- `/api/upload/sign` — добавлен тип `tool_audio`: не требует `project_id`, путь `{user_id}/tool/{uuid}.ext`, валидация MIME + ext (mp3/m4a/aac/ogg/wav) + size ≤25MB
+- `/api/tools/save-run` — расширен: тип `subtitles`, поле `subtitle_blocks`, параметр `audio_storage_path` (удаляется из Storage после сохранения tool_run)
+- `/tools/subtitles/page.tsx` — drag&drop загрузка, 12 языков Whisper + Auto, cost note (180 кр/мин), фазовый индикатор (uploading → transcribing → saving), превью субтитров (все блоки), скачать SRT/VTT/TXT, `?run=<id>` восстановление, saved-badge с ссылкой
+- `tools/page.tsx` — карточка Субтитры (slug=subtitles, emoji 🎧, teal акцент rgba(20,184,166,...))
+- `i18n.ts` — 22 новых ключа `tools.card_subtitles*` + `tools.subtitles_*` (ru + en)
+- Ключевые паттерны: `subtitle_blocks jsonb` уже в schema.sql, `resolveAudioUrl` в generate/subtitles перегенерирует signed URL для Railway, credits списываются в generate/subtitles (не в save-run)
+Деплой: SHA 036b3a3 → Vercel:success
+
 ### 2026-07-20 — Wave 1 acceptance + 529 overload fix
 
 **Wave 1 acceptance (SHA 9b8a3b1):**
