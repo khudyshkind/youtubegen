@@ -122,7 +122,7 @@ export default function OfferPage() {
         <p style={p}><strong style={T}>Индивидуальный предприниматель Худышкин Денис Владимирович</strong></p>
         <p style={p}>ОГРНИП: 322554300058740</p>
         <p style={p}>ИНН: 550403540149</p>
-        <p style={p}>Адрес (место нахождения по ЕГРИП): Россия, г. Омск, ул. Куйбышева, д. 31, кв. 99</p>
+        <p style={p}>Адрес (место нахождения по ЕГРИП): 644070, Россия, г. Омск, ул. Куйбышева, д. 31, кв. 99</p>
         <p style={p}>Электронная почта: <a href="mailto:support@lefiro.co" style={L}>support@lefiro.co</a></p>
         <p style={p0}>Сайт: <a href="https://lefiro.co" style={L}>https://lefiro.co</a></p>
       </S>
