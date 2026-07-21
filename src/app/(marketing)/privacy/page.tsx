@@ -3,208 +3,94 @@
 import LegalLayout from '@/components/legal/LegalLayout'
 import { useLang } from '@/hooks/useLang'
 
-const h2Style = { color: '#CBD5E1', fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.5rem', marginTop: '0' }
-const pStyle  = { color: '#94A3B8', fontSize: '0.9rem', lineHeight: '1.7', marginBottom: '0' }
-const ulStyle = { color: '#94A3B8', fontSize: '0.9rem', lineHeight: '1.7', paddingLeft: '1.25rem', margin: '0' }
+const h  = { color: '#CBD5E1', fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem', marginTop: '0' }
+const p  = { color: '#94A3B8', fontSize: '0.9rem', lineHeight: '1.7', marginBottom: '0.6rem' }
+const p0 = { color: '#94A3B8', fontSize: '0.9rem', lineHeight: '1.7', marginBottom: '0' }
+const ul = { color: '#94A3B8', fontSize: '0.9rem', lineHeight: '1.7', paddingLeft: '1.25rem', marginBottom: '0.6rem', marginTop: '0' }
+const T  = { color: '#CBD5E1' }
+const L  = { color: '#818CF8' }
 
-function Section({ children }: { children: React.ReactNode }) {
+function S({ children }: { children: React.ReactNode }) {
   return <section style={{ marginBottom: '2rem' }}>{children}</section>
 }
 
 export default function PrivacyPage() {
   const { lang } = useLang()
-  const ru = lang === 'ru'
 
   return (
-    <LegalLayout titleRu="Политика конфиденциальности" titleEn="Privacy Policy" updated="2026-07-11">
+    <LegalLayout titleRu="Политика обработки персональных данных" titleEn="Privacy Policy" updated="2026-07-21">
 
-      <Section>
-        <p style={pStyle}>
-          {ru
-            ? 'Мы — сервис Lefiro. Эта политика описывает, какие данные мы собираем, как используем и с кем делимся при использовании нашего сервиса автоматизации YouTube-контента.'
-            : 'We are Lefiro. This policy describes what data we collect, how we use it, and who we share it with when you use our YouTube content automation service.'}
-        </p>
-      </Section>
+      {lang !== 'ru' && (
+        <div style={{ ...p, padding: '0.75rem 1rem', marginBottom: '2rem', background: 'rgba(124,58,237,0.08)', borderRadius: '0.75rem', border: '1px solid rgba(124,58,237,0.2)' }}>
+          The authoritative version of this document is in Russian. The text below is the Russian original.
+        </div>
+      )}
 
-      <Section>
-        <h2 style={h2Style}>{ru ? '1. Данные, которые мы собираем' : '1. Data We Collect'}</h2>
-        <ul style={ulStyle}>
-          {ru ? (
-            <>
-              <li><strong style={{ color: '#CBD5E1' }}>Аккаунт</strong> — адрес электронной почты при регистрации.</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Контент проектов</strong> — темы, сценарии, настройки генерации и созданный медиаконтент (аудио, изображения, видео).</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Платёжные данные</strong> — Telegram user ID при оформлении подписки; метаданные криптовалютной транзакции (идентификатор, сумма, статус). Приватные ключи и полные реквизиты кошельков не собираются.</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Данные YouTube</strong> — при использовании аналитики: данные каналов, которые вы явно выбираете через YouTube Data API (публичные метрики в рамках ваших прав доступа).</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Технические данные</strong> — IP-адрес, тип браузера, операционная система, логи запросов. Собираются автоматически инфраструктурными провайдерами.</li>
-            </>
-          ) : (
-            <>
-              <li><strong style={{ color: '#CBD5E1' }}>Account</strong> — email address upon registration.</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Project content</strong> — topics, scripts, generation settings, and created media (audio, images, video).</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Payment data</strong> — Telegram user ID when subscribing; cryptocurrency transaction metadata (ID, amount, status). Private wallet keys and full wallet credentials are not collected.</li>
-              <li><strong style={{ color: '#CBD5E1' }}>YouTube data</strong> — when using analytics: channel data you explicitly select via YouTube Data API (public metrics within your access permissions).</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Technical data</strong> — IP address, browser type, OS, request logs. Collected automatically by infrastructure providers.</li>
-            </>
-          )}
+      <S>
+        <h2 style={h}>1. Общие положения</h2>
+        <p style={p}>1.1. Настоящая Политика определяет порядок обработки персональных данных Пользователей сервиса Lefiro (далее — «Сервис»), размещённого по адресу https://lefiro.co.</p>
+        <p style={p}>1.2. Оператором персональных данных является Индивидуальный предприниматель Худышкин Денис Владимирович (ОГРНИП 322554300058740, ИНН 550403540149) (далее — «Оператор»). Обработка осуществляется в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных данных».</p>
+        <p style={p0}>1.3. Используя Сервис и (или) проставляя отметку о согласии при регистрации, Пользователь даёт согласие на обработку своих персональных данных на условиях настоящей Политики.</p>
+      </S>
+
+      <S>
+        <h2 style={h}>2. Состав обрабатываемых данных</h2>
+        <p style={p}>2.1. Оператор обрабатывает следующие данные:</p>
+        <ul style={ul}>
+          <li>адрес электронной почты и иные идентификаторы, указанные Пользователем при регистрации;</li>
+          <li>идентификаторы учётной записи и данные авторизации;</li>
+          <li>история запросов, операций и платежей, технические логи использования Сервиса;</li>
+          <li>платёжные идентификаторы (без данных банковских карт — они обрабатываются платёжными провайдерами);</li>
+          <li>Контент Пользователя, передаваемый в Сервис (тексты, аудиофайлы, изображения и иные материалы), в объёме, необходимом для оказания услуг.</li>
         </ul>
-      </Section>
+        <p style={p0}>2.2. Оператор не собирает и не хранит данные банковских карт Пользователя. Обработка платёжных реквизитов осуществляется привлечёнными платёжными провайдерами на их стороне.</p>
+      </S>
 
-      <Section>
-        <h2 style={h2Style}>{ru ? '2. Как мы используем данные' : '2. How We Use Data'}</h2>
-        <ul style={ulStyle}>
-          {ru ? (
-            <>
-              <li>Предоставление функций сервиса.</li>
-              <li>Передача контента сторонним AI-провайдерам для выполнения генерации (только в рамках конкретного запроса).</li>
-              <li>Отправка уведомлений по электронной почте (например, о статусе платежа).</li>
-              <li>Обнаружение злоупотреблений и обеспечение безопасности сервиса.</li>
-            </>
-          ) : (
-            <>
-              <li>Providing Service features.</li>
-              <li>Passing content to third-party AI providers to fulfill generation requests (per-request only).</li>
-              <li>Sending email notifications (e.g., payment status).</li>
-              <li>Abuse detection and service security.</li>
-            </>
-          )}
-        </ul>
-      </Section>
+      <S>
+        <h2 style={h}>3. Цели обработки</h2>
+        <p style={p0}>3.1. Персональные данные обрабатываются в целях: предоставления функциональности Сервиса; учёта платежей и Баланса; исполнения обязательств по договору; применения мер к нарушителям; формирования агрегированной статистики; ответов на обращения и претензии; исполнения требований законодательства (в том числе налогового).</p>
+      </S>
 
-      <Section>
-        <h2 style={h2Style}>{ru ? '3. Категории обработчиков данных' : '3. Data Processor Categories'}</h2>
-        <p style={{ ...pStyle, marginBottom: '0.5rem' }}>
-          {ru
-            ? 'Мы передаём данные следующим категориям обработчиков (только в рамках их функций):'
-            : 'We share data with the following categories of processors (only within their designated functions):'}
-        </p>
-        <ul style={ulStyle}>
-          {ru ? (
-            <>
-              <li><strong style={{ color: '#CBD5E1' }}>База данных и аутентификация</strong> — Supabase</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Хостинг и CDN</strong> — Vercel</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Вычислительный воркер</strong> — Railway</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Электронная почта</strong> — Resend</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Файловое хранилище</strong> — Backblaze B2</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Сторонние AI-провайдеры</strong> — обрабатывают ваш контент при генерации (Anthropic, OpenAI, fal.ai и другие)</li>
-              <li><strong style={{ color: '#CBD5E1' }}>YouTube Data API</strong> — предоставляет данные каналов для аналитики</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Telegram</strong> — платёжный бот</li>
-            </>
-          ) : (
-            <>
-              <li><strong style={{ color: '#CBD5E1' }}>Database and authentication</strong> — Supabase</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Hosting and CDN</strong> — Vercel</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Compute worker</strong> — Railway</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Email</strong> — Resend</li>
-              <li><strong style={{ color: '#CBD5E1' }}>File storage</strong> — Backblaze B2</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Third-party AI providers</strong> — process your content during generation (Anthropic, OpenAI, fal.ai, and others)</li>
-              <li><strong style={{ color: '#CBD5E1' }}>YouTube Data API</strong> — provides channel data for analytics</li>
-              <li><strong style={{ color: '#CBD5E1' }}>Telegram</strong> — payment bot</li>
-            </>
-          )}
-        </ul>
-      </Section>
+      <S>
+        <h2 style={h}>4. Правовые основания обработки</h2>
+        <p style={p0}>4.1. Основаниями обработки являются: согласие Пользователя, выраженное путём принятия Пользовательского соглашения и настоящей Политики; исполнение договора, стороной которого является Пользователь; законный интерес Оператора — для предотвращения повторных нарушений и защиты прав в спорах; исполнение требований законодательства — для хранения данных о платежах.</p>
+      </S>
 
-      <Section>
-        <h2 style={h2Style}>{ru ? '4. Cookies и локальное хранилище' : '4. Cookies and Local Storage'}</h2>
-        <p style={{ ...pStyle, marginBottom: '0.5rem' }}>
-          {ru
-            ? 'Мы используем исключительно технические средства хранения:'
-            : 'We use only technical storage mechanisms:'}
-        </p>
-        <ul style={ulStyle}>
-          {ru ? (
-            <>
-              <li><strong style={{ color: '#CBD5E1' }}>HTTP cookies</strong> — сессия аутентификации Supabase. Необходимы для работы аккаунта.</li>
-              <li><strong style={{ color: '#CBD5E1' }}>localStorage</strong>: <code style={{ color: '#A78BFA' }}>yt-lang</code> — выбор языка интерфейса; <code style={{ color: '#A78BFA' }}>onboarding_template</code> — состояние онбординга при первом входе.</li>
-            </>
-          ) : (
-            <>
-              <li><strong style={{ color: '#CBD5E1' }}>HTTP cookies</strong> — Supabase authentication session. Required for account functionality.</li>
-              <li><strong style={{ color: '#CBD5E1' }}>localStorage</strong>: <code style={{ color: '#A78BFA' }}>yt-lang</code> — interface language preference; <code style={{ color: '#A78BFA' }}>onboarding_template</code> — onboarding state on first login.</li>
-            </>
-          )}
-        </ul>
-        <p style={{ ...pStyle, marginTop: '0.5rem' }}>
-          {ru
-            ? 'Рекламные трекеры, Google Analytics, Facebook Pixel и аналогичные системы слежения не используются.'
-            : 'Advertising trackers, Google Analytics, Facebook Pixel, and similar tracking systems are not used.'}
-        </p>
-      </Section>
+      <S>
+        <h2 style={h}>5. Сроки хранения</h2>
+        <p style={p}>5.1. Идентификаторы и история запросов хранятся до достижения целей обработки, отзыва согласия Пользователем или прекращения работы Сервиса.</p>
+        <p style={p}>5.2. Результаты, представляющие собой медиафайлы, хранятся в течение ограниченного срока (не менее 72 часов с момента создания), после чего могут быть удалены.</p>
+        <p style={p}>5.3. Данные о платежах хранятся в течение 5 (пяти) лет в соответствии с требованиями налогового законодательства.</p>
+        <p style={p0}>5.4. Данные заблокированных за нарушения Пользователей могут храниться бессрочно в целях предотвращения повторных нарушений.</p>
+      </S>
 
-      <Section>
-        <h2 style={h2Style}>{ru ? '5. YouTube API Services' : '5. YouTube API Services'}</h2>
-        <p style={pStyle}>
-          {ru
-            ? <>Сервис использует YouTube Data API Services для предоставления аналитики YouTube-каналов. Используя функции аналитики, вы соглашаетесь с <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#818CF8' }}>Политикой конфиденциальности Google</a>. Вы можете отозвать доступ приложения к вашим данным Google через <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer" style={{ color: '#818CF8' }}>страницу управления доступом Google</a>.</>
-            : <>The Service uses YouTube Data API Services to provide YouTube channel analytics. By using analytics features, you agree to the <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#818CF8' }}>Google Privacy Policy</a>. You can revoke the application&apos;s access to your Google data via the <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer" style={{ color: '#818CF8' }}>Google permissions page</a>.</>
-          }
-        </p>
-      </Section>
+      <S>
+        <h2 style={h}>6. Передача данных третьим лицам</h2>
+        <p style={p}>6.1. Оператор передаёт персональные данные третьим лицам исключительно в минимально необходимом объёме и только в следующих случаях: сторонним сервисам обработки данных на основе искусственного интеллекта — в объёме запросов, необходимых для оказания услуг; хостинг-провайдерам и платёжным провайдерам — для обеспечения работы Сервиса и приёма платежей; правоохранительным органам — по законному запросу.</p>
+        <p style={p0}>6.2. Оператор принимает разумные организационные и технические меры для защиты персональных данных от неправомерного доступа, изменения, раскрытия или уничтожения.</p>
+      </S>
 
-      <Section>
-        <h2 style={h2Style}>{ru ? '6. Хранение данных' : '6. Data Retention'}</h2>
-        <ul style={ulStyle}>
-          {ru ? (
-            <>
-              <li>Данные аккаунта и контент проектов хранятся до удаления аккаунта.</li>
-              <li>Созданный медиаконтент (аудио, изображения, видео) хранится ограниченное время согласно вашему тарифу; по истечении срока хранения мы вправе удалять файлы.</li>
-              <li>При удалении аккаунта данные удаляются из наших систем в разумные сроки.</li>
-            </>
-          ) : (
-            <>
-              <li>Account data and project content are retained until account deletion.</li>
-              <li>Created media files (audio, images, video) are retained for a limited period according to your plan; after the retention period expires, we may delete the files.</li>
-              <li>Upon account deletion, data is removed from our systems within a reasonable timeframe.</li>
-            </>
-          )}
-        </ul>
-      </Section>
+      <S>
+        <h2 style={h}>7. Права Пользователя</h2>
+        <p style={p}>7.1. Пользователь вправе: запросить доступ к своим персональным данным; потребовать их уточнения, блокирования или удаления; отозвать согласие на обработку; обжаловать действия Оператора в уполномоченный орган по защите прав субъектов персональных данных (Роскомнадзор) или в суд.</p>
+        <p style={p0}>7.2. Запросы направляются на адрес <a href="mailto:support@lefiro.co" style={L}>support@lefiro.co</a>. Срок рассмотрения — до 10 рабочих дней. Отзыв согласия или удаление данных может повлечь невозможность дальнейшего использования Сервиса.</p>
+      </S>
 
-      <Section>
-        <h2 style={h2Style}>{ru ? '7. Ваши права' : '7. Your Rights'}</h2>
-        <p style={{ ...pStyle, marginBottom: '0.5rem' }}>
-          {ru ? 'Вы вправе:' : 'You have the right to:'}
-        </p>
-        <ul style={ulStyle}>
-          {ru ? (
-            <>
-              <li>Получить доступ к своим данным.</li>
-              <li>Исправить неточные данные.</li>
-              <li>Удалить аккаунт (через настройки или по запросу на support@lefiro.co).</li>
-              <li>Запросить экспорт своих данных.</li>
-            </>
-          ) : (
-            <>
-              <li>Access your data.</li>
-              <li>Correct inaccurate data.</li>
-              <li>Delete your account (via settings or by emailing support@lefiro.co).</li>
-              <li>Request a data export.</li>
-            </>
-          )}
-        </ul>
-        <p style={{ ...pStyle, marginTop: '0.5rem' }}>
-          {ru
-            ? <>Для реализации прав обратитесь на <a href="mailto:support@lefiro.co" style={{ color: '#818CF8' }}>support@lefiro.co</a>.</>
-            : <>To exercise these rights, contact <a href="mailto:support@lefiro.co" style={{ color: '#818CF8' }}>support@lefiro.co</a>.</>
-          }
-        </p>
-      </Section>
+      <S>
+        <h2 style={h}>8. Файлы cookie и аналогичные технологии</h2>
+        <p style={p0}>8.1. Сервис использует технические файлы, необходимые для авторизации и работы личного кабинета (в том числе данные сессии и локального хранилища браузера). Сторонние рекламные и трекинговые системы Сервисом не используются.</p>
+      </S>
 
-      <Section>
-        <h2 style={h2Style}>{ru ? '8. Изменения политики' : '8. Policy Changes'}</h2>
-        <p style={pStyle}>
-          {ru
-            ? 'Мы вправе обновлять эту политику. О существенных изменениях мы уведомим по электронной почте. Дата последнего обновления указана вверху страницы.'
-            : 'We may update this policy. Material changes will be communicated by email. The last updated date is shown at the top of this page.'}
-        </p>
-      </Section>
+      <S>
+        <h2 style={h}>9. Изменение Политики</h2>
+        <p style={p0}>9.1. Оператор вправе изменять настоящую Политику. Действующая редакция размещается по адресу настоящего документа с указанием даты вступления в силу. Продолжение использования Сервиса после вступления изменений в силу означает согласие с обновлённой Политикой.</p>
+      </S>
 
-      <Section>
-        <h2 style={h2Style}>{ru ? '9. Связь' : '9. Contact'}</h2>
-        <p style={pStyle}>
-          <a href="mailto:support@lefiro.co" style={{ color: '#818CF8' }}>support@lefiro.co</a>
-        </p>
-      </Section>
+      <S>
+        <h2 style={h}>10. Контакты</h2>
+        <p style={p}>По вопросам обработки персональных данных: <a href="mailto:support@lefiro.co" style={L}>support@lefiro.co</a></p>
+        <p style={p0}><strong style={T}>Индивидуальный предприниматель Худышкин Денис Владимирович</strong>, ОГРНИП 322554300058740, ИНН 550403540149.</p>
+      </S>
 
     </LegalLayout>
   )

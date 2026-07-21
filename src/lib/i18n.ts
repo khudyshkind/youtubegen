@@ -19,6 +19,7 @@ export const translations = {
     'nav.terms':          'Условия',
     'nav.privacy':        'Конфиденциальность',
     'nav.refund':         'Возвраты',
+    'nav.offer':          'Публичная оферта',
 
     // ── Dashboard ─────────────────────────────────────────────────────────────
     'dashboard.hello':          'Привет',
@@ -269,8 +270,8 @@ export const translations = {
     'billing.subscription_note': 'Кредиты тарифа действуют 30 дней. Докупленные пакеты — бессрочно.',
     'billing.russia_title':  'Оплата из России',
     'billing.russia_desc':   'Принимаем оплату удобными для вас способами:',
-    'billing.russia_mir':    'Карта МИР',
-    'billing.russia_mir_desc': 'Перевод по номеру карты',
+    'billing.russia_mir':    'Банковская карта (МИР)',
+    'billing.russia_mir_desc': 'МИР, Visa, Mastercard',
     'billing.russia_crypto': 'Криптовалюта',
     'billing.russia_crypto_desc': 'USDT (TRC20 или ERC20)',
     'billing.russia_btn':    'Оплатить из России →',
@@ -1252,6 +1253,7 @@ export const translations = {
     'nav.terms':          'Terms',
     'nav.privacy':        'Privacy',
     'nav.refund':         'Refunds',
+    'nav.offer':          'Public Offer',
 
     // ── Dashboard ─────────────────────────────────────────────────────────────
     'dashboard.hello':          'Hello',
@@ -1502,8 +1504,8 @@ export const translations = {
     'billing.subscription_note': 'Plan credits last 30 days. Purchased packs are permanent.',
     'billing.russia_title':  'Payment from Russia',
     'billing.russia_desc':   'We accept payment in convenient ways:',
-    'billing.russia_mir':    'MIR Card',
-    'billing.russia_mir_desc': 'Transfer by card number',
+    'billing.russia_mir':    'Bank Card (MIR)',
+    'billing.russia_mir_desc': 'MIR, Visa, Mastercard',
     'billing.russia_crypto': 'Cryptocurrency',
     'billing.russia_crypto_desc': 'USDT (TRC20 or ERC20)',
     'billing.russia_btn':    'Pay from Russia →',

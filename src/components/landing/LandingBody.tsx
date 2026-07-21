@@ -9,16 +9,12 @@ import ScrollProgress from './ScrollProgress'
 import AnimatedCounter from './AnimatedCounter'
 import FaqAccordion from './FaqAccordion'
 import { useLang } from '@/hooks/useLang'
-import { PLAN_CREDITS, PLAN_PRICES } from '@/lib/types'
+import { PLAN_CREDITS, PLAN_PRICES, PLAN_PRICES_RUB } from '@/lib/types'
 
 const BG = '#0A0A0F'
 const DIV_LINE = '1px solid rgba(255,255,255,0.05)'
 
-interface Props {
-  usdToRub?: number
-}
-
-export default function LandingBody({ usdToRub = 90 }: Props) {
+export default function LandingBody() {
   const { t, lang } = useLang()
 
   const STEPS = [
@@ -60,7 +56,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
       name: 'Basic',
       isFree: false,
       priceUsd: PLAN_PRICES['basic'],
-      rub: Math.ceil(PLAN_PRICES['basic'] * usdToRub),
+      priceRub: PLAN_PRICES_RUB['basic'],
       credits: PLAN_CREDITS['basic'],
       features: [t('billing.f_credits_basic'), t('billing.f_all_tools'), t('billing.f_voices_3')],
       cta: t('landing.plan_cta_basic'),
@@ -71,7 +67,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
       name: 'Starter',
       isFree: false,
       priceUsd: PLAN_PRICES['starter'],
-      rub: Math.ceil(PLAN_PRICES['starter'] * usdToRub),
+      priceRub: PLAN_PRICES_RUB['starter'],
       credits: PLAN_CREDITS['starter'],
       features: [t('billing.f_credits_100'), t('billing.f_all_tools'), t('billing.f_analytics')],
       cta: t('landing.plan_cta_starter'),
@@ -82,7 +78,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
       name: 'Pro',
       isFree: false,
       priceUsd: PLAN_PRICES['pro'],
-      rub: Math.ceil(PLAN_PRICES['pro'] * usdToRub),
+      priceRub: PLAN_PRICES_RUB['pro'],
       credits: PLAN_CREDITS['pro'],
       features: [t('billing.f_credits_300'), t('billing.f_all_tools'), t('billing.f_priority_support')],
       cta: t('landing.plan_cta_pro'),
@@ -93,7 +89,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
       name: 'Agency',
       isFree: false,
       priceUsd: PLAN_PRICES['agency'],
-      rub: Math.ceil(PLAN_PRICES['agency'] * usdToRub),
+      priceRub: PLAN_PRICES_RUB['agency'],
       credits: PLAN_CREDITS['agency'],
       features: [t('billing.f_credits_1000'), t('billing.f_all_tools'), t('billing.f_dedicated_support')],
       cta: t('landing.plan_cta_agency'),
@@ -367,14 +363,16 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
                         {t('landing.plan_free_price')}
                       </span>
                     </div>
+                  ) : lang === 'ru' ? (
+                    <div className="flex items-end gap-1">
+                      <span className="text-4xl font-extrabold text-slate-100">{(plan.priceRub ?? 0).toLocaleString('ru-RU')} ₽</span>
+                      <span className="text-slate-500 mb-1 text-sm">{t('landing.period')}</span>
+                    </div>
                   ) : (
                     <div className="flex items-end gap-1">
                       <span className="text-4xl font-extrabold text-slate-100">${plan.priceUsd}</span>
                       <span className="text-slate-500 mb-1 text-sm">{t('landing.period')}</span>
                     </div>
-                  )}
-                  {!plan.isFree && (
-                    <p className="text-xs text-slate-600 mt-0.5">~{plan.rub?.toLocaleString('ru-RU')} ₽/мес</p>
                   )}
                   <p className="text-xs text-violet-400 font-semibold mt-1">
                     {plan.credits.toLocaleString('ru-RU')} {plan.isFree ? t('landing.plan_credits_once') : t('landing.plan_credits_mo')}
@@ -409,6 +407,60 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
               🎁 <span className="text-violet-400 font-semibold">{t('landing.free_credits')}</span> {t('landing.free_credits_suffix')}
             </p>
             <p className="text-sm text-slate-600">{t('landing.credits_note')}</p>
+          </div>
+
+          {/* How to receive order — public delivery info */}
+          <div
+            className="mt-10 rounded-2xl p-6 reveal"
+            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-2xl">📦</span>
+              <h3 className="text-xl font-semibold text-slate-100">
+                {lang === 'ru' ? 'Как получить заказ' : 'How to receive your order'}
+              </h3>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="flex items-start gap-3">
+                <span className="text-xl mt-0.5">💻</span>
+                <div>
+                  <p className="text-sm font-medium text-slate-200">
+                    {lang === 'ru' ? 'Всё цифровое' : 'Fully digital'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {lang === 'ru'
+                      ? 'Результаты доступны сразу в личном кабинете — физическая доставка не требуется'
+                      : 'Results appear instantly in your account — no physical delivery required'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-xl mt-0.5">⬇️</span>
+                <div>
+                  <p className="text-sm font-medium text-slate-200">
+                    {lang === 'ru' ? 'Скачивание файлов' : 'Download files'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {lang === 'ru'
+                      ? 'Аудио, видео и изображения можно скачать прямо из интерфейса'
+                      : 'Audio, video and images can be downloaded directly from the interface'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-xl mt-0.5">⏱️</span>
+                <div>
+                  <p className="text-sm font-medium text-slate-200">
+                    {lang === 'ru' ? 'Срок хранения' : 'Storage period'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {lang === 'ru'
+                      ? 'Медиафайлы хранятся 72 часа — сохраняйте результаты сразу после создания'
+                      : 'Media files are stored for 72 hours — save your results right after creation'}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Russia payment block — RU locale only */}
@@ -513,7 +565,7 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
                 <Link href="/auth/register" className="hover:text-slate-300 transition-colors">{t('nav.register')}</Link>
               </div>
               <div className="flex flex-wrap gap-x-8 gap-y-1 text-sm text-slate-700">
-                <Link href="/offer"   className="hover:text-slate-500 transition-colors">{t('nav.offer') || 'Оферта'}</Link>
+                <Link href="/offer"   className="hover:text-slate-500 transition-colors">{t('nav.offer')}</Link>
                 <Link href="/terms"   className="hover:text-slate-500 transition-colors">{t('nav.terms')}</Link>
                 <Link href="/privacy" className="hover:text-slate-500 transition-colors">{t('nav.privacy')}</Link>
                 <Link href="/refund"  className="hover:text-slate-500 transition-colors">{t('nav.refund')}</Link>
