@@ -10,7 +10,10 @@ import type { SubtitleBlock } from '@/lib/types'
 export const maxDuration = 300
 
 interface SubtitlesRequest {
-  audio_url: string
+  audio_url?: string
+  // Tool flow: file already uploaded — createSignedUrl here (file exists at this point)
+  storage_path?: string
+  storage_bucket?: string
   project_id?: string
   language?: string
 }
@@ -59,16 +62,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(check, { status: 402 })
     }
 
-    const { audio_url, project_id, language }: SubtitlesRequest = await request.json()
+    const { audio_url, storage_path, storage_bucket, project_id, language }: SubtitlesRequest = await request.json()
 
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, language, stage: 'subtitles' })
 
     console.log('[subtitles] audio_url:', audio_url?.slice(0, 120))
-    console.log('[subtitles] project_id:', project_id, '| language:', language)
+    console.log('[subtitles] storage_path:', storage_path, '| project_id:', project_id, '| language:', language)
 
-    // Resolve private Supabase URLs to a fresh signed URL (15 min for Railway download)
-    const fetchUrl = await resolveAudioUrl(audio_url)
+    let fetchUrl: string
+    if (storage_path && storage_bucket) {
+      // Tool flow: file was just uploaded — createSignedUrl now (file exists at this point)
+      const svc = createServiceClient()
+      const { data: signData, error: signErr } = await svc.storage
+        .from(storage_bucket)
+        .createSignedUrl(storage_path, 900)
+      if (signErr || !signData?.signedUrl) {
+        console.error('[subtitles] createSignedUrl failed for storage_path:', signErr?.message)
+        return NextResponse.json(
+          { ok: false, error: 'Не удалось создать URL для аудиофайла' },
+          { status: 500 },
+        )
+      }
+      fetchUrl = signData.signedUrl
+      console.log('[subtitles] signed URL created from storage_path')
+    } else {
+      // Studio flow: resolve existing audio_url (re-sign if Supabase private bucket URL)
+      fetchUrl = await resolveAudioUrl(audio_url ?? '')
+    }
 
     const railwayUrl = env('RAILWAY_VIDEO_SERVER_URL').replace(/\/$/, '')
     const railwaySecret = env('RAILWAY_API_SECRET')

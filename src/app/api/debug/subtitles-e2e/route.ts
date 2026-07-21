@@ -44,23 +44,7 @@ export async function GET() {
   }
   log.step1_upload_url = 'OK'
 
-  // ── Step 2: createSignedUrl (this is what was previously not error-checked) ─
-  const { data: readData, error: readErr } = await svc.storage
-    .from('audio')
-    .createSignedUrl(testPath, 900)
-
-  log.step2_read_url_err = readErr?.message ?? null
-  log.step2_access_url_empty = !readData?.signedUrl
-  log.step2_access_url_prefix = readData?.signedUrl?.slice(0, 80) ?? '(empty)'
-
-  if (readErr || !readData?.signedUrl) {
-    log.conclusion = 'BUG #1 confirmed: createSignedUrl failed, access_url would have been empty string'
-    return NextResponse.json({ ok: false, step: 'createSignedUrl', error: readErr?.message, log })
-  }
-
-  const accessUrl = readData.signedUrl
-
-  // ── Step 3: Upload silent WAV via signed upload URL ──────────────────────
+  // ── Step 2: Upload silent WAV via signed upload URL (BEFORE createSignedUrl) ─
   const wavBuf = buildSilentWav()
   const uploadRes = await fetch(uploadData.signedUrl, {
     method: 'PUT',
@@ -74,6 +58,22 @@ export async function GET() {
     await svc.storage.from('audio').remove([testPath])
     return NextResponse.json({ ok: false, step: 'PUT upload', status: uploadRes.status, log })
   }
+
+  // ── Step 3 (after upload): createSignedUrl — file now exists ─────────────
+  const { data: readData, error: readErr } = await svc.storage
+    .from('audio')
+    .createSignedUrl(testPath, 900)
+
+  log.step3_read_url_err = readErr?.message ?? null
+  log.step3_access_url_empty = !readData?.signedUrl
+  log.step3_access_url_prefix = readData?.signedUrl?.slice(0, 80) ?? '(empty)'
+
+  if (readErr || !readData?.signedUrl) {
+    await svc.storage.from('audio').remove([testPath])
+    return NextResponse.json({ ok: false, step: 'createSignedUrl_after_upload', error: readErr?.message, log })
+  }
+
+  const accessUrl = readData.signedUrl
 
   // ── Step 4: Call Railway /transcribe ─────────────────────────────────────
   const railwayUrl = env('RAILWAY_VIDEO_SERVER_URL').replace(/\/$/, '')
@@ -104,7 +104,7 @@ export async function GET() {
 
   const railwayOk = (transcribeBody as { ok?: boolean })?.ok === true
   log.conclusion = railwayOk
-    ? 'BUG #1 was the cause. After fix createSignedUrl succeeds (access_url non-empty) and Railway transcribes successfully.'
+    ? 'ROOT CAUSE CONFIRMED: createSignedUrl before upload failed (Object not found). After upload it succeeds. Full pipeline works.'
     : `Railway failed: HTTP ${transcribeStatus} — see step4_railway_body for exact error`
 
   return NextResponse.json({ ok: railwayOk, log })

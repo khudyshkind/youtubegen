@@ -159,9 +159,8 @@ function SubtitlesTool() {
       const signJson = await signRes.json()
       if (!signJson.ok) { setError(signJson.error ?? 'Upload init error'); return }
 
-      const { signed_url, access_url, path: storagePath } = signJson.data as {
+      const { signed_url, path: storagePath } = signJson.data as {
         signed_url: string
-        access_url: string
         path: string
       }
 
@@ -173,13 +172,15 @@ function SubtitlesTool() {
       })
       if (!uploadRes.ok) { setError('Ошибка загрузки файла. Попробуйте ещё раз.'); return }
 
-      // 3. Transcribe via Railway Whisper (no project_id → no DB write in subtitles route)
+      // 3. Transcribe: pass storage_path so generate/subtitles creates signed URL after upload
+      //    (Supabase createSignedUrl requires the file to already exist in Storage)
       setPhase('transcribing')
       const subRes = await fetch('/api/generate/subtitles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          audio_url: access_url,
+          storage_path:   storagePath,
+          storage_bucket: 'audio',
           ...(language ? { language } : {}),
         }),
       })
