@@ -47,6 +47,9 @@ export default function LegalLayout({ titleRu, titleEn, updated, children }: Pro
           className="mt-16 pt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm"
           style={{ borderTop: '1px solid rgba(255,255,255,0.06)', color: 'rgba(71,85,105,1)' }}
         >
+          <Link href="/offer"   className="hover:text-slate-400 transition-colors">
+            {lang === 'ru' ? 'Публичная оферта' : 'Public Offer'}
+          </Link>
           <Link href="/terms"   className="hover:text-slate-400 transition-colors">
             {lang === 'ru' ? 'Условия использования' : 'Terms of Service'}
           </Link>

@@ -17,14 +17,19 @@ export default function BillingPage() {
   const router = useRouter()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [error, setError] = useState('')
+  const [currency, setCurrency] = useState<'rub' | 'usd'>('rub')
   const supabase = createClient()
   const { t } = useLang()
+
+  const planPriceRub: Record<string, string> = { free: '0 ₽', basic: '790 ₽', starter: '1 490 ₽', pro: '3 990 ₽', agency: '11 900 ₽' }
+  const planPriceUsd: Record<string, string> = { free: '$0', basic: '$9', starter: '$19', pro: '$39', agency: '$99' }
+  const planPrice = (id: string) => currency === 'rub' ? planPriceRub[id] : planPriceUsd[id]
 
   const PLANS = [
     {
       id: 'free' as Plan,
       name: 'Free',
-      price: '$0',
+      price: planPrice('free'),
       period: '',
       highlight: false,
       features: [t('billing.f_credits_once'), t('billing.f_all_tools'), t('billing.f_no_analytics')],
@@ -32,7 +37,7 @@ export default function BillingPage() {
     {
       id: 'basic' as Plan,
       name: 'Basic',
-      price: '$9',
+      price: planPrice('basic'),
       period: t('billing.period'),
       highlight: false,
       features: [t('billing.f_credits_basic'), t('billing.f_all_tools'), t('billing.f_email_support')],
@@ -40,7 +45,7 @@ export default function BillingPage() {
     {
       id: 'starter' as Plan,
       name: 'Starter',
-      price: '$19',
+      price: planPrice('starter'),
       period: t('billing.period'),
       highlight: false,
       features: [t('billing.f_credits_100'), t('billing.f_all_tools'), t('billing.f_email_support')],
@@ -48,7 +53,7 @@ export default function BillingPage() {
     {
       id: 'pro' as Plan,
       name: 'Pro',
-      price: '$39',
+      price: planPrice('pro'),
       period: t('billing.period'),
       highlight: true,
       features: [t('billing.f_credits_300'), t('billing.f_all_tools'), t('billing.f_priority_support')],
@@ -56,7 +61,7 @@ export default function BillingPage() {
     {
       id: 'agency' as Plan,
       name: 'Agency',
-      price: '$99',
+      price: planPrice('agency'),
       period: t('billing.period'),
       highlight: false,
       features: [t('billing.f_credits_1000'), t('billing.f_all_tools'), t('billing.f_dedicated_support'), t('billing.f_api_access')],
@@ -152,7 +157,24 @@ export default function BillingPage() {
       )}
 
       {/* Plans grid */}
-      <h2 className="text-lg font-semibold text-slate-200 mb-1">{t('billing.choose_plan')}</h2>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-1">
+        <h2 className="text-lg font-semibold text-slate-200">{t('billing.choose_plan')}</h2>
+        {/* Currency switcher */}
+        <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <button
+            onClick={() => setCurrency('rub')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${currency === 'rub' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            ₽ RUB
+          </button>
+          <button
+            onClick={() => setCurrency('usd')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${currency === 'usd' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            $ USD
+          </button>
+        </div>
+      </div>
       <p className="text-xs text-slate-400 mb-4">{t('billing.subscription_note')}</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
         {PLANS.map((plan) => {
@@ -263,7 +285,9 @@ export default function BillingPage() {
                   <p className="text-2xl font-extrabold text-slate-100">{pkg.credits}</p>
                   <p className="text-sm text-slate-400">{t('billing.credits_unit')}</p>
                 </div>
-                <p className="text-xl font-bold text-violet-300">${pkg.price}</p>
+                <p className="text-xl font-bold text-violet-300">
+                  {currency === 'rub' ? `${pkg.priceRub} ₽` : `$${pkg.price}`}
+                </p>
                 <a
                   href={tgPayUrl(topupKeys[i])}
                   target="_blank"
@@ -277,6 +301,31 @@ export default function BillingPage() {
               </div>
             )
           })}
+        </div>
+      </div>
+
+      {/* How to receive order */}
+      <div
+        className="mt-8 rounded-2xl p-6"
+        style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)' }}
+      >
+        <div className="flex items-center gap-3 mb-3">
+          <span className="text-2xl">🎁</span>
+          <h3 className="text-lg font-semibold text-slate-100">Как получить заказ</h3>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-4 text-sm text-slate-400">
+          <div className="flex-1 flex gap-2.5">
+            <span className="text-violet-400 mt-0.5 shrink-0">⚡</span>
+            <span>После оплаты кредиты зачисляются на ваш баланс автоматически — обычно в течение нескольких минут.</span>
+          </div>
+          <div className="flex-1 flex gap-2.5">
+            <span className="text-violet-400 mt-0.5 shrink-0">📁</span>
+            <span>Результаты генерации (тексты, аудио, изображения, видео) доступны в личном кабинете для просмотра и скачивания.</span>
+          </div>
+          <div className="flex-1 flex gap-2.5">
+            <span className="text-violet-400 mt-0.5 shrink-0">⏱</span>
+            <span>Медиафайлы хранятся не менее 72 часов с момента создания — скачайте их своевременно.</span>
+          </div>
         </div>
       </div>
 

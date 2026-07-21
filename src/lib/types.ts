@@ -120,6 +120,13 @@ export const PLAN_PRICES: Record<Exclude<Plan, 'free'>, number> = {
   agency:  99,
 }
 
+export const PLAN_PRICES_RUB: Record<Exclude<Plan, 'free'>, number> = {
+  basic:    790,
+  starter: 1490,
+  pro:     3990,
+  agency: 11900,
+}
+
 // Maximum accumulated balance (2× monthly allocation)
 export const PLAN_MAX_CREDITS: Record<Plan, number> = {
   free:      10000,
@@ -130,9 +137,9 @@ export const PLAN_MAX_CREDITS: Record<Plan, number> = {
 }
 
 export const TOPUP_PACKAGES = [
-  { credits:  50000, price: 7,  label: '50 000 кредитов'  },
-  { credits: 200000, price: 26, label: '200 000 кредитов' },
-  { credits: 500000, price: 60, label: '500 000 кредитов' },
+  { credits:  50000, price:  7, priceRub:  490, label: '50 000 кредитов'  },
+  { credits: 200000, price: 26, priceRub: 1490, label: '200 000 кредитов' },
+  { credits: 500000, price: 60, priceRub: 3990, label: '500 000 кредитов' },
 ] as const
 
 export const PLAN_ORDER: Plan[] = ['free', 'basic', 'starter', 'pro', 'agency']

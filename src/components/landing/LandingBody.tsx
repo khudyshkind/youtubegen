@@ -513,9 +513,11 @@ export default function LandingBody({ usdToRub = 90 }: Props) {
                 <Link href="/auth/register" className="hover:text-slate-300 transition-colors">{t('nav.register')}</Link>
               </div>
               <div className="flex flex-wrap gap-x-8 gap-y-1 text-sm text-slate-700">
+                <Link href="/offer"   className="hover:text-slate-500 transition-colors">{t('nav.offer') || 'Оферта'}</Link>
                 <Link href="/terms"   className="hover:text-slate-500 transition-colors">{t('nav.terms')}</Link>
                 <Link href="/privacy" className="hover:text-slate-500 transition-colors">{t('nav.privacy')}</Link>
                 <Link href="/refund"  className="hover:text-slate-500 transition-colors">{t('nav.refund')}</Link>
+                <a href="mailto:support@lefiro.co" className="hover:text-slate-500 transition-colors">support@lefiro.co</a>
               </div>
             </nav>
           </div>
