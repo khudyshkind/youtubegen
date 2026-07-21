@@ -1,11 +1,29 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { CREDIT_COSTS, PLAN_CREDITS, PLAN_ORDER, TOPUP_PACKAGES } from '@/lib/types'
 import { useLang } from '@/hooks/useLang'
 import type { Profile, Plan } from '@/lib/types'
+
+function PaidBanner() {
+  const searchParams = useSearchParams()
+  const { t } = useLang()
+  if (searchParams.get('paid') !== '1') return null
+  return (
+    <div
+      className="mb-6 rounded-2xl px-5 py-4 flex items-center gap-3"
+      style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)' }}
+    >
+      <span className="text-2xl">✅</span>
+      <div>
+        <p className="text-sm font-semibold text-green-400">{t('billing.paid_success_title')}</p>
+        <p className="text-xs text-slate-400 mt-0.5">{t('billing.paid_success_desc')}</p>
+      </div>
+    </div>
+  )
+}
 
 const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME ?? 'lefiro_bot'
 
@@ -15,15 +33,12 @@ function tgPayUrl(startParam: string) {
 
 export default function BillingPage() {
   const router        = useRouter()
-  const searchParams  = useSearchParams()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [error,   setError]   = useState('')
   const [paying,  setPaying]  = useState<string | null>(null)
   const [currency, setCurrency] = useState<'rub' | 'usd'>('rub')
   const supabase = createClient()
   const { t } = useLang()
-
-  const paid = searchParams.get('paid') === '1'
 
   const planPriceRub: Record<string, string> = { free: '0 ₽', basic: '790 ₽', starter: '1 490 ₽', pro: '3 990 ₽', agency: '11 900 ₽' }
   const planPriceUsd: Record<string, string> = { free: '$0', basic: '$9', starter: '$19', pro: '$39', agency: '$99' }
@@ -128,18 +143,9 @@ export default function BillingPage() {
       </div>
 
       {/* Payment success banner */}
-      {paid && (
-        <div
-          className="mb-6 rounded-2xl px-5 py-4 flex items-center gap-3"
-          style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)' }}
-        >
-          <span className="text-2xl">✅</span>
-          <div>
-            <p className="text-sm font-semibold text-green-400">{t('billing.paid_success_title')}</p>
-            <p className="text-xs text-slate-400 mt-0.5">{t('billing.paid_success_desc')}</p>
-          </div>
-        </div>
-      )}
+      <Suspense>
+        <PaidBanner />
+      </Suspense>
 
       {/* Current balance */}
       <div
