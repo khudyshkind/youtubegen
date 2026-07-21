@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase-server'
+import { createClient } from '@supabase/supabase-js'
 
 // Temporary debug endpoint — REMOVE after task 9 verification
 const ONE_TIME_TOKEN = 'lefiro_legal_check_856e59c'
@@ -9,51 +10,81 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
   try {
-    const supabase = createServiceClient()
+    const admin = createServiceClient()
 
-    // Probe which DB env vars are injected at runtime
-    const envKeys = Object.keys(process.env).filter(k =>
-      k.includes('POSTGRES') || k.includes('DATABASE') || k.includes('SUPABASE')
-    )
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '(not set)'
-
-    const { data: lastUsers } = await supabase
+    // Get most recent real user (not bot/test accounts)
+    const { data: lastUsers } = await admin
       .from('profiles')
       .select('id, email, created_at')
+      .not('email', 'like', '%test-gate.local%')
       .order('created_at', { ascending: false })
       .limit(5)
 
     const testUser = lastUsers?.[0]
+    if (!testUser) {
+      return NextResponse.json({ error: 'no users found' }, { status: 404 })
+    }
 
-    const { data: rows, error: rowsError } = testUser
-      ? await supabase
-          .from('legal_acceptances')
-          .select('document, version, accepted_at')
-          .eq('user_id', testUser.id)
-          .order('accepted_at', { ascending: false })
-      : { data: null, error: null }
+    // Generate a magic link token for the test user (does NOT send email)
+    const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
+      type: 'magiclink',
+      email: testUser.email,
+    })
 
-    const { data: all, error: allError } = await supabase
+    if (linkError || !linkData?.properties?.hashed_token) {
+      return NextResponse.json({
+        step: 'generateLink failed',
+        error: linkError,
+        testUser: { id: testUser.id.slice(0, 8) + '…', email: testUser.email },
+      }, { status: 500 })
+    }
+
+    // Sign in with the generated token to get an authenticated session
+    const anonClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    const { data: sessionData, error: sessionError } = await anonClient.auth.verifyOtp({
+      token_hash: linkData.properties.hashed_token,
+      type: 'magiclink',
+    })
+
+    if (sessionError || !sessionData?.session) {
+      return NextResponse.json({
+        step: 'verifyOtp failed',
+        error: sessionError,
+        testUser: { id: testUser.id.slice(0, 8) + '…', email: testUser.email },
+      }, { status: 500 })
+    }
+
+    // Query legal_acceptances as the authenticated user
+    const userClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { global: { headers: { Authorization: `Bearer ${sessionData.session.access_token}` } } }
+    )
+
+    const { data: rows, error: rowsError } = await userClient
       .from('legal_acceptances')
-      .select('user_id, document, version, accepted_at')
+      .select('document, version, accepted_at')
       .order('accepted_at', { ascending: false })
-      .limit(20)
+
+    // Sign out to invalidate the temporary session
+    await anonClient.auth.signOut()
 
     return NextResponse.json({
-      env_keys: envKeys,
-      supabase_url_prefix: supabaseUrl.slice(0, 40),
-      service_role_key_set: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      lastUsers: lastUsers?.map(u => ({ id: u.id.slice(0, 8) + '…', email: u.email, created_at: u.created_at })),
-      testUser_acceptances: {
+      testUser: { id: testUser.id.slice(0, 8) + '…', email: testUser.email, created_at: testUser.created_at },
+      acceptances: {
         count: rows?.length ?? 0,
         error: rowsError ? { code: rowsError.code, message: rowsError.message } : null,
         rows,
       },
-      all_acceptances: {
-        count: all?.length ?? 0,
-        error: allError ? { code: allError.code, message: allError.message } : null,
-        rows: all?.map(r => ({ ...r, user_id: r.user_id.slice(0, 8) + '…' })),
-      },
+      verdict: rows?.length === 3
+        ? '✅ 3 строки (offer/terms/privacy) — consent flow работает'
+        : rows?.length === 0
+          ? '❌ 0 строк — INSERT не записывается (или пользователь до деплоя регистрировался)'
+          : `⚠️ ${rows?.length} строк — неожиданное количество`,
+      lastUsers: lastUsers?.map(u => ({ id: u.id.slice(0, 8) + '…', email: u.email, created_at: u.created_at })),
     })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
