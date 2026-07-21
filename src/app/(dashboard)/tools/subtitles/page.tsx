@@ -194,16 +194,17 @@ function SubtitlesTool() {
         return
       }
 
-      const { subtitle_blocks, duration_seconds } = subJson.data as {
+      const { subtitle_blocks, duration_seconds, credits_spent: routeCredits } = subJson.data as {
         subtitle_blocks: SubtitleBlock[]
         duration_seconds: number
+        credits_spent: number
       }
       setBlocks(subtitle_blocks)
       setDuration(duration_seconds)
 
-      // 4. Save as tool_run; route also deletes the temp audio from Storage
+      // 4. Save as tool_run; route also deletes the temp audio from Storage.
+      // credits_spent comes from the route (already charged via spendCredits) — we only record, never re-charge.
       setPhase('saving')
-      const creditsSpent = Math.max(180, Math.ceil(duration_seconds / 60) * 180)
       const saveRes = await fetch('/api/tools/save-run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -213,7 +214,7 @@ function SubtitlesTool() {
           input_text: file.name,
           subtitle_blocks,
           audio_storage_path: storagePath,
-          credits_spent: creditsSpent,
+          credits_spent: routeCredits,
           ...(language ? { language } : {}),
         }),
       })

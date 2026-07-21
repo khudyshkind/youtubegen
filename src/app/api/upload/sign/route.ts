@@ -77,7 +77,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: false, error: 'Не удалось создать URL для загрузки' }, { status: 500 })
       }
 
-      const { data: readData } = await svc.storage.from('audio').createSignedUrl(storagePath, 3600)
+      const { data: readData, error: signReadErr } = await svc.storage.from('audio').createSignedUrl(storagePath, 3600)
+      if (signReadErr || !readData?.signedUrl) {
+        console.error('[upload/sign tool_audio] createSignedUrl failed:', signReadErr?.message)
+        return NextResponse.json({ ok: false, error: 'Не удалось создать URL для чтения файла' }, { status: 500 })
+      }
 
       return NextResponse.json({
         ok: true,
@@ -85,7 +89,7 @@ export async function POST(request: NextRequest) {
           signed_url:   data.signedUrl,
           token:        data.token,
           path:         storagePath,
-          access_url:   readData?.signedUrl ?? '',
+          access_url:   readData.signedUrl,
           bucket:       'audio',
           content_type: mime,
         },

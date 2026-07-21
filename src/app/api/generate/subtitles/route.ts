@@ -134,7 +134,8 @@ export async function POST(request: NextRequest) {
         .eq('user_id', user.id)
     }
 
-    return NextResponse.json({ ok: true, data: { subtitle_blocks } })
+    // Include duration_seconds and actual credits_spent so tool page can record exact cost
+    return NextResponse.json({ ok: true, data: { subtitle_blocks, duration_seconds, credits_spent: cost } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/subtitles]', error)
