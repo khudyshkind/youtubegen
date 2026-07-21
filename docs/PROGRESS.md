@@ -135,14 +135,16 @@
 
 ---
 
-## Фаза 11 — Инструмент Субтитры по аудио (SHA 036b3a3)
+## Фаза 11 — Инструмент Субтитры по аудио (SHA 442b63f)
 
-- [x] ✅ `/api/upload/sign` — тип `tool_audio` (без project_id), валидация MIME/ext/size ≤25MB
-- [x] ✅ `/api/tools/save-run` — тип `subtitles`, сохранение `subtitle_blocks`, удаление temp-аудио
-- [x] ✅ `/tools/subtitles/page.tsx` — drag&drop, селектор языка, cost note, SRT/VTT/TXT download, `?run=` restore
+- [x] ✅ `/api/upload/sign` — тип `tool_audio` (без project_id), валидация MIME/ext/size ≤25MB; NO `createSignedUrl` (arch fix)
+- [x] ✅ `/api/tools/save-run` — тип `subtitles`, сохранение `subtitle_blocks`, удаление temp-аудио; NO spendCredits
+- [x] ✅ `/tools/subtitles/page.tsx` — drag&drop, селектор языка, cost note, SRT/VTT/TXT download, `?run=` restore; `credits_spent` из роута
 - [x] ✅ `tools/page.tsx` — карточка Субтитры (teal акцент, emoji 🎧)
 - [x] ✅ `i18n.ts` — ключи `tools.card_subtitles*` + `tools.subtitles_*` (ru + en, 22 ключа)
-- [x] ✅ Vercel deploy — build success, SHA `036b3a3`
+- [x] ✅ `generate/subtitles` — `storage_path+storage_bucket` tool flow; `createSignedUrl` после загрузки; возвращает `duration_seconds + credits_spent`
+- [x] ✅ Arch fix E2E verified: Railway 200, subtitle_blocks OK, debug endpoint deleted, studio unaffected
+- [x] ✅ Vercel deploy — build success, SHA `442b63f`
 
 ---
 

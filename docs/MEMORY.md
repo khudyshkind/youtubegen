@@ -115,6 +115,16 @@ NEXT_PUBLIC_APP_URL=
 <!-- ### YYYY-MM-DD — Краткое описание -->
 <!-- Что сделано, какие файлы созданы/изменены -->
 
+### 2026-07-22 — Фикс «Ошибка генерации субтитров» (SHA 442b63f)
+
+**Корневая причина:** `upload/sign` вызывал `createSignedUrl` ДО PUT-загрузки файла → Supabase "Object not found" → `access_url = ''` → Railway 400 → 502 на клиенте.
+**Архитектурный фикс:**
+- `upload/sign` type=`tool_audio`: убрана `createSignedUrl`. Возвращает только `{ signed_url, token, path, bucket, content_type }`.
+- `generate/subtitles`: новый путь `storage_path + storage_bucket` — создаёт signed read URL ПОСЛЕ загрузки. Возвращает `{ subtitle_blocks, duration_seconds, credits_spent: cost }`.
+- `tools/subtitles/page.tsx`: отправляет `{ storage_path, storage_bucket }` вместо `audio_url`; `credits_spent` берёт из ответа роута (не пересчитывает, не списывает повторно).
+- `save-run only writes: NO spendCredits call` — подтверждено.
+E2E тест (debug endpoint, удалён): Railway 200, subtitle_blocks получены, cleanup OK. Деплой: SHA 442b63f → Vercel:success
+
 ### 2026-07-21 — Инструмент «Субтитры по аудио» (SHA 036b3a3)
 
 Реализован самостоятельный инструмент транскрибации аудио (без создания проекта):

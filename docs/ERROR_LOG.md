@@ -20,6 +20,18 @@
 
 ---
 
+### [2026-07-22] «Ошибка генерации субтитров» в инструменте Субтитры по аудио
+**Симптом:** Загрузка MP3 в инструменте → «Ошибка генерации субтитров» сразу после PUT.
+**Причина:** `upload/sign` вызывал `createSignedUrl` для чтения ДО PUT-загрузки файла. Supabase Storage возвращает "Object not found" если объект не существует → `access_url` = '' → Railway `/transcribe` получает пустой `audio_url` → 400 "audio_url required" → Next.js generate/subtitles возвращает 502 → страница показывает ошибку.
+**Решение (архитектурный):**
+- `upload/sign` type=`tool_audio`: убрать `createSignedUrl`. Возвращать только `{ signed_url, token, path, bucket, content_type }`.
+- `generate/subtitles`: принимать `storage_path + storage_bucket` (tool flow). После приёма запроса (файл уже в Storage) вызывать `createSignedUrl(storage_path, 900)`.
+- Tool page: после PUT отправлять `{ storage_path, storage_bucket }` вместо `audio_url`.
+**Дополнительно:** route теперь возвращает `{ ..., duration_seconds, credits_spent: cost }`. Tool page записывает `credits_spent` из ответа, не пересчитывает и не списывает повторно.
+**Файлы:** `src/app/api/upload/sign/route.ts`, `src/app/api/generate/subtitles/route.ts`, `src/app/(dashboard)/tools/subtitles/page.tsx`
+
+---
+
 ### [2026-07-20] Антропик 529 на /generate/script (инструментный путь)
 **Симптом:** Plan генерируется стабильно, script в tools падает с 529 повторяемо
 **Причина:** Script запрашивает 2458 output tokens vs план ~1100 (2.2×). Под overload Anthropic первыми отклоняет тяжёлые запросы. SDK default retries (maxRetries=2, задержки 0.5s+1s) слишком быстрые — ретрай через 1 секунду ловит тот же overload.
