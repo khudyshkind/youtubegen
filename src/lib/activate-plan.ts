@@ -2,7 +2,7 @@ import { createServiceClient } from './supabase-server'
 import { PLAN_CREDITS } from './types'
 import type { Plan } from './types'
 
-export type ActivationSource = 'paddle' | 'tg_manual' | 'admin'
+export type ActivationSource = 'paddle' | 'tg_manual' | 'admin' | 'yookassa'
 
 /**
  * Unified plan activation: sets plan metadata and adds the monthly plan credit batch.
