@@ -53,6 +53,13 @@ const TOOL_CARDS = [
     descKey: 'tools.card_titles_niche_desc' as const,
     accent: { bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)', hover: 'rgba(6,182,212,0.35)', color: '#22d3ee' },
   },
+  {
+    slug: 'subtitles',
+    emoji: '🎧',
+    titleKey: 'tools.card_subtitles' as const,
+    descKey: 'tools.card_subtitles_desc' as const,
+    accent: { bg: 'rgba(20,184,166,0.08)', border: 'rgba(20,184,166,0.2)', hover: 'rgba(20,184,166,0.35)', color: '#2dd4bf' },
+  },
 ]
 
 export default function ToolsPage() {

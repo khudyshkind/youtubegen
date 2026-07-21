@@ -924,6 +924,8 @@ export const translations = {
     'tools.card_thumb_desc':     'Сгенерируйте превью с ИИ-картинкой и заголовком',
     'tools.card_titles_niche':   'Названия по нише',
     'tools.card_titles_niche_desc': 'Топ-50 YouTube → паттерны → 10 названий + 5 хуков',
+    'tools.card_subtitles':      'Субтитры по аудио',
+    'tools.card_subtitles_desc': 'Транскрибация аудио в субтитры с таймкодами (SRT/VTT/TXT)',
 
     // ── Script-gen tool page ───────────────────────────────────────────────────
     'tools.script_title':       'Сценарий для видео',
@@ -1000,6 +1002,28 @@ export const translations = {
     'tools.tts_processing_hint': 'Обычно занимает 1–3 минуты. Не закрывайте страницу.',
     'tools.tts_result_label':   'Результат',
     'tools.tts_download':       'Скачать MP3',
+
+    // ── Subtitles tool ────────────────────────────────────────────────────────
+    'tools.subtitles_title':       'Субтитры по аудио',
+    'tools.subtitles_subtitle':    'Загрузите аудиофайл и получите субтитры с таймкодами',
+    'tools.subtitles_file_label':  'Аудиофайл',
+    'tools.subtitles_file_hint':   'Перетащите или нажмите · mp3 / m4a / aac / ogg / wav · до 25 МБ',
+    'tools.subtitles_lang_label':  'Язык аудио',
+    'tools.subtitles_lang_auto':   'Авто (определить автоматически)',
+    'tools.subtitles_cost_note':   '180 кр/мин · списание по фактической длительности · минимум 180 кр',
+    'tools.subtitles_gen_btn':     'Сделать субтитры',
+    'tools.subtitles_uploading':   'Загружаю файл...',
+    'tools.subtitles_transcribing':'Транскрибирую...',
+    'tools.subtitles_saving':      'Сохраняю...',
+    'tools.subtitles_result_label':'Субтитры',
+    'tools.subtitles_segments':    'фрагм.',
+    'tools.subtitles_download_srt':'↓ SRT',
+    'tools.subtitles_download_vtt':'↓ VTT',
+    'tools.subtitles_download_txt':'↓ TXT',
+    'tools.subtitles_saved':       'Сохранено в истории',
+    'tools.subtitles_err_format':  'Поддерживаются mp3/m4a/aac/ogg/wav до 25 МБ',
+    'tools.subtitles_err_no_file': 'Выберите аудиофайл',
+    'tools.subtitles_err_credits': 'Недостаточно кредитов',
 
     // ── Thumbnail tool ────────────────────────────────────────────────────────
     'tools.thumb_title':        'Обложка для видео',
@@ -2161,6 +2185,8 @@ export const translations = {
     'tools.card_thumb_desc':    'Generate a preview with AI image and title overlay',
     'tools.card_titles_niche':  'Titles by Niche',
     'tools.card_titles_niche_desc': 'Top-50 YouTube → patterns → 10 titles + 5 hooks',
+    'tools.card_subtitles':     'Audio Subtitles',
+    'tools.card_subtitles_desc':'Transcribe audio to subtitles with timestamps (SRT/VTT/TXT)',
 
     // ── Script-gen tool page ───────────────────────────────────────────────────
     'tools.script_title':       'Video Script',
@@ -2233,6 +2259,28 @@ export const translations = {
     'tools.tts_processing_hint':  'Usually takes 1–3 minutes. Keep this page open.',
     'tools.tts_result_label':    'Audio result',
     'tools.tts_download':        'Download MP3',
+
+    // ── Subtitles tool ────────────────────────────────────────────────────────
+    'tools.subtitles_title':       'Audio Subtitles',
+    'tools.subtitles_subtitle':    'Upload an audio file to get subtitles with timestamps',
+    'tools.subtitles_file_label':  'Audio file',
+    'tools.subtitles_file_hint':   'Drag & drop or click · mp3 / m4a / aac / ogg / wav · up to 25 MB',
+    'tools.subtitles_lang_label':  'Audio language',
+    'tools.subtitles_lang_auto':   'Auto (detect automatically)',
+    'tools.subtitles_cost_note':   '180 cr/min · charged by actual duration · minimum 180 cr',
+    'tools.subtitles_gen_btn':     'Generate Subtitles',
+    'tools.subtitles_uploading':   'Uploading...',
+    'tools.subtitles_transcribing':'Transcribing...',
+    'tools.subtitles_saving':      'Saving...',
+    'tools.subtitles_result_label':'Subtitles',
+    'tools.subtitles_segments':    'seg.',
+    'tools.subtitles_download_srt':'↓ SRT',
+    'tools.subtitles_download_vtt':'↓ VTT',
+    'tools.subtitles_download_txt':'↓ TXT',
+    'tools.subtitles_saved':       'Saved to history',
+    'tools.subtitles_err_format':  'Supported: mp3/m4a/aac/ogg/wav up to 25 MB',
+    'tools.subtitles_err_no_file': 'Select an audio file',
+    'tools.subtitles_err_credits': 'Not enough credits',
 
     // ── Thumbnail tool ────────────────────────────────────────────────────────
     'tools.thumb_title':        'Video Thumbnail',
