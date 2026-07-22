@@ -10,6 +10,8 @@ function RegisterForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const refCode = searchParams.get('ref') ?? ''
+  const redirectTo = searchParams.get('redirectTo') ?? ''
+  const safeRedirect = redirectTo.startsWith('/') ? redirectTo : '/dashboard'
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -83,7 +85,7 @@ function RegisterForm() {
     if (data.session && data.user) {
       await applyReferralClient(data.user.id)
       await acceptLegal()
-      router.push('/dashboard')
+      router.push(safeRedirect)
       router.refresh()
       return
     }

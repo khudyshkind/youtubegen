@@ -36,6 +36,8 @@ export default function BillingPage() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [error,   setError]   = useState('')
   const [paying,  setPaying]  = useState<string | null>(null)
+  // paying key format: `${baseKey}_sbp` | `${baseKey}_def`
+  // baseKey = plan.id for plans, `topup_${i}` for topups
   const [currency, setCurrency] = useState<'rub' | 'usd'>('rub')
   const supabase = createClient()
   const { t } = useLang()
@@ -106,8 +108,9 @@ export default function BillingPage() {
     loadProfile()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function payWithYookassa(plan?: string, topupIndex?: number) {
-    const key = plan ?? `topup_${topupIndex}`
+  async function payWithYookassa(plan?: string, topupIndex?: number, sbp = false) {
+    const baseKey = plan ?? `topup_${topupIndex}`
+    const key = `${baseKey}_${sbp ? 'sbp' : 'def'}`
     setPaying(key)
     setError('')
     try {
@@ -115,7 +118,7 @@ export default function BillingPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          plan !== undefined ? { plan } : { topup_index: topupIndex },
+          plan !== undefined ? { plan, sbp } : { topup_index: topupIndex, sbp },
         ),
       })
       const data = await res.json() as { confirmation_url?: string; error?: string }
@@ -206,7 +209,7 @@ export default function BillingPage() {
       )}
 
       {/* Plans grid */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-1">
+      <div id="plans" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-1">
         <h2 className="text-lg font-semibold text-slate-200">{t('billing.choose_plan')}</h2>
         {/* Currency switcher */}
         <div className="flex items-center gap-1 p-1 rounded-xl w-fit" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -227,8 +230,12 @@ export default function BillingPage() {
       <p className="text-xs text-slate-400 mb-4">{t('billing.subscription_note')}</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
         {PLANS.map((plan) => {
-          const isCurrent = plan.id === currentPlan
-          const isLoading = paying === plan.id
+          const isCurrent    = plan.id === currentPlan
+          const sbpKey       = `${plan.id}_sbp`
+          const defKey       = `${plan.id}_def`
+          const isSbpLoading = paying === sbpKey
+          const isDefLoading = paying === defKey
+          const isAnyLoading = isSbpLoading || isDefLoading
 
           return (
             <div key={plan.id} className="relative pt-4">
@@ -284,26 +291,38 @@ export default function BillingPage() {
                   {t('billing.free_btn')}
                 </div>
               ) : (
-                // All paid plans: always show payment buttons (upgrade, downgrade, or renew)
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1.5">
                   {currency === 'rub' && (
-                    <button
-                      onClick={() => payWithYookassa(plan.id)}
-                      disabled={isLoading}
-                      className={`w-full py-2.5 rounded-xl text-sm font-semibold text-center transition-all disabled:opacity-60 disabled:cursor-wait ${
-                        plan.highlight ? 'btn-gradient text-white' : 'text-white hover:opacity-90'
-                      }`}
-                      style={plan.highlight ? {} : { background: 'linear-gradient(135deg, rgba(124,58,237,0.85), rgba(37,99,235,0.85))', border: '1px solid rgba(124,58,237,0.4)' }}
-                    >
-                      {isLoading ? t('billing.loading') : isCurrent ? t('billing.renew_btn') : t('billing.pay_rub')}
-                    </button>
+                    <>
+                      {/* Primary: SBP */}
+                      <button
+                        onClick={() => payWithYookassa(plan.id, undefined, true)}
+                        disabled={isAnyLoading}
+                        className={`w-full py-2.5 rounded-xl text-sm font-semibold text-center transition-all disabled:opacity-60 disabled:cursor-wait ${
+                          plan.highlight ? 'btn-gradient text-white' : 'text-white hover:opacity-90'
+                        }`}
+                        style={plan.highlight ? {} : { background: 'linear-gradient(135deg, rgba(124,58,237,0.85), rgba(37,99,235,0.85))', border: '1px solid rgba(124,58,237,0.4)' }}
+                      >
+                        {isSbpLoading ? t('billing.loading') : t('billing.pay_sbp')}
+                      </button>
+                      {/* Secondary: other YK methods */}
+                      <button
+                        onClick={() => payWithYookassa(plan.id, undefined, false)}
+                        disabled={isAnyLoading}
+                        className="w-full py-2 rounded-xl text-xs font-medium text-slate-400 text-center transition-all hover:text-slate-200 disabled:opacity-60 disabled:cursor-wait"
+                        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+                      >
+                        {isDefLoading ? t('billing.loading') : t('billing.pay_other')}
+                      </button>
+                      <p className="text-center text-xs text-slate-600">{t('billing.methods_note')}</p>
+                    </>
                   )}
                   <a
                     href={tgPayUrl(`pay_${plan.id}`)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="w-full py-2 rounded-xl text-xs font-medium text-slate-400 text-center transition-all hover:text-slate-200 block"
-                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+                    className="w-full py-2 rounded-xl text-xs font-medium text-slate-500 text-center transition-all hover:text-slate-300 block"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
                   >
                     💬 {t('billing.tg_pay_btn')}
                   </a>
@@ -324,9 +343,12 @@ export default function BillingPage() {
         <p className="text-xs text-slate-400 mb-4">{t('billing.subscription_note')}</p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {TOPUP_PACKAGES.map((pkg, i) => {
-            const topupKeys  = ['pay_topup_500', 'pay_topup_2000', 'pay_topup_5000'] as const
-            const topupKey   = `topup_${i}`
-            const isLoading  = paying === topupKey
+            const topupKeys    = ['pay_topup_500', 'pay_topup_2000', 'pay_topup_5000'] as const
+            const sbpKey       = `topup_${i}_sbp`
+            const defKey       = `topup_${i}_def`
+            const isSbpLoading = paying === sbpKey
+            const isDefLoading = paying === defKey
+            const isAnyLoading = isSbpLoading || isDefLoading
             return (
               <div
                 key={pkg.credits}
@@ -339,25 +361,37 @@ export default function BillingPage() {
                 <p className="text-xl font-bold text-violet-300">
                   {currency === 'rub' ? `${pkg.priceRub.toLocaleString('ru-RU')} ₽` : `$${pkg.price}`}
                 </p>
-                <div className="flex flex-col gap-2">
-                  {/* Primary: YooKassa RUB */}
+                <div className="flex flex-col gap-1.5">
                   {currency === 'rub' && (
-                    <button
-                      onClick={() => payWithYookassa(undefined, i)}
-                      disabled={isLoading}
-                      className="w-full py-2.5 rounded-xl text-sm font-semibold text-white text-center transition-all hover:opacity-90 disabled:opacity-60 disabled:cursor-wait"
-                      style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.85), rgba(37,99,235,0.85))', border: '1px solid rgba(124,58,237,0.4)' }}
-                    >
-                      {isLoading ? t('billing.loading') : t('billing.pay_rub')}
-                    </button>
+                    <>
+                      {/* Primary: SBP */}
+                      <button
+                        onClick={() => payWithYookassa(undefined, i, true)}
+                        disabled={isAnyLoading}
+                        className="w-full py-2.5 rounded-xl text-sm font-semibold text-white text-center transition-all hover:opacity-90 disabled:opacity-60 disabled:cursor-wait"
+                        style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.85), rgba(37,99,235,0.85))', border: '1px solid rgba(124,58,237,0.4)' }}
+                      >
+                        {isSbpLoading ? t('billing.loading') : t('billing.pay_sbp')}
+                      </button>
+                      {/* Secondary: other YK methods */}
+                      <button
+                        onClick={() => payWithYookassa(undefined, i, false)}
+                        disabled={isAnyLoading}
+                        className="w-full py-2 rounded-xl text-xs font-medium text-slate-400 text-center transition-all hover:text-slate-200 disabled:opacity-60 disabled:cursor-wait"
+                        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+                      >
+                        {isDefLoading ? t('billing.loading') : t('billing.pay_other')}
+                      </button>
+                      <p className="text-center text-xs text-slate-600">{t('billing.methods_note')}</p>
+                    </>
                   )}
-                  {/* Secondary: Telegram */}
+                  {/* Tertiary: Telegram */}
                   <a
                     href={tgPayUrl(topupKeys[i])}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="w-full py-2 rounded-xl text-xs font-medium text-slate-400 text-center transition-all hover:text-slate-200 block"
-                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+                    className="w-full py-2 rounded-xl text-xs font-medium text-slate-500 text-center transition-all hover:text-slate-300 block"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
                   >
                     💬 {t('billing.topup_btn')}
                   </a>
@@ -411,7 +445,7 @@ export default function BillingPage() {
             <span className="text-xl">💳</span>
             <div>
               <p className="text-sm font-medium text-slate-200">{t('billing.russia_mir')}</p>
-              <p className="text-xs text-slate-500">{t('billing.russia_mir_desc')}</p>
+              <p className="text-xs text-slate-500">{t('billing.methods_note')}</p>
             </div>
           </div>
           <div
@@ -426,13 +460,11 @@ export default function BillingPage() {
           </div>
         </div>
         <a
-          href={tgPayUrl('pay')}
-          target="_blank"
-          rel="noopener noreferrer"
+          href="#plans"
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
           style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.9), rgba(37,99,235,0.9))', border: '1px solid rgba(124,58,237,0.4)' }}
         >
-          {t('billing.russia_btn')}
+          {t('billing.russia_btn_plans')}
         </a>
       </div>
     </div>

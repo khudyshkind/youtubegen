@@ -60,7 +60,7 @@ export default function LandingBody() {
       credits: PLAN_CREDITS['basic'],
       features: [t('billing.f_credits_basic'), t('billing.f_all_tools'), t('billing.f_analytics')],
       cta: t('landing.plan_cta_basic'),
-      href: tgPlan('basic'),
+      href: '/auth/register?redirectTo=/billing',
       highlight: false,
     },
     {
@@ -71,7 +71,7 @@ export default function LandingBody() {
       credits: PLAN_CREDITS['starter'],
       features: [t('billing.f_credits_100'), t('billing.f_all_tools'), t('billing.f_analytics')],
       cta: t('landing.plan_cta_starter'),
-      href: tgPlan('starter'),
+      href: '/auth/register?redirectTo=/billing',
       highlight: true,
     },
     {
@@ -82,7 +82,7 @@ export default function LandingBody() {
       credits: PLAN_CREDITS['pro'],
       features: [t('billing.f_credits_300'), t('billing.f_all_tools'), t('billing.f_priority_support')],
       cta: t('landing.plan_cta_pro'),
-      href: tgPlan('pro'),
+      href: '/auth/register?redirectTo=/billing',
       highlight: false,
     },
     {
@@ -93,7 +93,7 @@ export default function LandingBody() {
       credits: PLAN_CREDITS['agency'],
       features: [t('billing.f_credits_1000'), t('billing.f_all_tools'), t('billing.f_dedicated_support')],
       cta: t('landing.plan_cta_agency'),
-      href: tgPlan('agency'),
+      href: '/auth/register?redirectTo=/billing',
       highlight: false,
     },
   ]

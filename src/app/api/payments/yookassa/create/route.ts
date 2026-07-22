@@ -29,8 +29,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Не авторизован' }, { status: 401 })
     }
 
-    const body = await req.json() as { plan?: string; topup_index?: number }
-    const { plan, topup_index: topupIndex } = body
+    const body = await req.json() as { plan?: string; topup_index?: number; sbp?: boolean }
+    const { plan, topup_index: topupIndex, sbp } = body
 
     const isPlan  = typeof plan === 'string'
     const isTopup = typeof topupIndex === 'number'
@@ -62,12 +62,13 @@ export async function POST(req: NextRequest) {
     const appUrl    = env('NEXT_PUBLIC_APP_URL') || 'https://lefiro.co'
     const returnUrl = `${appUrl}/billing?paid=1`
 
-    const paymentBody = {
+    const paymentBody: Record<string, unknown> = {
       amount:       { value: amountStr, currency: 'RUB' },
       capture:      true,
       confirmation: { type: 'redirect', return_url: returnUrl },
       description,
       metadata,
+      ...(sbp ? { payment_method_data: { type: 'sbp' } } : {}),
       receipt: {
         customer: { email: user.email },
         items: [
