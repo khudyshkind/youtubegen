@@ -57,6 +57,36 @@ async function fetchPayment(paymentId: string): Promise<{
   return res.json()
 }
 
+// ── Incident recorder ─────────────────────────────────────────────────────────
+interface IncidentParams {
+  paymentId:       string
+  userId?:         string | null
+  kind?:           string | null
+  planOrTopup?:    string | null
+  amountReceived?: number | null
+  amountExpected?: number | null
+  reason:          'amount_mismatch' | 'bad_metadata' | 'unknown_plan' | 'activation_failed'
+  rawPayload?:     unknown
+}
+
+async function recordIncident(svc: ReturnType<typeof createServiceClient>, p: IncidentParams) {
+  try {
+    await svc.from('payment_incidents').insert({
+      payment_id:       p.paymentId,
+      user_id:          p.userId         ?? null,
+      kind:             p.kind           ?? null,
+      plan_or_topup:    p.planOrTopup    ?? null,
+      amount_received:  p.amountReceived ?? null,
+      amount_expected:  p.amountExpected ?? null,
+      reason:           p.reason,
+      raw_payload:      p.rawPayload     ?? null,
+    })
+  } catch (e) {
+    // Best-effort: never let incident recording crash the webhook handler
+    console.error('[yookassa/webhook] recordIncident failed:', e instanceof Error ? e.message : String(e))
+  }
+}
+
 export async function POST(req: NextRequest) {
   // 503 if env not configured — safe fallback
   if (!env('YOOKASSA_SHOP_ID') || !env('YOOKASSA_SECRET_KEY')) {
@@ -119,18 +149,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  const svc     = createServiceClient()
   const meta    = payment.metadata ?? {}
   const userId  = meta.user_id as string | undefined
   const kind    = meta.kind    as string | undefined
+  const actualAmount = parseFloat(payment.amount.value)
 
   if (!userId || !kind) {
     console.error(`[yookassa/webhook] payment ${paymentId} missing metadata user_id or kind`)
-    await sendTelegramAlert(`🔴 <b>YooKassa webhook</b>\nПлатёж без метаданных: <code>${paymentId}</code>`)
+    await Promise.all([
+      recordIncident(svc, {
+        paymentId,
+        userId:          userId ?? null,
+        kind:            kind   ?? null,
+        amountReceived:  actualAmount,
+        reason:          'bad_metadata',
+        rawPayload:      payment,
+      }),
+      sendTelegramAlert(
+        `🔴 <b>YooKassa — битые метаданные</b>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId ?? 'ОТСУТСТВУЕТ'}</code>\nkind: <code>${kind ?? 'ОТСУТСТВУЕТ'}</code>\nСумма: ${actualAmount} ₽\n⚠️ Зафиксировано в payment_incidents`,
+      ),
+    ])
     return NextResponse.json({ ok: true })
   }
 
   // ── Amount verification against types.ts ──────────────────────────────────
-  const actualAmount = parseFloat(payment.amount.value)
   let expectedAmount: number
 
   // Log parsed metadata to help trace activation failures
@@ -140,7 +183,20 @@ export async function POST(req: NextRequest) {
     const planId = meta.plan_id as string
     if (!(VALID_PLANS as readonly string[]).includes(planId)) {
       console.error(`[yookassa/webhook] unknown plan_id=${planId} for payment ${paymentId}`)
-      await sendTelegramAlert(`🔴 <b>YooKassa webhook</b>\nНеизвестный plan_id: <code>${planId}</code>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>`)
+      await Promise.all([
+        recordIncident(svc, {
+          paymentId,
+          userId,
+          kind,
+          planOrTopup:     planId,
+          amountReceived:  actualAmount,
+          reason:          'unknown_plan',
+          rawPayload:      payment,
+        }),
+        sendTelegramAlert(
+          `🔴 <b>YooKassa — неизвестный plan_id</b>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>\nplan_id: <code>${planId}</code>\nСумма: ${actualAmount} ₽\n⚠️ Зафиксировано в payment_incidents`,
+        ),
+      ])
       return NextResponse.json({ ok: true })
     }
     expectedAmount = PLAN_PRICES_RUB[planId as Exclude<Plan, 'free'>]
@@ -148,25 +204,62 @@ export async function POST(req: NextRequest) {
     const idx = Number(meta.topup_index)
     if (isNaN(idx) || idx < 0 || idx >= TOPUP_PACKAGES.length) {
       console.error(`[yookassa/webhook] invalid topup_index=${String(meta.topup_index)} (parsed=${idx}) for payment ${paymentId}`)
-      await sendTelegramAlert(`🔴 <b>YooKassa webhook</b>\nНеверный topup_index: <code>${String(meta.topup_index)}</code>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>`)
+      await Promise.all([
+        recordIncident(svc, {
+          paymentId,
+          userId,
+          kind,
+          planOrTopup:     String(meta.topup_index ?? 'undefined'),
+          amountReceived:  actualAmount,
+          reason:          'unknown_plan',
+          rawPayload:      payment,
+        }),
+        sendTelegramAlert(
+          `🔴 <b>YooKassa — неверный topup_index</b>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>\ntopup_index: <code>${String(meta.topup_index)}</code>\nСумма: ${actualAmount} ₽\n⚠️ Зафиксировано в payment_incidents`,
+        ),
+      ])
       return NextResponse.json({ ok: true })
     }
     expectedAmount = TOPUP_PACKAGES[idx].priceRub
   } else {
     console.error(`[yookassa/webhook] unknown kind=${kind} for payment ${paymentId}`)
-    await sendTelegramAlert(`🔴 <b>YooKassa webhook</b>\nНеизвестный kind: <code>${kind}</code>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>`)
+    await Promise.all([
+      recordIncident(svc, {
+        paymentId,
+        userId,
+        kind,
+        amountReceived:  actualAmount,
+        reason:          'unknown_plan',
+        rawPayload:      payment,
+      }),
+      sendTelegramAlert(
+        `🔴 <b>YooKassa — неизвестный kind</b>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>\nkind: <code>${kind}</code>\nСумма: ${actualAmount} ₽\n⚠️ Зафиксировано в payment_incidents`,
+      ),
+    ])
     return NextResponse.json({ ok: true })
   }
 
   if (Math.abs(actualAmount - expectedAmount) > 0.01) {
-    const msg = `[yookassa/webhook] amount mismatch: got ${actualAmount}, expected ${expectedAmount} for ${kind}`
-    console.error(msg)
-    await sendTelegramAlert(`🔴 <b>YooKassa amount mismatch</b>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>\nExpected: ${expectedAmount} ₽, Got: ${actualAmount} ₽`)
-    return NextResponse.json({ ok: true }) // 200 to stop retries; we log + alert
+    console.error(`[yookassa/webhook] amount mismatch: got ${actualAmount}, expected ${expectedAmount} for ${kind}`)
+    await Promise.all([
+      recordIncident(svc, {
+        paymentId,
+        userId,
+        kind,
+        planOrTopup:     kind === 'plan' ? String(meta.plan_id) : String(meta.topup_index),
+        amountReceived:  actualAmount,
+        amountExpected:  expectedAmount,
+        reason:          'amount_mismatch',
+        rawPayload:      payment,
+      }),
+      sendTelegramAlert(
+        `🔴 <b>YooKassa — сумма не совпала</b>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>\nВид: ${kind} · ${kind === 'plan' ? meta.plan_id : `топап[${meta.topup_index}]`}\nОжидали: <b>${expectedAmount} ₽</b> · Получили: <b>${actualAmount} ₽</b>\n⚠️ Зафиксировано в payment_incidents`,
+      ),
+    ])
+    return NextResponse.json({ ok: true }) // 200 to stop retries
   }
 
   // ── Idempotency check ──────────────────────────────────────────────────────
-  const svc       = createServiceClient()
   const claimKey  = `claim_yookassa_${paymentId}`
 
   const { data: existing } = await svc
@@ -186,9 +279,21 @@ export async function POST(req: NextRequest) {
     const result = await activatePlan(userId, planId as Plan, 'yookassa')
     if (!result.ok) {
       console.error(`[yookassa/webhook] activatePlan failed: ${result.error}`)
-      await sendTelegramAlert(
-        `🔴 <b>YooKassa activatePlan error</b>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>\nplan: ${planId}\nerror: ${result.error}`,
-      )
+      await Promise.all([
+        recordIncident(svc, {
+          paymentId,
+          userId,
+          kind,
+          planOrTopup:    planId,
+          amountReceived: actualAmount,
+          amountExpected: expectedAmount,
+          reason:         'activation_failed',
+          rawPayload:     payment,
+        }),
+        sendTelegramAlert(
+          `🔴 <b>YooKassa — activatePlan упал</b>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>\nplan: ${planId} · ${expectedAmount} ₽\nerror: ${result.error}\n⚠️ Зафиксировано в payment_incidents`,
+        ),
+      ])
       return NextResponse.json({ ok: false, error: 'activation failed' }, { status: 500 })
     }
 
@@ -226,9 +331,21 @@ export async function POST(req: NextRequest) {
       })
       if (legacyErr) {
         console.error('[yookassa/webhook] topup fallback failed:', legacyErr.message)
-        await sendTelegramAlert(
-          `🔴 <b>YooKassa topup error</b>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>\ncredits: ${pkg.credits}\nerror: ${legacyErr.message}`,
-        )
+        await Promise.all([
+          recordIncident(svc, {
+            paymentId,
+            userId,
+            kind,
+            planOrTopup:    String(idx),
+            amountReceived: actualAmount,
+            amountExpected: expectedAmount,
+            reason:         'activation_failed',
+            rawPayload:     payment,
+          }),
+          sendTelegramAlert(
+            `🔴 <b>YooKassa — начисление кредитов упало</b>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>\nкредиты: ${pkg.credits} · ${expectedAmount} ₽\nerror: ${legacyErr.message}\n⚠️ Зафиксировано в payment_incidents`,
+          ),
+        ])
         return NextResponse.json({ ok: false, error: 'credit add failed' }, { status: 500 })
       }
     }
