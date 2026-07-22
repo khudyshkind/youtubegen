@@ -263,9 +263,9 @@ export default function BillingPage() {
               >
               <div>
                 <p className="text-sm font-medium text-slate-400">{plan.name}</p>
-                <div className="flex items-end gap-1 mt-1">
-                  <span className="text-3xl font-extrabold text-slate-100">{plan.price}</span>
-                  <span className="text-slate-500 mb-0.5">{plan.period}</span>
+                <div className="mt-1">
+                  <p className="text-3xl font-extrabold text-slate-100 leading-tight whitespace-nowrap">{plan.price}</p>
+                  {plan.period && <p className="text-sm text-slate-500 leading-none mt-0.5">{plan.period}</p>}
                 </div>
                 <p className="text-sm font-medium text-violet-400 mt-1">
                   {PLAN_CREDITS[plan.id]} {t('billing.credits_unit')}
