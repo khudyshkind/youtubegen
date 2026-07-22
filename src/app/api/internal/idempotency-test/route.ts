@@ -37,19 +37,19 @@ async function fetchYkPayment(paymentId: string) {
 export async function GET(req: NextRequest) {
   if (req.headers.get('x-test-secret') !== EXPECTED_SECRET) return unauthorized()
   const svc    = createServiceClient()
-  const action = new URL(req.url).searchParams.get('action') ?? 'snapshot'
+  const action = req.nextUrl.searchParams.get('action') ?? 'snapshot'
 
   if (action === 'claims') {
-    const { data } = await svc
+    const { data, error } = await svc
       .from('bot_settings')
       .select('key, value, updated_at')
       .like('key', 'claim_yookassa_%')
       .order('updated_at', { ascending: false })
-    return NextResponse.json({ claims: data })
+    return NextResponse.json({ claims: data, db_error: error?.message ?? null })
   }
 
   const snap = await fetchProfile(svc)
-  return NextResponse.json({ snapshot: snap })
+  return NextResponse.json({ snapshot: snap, action_received: action })
 }
 
 /**
