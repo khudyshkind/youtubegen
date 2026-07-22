@@ -123,7 +123,7 @@ export const PLAN_PRICES: Record<Exclude<Plan, 'free'>, number> = {
 export const PLAN_PRICES_RUB: Record<Exclude<Plan, 'free'>, number> = {
   basic:    790,
   starter: 1490,
-  pro:     99990,  // TEST_MISMATCH — revert to 3990 after acceptance test
+  pro:     3990,
   agency: 11900,
 }
 
