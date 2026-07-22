@@ -65,15 +65,6 @@ function SpinnerIcon({ className = 'w-4 h-4' }: { className?: string }) {
   )
 }
 
-function RefreshIcon({ className = 'w-4 h-4' }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-    </svg>
-  )
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function IllustrationsTool({
@@ -85,10 +76,9 @@ export default function IllustrationsTool({
 }: Props) {
   const { t } = useLang()
 
-  // Phase
   const [phase, setPhase] = useState<Phase>(restoredId ? 'done' : 'input')
 
-  // Input state
+  // Input state — preserved across phases so "Back to settings" restores everything
   const [text, setText] = useState(initialScript)
   const [engine, setEngine] = useState<EngineType>(
     restoredMeta ? parseEngine(restoredMeta.engine) : 'flux_schnell',
@@ -139,24 +129,36 @@ export default function IllustrationsTool({
     ? customStyleText.trim()
     : undefined
 
-  const totalCost = sceneCount * costPerImage
+  // Effective count for cost preview: manual uses manualCount, auto uses detected sceneCount
+  const displayCount = countMode === 'manual' ? manualCount : sceneCount
+  const displayCost  = displayCount * costPerImage
+
+  // Engine display label (no brand names)
+  const engineLabel = t((ENGINE_OPTIONS.find(e => e.key === engine)?.labelKey ?? 'tools.ill_engine_fast') as Parameters<typeof t>[0])
+
+  // Style display name for preview info box
+  const styleLabel = styleMode === 'preset'
+    ? (selectedStyleKey ? STYLE_LABELS[selectedStyleKey] : 'По умолчанию')
+    : 'Свой стиль'
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
 
+  function validateInput(): string | null {
+    if (!text.trim()) return t('tools.ill_err_no_text')
+    if (text.trim().length < 50) return t('tools.ill_err_short')
+    return null
+  }
+
   async function handlePreview() {
-    if (!text.trim()) { setError(t('tools.ill_err_no_text')); return }
-    if (text.trim().length < 50) { setError(t('tools.ill_err_short')); return }
+    const err = validateInput()
+    if (err) { setError(err); return }
     setPreviewLoading(true)
     setError('')
     try {
       const res = await fetch('/api/tools/illustrations/scenes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          count_mode: countMode,
-          count: countMode === 'manual' ? manualCount : undefined,
-        }),
+        body: JSON.stringify({ text, count_mode: 'auto' }),
       })
       const json = await res.json() as { ok: boolean; data?: { scene_count: number; preview: ScenePreview[] }; error?: string }
       if (!json.ok) throw new Error(json.error ?? 'Ошибка')
@@ -170,7 +172,11 @@ export default function IllustrationsTool({
     }
   }
 
-  async function handleGenerate() {
+  // countArg lets caller pass count directly (manual mode — avoids React async state issue)
+  async function handleGenerate(countArg?: number) {
+    const count = countArg ?? sceneCount
+    if (count < 1) return
+
     setError('')
     setPhase('generating')
     setImages([])
@@ -178,7 +184,6 @@ export default function IllustrationsTool({
     setCreditsSpent(0)
 
     try {
-      // Step 1: create stub project
       const autoTitle = text.trim().split(/[.!?\n]/)[0]?.slice(0, 80).trim() || 'Иллюстрации'
       const initRes = await fetch('/api/tools/illustrations/init', {
         method: 'POST',
@@ -190,7 +195,7 @@ export default function IllustrationsTool({
           style_value: effectiveStyleValue ?? '',
           custom_style: effectiveCustomStyle ?? '',
           language,
-          scene_count: sceneCount,
+          scene_count: count,
         }),
       })
       const initJson = await initRes.json() as { ok: boolean; data?: { project_id: string }; error?: string }
@@ -198,19 +203,17 @@ export default function IllustrationsTool({
       const pid = initJson.data!.project_id
       setProjectId(pid)
 
-      // Step 2: stream image generation (SSE)
       const genRes = await fetch('/api/generate/images', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           script: text,
           topic: autoTitle,
-          duration_sec: sceneCount * 10,
-          image_count: sceneCount,
+          duration_sec: count * 10,
+          image_count: count,
           project_id: pid,
           image_interval: 10,
           engine,
-          // Pass style — preset uses image_style, custom text uses custom_style
           image_style: effectiveStyleValue ?? null,
           custom_style: effectiveCustomStyle ?? null,
         }),
@@ -220,15 +223,14 @@ export default function IllustrationsTool({
         const ct = genRes.headers.get('content-type') ?? ''
         if (!ct.includes('application/json')) throw new Error(t('tools.ill_err_gen'))
         const json = await genRes.json() as { ok: boolean; error?: string; code?: string }
-        if (json.code === 'NO_CREDITS') throw new Error(`${t('tools.ill_err_no_credits')} (${totalCost} кр.)`)
+        if (json.code === 'NO_CREDITS') throw new Error(`${t('tools.ill_err_no_credits')} (${count * costPerImage} кр.)`)
         throw new Error(json.error ?? t('tools.ill_err_gen'))
       }
 
-      // Read SSE stream
       const reader = genRes.body!.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      let actualSuccessCount = 0
+      let actualChargedCount = 0
 
       while (true) {
         const { done, value } = await reader.read()
@@ -241,7 +243,16 @@ export default function IllustrationsTool({
         for (const part of parts) {
           const line = part.trim()
           if (!line.startsWith('data: ')) continue
-          let data: { type: string; total?: number; completed?: number; images?: SceneImage[]; success_count?: number; error?: string }
+          let data: {
+            type: string
+            total?: number
+            completed?: number
+            images?: SceneImage[]
+            success_count?: number
+            charged_count?: number
+            fail_count?: number
+            error?: string
+          }
           try {
             data = JSON.parse(line.slice(6))
           } catch {
@@ -249,9 +260,9 @@ export default function IllustrationsTool({
           }
 
           if (data.type === 'start') {
-            setProgress({ completed: 0, total: data.total ?? sceneCount })
+            setProgress({ completed: 0, total: data.total ?? count })
           } else if (data.type === 'progress') {
-            setProgress({ completed: data.completed ?? 0, total: data.total ?? sceneCount })
+            setProgress({ completed: data.completed ?? 0, total: data.total ?? count })
             if (data.images?.length) {
               const ts = Date.now()
               const incoming = data.images.map((img) => ({
@@ -275,12 +286,12 @@ export default function IllustrationsTool({
               url: img.url ? `${img.url}?t=${ts}` : img.url,
             }))
             setImages(finalImages)
-            actualSuccessCount = data.success_count ?? 0
-            const spent = actualSuccessCount * costPerImage
+            // Use charged_count (actual debits) for display — matches server's spendCredits calls
+            actualChargedCount = data.charged_count ?? data.success_count ?? 0
+            const spent = actualChargedCount * costPerImage
             setCreditsSpent(spent)
             void refreshCredits()
 
-            // Step 3: finalize — reset image_style routing slug, mark completed
             await fetch('/api/tools/illustrations/finalize', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -296,7 +307,8 @@ export default function IllustrationsTool({
     } catch (e) {
       const msg = e instanceof Error ? e.message : t('tools.ill_err_gen')
       setError(msg)
-      setPhase('previewing')
+      // manual mode never had a previewing phase — go back to input
+      setPhase(countMode === 'manual' ? 'input' : 'previewing')
     }
   }
 
@@ -343,10 +355,8 @@ export default function IllustrationsTool({
     const { default: JSZip } = await import('jszip')
     const zip = new JSZip()
     const valid = images.filter((img) => img.url)
-    for (let i = 0; i < valid.length; i++) {
-      const img = valid[i]
+    for (const img of valid) {
       try {
-        // Strip cache-buster query param for fetch
         const cleanUrl = img.url!.split('?')[0]
         const response = await fetch(cleanUrl)
         const blob = await response.blob()
@@ -365,7 +375,8 @@ export default function IllustrationsTool({
     URL.revokeObjectURL(url)
   }
 
-  function handleReset() {
+  // Returns to input form with all settings preserved (text, engine, style, language)
+  function handleBackToSettings() {
     setPhase('input')
     setImages([])
     setProgress(null)
@@ -375,10 +386,15 @@ export default function IllustrationsTool({
     setSceneCount(0)
     setScenePreviews([])
     setError('')
+  }
+
+  // Resets everything including the text field
+  function handleReset() {
+    handleBackToSettings()
     setText('')
   }
 
-  // ─── Render helpers ────────────────────────────────────────────────────────
+  // ─── Shared input form ────────────────────────────────────────────────────
 
   const inputSection = (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -401,7 +417,7 @@ export default function IllustrationsTool({
         {/* Count mode */}
         <div>
           <p className="text-sm font-medium text-slate-300 mb-2">{t('tools.ill_count_mode')}</p>
-          <div className="flex gap-3 flex-wrap">
+          <div className="flex gap-3 flex-wrap items-center">
             {(['auto', 'manual'] as const).map((mode) => (
               <label key={mode} className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -428,6 +444,16 @@ export default function IllustrationsTool({
               />
             )}
           </div>
+
+          {/* Inline cost preview for manual mode */}
+          {countMode === 'manual' && (
+            <div className="mt-3 px-4 py-3 rounded-xl"
+              style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
+              <p className="text-sm text-violet-300">
+                {manualCount} × {costPerImage} кр. = <strong>{displayCost} кр.</strong>
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -441,7 +467,10 @@ export default function IllustrationsTool({
               <label
                 key={opt.key}
                 className="flex items-center gap-2 cursor-pointer p-2.5 rounded-lg transition-colors"
-                style={{ background: engine === opt.key ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${engine === opt.key ? 'rgba(124,58,237,0.4)' : 'rgba(255,255,255,0.08)'}` }}
+                style={{
+                  background: engine === opt.key ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${engine === opt.key ? 'rgba(124,58,237,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                }}
               >
                 <input
                   type="radio"
@@ -525,7 +554,7 @@ export default function IllustrationsTool({
           <select
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg text-sm text-slate-100 bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/60"
+            className="w-full px-3 py-2 rounded-lg text-sm text-slate-100 border border-white/10 focus:outline-none focus:border-violet-500/60"
             style={{ background: '#1e293b' }}
           >
             <option value="">{t('tools.ill_lang_auto')}</option>
@@ -556,32 +585,46 @@ export default function IllustrationsTool({
         {inputSection}
 
         <div className="mt-6">
-          <button
-            type="button"
-            onClick={handlePreview}
-            disabled={previewLoading || !text.trim()}
-            className="flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ background: 'linear-gradient(135deg, #7C3AED, #2563EB)', color: '#fff' }}
-          >
-            {previewLoading ? (
-              <><SpinnerIcon /> Определяю сцены...</>
-            ) : (
-              t('tools.ill_preview_btn')
-            )}
-          </button>
+          {/* Manual mode: direct generate button */}
+          {countMode === 'manual' ? (
+            <button
+              type="button"
+              onClick={() => handleGenerate(manualCount)}
+              disabled={!text.trim()}
+              className="flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: 'linear-gradient(135deg, #7C3AED, #2563EB)', color: '#fff' }}
+            >
+              {t('tools.ill_gen_btn').replace('{total}', String(displayCost))}
+            </button>
+          ) : (
+            /* Auto mode: preview step first */
+            <button
+              type="button"
+              onClick={handlePreview}
+              disabled={previewLoading || !text.trim()}
+              className="flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: 'linear-gradient(135deg, #7C3AED, #2563EB)', color: '#fff' }}
+            >
+              {previewLoading ? (
+                <><SpinnerIcon /> ИИ определяет сцены...</>
+              ) : (
+                t('tools.ill_preview_btn')
+              )}
+            </button>
+          )}
         </div>
       </div>
     )
   }
 
-  // ─── Phase: PREVIEWING ────────────────────────────────────────────────────
+  // ─── Phase: PREVIEWING (auto mode only) ───────────────────────────────────
   if (phase === 'previewing') {
     const previewCostStr = t('tools.ill_preview_cost')
       .replace('{n}', String(sceneCount))
       .replace('{cost}', String(costPerImage))
-      .replace('{total}', String(totalCost))
+      .replace('{total}', String(displayCost))
 
-    const genBtnStr = t('tools.ill_gen_btn').replace('{total}', String(totalCost))
+    const genBtnStr = t('tools.ill_gen_btn').replace('{total}', String(displayCost))
 
     return (
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -596,11 +639,12 @@ export default function IllustrationsTool({
         )}
 
         {/* Cost preview card */}
-        <div className="rounded-2xl p-6 mb-6" style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
+        <div className="rounded-2xl p-6 mb-6"
+          style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
           <p className="text-lg font-semibold text-violet-300 mb-1">{previewCostStr}</p>
           <p className="text-xs text-slate-500">
-            Движок: {ENGINE_OPTIONS.find(e => e.key === engine)?.key.replace(/_/g, ' ')}
-            {effectiveStyleValue || effectiveCustomStyle ? ` · Стиль: ${selectedStyleKey ? STYLE_LABELS[selectedStyleKey] : 'свой'}` : ' · Стиль: по умолчанию'}
+            {engineLabel}
+            {(effectiveStyleValue || effectiveCustomStyle) && ` · Стиль: ${styleLabel}`}
           </p>
         </div>
 
@@ -634,7 +678,7 @@ export default function IllustrationsTool({
           </button>
           <button
             type="button"
-            onClick={handleGenerate}
+            onClick={() => handleGenerate()}
             className="px-6 py-3 rounded-xl font-semibold text-sm text-white transition-all"
             style={{ background: 'linear-gradient(135deg, #7C3AED, #2563EB)' }}
           >
@@ -647,6 +691,7 @@ export default function IllustrationsTool({
 
   // ─── Phase: GENERATING ────────────────────────────────────────────────────
   if (phase === 'generating') {
+    const currentTotal = progress?.total ?? displayCount
     const pct = progress ? Math.round((progress.completed / progress.total) * 100) : 0
     const progressStr = progress
       ? t('tools.ill_progress').replace('{done}', String(progress.completed)).replace('{total}', String(progress.total))
@@ -656,10 +701,9 @@ export default function IllustrationsTool({
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-slate-100">{t('tools.ill_generating')}</h1>
-          <p className="text-slate-500 text-sm mt-1">{progressStr}</p>
+          <p className="text-slate-500 text-sm mt-1">{progressStr} · {currentTotal} иллюстраций</p>
         </div>
 
-        {/* Progress bar */}
         <div className="mb-8 rounded-full h-2 overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
           <div
             className="h-2 rounded-full transition-all duration-500"
@@ -667,14 +711,16 @@ export default function IllustrationsTool({
           />
         </div>
 
-        {/* Live gallery */}
-        {images.length > 0 && <GalleryGrid images={images} onRegen={null} regenLoading={regenLoading} regenErrors={regenErrors} t={t} />}
+        {images.length > 0 && (
+          <GalleryGrid images={images} onRegen={null} regenLoading={regenLoading} regenErrors={regenErrors} t={t} />
+        )}
       </div>
     )
   }
 
   // ─── Phase: DONE ──────────────────────────────────────────────────────────
   const successCount = images.filter((i) => i.url).length
+  const failedCount  = images.filter((i) => !i.url).length
 
   return (
     <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -683,6 +729,7 @@ export default function IllustrationsTool({
           <h1 className="text-2xl font-bold text-slate-100">{t('tools.ill_title')}</h1>
           <p className="text-slate-500 text-sm mt-1">
             {successCount} иллюстраций
+            {failedCount > 0 && <span className="text-red-400"> · {failedCount} не удалось</span>}
             {creditsSpent > 0 && ` · списано ${creditsSpent} кр.`}
             {savedId && ` · ${t('tools.ill_saved')}`}
           </p>
@@ -701,11 +748,21 @@ export default function IllustrationsTool({
               {t('tools.ill_zip')}
             </button>
           )}
+          {/* Back to settings: keeps text & all params, clears only generated images */}
+          <button
+            type="button"
+            onClick={handleBackToSettings}
+            className="px-4 py-2.5 rounded-xl text-sm font-medium text-violet-300 transition-all"
+            style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.25)' }}
+          >
+            {t('tools.ill_back')}
+          </button>
+          {/* Full reset: clears text too */}
           <button
             type="button"
             onClick={handleReset}
-            className="px-4 py-2.5 rounded-xl text-sm font-medium text-violet-300 transition-all"
-            style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.25)' }}
+            className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-500 transition-all"
+            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
           >
             {t('tools.ill_new')}
           </button>
@@ -744,7 +801,7 @@ function GalleryGrid({ images, onRegen, regenLoading, regenErrors, t }: GalleryG
           className="rounded-2xl overflow-hidden flex flex-col"
           style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}
         >
-          {/* Image */}
+          {/* Image or failed state */}
           <div className="relative aspect-video bg-black/30">
             {img.url ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -754,13 +811,15 @@ function GalleryGrid({ images, onRegen, regenLoading, regenErrors, t }: GalleryG
                 className="w-full h-full object-cover"
               />
             ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <svg className="w-8 h-8 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-full h-full flex flex-col items-center justify-center gap-2 px-4">
+                <svg className="w-8 h-8 text-red-500/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
+                <span className="text-xs text-red-400 text-center">Не удалось сгенерировать</span>
               </div>
             )}
+
             {/* Scene number badge */}
             <span
               className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-xs font-medium"
@@ -768,7 +827,8 @@ function GalleryGrid({ images, onRegen, regenLoading, regenErrors, t }: GalleryG
             >
               {t('tools.ill_scene_label')} {img.scene_index + 1}
             </span>
-            {/* Regen button */}
+
+            {/* Regen button — visible for both failed and succeeded images */}
             {onRegen && img.prompt && (
               <button
                 type="button"
@@ -776,7 +836,10 @@ function GalleryGrid({ images, onRegen, regenLoading, regenErrors, t }: GalleryG
                 disabled={regenLoading.has(img.scene_index)}
                 title={t('tools.ill_regen')}
                 className="absolute top-2 right-2 p-1.5 rounded-lg transition-all disabled:opacity-50"
-                style={{ background: 'rgba(0,0,0,0.6)', color: '#94a3b8' }}
+                style={{
+                  background: img.url ? 'rgba(0,0,0,0.6)' : 'rgba(124,58,237,0.7)',
+                  color: img.url ? '#94a3b8' : '#e9d5ff',
+                }}
               >
                 {regenLoading.has(img.scene_index) ? (
                   <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">

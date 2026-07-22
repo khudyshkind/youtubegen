@@ -94,8 +94,14 @@ const TOOL_EMOJI: Record<string, string> = {
   'image-illustrations': '🖌️',
 }
 
+// image_style values are internal routing slugs; some don't match the URL folder name
+const TOOL_SLUG_REMAP: Record<string, string> = {
+  'image-illustrations': 'illustrations',
+}
+
 function toolRunHref(project: Project): string {
-  const slug = project.image_style ?? 'script-gen'
+  const raw = project.image_style ?? 'script-gen'
+  const slug = TOOL_SLUG_REMAP[raw] ?? raw
   return `/tools/${slug}?run=${project.id}`
 }
 

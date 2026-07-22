@@ -1005,6 +1005,7 @@ export async function POST(request: NextRequest) {
         const serviceClient = createServiceClient()
         const sceneImages: SceneImage[] = new Array(scenes.length)
         let successCount = 0
+        let chargedCount = 0
         let failCount = 0
 
         const GPT_BATCH_SIZE = parseInt(process.env.GPT_BATCH_SIZE ?? '3')
@@ -1045,9 +1046,9 @@ export async function POST(request: NextRequest) {
                 if (url) {
                   batchNewImages.push(img)
                   // Spend credits only for images that actually landed in Supabase Storage.
-                  // Generators now throw on upload failure, so url is always a permanent
-                  // Supabase URL here — but the guard stays as defence-in-depth.
-                  await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
+                  // Track chargedCount separately so the client displays exactly what was deducted.
+                  const chargeResult = await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
+                  if (chargeResult.ok) chargedCount++
                 }
                 console.log(`[images] scene ${i + 1} RESULT url: ${url?.slice(0, 100) ?? 'NULL'}`)
               } catch (err) {
@@ -1097,6 +1098,7 @@ export async function POST(request: NextRequest) {
           type: 'done',
           images: validImages,
           success_count: successCount,
+          charged_count: chargedCount,
           fail_count: failCount,
         }))
         controller.close()
