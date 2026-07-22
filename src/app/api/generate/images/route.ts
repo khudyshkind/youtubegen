@@ -436,7 +436,7 @@ async function generateScenesFromSubtitles(
       const chunkStart = ci * CLAUDE_CHUNK
       const chunk = scenesWithText.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
       const chunkSize = chunk.length
-      const maxTokens = Math.min(64000, Math.max(4000, chunkSize * 150))
+      const maxTokens = Math.min(64000, Math.max(8000, chunkSize * 250))
       const label = `subtitles chunk ${ci + 1}/${totalChunks}`
       const t0 = Date.now()
 
@@ -613,7 +613,7 @@ async function generateScenesFromScript(
       const chunkStart = ci * CLAUDE_CHUNK
       const chunk = blocksWithTimecodes.slice(chunkStart, chunkStart + CLAUDE_CHUNK)
       const chunkSize = chunk.length
-      const maxTokens = Math.min(64000, Math.max(4000, chunkSize * 150))
+      const maxTokens = Math.min(64000, Math.max(8000, chunkSize * 250))
       const label = `script chunk ${ci + 1}/${totalChunks}`
       const t0 = Date.now()
 
