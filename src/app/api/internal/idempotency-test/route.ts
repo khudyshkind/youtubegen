@@ -33,10 +33,21 @@ async function fetchYkPayment(paymentId: string) {
   return res.json()
 }
 
-/** GET /api/internal/idempotency-test — just returns current profile snapshot */
+/** GET /api/internal/idempotency-test?action=snapshot|claims */
 export async function GET(req: NextRequest) {
   if (req.headers.get('x-test-secret') !== EXPECTED_SECRET) return unauthorized()
-  const svc  = createServiceClient()
+  const svc    = createServiceClient()
+  const action = new URL(req.url).searchParams.get('action') ?? 'snapshot'
+
+  if (action === 'claims') {
+    const { data } = await svc
+      .from('bot_settings')
+      .select('key, value, updated_at')
+      .like('key', 'claim_yookassa_%')
+      .order('updated_at', { ascending: false })
+    return NextResponse.json({ claims: data })
+  }
+
   const snap = await fetchProfile(svc)
   return NextResponse.json({ snapshot: snap })
 }
