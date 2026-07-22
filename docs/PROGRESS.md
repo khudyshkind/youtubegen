@@ -168,6 +168,21 @@
 
 ---
 
+---
+
+## Фаза 13 — YooKassa: рутпричина + инциденты + биллинг
+
+- [x] ✅ `src/app/api/webhooks/yookassa/route.ts` — исправлен `body.event` вместо `body.type` (SHA 4587d78)
+- [x] ✅ IP whitelist — добавлен `77.75.154.128/25`, IPv4-mapped `::ffff:`, IPv6 prefix (SHA 01e17cb)
+- [x] ✅ Verbose logging на каждом silent exit + TG alert на всех failure ветках
+- [x] ✅ `supabase/migrations/008_payment_incidents.sql` — UNIQUE(payment_id), GRANT service_role (applied)
+- [x] ✅ `recordIncident()` в webhook handler — all 4 failure branches instrumented
+- [x] ✅ Приёмочный тест: amount_mismatch confirmed, idempotency (2 webhook = 1 row), already_activated на дублях
+- [x] ✅ `src/app/(dashboard)/billing/page.tsx` — убрана disabled «Понижение», разрешён любой тариф, кнопка «Продлить»
+- [x] ✅ `src/lib/i18n.ts` — ключ `billing.renew_btn` (RU: Продлить / EN: Renew)
+
+---
+
 ## Сводка
 
 | Фаза | Прогресс |
@@ -186,4 +201,5 @@
 | Фаза 10 — Wave 1 Acceptance + Tools | 8 / 9 (pending Migration 005) |
 | Фаза 11 — Субтитры по аудио | 6 / 6 |
 | Фаза 12 — Иллюстрации по тексту | 13 / 13 |
-| **Итого** | **102 / 103** |
+| Фаза 13 — YooKassa + payment_incidents | 8 / 8 |
+| **Итого** | **110 / 111** |

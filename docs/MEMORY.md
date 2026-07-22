@@ -115,6 +115,37 @@ NEXT_PUBLIC_APP_URL=
 <!-- ### YYYY-MM-DD — Краткое описание -->
 <!-- Что сделано, какие файлы созданы/изменены -->
 
+### 2026-07-22 — YooKassa webhook: рутпричина + платёжные инциденты (SHA 9901805)
+
+**Рутпричина активации (SHA 4587d78):** код проверял `body.type` (всегда `"notification"`) вместо `body.event` (`"payment.succeeded"`) → каждый вебхук тихо ack-ался без активации. Одна строка исправила систему.
+
+**IP whitelist (SHA 01e17cb):** добавлен пропущенный диапазон `77.75.154.128/25`, поддержка `::ffff:x.x.x.x` IPv4-mapped, IPv6-prefix `2a02:5180:`. Verbose logging на каждом silent exit.
+
+**Биллинг: разрешена покупка любого тарифа (SHA 9989791):**
+- Убрана disabled-ветка «Понижение» — теперь любой платный план доступен к покупке независимо от текущего
+- На карточке текущего тарифа — кнопка «Продлить» (i18n ключ `billing.renew_btn`)
+- Файлы: `src/app/(dashboard)/billing/page.tsx`, `src/lib/i18n.ts`
+
+**Таблица payment_incidents + инструментация (SHA 6a38589):**
+- `supabase/migrations/008_payment_incidents.sql` — UNIQUE(payment_id), upsert+ignoreDuplicates, GRANT service_role
+- `recordIncident(svc, params)` — best-effort (try/catch), `ON CONFLICT DO NOTHING` через ignoreDuplicates
+- Все ветки вебхука записывают инцидент: `bad_metadata`, `unknown_plan`, `amount_mismatch`, `activation_failed`
+- TG alert на каждой ветке с контекстом
+- Приёмочный тест: `amount_mismatch` → 1 строка в payment_incidents, идемпотентность (2 вебхука = 1 строка), `already_activated` на дублях плана и топапа — все прошли
+
+**YooKassa webhook финальный стек проверок:**
+1. IP whitelist
+2. Signature verify (HMAC)
+3. `body.event === 'payment.succeeded'` ← было сломано
+4. Re-fetch payment from YooKassa API (доверяем только им)
+5. userId/kind из metadata (`bad_metadata` branch)
+6. Plan/topup lookup (`unknown_plan` branch)
+7. Amount check vs PLAN_PRICES_RUB/TOPUP_PACKAGES (`amount_mismatch` branch)
+8. Idempotency claim (`already_activated` branch)
+9. activatePlan / add_credits_purchased (`activation_failed` branch)
+
+Деплой: SHA 9901805 → Vercel:success
+
 ### 2026-07-22 — Фикс «Ошибка генерации субтитров» (SHA 442b63f)
 
 **Корневая причина:** `upload/sign` вызывал `createSignedUrl` ДО PUT-загрузки файла → Supabase "Object not found" → `access_url = ''` → Railway 400 → 502 на клиенте.
