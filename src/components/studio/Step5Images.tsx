@@ -335,6 +335,13 @@ export default function Step5Images() {
       setImageStyle(desc)
       setSelectedStyleKey('none')
       void refreshCredits()
+      if (json.data?.ref_url) {
+        fetch('/api/upload/sign', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ref_url: json.data.ref_url, bucket: 'images' }),
+        }).catch(() => {})
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка анализа стиля')
       setRefPreviewUrl(null)
