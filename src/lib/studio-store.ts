@@ -7,8 +7,10 @@ import type {
 
 export type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 
-/** Append ?t=<ts> to a raw audio URL for cache-busting. Strips any existing ?t= first. */
+/** Append ?t=<ts> to a raw audio URL for cache-busting. Strips any existing ?t= first.
+ * Returns '' for empty input so downstream guards (if (!audioUrl)) work as intended. */
 export function stampAudioUrl(rawUrl: string, ts: number): string {
+  if (!rawUrl) return ''
   return `${rawUrl.split('?')[0]}?t=${ts}`
 }
 

@@ -855,6 +855,7 @@ export default function Step3Voice() {
         startAudioPolling(json.job_id as string)
         return
       }
+      if (!json.data.audio_url) throw new Error(t('step3.err_audio'))
       setAudioUrl(stampAudioUrl(json.data.audio_url, Date.now()))
       void refreshCredits()
     } catch (err) {

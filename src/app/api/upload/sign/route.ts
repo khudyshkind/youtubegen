@@ -146,10 +146,17 @@ export async function POST(request: NextRequest) {
 
     let accessUrl: string
     if (type === 'audio') {
-      const { data: readData } = await serviceClient.storage
+      const { data: readData, error: readErr } = await serviceClient.storage
         .from(bucket)
         .createSignedUrl(storagePath, 3600)
-      accessUrl = readData?.signedUrl ?? ''
+      if (readErr || !readData?.signedUrl) {
+        console.error('[upload/sign audio] createSignedUrl failed:', readErr?.message)
+        return NextResponse.json(
+          { ok: false, error: 'Не удалось создать ссылку на аудио — попробуйте загрузить файл заново' },
+          { status: 500 },
+        )
+      }
+      accessUrl = readData.signedUrl
     } else {
       const { data: { publicUrl } } = serviceClient.storage.from(bucket).getPublicUrl(storagePath)
       accessUrl = publicUrl
