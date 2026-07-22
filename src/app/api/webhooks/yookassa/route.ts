@@ -80,24 +80,27 @@ export async function POST(req: NextRequest) {
     console.warn(`[yookassa/webhook] unexpected source IP: ${rawClientIp} (normalised: ${clientIp}) — proceeding with API re-fetch verification`)
   }
 
-  let event: {
-    type:   string
+  // YooKassa body: { type: "notification", event: "payment.succeeded", object: {...} }
+  // The "type" field is always "notification"; the actual event name is in "event".
+  let body: {
+    type:   string  // always "notification"
+    event:  string  // "payment.succeeded" | "payment.canceled" | "refund.succeeded" | …
     object: { id: string }
   }
   try {
-    event = JSON.parse(rawBody)
+    body = JSON.parse(rawBody)
   } catch {
     console.error('[yookassa/webhook] invalid JSON body')
     return NextResponse.json({ ok: true })
   }
 
   // Ack all non-succeeded events immediately (ЮKassa expects 200 for all notifications)
-  if (event.type !== 'payment.succeeded') {
-    console.log(`[yookassa/webhook] event type=${event.type} — acknowledged`)
+  if (body.event !== 'payment.succeeded') {
+    console.log(`[yookassa/webhook] event=${body.event} — acknowledged`)
     return NextResponse.json({ ok: true })
   }
 
-  const paymentId = event.object?.id
+  const paymentId = body.object?.id
   if (!paymentId) {
     console.error('[yookassa/webhook] payment.succeeded without object.id')
     return NextResponse.json({ ok: true })
