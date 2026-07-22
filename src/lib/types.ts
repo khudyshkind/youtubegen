@@ -288,6 +288,7 @@ export interface SceneImage {
   timecode_end?: string
   engine?: 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana'
   audio_fingerprint?: number
+  nsfw_blocked?: boolean  // true when fal safety checker returned a black frame
 }
 
 export interface SeoData {

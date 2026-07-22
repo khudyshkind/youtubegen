@@ -55,6 +55,7 @@ interface SingleImageRequest {
 
 interface FalImageResult {
   images: Array<{ url: string; width?: number; height?: number }>
+  has_nsfw_concepts?: boolean[]  // fal replaces flagged images with black frames; must check explicitly
 }
 
 async function enhancePrompt(raw: string, styleHint: string): Promise<string> {
@@ -100,6 +101,10 @@ async function generateFlux(
 
   const falUrl = result.data?.images?.[0]?.url ?? null
   if (!falUrl) throw new Error('Flux не вернул изображение')
+  if (result.data?.has_nsfw_concepts?.[0] === true) {
+    console.warn(`[image-single] NSFW_FILTERED flux/dev scene=${sceneIndex}`)
+    throw new Error('NSFW_FILTERED: safety checker blocked image (flux/dev)')
+  }
 
   const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.jpg`
   return uploadFalToStorage(falUrl, storagePath, 'image/jpeg', serviceClient)
@@ -124,6 +129,10 @@ async function generateFluxSchnell(
 
   const falUrl = result.data?.images?.[0]?.url ?? null
   if (!falUrl) throw new Error('Flux Schnell: no image returned')
+  if (result.data?.has_nsfw_concepts?.[0] === true) {
+    console.warn(`[image-single] NSFW_FILTERED flux/schnell scene=${sceneIndex}`)
+    throw new Error('NSFW_FILTERED: safety checker blocked image (flux/schnell)')
+  }
 
   const storagePath = `${userId}/${projectId}/scene_schnell_${sceneIndex}.jpg`
   return uploadFalToStorage(falUrl, storagePath, 'image/jpeg', serviceClient)
@@ -150,6 +159,10 @@ async function generateNanoBanana(
   const img = result.data?.images?.[0]
   const falUrl = img?.url ?? null
   if (!falUrl) throw new Error('Nano Banana: no image returned')
+  if (result.data?.has_nsfw_concepts?.[0] === true) {
+    console.warn(`[image-single] NSFW_FILTERED nano-banana scene=${sceneIndex}`)
+    throw new Error('NSFW_FILTERED: safety checker blocked image (nano-banana)')
+  }
   if (img?.width && img?.height) {
     console.log(`[image-single] nano-banana scene ${sceneIndex} returned ${img.width}x${img.height} (ratio ${(img.width / img.height).toFixed(3)})`)
   }
@@ -263,13 +276,28 @@ export async function POST(request: NextRequest) {
 
     const serviceClient = createServiceClient()
 
-    const storedUrl = engine === 'gpt_mini'
-      ? await generateGptMini(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
+    // One auto-retry when fal safety checker blocks the image (filter is probabilistic)
+    const genFn = () => engine === 'gpt_mini'
+      ? generateGptMini(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
       : engine === 'flux_schnell'
-      ? await generateFluxSchnell(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
+      ? generateFluxSchnell(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
       : engine === 'nano_banana'
-      ? await generateNanoBanana(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
-      : await generateFlux(enhancedPrompt, styleConfig.negativePrompt, user.id, project_id, scene_index, serviceClient)
+      ? generateNanoBanana(enhancedPrompt, user.id, project_id, scene_index, serviceClient)
+      : generateFlux(enhancedPrompt, styleConfig.negativePrompt, user.id, project_id, scene_index, serviceClient)
+
+    let storedUrl: string
+    try {
+      storedUrl = await genFn()
+    } catch (firstErr) {
+      const firstMsg = firstErr instanceof Error ? firstErr.message : ''
+      if (firstMsg.startsWith('NSFW_FILTERED')) {
+        console.warn(`[image-single] NSFW auto-retry scene=${scene_index}`)
+        await sleep(800)
+        storedUrl = await genFn()  // propagates if second attempt also NSFW-blocked
+      } else {
+        throw firstErr
+      }
+    }
 
     const newImage: SceneImage = {
       ...(originalScene ?? {}),
@@ -277,6 +305,7 @@ export async function POST(request: NextRequest) {
       prompt: enhancedPrompt,
       url: storedUrl,
       engine,
+      nsfw_blocked: undefined,
     }
 
     const updated = existing.some((img) => img.scene_index === scene_index)
@@ -295,6 +324,13 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[image-single]', msg)
+    if (msg.startsWith('NSFW_FILTERED')) {
+      return NextResponse.json({
+        ok: false,
+        error: 'Изображение отклонено фильтром безопасности (даже после повторной попытки). Попробуйте перефразировать запрос.',
+        code: 'NSFW_FILTERED',
+      }, { status: 200 })
+    }
     if (msg.includes('верификация') || msg.toLowerCase().includes('verif')) {
       return NextResponse.json({ ok: false, error: msg }, { status: 403 })
     }

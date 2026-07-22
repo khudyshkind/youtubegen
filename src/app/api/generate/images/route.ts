@@ -339,6 +339,7 @@ interface ImagesRequest {
 
 interface FalImageResult {
   images: Array<{ url: string; width?: number; height?: number }>
+  has_nsfw_concepts?: boolean[]  // fal replaces flagged images with black frames; must check explicitly
 }
 
 interface SceneInfo {
@@ -734,6 +735,10 @@ async function generateImageFluxSchnell(
 
   const falUrl = result.data?.images?.[0]?.url ?? null
   if (!falUrl) throw new Error('Flux Schnell: no image returned')
+  if (result.data?.has_nsfw_concepts?.[0] === true) {
+    console.warn(`[images] NSFW_FILTERED flux/schnell scene=${sceneIndex}`)
+    throw new Error('NSFW_FILTERED: safety checker blocked image (flux/schnell)')
+  }
   if (!projectId) return falUrl
 
   const storagePath = `${userId}/${projectId}/scene_schnell_${sceneIndex}.jpg`
@@ -761,6 +766,10 @@ async function generateImageNanoBanana(
   const img = result.data?.images?.[0]
   const falUrl = img?.url ?? null
   if (!falUrl) throw new Error('Nano Banana: no image returned')
+  if (result.data?.has_nsfw_concepts?.[0] === true) {
+    console.warn(`[images] NSFW_FILTERED nano-banana scene=${sceneIndex}`)
+    throw new Error('NSFW_FILTERED: safety checker blocked image (nano-banana)')
+  }
   if (img?.width && img?.height) {
     console.log(`[images] nano-banana scene ${sceneIndex} returned ${img.width}x${img.height} (ratio ${(img.width / img.height).toFixed(3)})`)
   }
@@ -793,6 +802,10 @@ async function generateImageFlux(
 
   const imageUrl = result.data?.images?.[0]?.url ?? null
   if (!imageUrl) throw new Error('Flux: no image returned')
+  if (result.data?.has_nsfw_concepts?.[0] === true) {
+    console.warn(`[images] NSFW_FILTERED flux/dev scene=${sceneIndex}`)
+    throw new Error('NSFW_FILTERED: safety checker blocked image (flux/dev)')
+  }
   if (!projectId) return imageUrl
 
   const storagePath = `${userId}/${projectId}/scene_${sceneIndex}.jpg`
@@ -1054,8 +1067,14 @@ export async function POST(request: NextRequest) {
               } catch (err) {
                 failCount++
                 const msg = err instanceof Error ? err.message : String(err)
-                console.error(`[images] scene ${i + 1} FAILED:`, msg)
-                sceneImages[i] = { scene_index: i, prompt: styledPrompt, url: null, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine, audio_fingerprint: duration_sec != null ? Math.round(duration_sec) : undefined }
+                const nsfwBlocked = msg.startsWith('NSFW_FILTERED')
+                console.error(`[images] scene ${i + 1} ${nsfwBlocked ? 'NSFW_FILTERED (both attempts)' : 'FAILED'}:`, msg)
+                sceneImages[i] = {
+                  scene_index: i, prompt: styledPrompt, url: null,
+                  scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end,
+                  engine, audio_fingerprint: duration_sec != null ? Math.round(duration_sec) : undefined,
+                  nsfw_blocked: nsfwBlocked || undefined,
+                }
               }
             })
           )
