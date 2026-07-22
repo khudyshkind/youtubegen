@@ -238,7 +238,7 @@ export default function BillingPage() {
           const isAnyLoading = isSbpLoading || isDefLoading
 
           return (
-            <div key={plan.id} className="relative pt-4">
+            <div key={plan.id} className="relative pt-4 flex flex-col">
               {plan.highlight && !isCurrent && (
                 <div className="absolute top-0 left-0 right-0 flex justify-center z-10">
                   <span className="btn-gradient text-white text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
@@ -257,7 +257,7 @@ export default function BillingPage() {
                 </div>
               )}
               <div
-                className={`relative rounded-2xl p-5 flex flex-col gap-4 transition-all ${
+                className={`relative rounded-2xl p-5 flex flex-col gap-4 h-full transition-all ${
                   plan.highlight ? 'pro-card-glow' : 'card-dark'
                 } ${isCurrent ? 'border-violet-500/60' : ''}`}
               >
@@ -285,13 +285,13 @@ export default function BillingPage() {
 
               {plan.id === 'free' ? (
                 <div
-                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-center"
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-center mt-auto"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(100,116,139,1)' }}
                 >
                   {t('billing.free_btn')}
                 </div>
               ) : (
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-1.5 mt-auto">
                   {currency === 'rub' && (
                     <>
                       {/* Primary: SBP */}
@@ -314,7 +314,7 @@ export default function BillingPage() {
                       >
                         {isDefLoading ? t('billing.loading') : t('billing.pay_other')}
                       </button>
-                      <p className="text-center text-xs text-slate-600">{t('billing.methods_note')}</p>
+                      <p className="text-center text-xs text-slate-400">{t('billing.methods_note')}</p>
                     </>
                   )}
                   <a
@@ -382,7 +382,7 @@ export default function BillingPage() {
                       >
                         {isDefLoading ? t('billing.loading') : t('billing.pay_other')}
                       </button>
-                      <p className="text-center text-xs text-slate-600">{t('billing.methods_note')}</p>
+                      <p className="text-center text-xs text-slate-400">{t('billing.methods_note')}</p>
                     </>
                   )}
                   {/* Tertiary: Telegram */}

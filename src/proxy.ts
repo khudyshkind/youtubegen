@@ -52,9 +52,11 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(redirectUrl)
   }
 
-  // Redirect authenticated users away from auth pages
+  // Redirect authenticated users away from auth pages, respecting ?redirectTo=
   if ((pathname === '/auth/login' || pathname === '/auth/register') && user) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
+    const redirectTo = request.nextUrl.searchParams.get('redirectTo') ?? ''
+    const safeRedirect = redirectTo.startsWith('/') ? redirectTo : '/dashboard'
+    return NextResponse.redirect(new URL(safeRedirect, request.url))
   }
 
   return response

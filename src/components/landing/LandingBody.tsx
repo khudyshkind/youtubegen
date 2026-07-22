@@ -496,13 +496,11 @@ export default function LandingBody() {
               </div>
             </div>
             <a
-              href="https://t.me/lefiro_bot"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="/billing#plans"
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
               style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.9), rgba(37,99,235,0.9))', border: '1px solid rgba(124,58,237,0.4)' }}
             >
-              {t('billing.russia_btn')}
+              {t('billing.russia_btn_plans')}
             </a>
           </div>}
         </div>
