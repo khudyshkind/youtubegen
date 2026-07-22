@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { CREDIT_COSTS, PLAN_CREDITS, PLAN_ORDER, TOPUP_PACKAGES } from '@/lib/types'
+import { CREDIT_COSTS, PLAN_CREDITS, TOPUP_PACKAGES } from '@/lib/types'
 import { useLang } from '@/hooks/useLang'
 import type { Profile, Plan } from '@/lib/types'
 
@@ -227,9 +227,8 @@ export default function BillingPage() {
       <p className="text-xs text-slate-400 mb-4">{t('billing.subscription_note')}</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
         {PLANS.map((plan) => {
-          const isCurrent  = plan.id === currentPlan
-          const isDowngrade = PLAN_ORDER.indexOf(plan.id) < PLAN_ORDER.indexOf(currentPlan)
-          const isLoading  = paying === plan.id
+          const isCurrent = plan.id === currentPlan
+          const isLoading = paying === plan.id
 
           return (
             <div key={plan.id} className="relative pt-4">
@@ -277,27 +276,16 @@ export default function BillingPage() {
                 ))}
               </ul>
 
-              {plan.id === 'free' || isCurrent ? (
+              {plan.id === 'free' ? (
                 <div
                   className="w-full py-2.5 rounded-xl text-sm font-semibold text-center"
-                  style={
-                    isCurrent
-                      ? { background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)', color: 'rgba(167,139,250,1)' }
-                      : { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(100,116,139,1)' }
-                  }
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(100,116,139,1)' }}
                 >
-                  {isCurrent ? t('billing.current_plan') : t('billing.free_btn')}
-                </div>
-              ) : isDowngrade ? (
-                <div
-                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-center text-slate-600 cursor-not-allowed"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
-                >
-                  {t('billing.downgrade')}
+                  {t('billing.free_btn')}
                 </div>
               ) : (
+                // All paid plans: always show payment buttons (upgrade, downgrade, or renew)
                 <div className="flex flex-col gap-2">
-                  {/* Primary: YooKassa RUB (shown when currency=rub) */}
                   {currency === 'rub' && (
                     <button
                       onClick={() => payWithYookassa(plan.id)}
@@ -307,10 +295,9 @@ export default function BillingPage() {
                       }`}
                       style={plan.highlight ? {} : { background: 'linear-gradient(135deg, rgba(124,58,237,0.85), rgba(37,99,235,0.85))', border: '1px solid rgba(124,58,237,0.4)' }}
                     >
-                      {isLoading ? t('billing.loading') : t('billing.pay_rub')}
+                      {isLoading ? t('billing.loading') : isCurrent ? t('billing.renew_btn') : t('billing.pay_rub')}
                     </button>
                   )}
-                  {/* Secondary: Telegram bot */}
                   <a
                     href={tgPayUrl(`pay_${plan.id}`)}
                     target="_blank"
