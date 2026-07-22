@@ -71,7 +71,9 @@ interface IncidentParams {
 
 async function recordIncident(svc: ReturnType<typeof createServiceClient>, p: IncidentParams) {
   try {
-    await svc.from('payment_incidents').insert({
+    // upsert with ignoreDuplicates: true = INSERT ... ON CONFLICT (payment_id) DO NOTHING
+    // YooKassa retries the same webhook up to 7× — this ensures only 1 row per payment.
+    await svc.from('payment_incidents').upsert({
       payment_id:       p.paymentId,
       user_id:          p.userId         ?? null,
       kind:             p.kind           ?? null,
@@ -80,7 +82,7 @@ async function recordIncident(svc: ReturnType<typeof createServiceClient>, p: In
       amount_expected:  p.amountExpected ?? null,
       reason:           p.reason,
       raw_payload:      p.rawPayload     ?? null,
-    })
+    }, { onConflict: 'payment_id', ignoreDuplicates: true })
   } catch (e) {
     // Best-effort: never let incident recording crash the webhook handler
     console.error('[yookassa/webhook] recordIncident failed:', e instanceof Error ? e.message : String(e))
