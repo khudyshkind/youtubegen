@@ -10,8 +10,9 @@ import type { ScenePreview } from '@/lib/scene-split'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type EngineType = 'flux_schnell' | 'flux' | 'nano_banana'
-type Phase = 'input' | 'previewing' | 'generating' | 'done'
+type EngineType  = 'flux_schnell' | 'flux' | 'nano_banana'
+type StyleMode   = 'preset' | 'custom' | 'reference'
+type Phase       = 'input' | 'previewing' | 'generating' | 'done'
 
 interface RestoredMeta {
   engine: string
@@ -85,9 +86,16 @@ export default function IllustrationsTool({
   )
   const [countMode, setCountMode] = useState<'auto' | 'manual'>('auto')
   const [manualCount, setManualCount] = useState(10)
-  const [styleMode, setStyleMode] = useState<'preset' | 'custom'>(
+  const [styleMode, setStyleMode] = useState<StyleMode>(
     restoredMeta?.custom_style ? 'custom' : 'preset',
   )
+
+  // Reference-image style state (analysis result, not the file itself)
+  const [refStyleDesc, setRefStyleDesc] = useState('')
+  const [refAnalyzing, setRefAnalyzing] = useState(false)
+  const [refAnalyzed, setRefAnalyzed] = useState(false)
+  const [refError, setRefError] = useState('')
+  const [refFileName, setRefFileName] = useState('')
   const [selectedStyleKey, setSelectedStyleKey] = useState<ImageStyleKey | ''>(() => {
     if (!restoredMeta?.style_value) return ''
     const match = (Object.entries(IMAGE_STYLES) as [ImageStyleKey, string][]).find(
@@ -127,6 +135,8 @@ export default function IllustrationsTool({
 
   const effectiveCustomStyle = styleMode === 'custom' && customStyleText.trim()
     ? customStyleText.trim()
+    : styleMode === 'reference' && refStyleDesc
+    ? refStyleDesc
     : undefined
 
   // Effective count for cost preview: manual uses manualCount, auto uses detected sceneCount
@@ -139,14 +149,61 @@ export default function IllustrationsTool({
   // Style display name for preview info box
   const styleLabel = styleMode === 'preset'
     ? (selectedStyleKey ? STYLE_LABELS[selectedStyleKey] : 'По умолчанию')
-    : 'Свой стиль'
+    : styleMode === 'custom'
+    ? 'Свой стиль'
+    : refAnalyzed ? 'По референсу' : 'Ожидание референса'
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
 
   function validateInput(): string | null {
     if (!text.trim()) return t('tools.ill_err_no_text')
     if (text.trim().length < 50) return t('tools.ill_err_short')
+    if (styleMode === 'reference' && !refStyleDesc) return t('tools.ill_ref_err_no_file')
     return null
+  }
+
+  async function handleRefFile(file: File) {
+    const allowed = new Set(['image/jpeg', 'image/png', 'image/webp'])
+    if (!allowed.has(file.type)) { setRefError(t('tools.ill_ref_err_mime')); return }
+    if (file.size > 4 * 1024 * 1024) { setRefError(t('tools.ill_ref_err_size')); return }
+
+    setRefFileName(file.name)
+    setRefError('')
+    setRefStyleDesc('')
+    setRefAnalyzed(false)
+    setRefAnalyzing(true)
+
+    try {
+      const fd = new FormData()
+      fd.append('image', file)
+      const res = await fetch('/api/generate/analyze-style', { method: 'POST', body: fd })
+      const json = await res.json() as { ok: boolean; data?: { style_description: string; ref_url?: string }; error?: string }
+      if (!json.ok) throw new Error(json.error ?? 'Ошибка анализа стиля')
+      setRefStyleDesc(json.data!.style_description)
+      setRefAnalyzed(true)
+      // Best-effort cleanup: delete the temp reference file from Storage
+      if (json.data?.ref_url) {
+        fetch('/api/upload/sign', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ref_url: json.data.ref_url, bucket: 'images' }),
+        }).catch(() => {})
+      }
+    } catch (e) {
+      setRefError(e instanceof Error ? e.message : 'Ошибка анализа стиля')
+      setRefFileName('')
+      setRefAnalyzed(false)
+    } finally {
+      setRefAnalyzing(false)
+    }
+  }
+
+  function handleRefReset() {
+    setRefFileName('')
+    setRefStyleDesc('')
+    setRefAnalyzed(false)
+    setRefAnalyzing(false)
+    setRefError('')
   }
 
   async function handlePreview() {
@@ -452,6 +509,9 @@ export default function IllustrationsTool({
               <p className="text-sm text-violet-300">
                 {manualCount} × {costPerImage} кр. = <strong>{displayCost} кр.</strong>
               </p>
+              {styleMode === 'reference' && refAnalyzed && (
+                <p className="text-xs text-slate-600 mt-0.5">{t('tools.ill_ref_cost_note')}</p>
+              )}
             </div>
           )}
         </div>
@@ -486,28 +546,33 @@ export default function IllustrationsTool({
           </div>
         </div>
 
-        {/* Style */}
+        {/* Style — three mutually exclusive modes */}
         <div>
           <p className="text-sm font-medium text-slate-300 mb-2">{t('tools.ill_style_label')}</p>
-          <div className="flex gap-2 mb-3">
-            {(['preset', 'custom'] as const).map((m) => (
+
+          {/* Mode tabs */}
+          <div className="flex gap-1.5 mb-3">
+            {(['preset', 'custom', 'reference'] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setStyleMode(m)}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                className="flex-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-all"
                 style={{
                   background: styleMode === m ? 'rgba(124,58,237,0.25)' : 'rgba(255,255,255,0.05)',
                   border: `1px solid ${styleMode === m ? 'rgba(124,58,237,0.5)' : 'rgba(255,255,255,0.1)'}`,
                   color: styleMode === m ? '#c4b5fd' : '#94a3b8',
                 }}
               >
-                {m === 'preset' ? t('tools.ill_style_preset') : t('tools.ill_style_custom')}
+                {m === 'preset' ? t('tools.ill_style_preset')
+                  : m === 'custom' ? t('tools.ill_style_custom')
+                  : t('tools.ill_style_reference')}
               </button>
             ))}
           </div>
 
-          {styleMode === 'preset' ? (
+          {/* Preset grid */}
+          {styleMode === 'preset' && (
             <div className="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
@@ -537,7 +602,10 @@ export default function IllustrationsTool({
                 </button>
               ))}
             </div>
-          ) : (
+          )}
+
+          {/* Custom text */}
+          {styleMode === 'custom' && (
             <textarea
               value={customStyleText}
               onChange={(e) => setCustomStyleText(e.target.value)}
@@ -545,6 +613,78 @@ export default function IllustrationsTool({
               rows={3}
               className="w-full px-3 py-2 rounded-lg text-xs text-slate-100 bg-white/5 border border-white/10 resize-none focus:outline-none focus:border-violet-500/60 placeholder-slate-600"
             />
+          )}
+
+          {/* Reference image */}
+          {styleMode === 'reference' && (
+            <div>
+              {!refAnalyzed && !refAnalyzing ? (
+                /* Drop zone */
+                <label
+                  className="flex flex-col items-center justify-center gap-2 w-full rounded-xl cursor-pointer transition-all"
+                  style={{
+                    border: '2px dashed rgba(124,58,237,0.35)',
+                    background: 'rgba(124,58,237,0.05)',
+                    minHeight: 90,
+                    padding: '16px 12px',
+                  }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const f = e.dataTransfer.files[0]
+                    if (f) handleRefFile(f)
+                  }}
+                >
+                  <svg className="w-6 h-6 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <p className="text-xs text-slate-400 text-center">{t('tools.ill_ref_drop')}</p>
+                  <p className="text-xs text-slate-600">{t('tools.ill_ref_hint')}</p>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleRefFile(f) }}
+                  />
+                </label>
+              ) : refAnalyzing ? (
+                /* Analyzing */
+                <div className="flex items-center gap-2 px-3 py-3 rounded-xl"
+                  style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
+                  <SpinnerIcon className="w-4 h-4 text-violet-400" />
+                  <span className="text-xs text-violet-300">{t('tools.ill_ref_analyzing')}</span>
+                </div>
+              ) : (
+                /* Analyzed — show description */
+                <div className="rounded-xl px-3 py-3 flex flex-col gap-2"
+                  style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <svg className="w-3.5 h-3.5 text-green-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-xs font-medium text-green-400">{t('tools.ill_ref_detected')}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRefReset}
+                      className="text-xs text-slate-500 hover:text-slate-300 transition-colors shrink-0"
+                    >
+                      {t('tools.ill_ref_change')}
+                    </button>
+                  </div>
+                  {refFileName && (
+                    <p className="text-xs text-slate-500 truncate">📎 {refFileName}</p>
+                  )}
+                  <p className="text-xs text-slate-300 leading-relaxed italic">&ldquo;{refStyleDesc}&rdquo;</p>
+                  <p className="text-xs text-slate-600">{t('tools.ill_ref_cost_note')}</p>
+                </div>
+              )}
+              {refError && (
+                <p className="mt-2 text-xs text-red-400">{refError}</p>
+              )}
+            </div>
           )}
         </div>
 
@@ -646,6 +786,9 @@ export default function IllustrationsTool({
             {engineLabel}
             {(effectiveStyleValue || effectiveCustomStyle) && ` · Стиль: ${styleLabel}`}
           </p>
+          {styleMode === 'reference' && refAnalyzed && (
+            <p className="text-xs text-slate-600 mt-1">{t('tools.ill_ref_cost_note')}</p>
+          )}
         </div>
 
         {/* Scene previews */}

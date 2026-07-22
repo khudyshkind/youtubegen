@@ -19,11 +19,11 @@ function getExt(name: string): string {
 }
 
 interface SignRequest {
-  type: 'audio' | 'image' | 'tool_audio'
+  type: 'audio' | 'image' | 'tool_audio' | 'tool_image_reference'
   project_id?: string
   index?: number
   content_type?: string
-  // tool_audio only — validated server-side
+  // tool_audio / tool_image_reference only — validated server-side
   file_size?: number
   file_name?: string
 }
@@ -38,6 +38,30 @@ export async function POST(request: NextRequest) {
 
     const body: SignRequest = await request.json()
     const { type, project_id, index = 0, content_type, file_size, file_name } = body
+
+    // ── tool_image_reference: standalone reference image for style analysis ────
+    if (type === 'tool_image_reference') {
+      const ALLOWED_REF_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+      const MAX_REF_BYTES = 10 * 1024 * 1024
+      if (content_type && !ALLOWED_REF_MIMES.has(content_type)) {
+        return NextResponse.json({ ok: false, error: 'Поддерживаются JPEG, PNG, WEBP', code: 'INVALID_FORMAT' }, { status: 400 })
+      }
+      if (file_size !== undefined && file_size > MAX_REF_BYTES) {
+        return NextResponse.json({ ok: false, error: 'Файл слишком большой. Максимум 10 МБ', code: 'FILE_TOO_LARGE' }, { status: 400 })
+      }
+      const ext = content_type === 'image/png' ? 'png' : content_type === 'image/webp' ? 'webp' : 'jpg'
+      const storagePath = `${user.id}/tool/ref_${randomUUID()}.${ext}`
+      const svc = createServiceClient()
+      const { data, error } = await svc.storage.from('images').createSignedUploadUrl(storagePath)
+      if (error || !data) {
+        console.error('[upload/sign tool_image_reference]', error?.message)
+        return NextResponse.json({ ok: false, error: 'Не удалось создать URL для загрузки' }, { status: 500 })
+      }
+      return NextResponse.json({
+        ok: true,
+        data: { signed_url: data.signedUrl, token: data.token, path: storagePath, bucket: 'images', content_type: content_type ?? 'image/jpeg' },
+      })
+    }
 
     // ── tool_audio: standalone tool upload (no project_id needed) ──────────────
     if (type === 'tool_audio') {
@@ -145,5 +169,37 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error('[upload/sign]', err)
     return NextResponse.json({ ok: false, error: 'Ошибка сервера' }, { status: 500 })
+  }
+}
+
+// DELETE /api/upload/sign — cleanup temp files after style analysis
+// Accepts { ref_url, bucket } and deletes the object at the path extracted from the public URL.
+// Security: validates path starts with the authenticated user's ID.
+export async function DELETE(request: NextRequest) {
+  try {
+    const supabase = await createServerSupabase()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ ok: false }, { status: 401 })
+
+    const { ref_url, bucket = 'images' } = await request.json() as { ref_url: string; bucket?: string }
+
+    let storagePath: string | null = null
+    try {
+      const url = new URL(ref_url)
+      const match = url.pathname.match(/\/object\/public\/[^/]+\/(.+)/)
+      if (match?.[1]) storagePath = decodeURIComponent(match[1])
+    } catch {}
+
+    if (!storagePath || !storagePath.startsWith(user.id + '/')) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
+    }
+
+    const svc = createServiceClient()
+    const { error } = await svc.storage.from(bucket).remove([storagePath])
+    if (error) console.warn('[upload/sign DELETE]', error.message)
+    return NextResponse.json({ ok: !error })
+  } catch (err) {
+    console.error('[upload/sign DELETE]', err)
+    return NextResponse.json({ ok: false }, { status: 500 })
   }
 }
