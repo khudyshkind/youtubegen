@@ -15,6 +15,7 @@ const YK_CIDRS = [
   '185.71.76.0/27',
   '185.71.77.0/27',
   '77.75.153.0/25',
+  '77.75.154.128/25',  // covers 77.75.154.128–255 (confirmed production range)
   '77.75.156.11/32',
   '77.75.156.35/32',
 ]
@@ -28,8 +29,13 @@ function ipInCidr(ip: string, cidr: string): boolean {
   } catch { return false }
 }
 
-function isYooKassaIp(ip: string): boolean {
-  return YK_CIDRS.some(cidr => ipInCidr(ip, cidr))
+function isYooKassaIp(rawIp: string): boolean {
+  // Vercel passes IPv4-mapped IPv6 (::ffff:x.x.x.x) — normalise to plain IPv4
+  const ip = rawIp.startsWith('::ffff:') ? rawIp.slice(7) : rawIp
+  if (YK_CIDRS.some(cidr => ipInCidr(ip, cidr))) return true
+  // YooKassa IPv6 range 2a02:5180::/32
+  if (ip.startsWith('2a02:5180:')) return true
+  return false
 }
 
 // Re-fetch the payment from YooKassa to verify it (don't trust the webhook body).
@@ -61,15 +67,17 @@ export async function POST(req: NextRequest) {
   let rawBody = ''
   try {
     rawBody = await req.text()
-  } catch {
+  } catch (e) {
+    console.error('[yookassa/webhook] failed to read request body:', e instanceof Error ? e.message : String(e))
     return NextResponse.json({ ok: true })
   }
 
   // Log YooKassa IP for monitoring (verification via API re-fetch below)
-  const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown'
-  const ipOk     = isYooKassaIp(clientIp)
+  const rawClientIp = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown'
+  const clientIp    = rawClientIp.startsWith('::ffff:') ? rawClientIp.slice(7) : rawClientIp
+  const ipOk        = isYooKassaIp(rawClientIp)
   if (!ipOk) {
-    console.warn(`[yookassa/webhook] unexpected source IP: ${clientIp} — proceeding with API re-fetch verification`)
+    console.warn(`[yookassa/webhook] unexpected source IP: ${rawClientIp} (normalised: ${clientIp}) — proceeding with API re-fetch verification`)
   }
 
   let event: {
@@ -122,22 +130,28 @@ export async function POST(req: NextRequest) {
   const actualAmount = parseFloat(payment.amount.value)
   let expectedAmount: number
 
+  // Log parsed metadata to help trace activation failures
+  console.log(`[yookassa/webhook] payment ${paymentId} meta: kind=${kind} user_id=${userId} topup_index=${meta.topup_index ?? 'n/a'} plan_id=${meta.plan_id ?? 'n/a'}`)
+
   if (kind === 'plan') {
     const planId = meta.plan_id as string
     if (!(VALID_PLANS as readonly string[]).includes(planId)) {
-      console.error(`[yookassa/webhook] unknown plan_id=${planId}`)
+      console.error(`[yookassa/webhook] unknown plan_id=${planId} for payment ${paymentId}`)
+      await sendTelegramAlert(`🔴 <b>YooKassa webhook</b>\nНеизвестный plan_id: <code>${planId}</code>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>`)
       return NextResponse.json({ ok: true })
     }
     expectedAmount = PLAN_PRICES_RUB[planId as Exclude<Plan, 'free'>]
   } else if (kind === 'topup') {
     const idx = Number(meta.topup_index)
     if (isNaN(idx) || idx < 0 || idx >= TOPUP_PACKAGES.length) {
-      console.error(`[yookassa/webhook] invalid topup_index=${meta.topup_index}`)
+      console.error(`[yookassa/webhook] invalid topup_index=${String(meta.topup_index)} (parsed=${idx}) for payment ${paymentId}`)
+      await sendTelegramAlert(`🔴 <b>YooKassa webhook</b>\nНеверный topup_index: <code>${String(meta.topup_index)}</code>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>`)
       return NextResponse.json({ ok: true })
     }
     expectedAmount = TOPUP_PACKAGES[idx].priceRub
   } else {
-    console.error(`[yookassa/webhook] unknown kind=${kind}`)
+    console.error(`[yookassa/webhook] unknown kind=${kind} for payment ${paymentId}`)
+    await sendTelegramAlert(`🔴 <b>YooKassa webhook</b>\nНеизвестный kind: <code>${kind}</code>\npayment_id: <code>${paymentId}</code>\nuser_id: <code>${userId}</code>`)
     return NextResponse.json({ ok: true })
   }
 
