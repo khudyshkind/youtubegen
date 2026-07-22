@@ -191,10 +191,10 @@ export default function BillingPage() {
               </p>
             )}
           </div>
-          <div className="flex flex-col gap-1 text-sm text-slate-400">
-            <p className="font-medium text-slate-300">{t('billing.ops_title')}</p>
+          <div className="flex flex-col gap-0.5 text-slate-400">
+            <p className="text-sm font-medium text-slate-300 mb-0.5">{t('billing.ops_title')}</p>
             {CREDIT_COST_INFO.map((item) => (
-              <p key={item.operation}>
+              <p key={item.operation} className="text-xs whitespace-nowrap">
                 {item.icon} {item.operation} — <strong className="text-slate-200">{item.credits} {t('nav.credits_suffix')}</strong>
               </p>
             ))}
