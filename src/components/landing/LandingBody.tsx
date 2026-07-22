@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import HeroSection from './HeroSection'
 import RevealInit from './RevealInit'
@@ -9,6 +10,7 @@ import ScrollProgress from './ScrollProgress'
 import AnimatedCounter from './AnimatedCounter'
 import FaqAccordion from './FaqAccordion'
 import { useLang } from '@/hooks/useLang'
+import { createClient } from '@/lib/supabase'
 import { PLAN_CREDITS, PLAN_PRICES, PLAN_PRICES_RUB } from '@/lib/types'
 
 const BG = '#0A0A0F'
@@ -16,6 +18,13 @@ const DIV_LINE = '1px solid rgba(255,255,255,0.05)'
 
 export default function LandingBody() {
   const { t, lang } = useLang()
+  const [isAuthed, setIsAuthed] = useState(false)
+
+  useEffect(() => {
+    createClient().auth.getSession().then(({ data }) => {
+      setIsAuthed(!!data.session)
+    })
+  }, [])
 
   const STEPS = [
     { n: '01', icon: '💡', title: t('landing.step1_title'), desc: t('landing.step1_desc') },
@@ -49,7 +58,7 @@ export default function LandingBody() {
       credits: PLAN_CREDITS['free'],
       features: [t('billing.f_script'), t('billing.f_audio_engines_5'), t('billing.f_all_tools')],
       cta: t('landing.plan_cta_free'),
-      href: '/auth/register',
+      href: isAuthed ? '/dashboard' : '/auth/register',
       highlight: false,
     },
     {
@@ -60,7 +69,7 @@ export default function LandingBody() {
       credits: PLAN_CREDITS['basic'],
       features: [t('billing.f_credits_basic'), t('billing.f_all_tools'), t('billing.f_analytics')],
       cta: t('landing.plan_cta_basic'),
-      href: '/auth/register?redirectTo=/billing',
+      href: isAuthed ? '/billing' : '/auth/register?redirectTo=/billing',
       highlight: false,
     },
     {
@@ -71,7 +80,7 @@ export default function LandingBody() {
       credits: PLAN_CREDITS['starter'],
       features: [t('billing.f_credits_100'), t('billing.f_all_tools'), t('billing.f_analytics')],
       cta: t('landing.plan_cta_starter'),
-      href: '/auth/register?redirectTo=/billing',
+      href: isAuthed ? '/billing' : '/auth/register?redirectTo=/billing',
       highlight: true,
     },
     {
@@ -82,7 +91,7 @@ export default function LandingBody() {
       credits: PLAN_CREDITS['pro'],
       features: [t('billing.f_credits_300'), t('billing.f_all_tools'), t('billing.f_priority_support')],
       cta: t('landing.plan_cta_pro'),
-      href: '/auth/register?redirectTo=/billing',
+      href: isAuthed ? '/billing' : '/auth/register?redirectTo=/billing',
       highlight: false,
     },
     {
@@ -93,7 +102,7 @@ export default function LandingBody() {
       credits: PLAN_CREDITS['agency'],
       features: [t('billing.f_credits_1000'), t('billing.f_all_tools'), t('billing.f_dedicated_support')],
       cta: t('landing.plan_cta_agency'),
-      href: '/auth/register?redirectTo=/billing',
+      href: isAuthed ? '/billing' : '/auth/register?redirectTo=/billing',
       highlight: false,
     },
   ]
@@ -113,7 +122,7 @@ export default function LandingBody() {
       <ScrollProgress />
 
       {/* ── Hero ──────────────────────────────────────────── */}
-      <HeroSection />
+      <HeroSection isAuthed={isAuthed} />
 
       {/* ── How it works ──────────────────────────────────── */}
       <section id="how-it-works" className="py-28 relative" style={{ background: BG }}>
@@ -147,7 +156,7 @@ export default function LandingBody() {
           </div>
 
           <div className="text-center mt-12 reveal">
-            <Link href="/auth/register" className="btn-gradient inline-block px-8 py-3.5 text-white font-semibold rounded-xl">
+            <Link href={isAuthed ? '/dashboard' : '/auth/register'} className="btn-gradient inline-block px-8 py-3.5 text-white font-semibold rounded-xl">
               {t('landing.cta_btn')}
             </Link>
           </div>
@@ -208,7 +217,7 @@ export default function LandingBody() {
               </div>
               <p className="text-slate-300 font-medium text-lg mb-1">{t('landing.demo_coming')}</p>
               <p className="text-slate-600 text-sm">{t('landing.demo_hint')}</p>
-              <Link href="/auth/register" className="btn-gradient inline-block mt-5 px-6 py-2.5 text-white text-sm font-semibold rounded-xl">
+              <Link href={isAuthed ? '/dashboard' : '/auth/register'} className="btn-gradient inline-block mt-5 px-6 py-2.5 text-white text-sm font-semibold rounded-xl">
                 {t('landing.demo_cta')}
               </Link>
             </div>
@@ -263,7 +272,7 @@ export default function LandingBody() {
           </div>
 
           <div className="text-center mt-12 reveal">
-            <Link href="/auth/register" className="btn-ghost-dark inline-block px-8 py-3.5 text-sm font-semibold rounded-xl">
+            <Link href={isAuthed ? '/dashboard' : '/auth/register'} className="btn-ghost-dark inline-block px-8 py-3.5 text-sm font-semibold rounded-xl">
               {t('landing.cta_btn')}
             </Link>
           </div>

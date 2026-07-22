@@ -5,7 +5,7 @@ import Link from 'next/link'
 import AnimatedCounter from './AnimatedCounter'
 import { useLang } from '@/hooks/useLang'
 
-export default function HeroSection() {
+export default function HeroSection({ isAuthed = false }: { isAuthed?: boolean }) {
   const { t, lang } = useLang()
 
   const PHRASES = [
@@ -128,7 +128,7 @@ export default function HeroSection() {
 
         {/* CTA */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20">
-          <Link href="/auth/register" className="btn-gradient w-full sm:w-auto px-8 py-4 text-white font-semibold rounded-2xl text-lg">
+          <Link href={isAuthed ? '/dashboard' : '/auth/register'} className="btn-gradient w-full sm:w-auto px-8 py-4 text-white font-semibold rounded-2xl text-lg">
             {t('landing.hero_cta')}
           </Link>
           <a href="#how-it-works" className="btn-ghost-dark w-full sm:w-auto px-8 py-4 rounded-2xl text-lg font-semibold backdrop-blur-sm">

@@ -155,6 +155,18 @@ export default function Navbar() {
           {/* Right side */}
           {user ? (
             <div className="flex items-center gap-3">
+              {/* "Go to app" button — only on landing */}
+              {isLanding && (
+                <Link
+                  href="/dashboard"
+                  className="btn-gradient hidden sm:flex items-center gap-1.5 px-4 py-1.5 text-white text-sm font-semibold rounded-xl"
+                >
+                  {t('nav.to_app')}
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                </Link>
+              )}
               {/* Credits badge */}
               <div
                 className="hidden sm:flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-colors"
