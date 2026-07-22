@@ -86,10 +86,12 @@ function MediaBadge({ project }: { project: Project }) {
 }
 
 const TOOL_EMOJI: Record<string, string> = {
-  'script-gen': '📝',
-  'seo':        '🎯',
-  'repack':     '🔁',
-  'uniqueize':  '✍️',
+  'script-gen':          '📝',
+  'seo':                 '🎯',
+  'repack':              '🔁',
+  'uniqueize':           '✍️',
+  'subtitles':           '🎧',
+  'image-illustrations': '🖌️',
 }
 
 function toolRunHref(project: Project): string {

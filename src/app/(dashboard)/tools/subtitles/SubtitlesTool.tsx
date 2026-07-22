@@ -4,24 +4,10 @@ import { useState, useRef } from 'react'
 import Link from 'next/link'
 import { useLang } from '@/hooks/useLang'
 import type { SubtitleBlock } from '@/lib/types'
+import { SCRIPT_LANGUAGES } from '@/lib/languages'
 
 const ALLOWED_EXTS = ['mp3', 'm4a', 'aac', 'ogg', 'wav']
 const MAX_BYTES = 25 * 1024 * 1024
-
-const LANGUAGES = [
-  { code: 'ru', label: '🇷🇺 Русский' },
-  { code: 'en', label: '🇬🇧 English' },
-  { code: 'de', label: '🇩🇪 Deutsch' },
-  { code: 'es', label: '🇪🇸 Español' },
-  { code: 'fr', label: '🇫🇷 Français' },
-  { code: 'it', label: '🇮🇹 Italiano' },
-  { code: 'pt', label: '🇵🇹 Português' },
-  { code: 'zh', label: '🇨🇳 中文' },
-  { code: 'ja', label: '🇯🇵 日本語' },
-  { code: 'ko', label: '🇰🇷 한국어' },
-  { code: 'ar', label: '🇸🇦 العربية' },
-  { code: 'uk', label: '🇺🇦 Українська' },
-]
 
 function fmtTime(s: number, vtt = false): string {
   const h = Math.floor(s / 3600)
@@ -300,8 +286,8 @@ export default function SubtitlesTool({ initialBlocks, initialTitle, restoredId 
           className="w-full rounded-xl border border-slate-700 bg-slate-800/60 text-slate-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
         >
           <option value="">{t('tools.subtitles_lang_auto')}</option>
-          {LANGUAGES.map(l => (
-            <option key={l.code} value={l.code}>{l.label}</option>
+          {SCRIPT_LANGUAGES.map(l => (
+            <option key={l.code} value={l.code}>{l.flag} {l.name}</option>
           ))}
         </select>
       </div>

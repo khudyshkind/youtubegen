@@ -60,6 +60,13 @@ const TOOL_CARDS = [
     descKey: 'tools.card_subtitles_desc' as const,
     accent: { bg: 'rgba(20,184,166,0.08)', border: 'rgba(20,184,166,0.2)', hover: 'rgba(20,184,166,0.35)', color: '#2dd4bf' },
   },
+  {
+    slug: 'illustrations',
+    emoji: '🖌️',
+    titleKey: 'tools.card_illustrations' as const,
+    descKey: 'tools.card_illustrations_desc' as const,
+    accent: { bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.2)', hover: 'rgba(168,85,247,0.35)', color: '#c084fc' },
+  },
 ]
 
 export default function ToolsPage() {

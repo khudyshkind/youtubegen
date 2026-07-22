@@ -7,7 +7,8 @@ import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SceneImage } from '@/lib/types'
-import { getStyleConfig } from '@/lib/image-style-configs'
+import { getStyleConfig, DEFAULT_STYLE_CONFIG } from '@/lib/image-style-configs'
+import type { StyleConfig } from '@/lib/image-style-configs'
 
 export const maxDuration = 120
 
@@ -49,6 +50,7 @@ interface SingleImageRequest {
   prompt: string
   engine?: ImageEngine
   image_style?: string
+  custom_style?: string
 }
 
 interface FalImageResult {
@@ -211,7 +213,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: SingleImageRequest = await request.json()
-    const { project_id, scene_index, prompt, engine = 'flux', image_style } = body
+    const { project_id, scene_index, prompt, engine = 'flux', image_style, custom_style } = body
 
     if (!project_id || scene_index === undefined || !prompt?.trim()) {
       return NextResponse.json(
@@ -229,7 +231,16 @@ export async function POST(request: NextRequest) {
     const check = await requireCredits(user.id, costKey, supabase)
     if (!check.ok) return NextResponse.json(check, { status: 402 })
 
-    const styleConfig = getStyleConfig(image_style)
+    const styleConfig: StyleConfig = custom_style?.trim()
+      ? {
+          claudeInstruction: `${custom_style.trim()}. Describe scenes in this visual style.`,
+          fluxSuffix: custom_style.trim(),
+          negativePrompt: DEFAULT_STYLE_CONFIG.negativePrompt,
+          enhanceSystemHint: custom_style.trim(),
+          fallbackPrompt: DEFAULT_STYLE_CONFIG.fallbackPrompt,
+          illustrative: false,
+        }
+      : getStyleConfig(image_style)
     const enhancedBase = await enhancePrompt(prompt, styleConfig.enhanceSystemHint)
     const enhancedPrompt = `${enhancedBase}, ${styleConfig.fluxSuffix}`
     console.log(`[image-single] engine=${engine} scene_index=${scene_index} style="${image_style ?? 'default'}"`)

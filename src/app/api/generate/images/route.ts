@@ -8,7 +8,7 @@ import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS, ENGINE_DISPLAY, IMAGE_COUNT_MAX } from '@/lib/types'
 import type { SceneImage, SubtitleBlock } from '@/lib/types'
-import { getStyleConfig } from '@/lib/image-style-configs'
+import { getStyleConfig, DEFAULT_STYLE_CONFIG } from '@/lib/image-style-configs'
 import type { StyleConfig } from '@/lib/image-style-configs'
 
 export const maxDuration = 300
@@ -332,6 +332,9 @@ interface ImagesRequest {
   subtitle_blocks?: SubtitleBlock[]
   engine?: ImageEngine
   image_style?: string
+  // Free-text style override: when set, replaces preset style suffix + claude instruction.
+  // Used by the Illustrations tool for arbitrary style input bypassing STYLE_CONFIGS.
+  custom_style?: string
 }
 
 interface FalImageResult {
@@ -881,7 +884,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
   }
 
-  const { script, topic, duration_sec, image_count, project_id, image_interval, subtitle_blocks, engine = 'flux', image_style }: ImagesRequest =
+  const { script, topic, duration_sec, image_count, project_id, image_interval, subtitle_blocks, engine = 'flux', image_style, custom_style }: ImagesRequest =
     await request.json()
 
   if (!script?.trim() || !topic?.trim()) {
@@ -915,8 +918,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
   }
 
-  const styleConfig = getStyleConfig(image_style)
-  console.log(`[images] engine=${engine} style="${image_style ?? 'default'}" suffix="${styleConfig.fluxSuffix.slice(0, 60)}"`)
+  // When custom_style is provided it fully overrides preset STYLE_CONFIGS: both the Claude
+  // scene-description instruction and the fal prompt suffix use the free-text string directly.
+  const styleConfig: StyleConfig = custom_style?.trim()
+    ? {
+        claudeInstruction: `${custom_style.trim()}. Describe each scene strictly in this visual style.`,
+        fluxSuffix: custom_style.trim(),
+        negativePrompt: DEFAULT_STYLE_CONFIG.negativePrompt,
+        enhanceSystemHint: custom_style.trim(),
+        fallbackPrompt: DEFAULT_STYLE_CONFIG.fallbackPrompt,
+        illustrative: false,
+      }
+    : getStyleConfig(image_style)
+  console.log(`[images] engine=${engine} style="${image_style ?? 'default'}" custom_style="${custom_style ?? ''}" suffix="${styleConfig.fluxSuffix.slice(0, 60)}"`)
 
   // === SSE streaming — keeps the connection alive for the full generation ===
   const encoder = new TextEncoder()

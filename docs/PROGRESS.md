@@ -148,6 +148,26 @@
 
 ---
 
+---
+
+## Фаза 12 — Инструмент «Иллюстрации по тексту»
+
+- [x] ✅ `src/lib/scene-split.ts` — detectSceneCount (Haiku auto, word-count fallback)
+- [x] ✅ `/api/tools/illustrations/scenes` — POST {text, count_mode, count?} → scene preview
+- [x] ✅ `/api/tools/illustrations/init` — создаёт stub-проект (type='tool_run', image_style='image-illustrations')
+- [x] ✅ `/api/tools/illustrations/finalize` — сбрасывает routing slug, ставит status='completed'
+- [x] ✅ `custom_style` в `/api/generate/images` — synthetic StyleConfig, bypass STYLE_CONFIGS
+- [x] ✅ `custom_style` в `/api/generate/image-single` — то же для перегенерации
+- [x] ✅ `i18n.ts` — ключи `tools.ill_*` + `tools.card_illustrations*` (ru + en, ~35 ключей)
+- [x] ✅ `IllustrationsTool.tsx` — клиентский компонент (SSE, regen, ZIP, 4 фазы, 11 стилей, 3 движка)
+- [x] ✅ `tools/illustrations/page.tsx` — сервер-компонент, ?run= restore из projects
+- [x] ✅ `tools/page.tsx` — карточка Иллюстрации (violet акцент, emoji 🖌️)
+- [x] ✅ `DashboardClient.tsx` — TOOL_EMOJI добавлены 'subtitles' и 'image-illustrations'
+- [x] ✅ `SubtitlesTool.tsx` — LANGUAGES (12) заменён на SCRIPT_LANGUAGES import (28 языков)
+- [x] ✅ `npx tsc --noEmit` — 0 ошибок
+
+---
+
 ## Сводка
 
 | Фаза | Прогресс |
@@ -165,4 +185,5 @@
 | Фаза 9 — YouTube Analytics | 11 / 11 |
 | Фаза 10 — Wave 1 Acceptance + Tools | 8 / 9 (pending Migration 005) |
 | Фаза 11 — Субтитры по аудио | 6 / 6 |
-| **Итого** | **89 / 90** |
+| Фаза 12 — Иллюстрации по тексту | 13 / 13 |
+| **Итого** | **102 / 103** |
