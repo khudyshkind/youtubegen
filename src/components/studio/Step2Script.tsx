@@ -74,6 +74,7 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
   const [enhanceCta, setEnhanceCta] = useState(false)
   const [enhancePauses, setEnhancePauses] = useState(false)
   const [enhancing, setEnhancing] = useState(false)
+  const [scriptShortWarn, setScriptShortWarn] = useState<{ actual: number; target: number } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const nextRef = useRef<() => void>(() => {})
   useEffect(() => {
@@ -109,6 +110,7 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
   async function handleGenerate() {
     if (!confirmRegenIfCompleted(t('regen_confirm.message'))) return
     setError('')
+    setScriptShortWarn(null)
     setLoading(true)
     try {
       const res = await fetch('/api/generate/script', {
@@ -125,6 +127,9 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
         throw new Error(json.error)
       }
       setScript(json.data.script)
+      if (json.data.script_short) {
+        setScriptShortWarn({ actual: json.data.actual_words, target: json.data.target_words })
+      }
       void refreshCredits()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step2.err_gen'))
@@ -558,6 +563,24 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
         <p className="text-sm text-red-400 rounded-xl px-4 py-3" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
           {error}
         </p>
+      )}
+
+      {scriptShortWarn && !loading && (
+        <div className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-xs text-amber-300"
+             style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.3)' }}>
+          <span>
+            🟡 Сценарий короче запрошенного: {scriptShortWarn.actual} из {scriptShortWarn.target} слов
+            (~{Math.round(scriptShortWarn.actual / scriptShortWarn.target * 100)}% от цели). Можно сгенерировать заново или продолжить с текущим.
+          </span>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={loading}
+            className="shrink-0 font-semibold underline text-amber-400 hover:text-amber-200 transition-colors whitespace-nowrap"
+          >
+            ↺ Заново
+          </button>
+        </div>
       )}
 
       {/* Script textarea */}

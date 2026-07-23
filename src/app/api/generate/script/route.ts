@@ -69,7 +69,8 @@ function buildPrompt(p: ScriptParams, planSections?: PlanSection[]): string {
     '',
     'ТЕХНИЧЕСКИЕ ПАРАМЕТРЫ:',
     `- Язык: ${langName}`,
-    `- Длительность: ${p.duration_minutes} мин (~${wordsTarget} слов при темпе 130 слов/мин)`,
+    `- Длительность: ${p.duration_minutes} мин. TTS-голос воспроизводит текст в темпе ~130 слов/мин — ориентируйся именно на этот темп при написании.`,
+    `- Объём текста: не менее ${wordsTarget} слов. Если текст кажется завершённым раньше — дополни деталями, примерами или переходами. Сокращать нельзя.`,
     `- Нарративный стиль: ${NARRATIVE_STYLE_LABELS[p.narrative_style] ?? p.narrative_style}`,
     `- Тон: ${TONE_LABELS[p.tone] ?? p.tone}`,
     `- Целевая аудитория: ${AUDIENCE_LABELS[p.target_audience] ?? p.target_audience}`,
@@ -504,6 +505,27 @@ export async function POST(request: NextRequest) {
       const retry = await callGenerate()
       const retryStop = normaliseStop(retry.stopReason)
       if (!retry.text || !isGuardOk(retryStop, retry.text, targetWords)) {
+        // Safety net: both attempts ended naturally (end_turn, not max_tokens) and the
+        // better result is ≥ 80 % of target → accept with SCRIPT_SHORT warning.
+        // Below 80 % or any attempt hit max_tokens → hard fail, credits not charged.
+        const SHORT_RATIO = 0.80
+        const naturalAttempts = [
+          normStop !== 'max_tokens' ? gen : null,
+          retryStop !== 'max_tokens' ? retry : null,
+        ].filter((r): r is GenResult => r !== null && !!r.text)
+        const best = naturalAttempts.sort((a, b) => countWords(b.text) - countWords(a.text))[0]
+        if (best && countWords(best.text) >= targetWords * SHORT_RATIO) {
+          const actualWords = countWords(best.text)
+          console.warn(`[generate/script] guard fallback: words=${actualWords}/${targetWords} (${Math.round(actualWords / targetWords * 100)}%) — returning with SCRIPT_SHORT`)
+          await spendCredits(user.id, cost, operation, project_id)
+          if (project_id) {
+            const shortUpdate: Record<string, unknown> = { script: best.text, status: 'draft', credits_spent: cost, language: scriptParams.language ?? null }
+            if (plan_sections && plan_sections.length > 0) shortUpdate.plan_sections = plan_sections
+            await supabase.from('projects').update(shortUpdate).eq('id', project_id).eq('user_id', user.id)
+          }
+          void trackEvent(user.id, 'step_completed', { step: 'script', model, project_id, short: true })
+          return NextResponse.json({ ok: true, data: { script: best.text, script_short: true, actual_words: actualWords, target_words: targetWords } })
+        }
         console.error(`[generate/script] guard fail attempt=2 words=${retry.text ? countWords(retry.text) : 0} stop_reason=${retryStop} — aborting, credits not charged`)
         return NextResponse.json({
           ok: false,
