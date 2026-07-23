@@ -728,7 +728,7 @@ async function generateImageFluxSchnell(
   const result = await (fal.subscribe as any)('fal-ai/flux/schnell', {
     input: {
       prompt: `${prompt}, NO TEXT, NO NUMBERS, NO DIGITS, NO WATERMARKS`,
-      image_size: { width: 1280, height: 720 },
+      image_size: { width: 1920, height: 1080 },
       num_images: 1,
     },
   }) as { data: FalImageResult }
@@ -758,6 +758,7 @@ async function generateImageNanoBanana(
     input: {
       prompt: `${prompt}, NO TEXT, NO NUMBERS, NO DIGITS, NO WATERMARKS`,
       aspect_ratio: '16:9',
+      image_size: { width: 1920, height: 1080 },
       num_images: 1,
       output_format: 'jpeg',
     },
@@ -794,7 +795,7 @@ async function generateImageFlux(
     input: {
       prompt: `${prompt}, NO TEXT, NO NUMBERS, NO DIGITS, NO WATERMARKS`,
       negative_prompt: negativePrompt,
-      image_size: { width: 1280, height: 720 },
+      image_size: { width: 1920, height: 1080 },
       num_images: 1,
       num_inference_steps: 35,
     },
