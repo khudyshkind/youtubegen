@@ -3604,13 +3604,13 @@ const EFFECT_FILTERS = {
 }
 
 const VF_BASE =
-  'scale=1280:720:force_original_aspect_ratio=decrease,' +
-  'pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1'
+  'scale=1920:1080:force_original_aspect_ratio=decrease,' +
+  'pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1'
 
-// Force-scale to exact 1280x720 — no AR preservation, no letterbox/pillarbox ever.
-// Flux images are already 1280x720 (no change). GPT images (1536x1024) get slight
+// Force-scale to exact 1920x1080 — no AR preservation, no letterbox/pillarbox ever.
+// Flux images are already 1920x1080 (no change). GPT images (1536x1024) get slight
 // horizontal compression (~17%) which is acceptable for AI-generated content.
-const VF_SCALE = 'scale=1280:720,setsar=1'
+const VF_SCALE = 'scale=1920:1080,setsar=1'
 
 // Build per-clip vf filter. Ken Burns is applied here (still-image stage) so that
 // zoompan works on a looped static frame — the only context where it produces smooth motion.
@@ -3626,11 +3626,11 @@ const VF_SCALE = 'scale=1280:720,setsar=1'
 //   even scenes → zoom-in to center (z 1.0→1.5 over the clip)
 //   odd  scenes → pan left→right with light zoom (z 1.1→1.3, x 0→128px out)
 //
-// UPSCALE before zoompan (scale=4000:2250) eliminates integer-rounding jitter.
-// zoompan computes x/y in integer pixels on input canvas; at 1280px a 1-pixel
-// rounding error = 1 output pixel of stutter. At 4000px, 1px error = 0.32 output
+// UPSCALE before zoompan (scale=6000:3375) eliminates integer-rounding jitter.
+// zoompan computes x/y in integer pixels on input canvas; at 1920px a 1-pixel
+// rounding error = 1 output pixel of stutter. At 6000px, 1px error = 0.32 output
 // pixels — sub-perceptual. Lanczos upscale is one-time per image; zoompan
-// downscales each crop back to s=1280x720 internally.
+// downscales each crop back to s=1920x1080 internally.
 function calcZoompanFrames(dur) {
   return Math.max(1, Math.round(dur * 25))
 }
@@ -3639,11 +3639,11 @@ function getVfFilter(_img, dur, sceneIdx, hasKenBurns) {
   if (!hasKenBurns) return VF_SCALE
   const d = calcZoompanFrames(dur)
   if (sceneIdx % 2 === 0) {
-    // Pattern A: zoom-in to center. z 1.0→1.5; at 4000px canvas: x varies by ~4.7px/frame→0.75 out-px/frame.
-    return `scale=4000:2250:flags=lanczos,zoompan=z=1+0.5*on/duration:x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):d=${d}:s=1280x720:fps=25,setsar=1`
+    // Pattern A: zoom-in to center. z 1.0→1.5; at 6000px canvas: x varies proportionally.
+    return `scale=6000:3375:flags=lanczos,zoompan=z=1+0.5*on/duration:x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):d=${d}:s=1920x1080:fps=25,setsar=1`
   } else {
-    // Pattern B: pan left→right + zoom. z 1.1→1.3; x 0→400px at 4000 canvas (=128 out-px).
-    return `scale=4000:2250:flags=lanczos,zoompan=z=1.1+0.2*on/duration:x=iw*0.1*on/duration:y=ih/2-(ih/zoom/2):d=${d}:s=1280x720:fps=25,setsar=1`
+    // Pattern B: pan left→right + zoom. z 1.1→1.3; x 0→600px at 6000 canvas (=192 out-px).
+    return `scale=6000:3375:flags=lanczos,zoompan=z=1.1+0.2*on/duration:x=iw*0.1*on/duration:y=ih/2-(ih/zoom/2):d=${d}:s=1920x1080:fps=25,setsar=1`
   }
 }
 
@@ -4043,7 +4043,7 @@ async function burnSubtitlesVGF(videoUrl, subtitle_blocks, subtitle_style, jobId
       const result = await runFFmpegOnVGF(
         { in_1: videoUrl, in_2: assUrl },
         { out_1: 'output_subs.mp4' },
-        `-i {{in_1}} -vf subtitles={{in_2}}:force_style=${forceStyle} -c:v libx264 -preset fast -crf 26 -maxrate 4M -bufsize 8M -pix_fmt yuv420p -c:a copy {{out_1}}`,
+        `-i {{in_1}} -vf subtitles={{in_2}}:force_style=${forceStyle} -c:v libx264 -preset fast -crf 26 -maxrate 8M -bufsize 16M -pix_fmt yuv420p -c:a copy {{out_1}}`,
         timeoutMs,
         heartbeat,
       )
@@ -4348,7 +4348,7 @@ async function processVideoJob(jobId, body) {
       const muxResult = await runFFmpegOnVGF(
         { in_1: accUrl, in_2: finalAudioUrl },
         { out_1: 'temp_1.mp4' },
-        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -shortest {{out_1}}`,
+        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 10M -bufsize 20M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -shortest {{out_1}}`,
         longTimeout
       )
       let currentUrl = muxResult.out_1
@@ -4460,7 +4460,7 @@ async function processVideoJob(jobId, body) {
       const cutMuxResult = await runFFmpegOnVGF(
         { in_1: mergedVideoUrl, in_2: finalAudioUrl },
         { out_1: 'temp_1.mp4' },
-        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 6M -bufsize 12M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -shortest {{out_1}}`,
+        `-i {{in_1}} -i {{in_2}} -map 0:v -map 1:a -vf ${muxVf} -c:v libx264 -preset fast -crf 20 -maxrate 10M -bufsize 20M -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart -shortest {{out_1}}`,
         longTimeout
       )
       let currentUrl = cutMuxResult.out_1
