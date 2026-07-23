@@ -4550,6 +4550,10 @@ async function processVideoJob(jobId, body) {
     try { console.timeEnd(T('TOTAL')) } catch (_) {}
     await updateJob(jobId, { status: 'failed', error_message: err.message })
     await refundVideoJobCredits(jobId, body.user_id, body.project_id)
+    if (body.project_id) {
+      await sbPatch('projects', `id=eq.${body.project_id}&status=eq.generating_video`, { status: 'failed' })
+        .catch(e => console.warn(`[job:${jobId}] project status reset failed:`, e.message))
+    }
   } finally {
     renderActiveJobs.delete(jobId)
     try {
@@ -4679,9 +4683,18 @@ app.post('/render', verifySecret, async (req, res) => {
 
   // Fire-and-forget: process in background without blocking the HTTP response
   setImmediate(() => {
-    processVideoJob(jobId, req.body).catch((err) => {
+    processVideoJob(jobId, req.body).catch(async (err) => {
       console.error(`[job:${jobId}] unhandled:`, err.message)
       Sentry.captureException(err, { extra: { jobId, stage: 'processVideoJob_unhandled' } })
+      // Safety net: if processVideoJob threw before its own try/catch (e.g. updateJob or mkdtempSync),
+      // mark the job and project failed so they don't hang until the watchdog (40 min).
+      await updateJob(jobId, { status: 'failed', error_message: `unhandled: ${err.message}` })
+        .catch(() => {})
+      const pid = req.body?.project_id
+      if (pid) {
+        await sbPatch('projects', `id=eq.${pid}&status=eq.generating_video`, { status: 'failed' })
+          .catch(() => {})
+      }
     })
   })
 
