@@ -69,9 +69,8 @@ function buildPrompt(p: ScriptParams, planSections?: PlanSection[]): string {
     '',
     'ТЕХНИЧЕСКИЕ ПАРАМЕТРЫ:',
     `- Язык: ${langName}`,
-    `- Длительность: ${p.duration_minutes} мин. TTS-голос читает ~130 слов/мин → нужно ${wordsTarget} слов.`,
-    `  Распредели текст так: вступление ~${Math.round(wordsTarget * 0.1)} слов, основная часть ~${Math.round(wordsTarget * 0.8)} слов, заключение/CTA ~${Math.round(wordsTarget * 0.1)} слов.`,
-    `  Пиши каждую часть ПОЛНОСТЬЮ — не сокращай ни одну из них.`,
+    `- Длительность: ${p.duration_minutes} мин. TTS-голос воспроизводит текст в темпе ~130 слов/мин — ориентируйся именно на этот темп при написании.`,
+    `- Объём текста: не менее ${wordsTarget} слов. Если текст кажется завершённым раньше — дополни деталями, примерами или переходами. Сокращать нельзя.`,
     `- Нарративный стиль: ${NARRATIVE_STYLE_LABELS[p.narrative_style] ?? p.narrative_style}`,
     `- Тон: ${TONE_LABELS[p.tone] ?? p.tone}`,
     `- Целевая аудитория: ${AUDIENCE_LABELS[p.target_audience] ?? p.target_audience}`,
@@ -126,6 +125,30 @@ function buildPrompt(p: ScriptParams, planSections?: PlanSection[]): string {
   )
 
   return lines.join('\n')
+}
+
+// Pass 2 prompt: asks model to expand an existing draft to the target word count.
+// The model outputs the FULL expanded text (draft merged with additions).
+function buildExpandPrompt(p: ScriptParams, draft: string, draftWords: number, targetWords: number): string {
+  const langName = LANGUAGE_NAMES[p.language] ?? p.language
+  const needed = targetWords - draftWords
+  return [
+    `Ниже — черновик сценария YouTube-видео на тему "${p.topic}" (${draftWords} слов из целевых ${targetWords}).`,
+    '',
+    `ЗАДАЧА: дополни черновик до ${targetWords} слов — нужно дописать ещё ~${needed} слов.`,
+    'Не переписывай — только расширяй существующий текст:',
+    '• добавляй конкретные примеры, факты, истории',
+    '• углубляй тезисы — объясняй «почему» и «как»',
+    '• добавляй плавные переходы между мыслями',
+    '• расширяй разделы, которые можно раскрыть подробнее',
+    '',
+    `Весь текст — на ${langName} языке. Без Markdown, без заголовков, без ремарок типа «(пауза)». Только сплошной текст для голосовой озвучки.`,
+    'Выведи ПОЛНЫЙ текст (черновик + дополнения слитно, без разрывов и меток «черновик/добавление»).',
+    '',
+    '═══ ЧЕРНОВИК ═══',
+    draft,
+    '═══ КОНЕЦ ЧЕРНОВИКА ═══',
+  ].join('\n')
 }
 
 function modelOperation(model: string): keyof typeof CREDIT_COSTS {
@@ -500,41 +523,50 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Модель вернула пустой ответ' }, { status: 502 })
     }
 
-    // Guard: stop_reason=max_tokens OR output < 85 % of target words → retry once, then 422 (no credits)
-    if (!isGuardOk(normStop, gen.text, targetWords)) {
-      console.warn(`[generate/script] guard fail attempt=1 words=${countWords(gen.text)} target=${targetWords} stop_reason=${normStop} — retrying`)
-      const retry = await callGenerate()
-      const retryStop = normaliseStop(retry.stopReason)
-      if (!retry.text || !isGuardOk(retryStop, retry.text, targetWords)) {
-        // Safety net: both attempts ended naturally (end_turn, not max_tokens) and the
-        // better result is ≥ 80 % of target → accept with SCRIPT_SHORT warning.
-        // Below 80 % or any attempt hit max_tokens → hard fail, credits not charged.
-        const SHORT_RATIO = 0.80
-        const naturalAttempts = [
-          normStop !== 'max_tokens' ? gen : null,
-          retryStop !== 'max_tokens' ? retry : null,
-        ].filter((r): r is GenResult => r !== null && !!r.text)
-        const best = naturalAttempts.sort((a, b) => countWords(b.text) - countWords(a.text))[0]
-        if (best && countWords(best.text) >= targetWords * SHORT_RATIO) {
-          const actualWords = countWords(best.text)
-          console.warn(`[generate/script] guard fallback: words=${actualWords}/${targetWords} (${Math.round(actualWords / targetWords * 100)}%) — returning with SCRIPT_SHORT`)
-          await spendCredits(user.id, cost, operation, project_id)
-          if (project_id) {
-            const shortUpdate: Record<string, unknown> = { script: best.text, status: 'draft', credits_spent: cost, language: scriptParams.language ?? null }
-            if (plan_sections && plan_sections.length > 0) shortUpdate.plan_sections = plan_sections
-            await supabase.from('projects').update(shortUpdate).eq('id', project_id).eq('user_id', user.id)
-          }
-          void trackEvent(user.id, 'step_completed', { step: 'script', model, project_id, short: true })
-          return NextResponse.json({ ok: true, data: { script: best.text, script_short: true, actual_words: actualWords, target_words: targetWords } })
+    // Two-pass expansion: if draft ended naturally but is < 95 % of target,
+    // ask the model to expand it rather than blindly retry the full generation.
+    // Skipped when stop_reason=max_tokens (truncated output — expansion unreliable).
+    const EXPAND_THRESHOLD = 0.95
+    if (normStop !== 'max_tokens' && countWords(gen.text) < targetWords * EXPAND_THRESHOLD) {
+      const draftWords = countWords(gen.text)
+      console.log(`[generate/script] two-pass expand: draft=${draftWords} target=${targetWords} stop=${normStop}`)
+      const expandPrompt = buildExpandPrompt(scriptParams, gen.text, draftWords, targetWords)
+      try {
+        const expanded = model === 'gpt-4o'
+          ? await generateWithGpt4o(expandPrompt, maxTokens)
+          : await generateWithClaude(expandPrompt, model === 'claude-opus', maxTokens)
+        const expandedWords = countWords(expanded.text)
+        console.log(`[generate/script] expand result: words=${expandedWords} stop=${expanded.stopReason}`)
+        if (expanded.text && expandedWords > draftWords) {
+          gen = expanded
+          normStop = normaliseStop(expanded.stopReason)
         }
-        console.error(`[generate/script] guard fail attempt=2 words=${retry.text ? countWords(retry.text) : 0} stop_reason=${retryStop} — aborting, credits not charged`)
-        return NextResponse.json({
-          ok: false,
-          error: 'Не удалось сгенерировать сценарий полностью — попробуйте ещё раз.',
-          code: 'SCRIPT_TRUNCATED',
-        }, { status: 422 })
+      } catch (expandErr) {
+        console.warn('[generate/script] expand call failed, using draft:', expandErr instanceof Error ? expandErr.message.slice(0, 120) : String(expandErr))
       }
-      gen = retry
+    }
+
+    // Final guard: applied to draft OR expanded result
+    if (!isGuardOk(normStop, gen.text, targetWords)) {
+      const actualWords = countWords(gen.text)
+      const SHORT_RATIO = 0.80
+      if (normStop !== 'max_tokens' && actualWords >= targetWords * SHORT_RATIO) {
+        console.warn(`[generate/script] guard fallback: words=${actualWords}/${targetWords} (${Math.round(actualWords / targetWords * 100)}%) — returning with SCRIPT_SHORT`)
+        await spendCredits(user.id, cost, operation, project_id)
+        if (project_id) {
+          const shortUpdate: Record<string, unknown> = { script: gen.text, status: 'draft', credits_spent: cost, language: scriptParams.language ?? null }
+          if (plan_sections && plan_sections.length > 0) shortUpdate.plan_sections = plan_sections
+          await supabase.from('projects').update(shortUpdate).eq('id', project_id).eq('user_id', user.id)
+        }
+        void trackEvent(user.id, 'step_completed', { step: 'script', model, project_id, short: true })
+        return NextResponse.json({ ok: true, data: { script: gen.text, script_short: true, actual_words: actualWords, target_words: targetWords } })
+      }
+      console.error(`[generate/script] guard fail: words=${actualWords} stop=${normStop} — aborting, credits not charged`)
+      return NextResponse.json({
+        ok: false,
+        error: 'Не удалось сгенерировать сценарий полностью — попробуйте ещё раз.',
+        code: 'SCRIPT_TRUNCATED',
+      }, { status: 422 })
     }
 
     const script = gen.text
