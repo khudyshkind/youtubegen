@@ -137,7 +137,7 @@ POST /api/payments/yookassa/create
 1. Live shopId + секретный ключ → env Vercel → **Redeploy до Ready + SHA фактом**.
 2. Вебхук в **боевом** магазине: тот же URL, событие `payment.succeeded`.
 3. Проверить СБП включён в боевом магазине.
-4. Свести платёжные входы: «Выбрать тариф» на лендинге + «Оплатить из России» в ЛК сейчас ведут в ТГ-бота. Переключить на `/billing` **одновременно** с live-ключами (раньше нельзя — бот сегодня единственный канал живых денег). ТГ-бот остаётся вторичным каналом (крипта, ручные активации).
+4. ~~Свести платёжные входы~~ **ВЫПОЛНЕНО**: «Выбрать тариф» на лендинге и «Оплатить из России» в ЛК переведены на `/billing` (SHA f5c3f0e). ТГ-бот остаётся вторичным каналом (крипта, ручные активации).
 5. Контрольный реальный платёж 490 ₽: кредиты зачислены + чек на почту + поступление на Точку.
 
 ---
@@ -268,6 +268,29 @@ Anthropic под нагрузкой первыми отклоняет тяжёл
 
 Уроки: NEXT_PUBLIC_* — только Vercel; pre-push hook `node --check`; UptimeRobot как внешний сторож.
 
+### Сцены: max_tokens слишком мал → 100% fallback (SHA e5e3fd5)
+
+25 сцен × 150 = 3750 < 4000 → всегда прижималось к полу 4000. Claude обрывал JSON на середине → `parseJsonArray` не находил `]` → возвращал `[]` → 100% сцен в fallback. `stop_reason:max_tokens, output:4000, deficit:0/25`.
+
+Фикс: `max(8000, chunk×250)` — для ≤32 сцен даёт 8000 токенов, линейно растёт выше. Также исправлены обе ветки (subtitles-path и script-path) в `images/route.ts`.
+
+### Wallet-баг при регистрации (migration 009, SHA 60d68ca)
+
+`handle_new_user` вставлял `credits=10000`, но **не трогал** `purchased_credits` (добавлено migration 001 позже). `deduct_credits` проверяет `plan_credits + purchased_credits`, а не `credits`. Итог: 9 новых пользователей имели 10 000 «фантомных» кредитов (в поле `credits`) и 0 реальных (в кошельках) — списание никогда не проходило.
+
+Фикс (migration 009, применена в Supabase SQL Editor):
+```sql
+-- Repair
+UPDATE profiles SET purchased_credits = credits - plan_credits
+WHERE plan_credits + purchased_credits < credits AND credits > 0;
+-- Результат: 0 строк после исправления (9 → 0 сломанных)
+```
+Триггер переписан: теперь `INSERT` явно включает `purchased_credits = 10000`. `schema.sql` обновлён синхронно.
+
+### Email rate limit при регистрации (диагноз, не код)
+
+Ошибка «email rate limit exceeded» на проде — это Supabase Auth **встроенный SMTP** (free-tier: 2–4 auth-письма/час). Наш Resend используется только для транзакционных писем (welcome, video ready, low credits, referral) — совершенно отдельный канал. Фикс: включить **Custom SMTP** в настройках Supabase Auth → Dashboard → Auth → SMTP Settings (Resend, домен lefiro.co). Пока не применено.
+
 ### Контроль длины скрипта (бэклог)
 
 `projects.duration_minutes` = запрошенная юзером длительность (Шаг 1), после Шага 1 в пайплайне не используется. LLM может выдать ×11 слов (5 мин → 58 мин аудио). Реальный хронометраж: `subtitle_blocks[last].end` или длительность аудиофайла.
@@ -276,7 +299,7 @@ Anthropic под нагрузкой первыми отклоняет тяжёл
 
 ## 8. ГЕНЕРАЦИЯ СЦЕН
 
-- `CLAUDE_CHUNK=50`, `max_tokens=min(64000, max(4000, chunk×150))`. Лимит Haiku 4.5 = **64K output** (не 8192 — фантом опровергнут документацией).
+- `CLAUDE_CHUNK=50`, `max_tokens=min(64000, max(8000, chunk×250))`. Лимит Haiku 4.5 = **64K output** (не 8192 — фантом опровергнут документацией).
 - Client timeout 120с, worst-case 245с < 300с maxDuration.
 - `SCENES_SYSTEM_PROMPT`: нормы против символов/монтажных указаний/«indicated by» + says/asks → визуальное действие.
 - `sanitizeScenePrompt`: словарная замена триггеров на основном и fallback-путях.

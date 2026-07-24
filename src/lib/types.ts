@@ -34,7 +34,7 @@ export const CREDIT_COSTS = {
   image_flux_schnell: 100,
   image_gpt_mini: 1230,    // gpt-image-2 medium 1536×1024 @ $0.041
   image_nano_banana: 1170, // fal-ai/nano-banana @ $0.039
-  style_analysis: 60,
+  style_analysis: 30,
 
   // Video (per-minute rate; billing logic updated separately)
   video: 300,

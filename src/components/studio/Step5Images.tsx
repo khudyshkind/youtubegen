@@ -326,7 +326,7 @@ export default function Step5Images() {
       const res = await fetch('/api/generate/analyze-style', { method: 'POST', body: fd })
       const json = await res.json()
       if (!json.ok) {
-        setError(json.code === 'NO_CREDITS' ? `${t('msg.no_credits')} (2 ${t('nav.credits_suffix')})` : json.error)
+        setError(json.code === 'NO_CREDITS' ? `${t('msg.no_credits')} (${CREDIT_COSTS.style_analysis} ${t('nav.credits_suffix')})` : json.error)
         setRefPreviewUrl(null)
         return
       }

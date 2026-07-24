@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
+import { CREDIT_COSTS } from '@/lib/types'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 
 export const maxDuration = 30
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Файл слишком большой (макс 4 МБ)' }, { status: 400 })
     }
 
-    const check = await requireCreditsAmount(user.id, 2, supabase)
+    const check = await requireCreditsAmount(user.id, CREDIT_COSTS.style_analysis, supabase)
     if (!check.ok) {
       return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
     }
@@ -84,7 +85,7 @@ export async function POST(request: NextRequest) {
       console.warn('[analyze-style] ref storage upload failed (non-fatal):', e instanceof Error ? e.message : e)
     }
 
-    await spendCredits(user.id, 2, 'style_analysis', projectId ?? undefined)
+    await spendCredits(user.id, CREDIT_COSTS.style_analysis, 'style_analysis', projectId ?? undefined)
 
     return NextResponse.json({ ok: true, data: { style_description: styleDescription, ref_url: refUrl } })
   } catch (error) {
