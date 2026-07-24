@@ -540,6 +540,12 @@ export async function POST(request: NextRequest) {
         if (expanded.text && expandedWords > draftWords) {
           gen = expanded
           normStop = normaliseStop(expanded.stopReason)
+          trackEvent(user.id, 'script_expand', {
+            model,
+            draft_words:    draftWords,
+            target_words:   targetWords,
+            expanded_words: expandedWords,
+          }).catch(() => {})
         }
       } catch (expandErr) {
         console.warn('[generate/script] expand call failed, using draft:', expandErr instanceof Error ? expandErr.message.slice(0, 120) : String(expandErr))

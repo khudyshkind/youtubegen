@@ -598,3 +598,13 @@ grant all on public.sentry_alert_dedup to service_role;
 
 -- Migration: subtitle burn-in degradation warnings (run once in Supabase SQL Editor)
 alter table public.video_jobs add column if not exists warnings jsonb;
+
+-- Migration: metrics collection (010_metrics_collection.sql)
+alter table public.profiles         add column if not exists last_active_at    timestamptz;
+alter table public.video_jobs       add column if not exists phase_updated_at  timestamptz;
+alter table public.credit_transactions add column if not exists payment_amount   numeric;
+alter table public.credit_transactions add column if not exists payment_currency text;
+
+create index if not exists credit_transactions_created_at_idx on public.credit_transactions (created_at);
+create index if not exists credit_transactions_operation_idx  on public.credit_transactions (operation);
+create index if not exists video_jobs_status_idx              on public.video_jobs (status);

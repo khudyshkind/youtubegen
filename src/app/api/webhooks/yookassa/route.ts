@@ -275,6 +275,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, already_activated: true })
   }
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  // Best-effort: tag the freshly-inserted credit_transaction row with the RUB amount.
+  // Non-critical — if the SELECT or UPDATE fails the payment is already recorded.
+  const tagPaymentAmount = async (operation: string) => {
+    const since = new Date(Date.now() - 10_000).toISOString()
+    const { data: tx } = await svc
+      .from('credit_transactions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('operation', operation)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (tx?.id) {
+      await svc
+        .from('credit_transactions')
+        .update({ payment_amount: actualAmount, payment_currency: 'RUB' })
+        .eq('id', tx.id)
+    }
+  }
+
   // ── Activation ────────────────────────────────────────────────────────────
   if (kind === 'plan') {
     const planId = meta.plan_id as string
@@ -304,6 +326,8 @@ export async function POST(req: NextRequest) {
       { key: claimKey, value: 'activated', updated_at: new Date().toISOString() },
       { onConflict: 'key' },
     )
+
+    await tagPaymentAmount('plan_activation_yookassa')
 
     console.log(`[yookassa/webhook] plan activated: user=${userId} plan=${planId} payment=${paymentId} expires=${result.expires_at}`)
     await sendTelegramAlert(
@@ -357,6 +381,8 @@ export async function POST(req: NextRequest) {
       { key: claimKey, value: 'activated', updated_at: new Date().toISOString() },
       { onConflict: 'key' },
     )
+
+    await tagPaymentAmount('topup_yookassa')
 
     console.log(`[yookassa/webhook] topup credited: user=${userId} credits=${pkg.credits} payment=${paymentId}`)
     await sendTelegramAlert(

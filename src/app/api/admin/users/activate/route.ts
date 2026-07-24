@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase-server'
 import { activatePlan } from '@/lib/activate-plan'
-import { TOPUP_PACKAGES } from '@/lib/types'
+import { TOPUP_PACKAGES, PLAN_PRICES } from '@/lib/types'
 import type { Plan } from '@/lib/types'
 
 const VALID_PLANS: Plan[] = ['basic', 'starter', 'pro', 'agency']
@@ -85,6 +85,26 @@ export async function POST(request: NextRequest) {
         )
     }
 
+    // Best-effort: tag the freshly-inserted credit_transaction row with the USDT amount.
+    const tagPaymentAmountUsdt = async (operation: string, amountUsd: number) => {
+      const since = new Date(Date.now() - 10_000).toISOString()
+      const { data: tx } = await svc
+        .from('credit_transactions')
+        .select('id')
+        .eq('user_id', targetUser.id)
+        .eq('operation', operation)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (tx?.id) {
+        await svc
+          .from('credit_transactions')
+          .update({ payment_amount: amountUsd, payment_currency: 'USDT' })
+          .eq('id', tx.id)
+      }
+    }
+
     // ── Topup path: add to eternal wallet only, do NOT change plan ────────────
     if (isTopup) {
       const pkg = TOPUP_PACKAGES[TOPUP_KEY_MAP[plan]]
@@ -109,6 +129,7 @@ export async function POST(request: NextRequest) {
         }
       }
       await markClaim()
+      await tagPaymentAmountUsdt('topup_russia', pkg.price)
       console.log(`[activate] topup plan=${plan} credits=${pkg.credits} user=${targetUser.id} email=${email}`)
       return NextResponse.json({
         ok: true,
@@ -135,6 +156,8 @@ export async function POST(request: NextRequest) {
     }
 
     await markClaim()
+    const planPriceUsd = PLAN_PRICES[plan as Exclude<Plan, 'free'>] ?? null
+    if (planPriceUsd != null) await tagPaymentAmountUsdt('plan_activation_tg_manual', planPriceUsd)
     console.log(
       `[activate] plan=${plan} plan_credits=${result.plan_credits} ` +
       `expires=${result.expires_at} user=${targetUser.id} email=${email}`,

@@ -259,7 +259,10 @@ async function sbPatch(table, qs, body) {
 
 async function updateJob(jobId, data) {
   try {
-    await sbPatch('video_jobs', `id=eq.${jobId}`, data)
+    const payload = data.phase !== undefined
+      ? { ...data, phase_updated_at: new Date().toISOString() }
+      : data
+    await sbPatch('video_jobs', `id=eq.${jobId}`, payload)
   } catch (e) {
     console.error(`[job:${jobId}] updateJob failed:`, e.message)
     Sentry.captureException(e, { extra: { jobId, data } })
