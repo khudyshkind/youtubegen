@@ -556,6 +556,16 @@ const MAIN_KB = {
   is_persistent: true,
 }
 
+// Persistent reply keyboard for public (non-owner) users
+const PUBLIC_KB = {
+  keyboard: [
+    [{ text: '💰 Тарифы и цены' },   { text: '🎬 Как это работает' }],
+    [{ text: '❓ Частые вопросы' },  { text: '🆘 Поддержка' }],
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+}
+
 function previewInline() {
   return {
     inline_keyboard: [[
@@ -787,6 +797,55 @@ async function safeSendMessage(chatId, text, options = {}) {
 // Send to owner with main keyboard always attached
 async function sendTo(chatId, text, extra = {}) {
   return safeSendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup: MAIN_KB, ...extra })
+}
+
+// ── AI consultant helpers ─────────────────────────────────────────────────────
+function consultantSystem() {
+  return (
+    lefiroKB + '\n\n' +
+    'Ты — AI-ассистент продукта Lefiro. Отвечай только по информации из книги знаний выше. ' +
+    'Не выдумывай цены, сроки и функции, которых нет в книге. ' +
+    'Если вопрос касается конкретного аккаунта, платежа, баланса или заказа пользователя, ' +
+    'либо в книге знаний нет ответа, либо это жалоба — ' +
+    'закончи ответ служебной меткой на отдельной строке: [ESCALATE]\n' +
+    'Метку [ESCALATE] добавляй ТОЛЬКО в этих случаях, не в каждом ответе. ' +
+    'Отвечай кратко (1–4 предложения), без Markdown-разметки, на языке пользователя.'
+  )
+}
+
+async function runConsultant(chatId, queryText) {
+  const humanBtn = { inline_keyboard: [[{ text: '👤 Позвать человека', callback_data: 'sup_cat_ai' }]] }
+  const now  = Date.now()
+  const hour = 60 * 60 * 1000
+  const prev = (aiRateLimit.get(String(chatId)) || []).filter(t => now - t < hour)
+  if (prev.length >= 10) {
+    await safeSendMessage(chatId,
+      'Вы отправили слишком много вопросов — лимит 10 в час. Попробуйте позже или позвоните человеку.',
+      { reply_markup: humanBtn }
+    )
+    return
+  }
+  aiRateLimit.set(String(chatId), [...prev, now])
+  try {
+    const aiRes = await claude().messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1000,
+      system: consultantSystem(),
+      messages: [{ role: 'user', content: queryText }],
+    })
+    const raw    = (aiRes.content[0]?.type === 'text' ? aiRes.content[0].text : '').trim()
+    if (!raw) throw new Error('empty AI response')
+    const escalate = raw.includes('[ESCALATE]')
+    const answer   = raw.replace(/\[ESCALATE\]/g, '').trim()
+    await safeSendMessage(chatId, answer, escalate ? { reply_markup: humanBtn } : {})
+  } catch (err) {
+    console.error('[ai-consultant]', err.message)
+    Sentry.captureException(err)
+    await safeSendMessage(chatId,
+      'Не удалось получить ответ от AI. Позвоните живому человеку — он поможет.',
+      { reply_markup: humanBtn }
+    )
+  }
 }
 
 async function publishToChannel(text, imageUrl = null) {
@@ -1833,8 +1892,14 @@ app.post('/telegram/webhook', async (req, res) => {
       return
     }
 
-    // ── /start router ───────────────────────────────────────────────────────
-    if (text === '/start' || text.startsWith('/start ') || text === '/pay') {
+    // ── /start router + /menu ───────────────────────────────────────────────
+    if (text === '/start' || text.startsWith('/start ') || text === '/pay' || text === '/menu') {
+      // /menu — refresh keyboard without touching payment/support state
+      if (text === '/menu') {
+        await tgApi('sendMessage', { chat_id: chatId, text: 'Выберите раздел 👇', reply_markup: PUBLIC_KB })
+        return
+      }
+
       payStates.delete(String(chatId))
       supportStates.delete(String(chatId))
       const startArg  = text.startsWith('/start ') ? text.slice(7).trim() : ''
@@ -1878,14 +1943,53 @@ app.post('/telegram/webhook', async (req, res) => {
         }
       }
 
-      // Default /start — payment menu
-      payStates.set(String(chatId), { step: 'method', username, firstName })
+      // Default /start — welcome + public keyboard + payment options
       await tgApi('sendMessage', {
         chat_id: chatId,
-        text: '👋 Привет! Для оплаты Lefiro из России\nвыбери удобный способ:',
+        text:
+          '👋 Привет! Это *[Lefiro](https://lefiro.co)* — сервис, который\n' +
+          'превращает идею в готовый ролик для YouTube.\n\n' +
+          'Анализирует нишу и конкурентов, пишет сценарий, озвучивает,\n' +
+          'генерирует иллюстрации, готовит SEO и собирает видео.\n\n' +
+          'Нужен только текст задумки. Остальное — на нас.\n\n' +
+          'Я бот-консультант: отвечаю на вопросы о сервисе, тарифах и оплате.\n' +
+          'Спросите, например:\n\n' +
+          '- Сколько стоит попробовать сервис?\n' +
+          '- Как это работает?\n' +
+          '- Как оплатить из-за рубежа?\n\n' +
+          'Пишите вопрос прямо в чат или выберите раздел в меню внизу 👇',
         parse_mode: 'Markdown',
+        reply_markup: PUBLIC_KB,
+      })
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: 'Для оплаты Lefiro из России выбери удобный способ:',
         reply_markup: payMethodInline(),
       })
+      return
+    }
+
+    // ── Reply keyboard shortcuts ───────────────────────────────────────────────
+    if (text === '🆘 Поддержка') {
+      const username  = message.from?.username
+      const firstName = message.from?.first_name
+      supportStates.set(String(chatId), { step: 'waiting_category', username, firstName })
+      await tgApi('sendMessage', {
+        chat_id: chatId,
+        text: '👋 Выбери тему обращения:',
+        parse_mode: 'Markdown',
+        reply_markup: supportCategoryInline(),
+      })
+      return
+    }
+
+    const KB_QUERIES = {
+      '💰 Тарифы и цены':    'Расскажи о тарифах и ценах',
+      '🎬 Как это работает': 'Как работает сервис, из каких шагов',
+      '❓ Частые вопросы':   'Какие вопросы задают чаще всего',
+    }
+    if (KB_QUERIES[text] && lefiroKB) {
+      await runConsultant(chatId, KB_QUERIES[text])
       return
     }
 
@@ -1895,42 +1999,7 @@ app.post('/telegram/webhook', async (req, res) => {
     if (lefiroKB && text && !isCommand
         && !supportStates.get(String(chatId))
         && !payStates.get(String(chatId))) {
-      const now   = Date.now()
-      const hour  = 60 * 60 * 1000
-      const prev  = (aiRateLimit.get(String(chatId)) || []).filter(t => now - t < hour)
-      const humanBtn = { inline_keyboard: [[{ text: '👤 Позвать человека', callback_data: 'sup_cat_ai' }]] }
-      if (prev.length >= 10) {
-        await safeSendMessage(chatId,
-          'Вы отправили слишком много вопросов — лимит 10 в час. Попробуйте позже или позвоните человеку.',
-          { reply_markup: humanBtn }
-        )
-        return
-      }
-      aiRateLimit.set(String(chatId), [...prev, now])
-      try {
-        const aiRes = await claude().messages.create({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 1000,
-          system:
-            lefiroKB + '\n\n' +
-            'Ты — AI-ассистент продукта Lefiro. Отвечай только по информации из книги знаний выше. ' +
-            'Не выдумывай цены, сроки и функции, которых нет в книге. ' +
-            'Если пользователь спрашивает о своём аккаунте, балансе или конкретном платеже — ' +
-            'не отвечай по существу, а предложи позвать живого человека. ' +
-            'Отвечай кратко (1–4 предложения), без Markdown-разметки, на языке пользователя.',
-          messages: [{ role: 'user', content: text }],
-        })
-        const answer = (aiRes.content[0]?.type === 'text' ? aiRes.content[0].text : '').trim()
-        if (!answer) throw new Error('empty AI response')
-        await safeSendMessage(chatId, answer, { reply_markup: humanBtn })
-      } catch (err) {
-        console.error('[ai-consultant]', err.message)
-        Sentry.captureException(err)
-        await safeSendMessage(chatId,
-          'Не удалось получить ответ от AI. Позвоните живому человеку — он поможет.',
-          { reply_markup: humanBtn }
-        )
-      }
+      await runConsultant(chatId, text)
       return
     }
 
