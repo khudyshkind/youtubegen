@@ -89,6 +89,16 @@ const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
   : 'https://ytgen-video-server-production.up.railway.app'
 
+// ── AI consultant ──────────────────────────────────────────────────────────────
+let lefiroKB = null
+try {
+  lefiroKB = fs.readFileSync(path.join(__dirname, '../knowledge/lefiro_kb_bot.md'), 'utf8')
+  console.log('[ai-consultant] KB loaded, chars:', lefiroKB.length)
+} catch (e) {
+  console.warn('[ai-consultant] KB file not found, consultant disabled:', e.message)
+}
+const aiRateLimit = new Map() // chatId → [timestamps]; cleared by natural GC on eviction
+
 // ── Media retention policy ────────────────────────────────────────────────────
 // Single unified threshold: all plans, all users — no plan-based distinctions.
 // Env: RETENTION_MEDIA_HOURS (default 72).
@@ -437,6 +447,7 @@ const SUPPORT_CATEGORIES = {
   generation: { label: '🎬 Проблема с генерацией',   emoji: '🎬' },
   idea:       { label: '💡 Предложение',             emoji: '💡' },
   other:      { label: '❓ Другой вопрос',           emoji: '❓' },
+  ai:         { label: '🤖 AI не смог помочь',       emoji: '🤖' },
 }
 
 function supportCategoryInline() {
@@ -733,13 +744,49 @@ async function tgSendPhoto(chatId, imageBuffer, caption, extra = {}) {
   }
 }
 
+// Escape Telegram Markdown v1 special chars so a long split never lands inside a span
+function escapeMarkdown(text) {
+  return text.replace(/([*_`\[])/g, '\\$1')
+}
+
+// Split text into ≤4096-char chunks at paragraph / line / hard boundaries
+function splitText(text, maxLen = 4096) {
+  if (text.length <= maxLen) return [text]
+  const chunks = []
+  let remaining = text
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) { chunks.push(remaining); break }
+    let cut = remaining.lastIndexOf('\n\n', maxLen)
+    if (cut < 1) cut = remaining.lastIndexOf('\n', maxLen)
+    if (cut < 1) cut = maxLen
+    chunks.push(remaining.slice(0, cut))
+    remaining = remaining.slice(cut).replace(/^\n+/, '')
+  }
+  return chunks
+}
+
+// Send long text safely: split into chunks, attach reply_markup only to the last one.
+// If parse_mode is set, text is escaped before splitting; on 400 retries without parse_mode.
+async function safeSendMessage(chatId, text, options = {}) {
+  const { parse_mode, reply_markup, ...rest } = options
+  const prepared = parse_mode ? escapeMarkdown(text) : text
+  const chunks = splitText(prepared)
+  for (let i = 0; i < chunks.length; i++) {
+    const isLast = i === chunks.length - 1
+    const params = { chat_id: chatId, text: chunks[i], ...rest }
+    if (parse_mode) params.parse_mode = parse_mode
+    if (isLast && reply_markup) params.reply_markup = reply_markup
+    const result = await tgApi('sendMessage', params)
+    if (parse_mode && result && !result.ok && result.error_code === 400) {
+      const { parse_mode: _pm, ...fallback } = params
+      await tgApi('sendMessage', fallback)
+    }
+  }
+}
+
 // Send to owner with main keyboard always attached
 async function sendTo(chatId, text, extra = {}) {
-  return tgApi('sendMessage', {
-    chat_id: chatId, text, parse_mode: 'Markdown',
-    reply_markup: MAIN_KB,
-    ...extra,
-  })
+  return safeSendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup: MAIN_KB, ...extra })
 }
 
 async function publishToChannel(text, imageUrl = null) {
@@ -1839,6 +1886,51 @@ app.post('/telegram/webhook', async (req, res) => {
         parse_mode: 'Markdown',
         reply_markup: payMethodInline(),
       })
+      return
+    }
+
+    // ── AI consultant (P3.5) ───────────────────────────────────────────────────
+    // Fires only when KB is loaded, no command, no active support/pay state.
+    // P1 and P2 already returned above; P4 catch-all follows below.
+    if (lefiroKB && text && !isCommand
+        && !supportStates.get(String(chatId))
+        && !payStates.get(String(chatId))) {
+      const now   = Date.now()
+      const hour  = 60 * 60 * 1000
+      const prev  = (aiRateLimit.get(String(chatId)) || []).filter(t => now - t < hour)
+      const humanBtn = { inline_keyboard: [[{ text: '👤 Позвать человека', callback_data: 'sup_cat_ai' }]] }
+      if (prev.length >= 10) {
+        await safeSendMessage(chatId,
+          'Вы отправили слишком много вопросов — лимит 10 в час. Попробуйте позже или позвоните человеку.',
+          { reply_markup: humanBtn }
+        )
+        return
+      }
+      aiRateLimit.set(String(chatId), [...prev, now])
+      try {
+        const aiRes = await claude().messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1000,
+          system:
+            lefiroKB + '\n\n' +
+            'Ты — AI-ассистент продукта Lefiro. Отвечай только по информации из книги знаний выше. ' +
+            'Не выдумывай цены, сроки и функции, которых нет в книге. ' +
+            'Если пользователь спрашивает о своём аккаунте, балансе или конкретном платеже — ' +
+            'не отвечай по существу, а предложи позвать живого человека. ' +
+            'Отвечай кратко (1–4 предложения), без Markdown-разметки, на языке пользователя.',
+          messages: [{ role: 'user', content: text }],
+        })
+        const answer = (aiRes.content[0]?.type === 'text' ? aiRes.content[0].text : '').trim()
+        if (!answer) throw new Error('empty AI response')
+        await safeSendMessage(chatId, answer, { reply_markup: humanBtn })
+      } catch (err) {
+        console.error('[ai-consultant]', err.message)
+        Sentry.captureException(err)
+        await safeSendMessage(chatId,
+          'Не удалось получить ответ от AI. Позвоните живому человеку — он поможет.',
+          { reply_markup: humanBtn }
+        )
+      }
       return
     }
 
