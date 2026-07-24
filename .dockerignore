@@ -8,4 +8,6 @@ docs
 public
 tmp
 *.md
+!knowledge/lefiro_kb_bot.md
 !video-server/
+video-server/node_modules

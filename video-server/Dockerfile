@@ -11,10 +11,11 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY package.json ./
+COPY video-server/package.json ./
 RUN npm install --omit=dev
 
-COPY index.js instrument.js ./
+COPY video-server/index.js video-server/instrument.js ./
+COPY knowledge/lefiro_kb_bot.md ./knowledge/
 
 EXPOSE 3001
 

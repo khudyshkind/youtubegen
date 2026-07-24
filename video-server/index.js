@@ -92,7 +92,7 @@ const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
 // ── AI consultant ──────────────────────────────────────────────────────────────
 let lefiroKB = null
 try {
-  lefiroKB = fs.readFileSync(path.join(__dirname, '../knowledge/lefiro_kb_bot.md'), 'utf8')
+  lefiroKB = fs.readFileSync(path.join(__dirname, 'knowledge/lefiro_kb_bot.md'), 'utf8')
   console.log('[ai-consultant] KB loaded, chars:', lefiroKB.length)
 } catch (e) {
   console.warn('[ai-consultant] KB file not found, consultant disabled:', e.message)
