@@ -582,7 +582,7 @@ Lefiro не публикует видео на YouTube автоматическ�
 | 1. Что это | `src/lib/i18n.ts` (описания, FAQ), `src/lib/languages.ts` (языки), `src/components/studio/Step1Topic.tsx` (длительности) |
 | 2. Процесс — шаги | `src/lib/i18n.ts` (i18n-ключи шагов 1-8), компоненты Step1–Step7 |
 | 3. Аналитика | `src/lib/types.ts` (CREDIT_COSTS), `src/lib/i18n.ts` (описания вкладок) |
-| 4. Кредиты и цены | `src/lib/types.ts` (CREDIT_COSTS, PLAN_PRICES, PLAN_PRICES_RUB, PLAN_CREDITS, PLAN_MAX_CREDITS, TOPUP_PACKAGES) — **единственный источник истины по ценам**; `src/lib/activate-plan.ts` (срок 30 дней), `supabase/migrations/002_expire_plan.sql` (сгорание) |
+| 4. Кредиты и цены | `src/lib/types.ts` (CREDIT_COSTS, PLAN_PRICES, PLAN_PRICES_RUB, PLAN_CREDITS, TOPUP_PACKAGES) — **единственный источник истины по ценам**; `src/lib/activate-plan.ts` (срок 30 дней), `supabase/migrations/002_expire_plan.sql` (сгорание) |
 | 5. FAQ | `src/lib/i18n.ts` (тексты ошибок, подсказки), `src/components/studio/Step6Video.tsx` (banner), `src/app/api/generate/video/status/route.ts` (автовозврат), `video-server/index.js` (рефанд) |
 | 6. Ограничения | `src/lib/types.ts` (IMAGE_COUNT_MAX, интервалы), `src/lib/i18n.ts` (предупреждения) |
 

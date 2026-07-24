@@ -52,7 +52,7 @@ where id = 'REPLACE-WITH-YOUR-UUID'::uuid;
 -- Expected: plan='free', credits=50000, plan_credits=0, purchased_credits=50000, invariant_ok=true
 
 -- ── SIM 2: free → paid (сначала план, потом кредиты — как в activatePlan) ────
--- Порядок критичен: add_plan_credits читает profiles.plan для расчёта кепа.
+-- Порядок критичен: сначала обновляем plan, потом вызываем add_plan_credits.
 
 -- Шаг A: установить план и даты
 update public.profiles
@@ -61,14 +61,14 @@ set plan              = 'starter',
     plan_expires_at   = now() + interval '30 days'
 where id = 'REPLACE-WITH-YOUR-UUID'::uuid;
 
--- Шаг Б: начислить план-кредиты (cap читает plan='starter' → 400000)
+-- Шаг Б: начислить план-кредиты
 select public.add_plan_credits(
   'REPLACE-WITH-YOUR-UUID'::uuid,
   200000,
   'plan_activation_tg_manual',
   null
 );
--- v_plan='starter', v_max_cap=400000, v_cur_plan=0 → v_to_add=200000
+-- plan_credits: 0+200000=200000
 
 select 'SIM2 POST' as sim, plan, plan_credits, purchased_credits, credits,
        (credits = plan_credits + purchased_credits) as invariant_ok
@@ -159,7 +159,6 @@ select public.add_plan_credits(
   'plan_activation_paddle',
   null
 );
--- plan='starter', cap=400000, cur_plan=0 → to_add=200000
 -- plan_credits: 0+200000=200000, credits: 70000+200000=270000
 
 select 'SIM7 POST' as sim, plan_credits, purchased_credits, credits,
@@ -169,28 +168,10 @@ from public.profiles
 where id = 'REPLACE-WITH-YOUR-UUID'::uuid;
 -- Expected: plan_credits=200000, purchased_credits=70000, credits=270000, invariant_ok=true
 
--- ── SIM 8: Кап PLAN_MAX_CREDITS (starter = 400000) ───────────────────────────
--- cur_plan=200000, пробуем добавить 300000 → cap режет до 200000
-
-select public.add_plan_credits(
-  'REPLACE-WITH-YOUR-UUID'::uuid,
-  300000,
-  'plan_activation_overflow_test',
-  null
-);
--- v_to_add = LEAST(300000, 400000-200000) = LEAST(300000, 200000) = 200000
--- plan_credits: 200000+200000=400000, credits: 270000+200000=470000
-
-select 'SIM8 POST (кап)' as sim, plan_credits, purchased_credits, credits,
-       (credits = plan_credits + purchased_credits) as invariant_ok
-from public.profiles
-where id = 'REPLACE-WITH-YOUR-UUID'::uuid;
--- Expected: plan_credits=400000, purchased_credits=70000, credits=470000, invariant_ok=true
-
 -- ── Лог транзакций симуляции ─────────────────────────────────────────────────
 -- Фильтр по operation исключает реальные транзакции юзера.
 -- 'should_fail' отсутствует — spend_credits не вставляет при отказе.
--- Итого 6 строк.
+-- Итого 5 строк.
 
 select 'TXLOG' as section, operation, amount, wallet, created_at
 from public.credit_transactions
@@ -200,17 +181,15 @@ where user_id = 'REPLACE-WITH-YOUR-UUID'::uuid
     'video_render_test',
     'video_render_big',
     'topup_russia',
-    'plan_activation_paddle',
-    'plan_activation_overflow_test'
+    'plan_activation_paddle'
   )
 order by created_at;
--- Expected 6 rows:
---   plan_activation_tg_manual     +200000  plan
---   video_render_test              -70000  mixed
---   video_render_big              -160000  mixed
---   topup_russia                   +50000  purchased
---   plan_activation_paddle        +200000  plan
---   plan_activation_overflow_test +200000  plan  ← 200000, не 300000 (кап)
+-- Expected 5 rows:
+--   plan_activation_tg_manual  +200000  plan
+--   video_render_test           -70000  mixed
+--   video_render_big           -160000  mixed
+--   topup_russia                +50000  purchased
+--   plan_activation_paddle     +200000  plan
 
 -- ── ROLLBACK — все изменения откатываются, данные не сохраняются ─────────────
 

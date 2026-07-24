@@ -34,9 +34,7 @@ export async function applyReferral(
     .update({ referred_by: code })
     .eq('id', newUserId)
 
-  // Stage 1: give new user signup bonus immediately.
-  // Uses RPC directly to bypass PLAN_MAX_CREDITS cap in addCredits()
-  // (free user starts at 10 000 = cap, so JS wrapper would give 0).
+  // Stage 1: give new user signup bonus immediately via purchased wallet (eternal).
   await supabase.rpc('add_credits', {
     p_user_id:    newUserId,
     p_amount:     REFEREE_BONUS,

@@ -6,7 +6,6 @@ import { useLang } from '@/hooks/useLang'
 import { useStudioStore } from '@/lib/studio-store'
 import NewProjectButton from '@/components/shared/NewProjectButton'
 import DeleteProjectButton from '@/components/shared/DeleteProjectButton'
-import { PLAN_MAX_CREDITS } from '@/lib/types'
 import type { Profile, Project, ProjectStatus, ProjectType } from '@/lib/types'
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
@@ -105,19 +104,6 @@ function toolRunHref(project: Project): string {
   return `/tools/${slug}?run=${project.id}`
 }
 
-function CreditsBar({ credits, plan }: { credits: number; plan: string }) {
-  const max = PLAN_MAX_CREDITS[plan as keyof typeof PLAN_MAX_CREDITS] ?? PLAN_MAX_CREDITS.free
-  const pct = Math.min(100, Math.round((credits / max) * 100))
-  return (
-    <div className="w-full rounded-full h-1.5" style={{ background: 'rgba(255,255,255,0.08)' }}>
-      <div
-        className="h-1.5 rounded-full transition-all"
-        style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #7C3AED, #2563EB)' }}
-      />
-    </div>
-  )
-}
-
 function ProjectThumbnail({ project }: { project: Project }) {
   const previewUrl =
     project.thumbnail_url ??
@@ -199,7 +185,14 @@ export default function DashboardClient({ profile, projects }: Props) {
             </Link>
           </div>
           <p className="text-3xl font-bold text-slate-100 mb-2">{profile?.credits ?? 0}</p>
-          <CreditsBar credits={profile?.credits ?? 0} plan={profile?.plan ?? 'free'} />
+          {profile?.plan !== 'free' && profile?.plan_credits != null && (
+            <p className="text-xs text-slate-500 mb-1">
+              {lang === 'en' ? 'Plan' : 'Тарифных'}: {profile.plan_credits.toLocaleString()}
+              {profile.plan_expires_at && (
+                <> · {lang === 'en' ? 'until' : 'до'} {new Date(profile.plan_expires_at).toLocaleDateString(lang === 'en' ? 'en-US' : 'ru-RU', { day: 'numeric', month: 'short' })}</>
+              )}
+            </p>
+          )}
           <p className="text-xs text-slate-600 mt-2">
             {t('dashboard.plan')} <span className="font-medium text-slate-400 capitalize">{profile?.plan ?? 'free'}</span>
           </p>

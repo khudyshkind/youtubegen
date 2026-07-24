@@ -78,8 +78,7 @@ export async function GET(request: NextRequest) {
         .select('id')
 
       if (refunded && refunded.length > 0) {
-        // Won the write race → refund via direct RPC, bypassing PLAN_MAX_CREDITS cap
-        // (same pattern as referral.ts — user paid for this synthesis, cap must not cut the refund)
+        // Won the write race → refund to purchased (eternal) wallet via add_credits RPC.
         await svc.rpc('add_credits', {
           p_user_id:    user.id,
           p_amount:     job.credits_charged,

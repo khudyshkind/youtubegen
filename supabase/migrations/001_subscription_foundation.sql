@@ -32,9 +32,8 @@ where plan_credits = 0
   and credits > 0;
 
 -- ─── 4. add_plan_credits ─────────────────────────────────────────────────────
--- Adds credits to the expiring (plan) wallet.
--- Respects PLAN_MAX_CREDITS cap on the amount added; never cuts existing balance.
--- Cap values MUST stay in sync with PLAN_MAX_CREDITS in src/lib/types.ts.
+-- Adds credits to the expiring (plan) wallet. No cap.
+-- Cap was removed in 003_remove_plan_cap.sql.
 
 create or replace function public.add_plan_credits(
   p_user_id    uuid,
@@ -43,36 +42,16 @@ create or replace function public.add_plan_credits(
   p_project_id uuid default null
 )
 returns void as $$
-declare
-  v_plan     text;
-  v_max_cap  integer;
-  v_cur_plan integer;
-  v_to_add   integer;
 begin
-  select plan, plan_credits
-    into v_plan, v_cur_plan
-    from public.profiles
-    where id = p_user_id
-    for update;
-
-  -- Must stay in sync with PLAN_MAX_CREDITS in src/lib/types.ts
-  v_max_cap := case v_plan
-    when 'basic'   then 160000
-    when 'starter' then 400000
-    when 'pro'     then 1000000
-    when 'agency'  then 3000000
-    else 10000  -- free
-  end;
-
-  v_to_add := greatest(0, least(p_amount, v_max_cap - v_cur_plan));
+  perform 1 from public.profiles where id = p_user_id for update;
 
   update public.profiles
-    set plan_credits = plan_credits + v_to_add,
-        credits      = credits      + v_to_add
+    set plan_credits = plan_credits + p_amount,
+        credits      = credits      + p_amount
     where id = p_user_id;
 
   insert into public.credit_transactions (user_id, amount, operation, project_id, wallet)
-    values (p_user_id, v_to_add, p_operation, p_project_id, 'plan');
+    values (p_user_id, p_amount, p_operation, p_project_id, 'plan');
 end;
 $$ language plpgsql security definer;
 
