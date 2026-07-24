@@ -75,8 +75,6 @@ const renderActiveJobs = new Map()
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN
 
 // ── Russia payment config ─────────────────────────────────────────────────────
-const CARD_NUMBER = process.env.CARD_NUMBER || '0000 0000 0000 0000'
-const CARD_HOLDER = process.env.CARD_HOLDER || 'IVAN IVANOV'
 const USDT_TRC20  = process.env.USDT_TRC20  || 'TW6Z6iZECebHe764YCKAsv5MfVFG6G947L'
 const USDT_ERC20  = process.env.USDT_ERC20  || '0x0f8d57d74367c4379b809399b1205f587f46104a'
 const APP_URL     = process.env.APP_URL     || 'https://lefiro.co'
@@ -946,21 +944,6 @@ async function sendExpiryReminderEmail(to, { planName, expiresDate, planCredits 
 }
 
 // ── Russia payment helpers ────────────────────────────────────────────────────
-function cardPaymentText(planInfo, rubAmount) {
-  const rubLine = rubAmount ? `Переведи: *${rubAmount} ₽*\n` : `Переведи сумму на карту:\n`
-  return (
-    `💳 *Оплата картой МИР*\n\n` +
-    `Тариф: *${planInfo.name}* — ${planInfo.price}${rubAmount ? ` (~${rubAmount} ₽)` : ''}\n` +
-    rubLine +
-    `🏦 Номер карты: \`${CARD_NUMBER}\`\n` +
-    `👤 Получатель: ${CARD_HOLDER}\n\n` +
-    `После оплаты отправь сюда:\n` +
-    `1. Скриншот перевода\n` +
-    `2. Свой email в Lefiro\n\n` +
-    `Активируем в течение 1 часа ✅`
-  )
-}
-
 function cryptoPaymentText(planInfo) {
   return (
     `₿ *Оплата USDT*\n\n` +
@@ -1507,27 +1490,40 @@ async function handlePublicCallback(cq) {
   const username  = cq.from?.username
   const firstName = cq.from?.first_name
 
-  if (data === 'pay_card' || data === 'pay_crypto') {
-    const method = data === 'pay_card' ? 'card' : 'crypto'
-    const pst    = payStates.get(String(chatId)) || {}
+  if (data === 'pay_card') {
+    await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
+    await tgApi('sendMessage', {
+      chat_id: chatId,
+      text:
+        '💳 Оплата картой и через СБП — на сайте:\n' +
+        '[lefiro.co/billing](https://lefiro.co/billing)\n\n' +
+        'Там оплата проходит автоматически, с чеком, тариф\n' +
+        'активируется сразу. Войдите в аккаунт и выберите план.\n\n' +
+        'Для оплаты криптовалютой (USDT) вернитесь и выберите\n' +
+        'соответствующий способ.',
+      parse_mode: 'Markdown',
+      reply_markup: payBackInline(),
+    })
+    return
+  }
+
+  if (data === 'pay_crypto') {
+    const pst = payStates.get(String(chatId)) || {}
 
     // Deep-link flow: plan already known — show details immediately
     if (pst.step === 'method_for_plan' && pst.plan) {
       const planInfo = PAY_PLANS[pst.plan]
       if (planInfo) {
-        payStates.set(String(chatId), { ...pst, step: 'awaiting_proof', method })
+        payStates.set(String(chatId), { ...pst, step: 'awaiting_proof', method: 'crypto' })
         await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
-        const rate      = await getUsdToRub()
-        const rubAmount = planInfo.usd ? Math.ceil(planInfo.usd * rate) : null
-        const detailsText = method === 'card' ? cardPaymentText(planInfo, rubAmount) : cryptoPaymentText(planInfo)
-        await tgApi('sendMessage', { chat_id: chatId, text: detailsText, parse_mode: 'Markdown', reply_markup: payBackInline() })
-        await notifyOwnerNewPayment(chatId, username || pst.username, firstName || pst.firstName, method, planInfo, rubAmount)
+        await tgApi('sendMessage', { chat_id: chatId, text: cryptoPaymentText(planInfo), parse_mode: 'Markdown', reply_markup: payBackInline() })
+        await notifyOwnerNewPayment(chatId, username || pst.username, firstName || pst.firstName, 'crypto', planInfo)
         return
       }
     }
 
     // Regular flow: ask for plan
-    payStates.set(String(chatId), { step: 'plan', method, username, firstName })
+    payStates.set(String(chatId), { step: 'plan', method: 'crypto', username, firstName })
     await tgApi('editMessageText', {
       chat_id: chatId, message_id: msgId,
       text: '📦 *Укажи какой тариф хочешь оплатить:*',
@@ -1542,18 +1538,12 @@ async function handlePublicCallback(cq) {
     const planInfo = PAY_PLANS[plan]
     if (!planInfo) return
 
-    const pst    = payStates.get(String(chatId)) || {}
-    const method = pst.method || 'card'
-    payStates.set(String(chatId), { ...pst, step: 'awaiting_proof', plan, method })
+    const pst = payStates.get(String(chatId)) || {}
+    payStates.set(String(chatId), { ...pst, step: 'awaiting_proof', plan, method: 'crypto' })
 
     await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
-
-    const rate      = await getUsdToRub()
-    const rubAmount = planInfo.usd ? Math.ceil(planInfo.usd * rate) : null
-    const detailsText = method === 'card' ? cardPaymentText(planInfo, rubAmount) : cryptoPaymentText(planInfo)
-    await tgApi('sendMessage', { chat_id: chatId, text: detailsText, parse_mode: 'Markdown', reply_markup: payBackInline() })
-
-    await notifyOwnerNewPayment(chatId, username || pst.username, firstName || pst.firstName, method, planInfo, rubAmount)
+    await tgApi('sendMessage', { chat_id: chatId, text: cryptoPaymentText(planInfo), parse_mode: 'Markdown', reply_markup: payBackInline() })
+    await notifyOwnerNewPayment(chatId, username || pst.username, firstName || pst.firstName, 'crypto', planInfo)
     return
   }
 
@@ -1884,7 +1874,7 @@ app.post('/telegram/webhook', async (req, res) => {
 
     // ── Payment: waiting for proof ──────────────────────────────────────────
     const pst = payStates.get(String(chatId))
-    if (pst?.step === 'awaiting_proof' && !isCommand && (message.photo || message.document || message.text)) {
+    if (pst?.step === 'awaiting_proof' && pst.method === 'crypto' && !isCommand && (message.photo || message.document || message.text)) {
       await forwardProofToOwner(chatId, message, pst).catch(err => {
         console.error('[pay] forwardProof error:', err.message)
         tgApi('sendMessage', { chat_id: chatId, text: '✅ Получено! Ожидай активации в течение 1 часа.' })
