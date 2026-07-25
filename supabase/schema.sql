@@ -285,13 +285,18 @@ end;
 $$ language plpgsql security definer;
 
 -- deduct_credits: two-wallet spend; backward-compat return format {success, remaining}.
+-- 011: added last_active_at = now() + SET search_path hardening.
 create or replace function public.deduct_credits(
   p_user_id    uuid,
   p_amount     integer,
   p_operation  text,
   p_project_id uuid default null
 )
-returns json as $$
+returns json
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
 declare
   v_plan_cr    integer;
   v_purch_cr   integer;
@@ -314,7 +319,8 @@ begin
   update public.profiles
     set plan_credits      = plan_credits      - v_from_plan,
         purchased_credits = purchased_credits - v_from_purch,
-        credits           = credits           - p_amount
+        credits           = credits           - p_amount,
+        last_active_at    = now()
     where id = p_user_id;
 
   insert into public.credit_transactions (user_id, amount, operation, project_id, wallet)
@@ -327,7 +333,7 @@ begin
     'from_purchased', v_from_purch
   );
 end;
-$$ language plpgsql security definer;
+$$;
 
 -- ─────────────────────────────────────────
 -- Role grants (required for RLS to work)
@@ -339,6 +345,27 @@ grant select, update                          on public.profiles             to 
 grant select, insert, update, delete          on public.projects             to authenticated;
 grant select, insert, update, delete          on public.projects             to service_role;
 grant select                                  on public.credit_transactions  to authenticated;
+
+-- ── credit RPC grants: only service_role (011_grants_and_metrics_fix) ─────────
+-- SECURITY DEFINER functions accept p_user_id as a parameter without verifying
+-- auth.uid(). PostgREST exposes them at /rest/v1/rpc/{name}. Granting PUBLIC or
+-- authenticated access would allow any JWT holder to credit an arbitrary user.
+-- All app callers use SUPABASE_SERVICE_ROLE_KEY (role: service_role).
+revoke execute on function public.add_plan_credits(uuid, integer, text, uuid)      from public, authenticated;
+revoke execute on function public.add_purchased_credits(uuid, integer, text, uuid) from public, authenticated;
+revoke execute on function public.add_credits(uuid, integer, text, uuid)           from public, authenticated;
+revoke execute on function public.spend_credits(uuid, integer, text, uuid)         from public, authenticated;
+revoke execute on function public.deduct_credits(uuid, integer, text, uuid)        from public, authenticated;
+revoke execute on function public.expire_plan(uuid)                                from public, authenticated;
+revoke execute on function public.extend_plan(uuid, integer, text, text)           from public, authenticated;
+
+grant execute on function public.add_plan_credits(uuid, integer, text, uuid)      to service_role;
+grant execute on function public.add_purchased_credits(uuid, integer, text, uuid) to service_role;
+grant execute on function public.add_credits(uuid, integer, text, uuid)           to service_role;
+grant execute on function public.spend_credits(uuid, integer, text, uuid)         to service_role;
+grant execute on function public.deduct_credits(uuid, integer, text, uuid)        to service_role;
+grant execute on function public.expire_plan(uuid)                                to service_role;
+grant execute on function public.extend_plan(uuid, integer, text, text)           to service_role;
 
 -- ─────────────────────────────────────────
 -- Row Level Security
@@ -416,6 +443,8 @@ create index if not exists analytics_events_created_at_idx on public.analytics_e
 alter table public.analytics_events enable row level security;
 
 grant select on public.analytics_events to authenticated;
+grant insert on public.analytics_events to service_role;
+revoke truncate on public.analytics_events from anon, authenticated;
 
 create policy "analytics_events: own select"
   on public.analytics_events for select

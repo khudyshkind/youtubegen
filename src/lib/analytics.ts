@@ -7,11 +7,14 @@ export async function trackEvent(
 ): Promise<void> {
   try {
     const supabase = createServiceClient()
-    await supabase.from('analytics_events').insert({
+    const { error } = await supabase.from('analytics_events').insert({
       user_id: userId,
       event,
       properties: properties ?? {},
     })
+    if (error) {
+      console.error('[analytics] track error:', error.message)
+    }
   } catch (err) {
     console.error('[analytics] track error:', err)
   }
