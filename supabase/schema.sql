@@ -351,21 +351,29 @@ grant select                                  on public.credit_transactions  to 
 -- auth.uid(). PostgREST exposes them at /rest/v1/rpc/{name}. Granting PUBLIC or
 -- authenticated access would allow any JWT holder to credit an arbitrary user.
 -- All app callers use SUPABASE_SERVICE_ROLE_KEY (role: service_role).
-revoke execute on function public.add_plan_credits(uuid, integer, text, uuid)      from public, authenticated;
-revoke execute on function public.add_purchased_credits(uuid, integer, text, uuid) from public, authenticated;
-revoke execute on function public.add_credits(uuid, integer, text, uuid)           from public, authenticated;
-revoke execute on function public.spend_credits(uuid, integer, text, uuid)         from public, authenticated;
-revoke execute on function public.deduct_credits(uuid, integer, text, uuid)        from public, authenticated;
-revoke execute on function public.expire_plan(uuid)                                from public, authenticated;
-revoke execute on function public.extend_plan(uuid, integer, text, text)           from public, authenticated;
-
-grant execute on function public.add_plan_credits(uuid, integer, text, uuid)      to service_role;
-grant execute on function public.add_purchased_credits(uuid, integer, text, uuid) to service_role;
-grant execute on function public.add_credits(uuid, integer, text, uuid)           to service_role;
-grant execute on function public.spend_credits(uuid, integer, text, uuid)         to service_role;
-grant execute on function public.deduct_credits(uuid, integer, text, uuid)        to service_role;
-grant execute on function public.expire_plan(uuid)                                to service_role;
-grant execute on function public.extend_plan(uuid, integer, text, text)           to service_role;
+--
+-- DO block: iterates pg_proc so the block is safe even when expire_plan /
+-- extend_plan are not yet defined (they live in migrations 002/003 and will
+-- be processed by migration 011 after those migrations run).
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT p.oid
+    FROM   pg_proc p
+    JOIN   pg_namespace n ON n.oid = p.pronamespace
+    WHERE  n.nspname = 'public'
+      AND  p.proname IN (
+             'add_plan_credits', 'add_purchased_credits', 'add_credits',
+             'spend_credits', 'deduct_credits', 'expire_plan', 'extend_plan'
+           )
+  LOOP
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC, authenticated', r.oid::regprocedure);
+    EXECUTE format('GRANT  EXECUTE ON FUNCTION %s TO   service_role',          r.oid::regprocedure);
+  END LOOP;
+END;
+$$;
 
 -- ─────────────────────────────────────────
 -- Row Level Security
