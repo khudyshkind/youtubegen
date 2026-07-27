@@ -2,72 +2,7 @@
 
 import Link from 'next/link'
 import { useLang } from '@/hooks/useLang'
-
-const TOOL_CARDS = [
-  {
-    slug: 'script-gen',
-    emoji: '📝',
-    titleKey: 'tools.card_script' as const,
-    descKey: 'tools.card_script_desc' as const,
-    accent: { bg: 'rgba(124,58,237,0.08)', border: 'rgba(124,58,237,0.2)', hover: 'rgba(124,58,237,0.35)', color: '#a78bfa' },
-  },
-  {
-    slug: 'seo',
-    emoji: '🎯',
-    titleKey: 'tools.card_seo' as const,
-    descKey: 'tools.card_seo_desc' as const,
-    accent: { bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)', hover: 'rgba(59,130,246,0.35)', color: '#60a5fa' },
-  },
-  {
-    slug: 'repack',
-    emoji: '🔁',
-    titleKey: 'tools.card_repack' as const,
-    descKey: 'tools.card_repack_desc' as const,
-    accent: { bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)', hover: 'rgba(16,185,129,0.35)', color: '#34d399' },
-  },
-  {
-    slug: 'uniqueize',
-    emoji: '✍️',
-    titleKey: 'tools.card_uniqueizer' as const,
-    descKey: 'tools.card_uniqueizer_desc' as const,
-    accent: { bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.2)', hover: 'rgba(245,158,11,0.35)', color: '#fbbf24' },
-  },
-  {
-    slug: 'tts',
-    emoji: '🎙️',
-    titleKey: 'tools.card_tts' as const,
-    descKey: 'tools.card_tts_desc' as const,
-    accent: { bg: 'rgba(236,72,153,0.08)', border: 'rgba(236,72,153,0.2)', hover: 'rgba(236,72,153,0.35)', color: '#f472b6' },
-  },
-  {
-    slug: 'thumbnail-gen',
-    emoji: '🖼️',
-    titleKey: 'tools.card_thumb' as const,
-    descKey: 'tools.card_thumb_desc' as const,
-    accent: { bg: 'rgba(249,115,22,0.08)', border: 'rgba(249,115,22,0.2)', hover: 'rgba(249,115,22,0.35)', color: '#fb923c' },
-  },
-  {
-    slug: 'titles-by-niche',
-    emoji: '📊',
-    titleKey: 'tools.card_titles_niche' as const,
-    descKey: 'tools.card_titles_niche_desc' as const,
-    accent: { bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)', hover: 'rgba(6,182,212,0.35)', color: '#22d3ee' },
-  },
-  {
-    slug: 'subtitles',
-    emoji: '🎧',
-    titleKey: 'tools.card_subtitles' as const,
-    descKey: 'tools.card_subtitles_desc' as const,
-    accent: { bg: 'rgba(20,184,166,0.08)', border: 'rgba(20,184,166,0.2)', hover: 'rgba(20,184,166,0.35)', color: '#2dd4bf' },
-  },
-  {
-    slug: 'illustrations',
-    emoji: '🖌️',
-    titleKey: 'tools.card_illustrations' as const,
-    descKey: 'tools.card_illustrations_desc' as const,
-    accent: { bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.2)', hover: 'rgba(168,85,247,0.35)', color: '#c084fc' },
-  },
-]
+import { TOOL_CARDS } from '@/lib/content-config'
 
 export default function ToolsPage() {
   const { t } = useLang()

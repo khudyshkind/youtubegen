@@ -1,12 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useLang } from '@/hooks/useLang'
-import { useStudioStore } from '@/lib/studio-store'
 import NewProjectButton from '@/components/shared/NewProjectButton'
 import DeleteProjectButton from '@/components/shared/DeleteProjectButton'
 import type { Profile, Project, ProjectStatus, ProjectType } from '@/lib/types'
+import { TOOL_CARDS, ANALYTICS_GROUPS } from '@/lib/content-config'
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
   draft: 'bg-white/5 text-slate-400 border border-white/10',
@@ -137,22 +136,8 @@ interface Props {
   projects: Project[]
 }
 
-const TEMPLATES = [
-  { id: 'top5',     emoji: '🏆', titleKey: 'dashboard.template_top5',     descKey: 'dashboard.template_top5_desc' },
-  { id: 'review',   emoji: '⭐', titleKey: 'dashboard.template_review',    descKey: 'dashboard.template_review_desc' },
-  { id: 'tutorial', emoji: '🎓', titleKey: 'dashboard.template_tutorial',  descKey: 'dashboard.template_tutorial_desc' },
-] as const
-
 export default function DashboardClient({ profile, projects }: Props) {
   const { t, lang } = useLang()
-  const router = useRouter()
-  const reset = useStudioStore((s) => s.reset)
-
-  function handleTemplate(id: string) {
-    localStorage.setItem('onboarding_template', id)
-    reset()
-    router.push('/studio')
-  }
 
   const statusLabel = (s: ProjectStatus) => t(`status.${s}`)
 
@@ -167,90 +152,85 @@ export default function DashboardClient({ profile, projects }: Props) {
         <p className="text-slate-500 text-sm mt-1">{t('dashboard.subtitle')}</p>
       </div>
 
-      {/* Entry cards — always visible */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+      {/* Section blocks */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 items-start">
 
-        {/* Card 1: Full video from topic */}
+        {/* Block 1: Studio */}
+        <Link
+          href="/studio"
+          className="flex flex-col rounded-2xl p-5 transition-all hover:scale-[1.01]"
+          style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(124,58,237,0.45)')}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(124,58,237,0.2)')}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-base font-semibold" style={{ color: '#c4b5fd' }}>🎬 {t('dashboard.block_studio')}</p>
+            <svg className="w-4 h-4 shrink-0" style={{ color: '#7c3aed' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+          <p className="text-xs text-slate-400 leading-relaxed">{t('dashboard.block_studio_desc')}</p>
+        </Link>
+
+        {/* Block 2: Tools */}
         <div
           className="flex flex-col rounded-2xl p-5"
-          style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}
+          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
         >
-          <span className="text-2xl mb-3">🎬</span>
-          <p className="text-sm font-semibold text-violet-300 mb-1">{t('dashboard.entry_video')}</p>
-          <p className="text-xs text-slate-500 mb-0.5">{t('dashboard.entry_video_need')}</p>
-          <p className="text-xs text-slate-400 mb-4 flex-1">{t('dashboard.entry_video_get')}</p>
-
-          {/* Templates */}
-          <div className="flex flex-col gap-1.5 mb-3">
-            {TEMPLATES.map((tpl) => (
-              <button
-                key={tpl.id}
-                type="button"
-                onClick={() => handleTemplate(tpl.id)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white transition-all text-left cursor-pointer"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)')}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)')}
+          <Link
+            href="/tools"
+            className="flex items-center justify-between mb-1 group"
+          >
+            <p className="text-base font-semibold text-slate-200 group-hover:text-white transition-colors">🔧 {t('dashboard.block_tools')}</p>
+            <svg className="w-4 h-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </Link>
+          <p className="text-xs text-slate-500 mb-3">{t('dashboard.block_tools_desc')}</p>
+          <div className="flex flex-col gap-0.5">
+            {TOOL_CARDS.map((card) => (
+              <Link
+                key={card.slug}
+                href={`/tools/${card.slug}`}
+                className="flex items-center gap-2 px-2 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
               >
-                <span>{tpl.emoji}</span>
-                <span>{t(tpl.titleKey)}</span>
-              </button>
+                <span>{card.emoji}</span>
+                <span>{t(card.titleKey)}</span>
+              </Link>
             ))}
           </div>
-
-          <NewProjectButton className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold btn-gradient text-white">
-            {t('dashboard.create_video')}
-          </NewProjectButton>
         </div>
 
-        {/* Card 2: Illustrations */}
-        <Link
-          href="/tools/illustrations"
-          className="flex flex-col rounded-2xl p-5 transition-all hover:scale-[1.02] active:scale-[0.98]"
-          style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(168,85,247,0.45)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(168,85,247,0.2)')}
+        {/* Block 3: Analytics */}
+        <div
+          className="flex flex-col rounded-2xl p-5"
+          style={{ background: 'rgba(6,182,212,0.04)', border: '1px solid rgba(6,182,212,0.15)' }}
         >
-          <span className="text-2xl mb-3">🖌️</span>
-          <p className="text-sm font-semibold mb-1" style={{ color: '#c084fc' }}>{t('dashboard.entry_illustrations')}</p>
-          <p className="text-xs text-slate-500 mb-0.5">{t('dashboard.entry_illustrations_need')}</p>
-          <p className="text-xs text-slate-400 flex-1">{t('dashboard.entry_illustrations_get')}</p>
-        </Link>
-
-        {/* Card 3: TTS */}
-        <Link
-          href="/tools/tts"
-          className="flex flex-col rounded-2xl p-5 transition-all hover:scale-[1.02] active:scale-[0.98]"
-          style={{ background: 'rgba(236,72,153,0.08)', border: '1px solid rgba(236,72,153,0.2)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(236,72,153,0.45)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(236,72,153,0.2)')}
-        >
-          <span className="text-2xl mb-3">🎙️</span>
-          <p className="text-sm font-semibold mb-1" style={{ color: '#f472b6' }}>{t('dashboard.entry_tts')}</p>
-          <p className="text-xs text-slate-500 mb-0.5">{t('dashboard.entry_tts_need')}</p>
-          <p className="text-xs text-slate-400 flex-1">{t('dashboard.entry_tts_get')}</p>
-        </Link>
-
-        {/* Card 4: Analytics */}
-        <Link
-          href="/analytics"
-          className="flex flex-col rounded-2xl p-5 transition-all hover:scale-[1.02] active:scale-[0.98]"
-          style={{ background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.2)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(6,182,212,0.45)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(6,182,212,0.2)')}
-        >
-          <span className="text-2xl mb-3">📊</span>
-          <p className="text-sm font-semibold mb-1" style={{ color: '#22d3ee' }}>{t('dashboard.entry_analytics')}</p>
-          <p className="text-xs text-slate-500 mb-0.5">{t('dashboard.entry_analytics_need')}</p>
-          <p className="text-xs text-slate-400 flex-1">{t('dashboard.entry_analytics_get')}</p>
-        </Link>
-      </div>
-
-      {/* All tools link */}
-      <div className="mb-8 text-right">
-        <Link href="/tools" className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
-          {t('dashboard.all_tools')}
-        </Link>
+          <Link
+            href="/analytics"
+            className="flex items-center justify-between mb-1 group"
+          >
+            <p className="text-base font-semibold group-hover:text-white transition-colors" style={{ color: '#22d3ee' }}>📊 {t('dashboard.block_analytics')}</p>
+            <svg className="w-4 h-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </Link>
+          <p className="text-xs text-slate-500 mb-3">{t('dashboard.block_analytics_desc')}</p>
+          <div className="flex flex-col gap-1">
+            {ANALYTICS_GROUPS
+              .filter((g) => g.groupKey !== 'analytics.group_history')
+              .map((group) => (
+                <Link
+                  key={group.groupKey}
+                  href="/analytics"
+                  className="flex items-center justify-between px-2 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  <span>{t(group.groupKey)}</span>
+                  <span className="text-slate-600 tabular-nums">({group.tabs.length})</span>
+                </Link>
+              ))}
+          </div>
+        </div>
       </div>
 
       {/* Stats row */}

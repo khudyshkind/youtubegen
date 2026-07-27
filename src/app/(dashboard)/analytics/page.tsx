@@ -6,6 +6,7 @@ import { useLang } from '@/hooks/useLang'
 import { useStudioStore } from '@/lib/studio-store'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { CREDIT_COSTS } from '@/lib/types'
+import { ANALYTICS_GROUPS } from '@/lib/content-config'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -4226,40 +4227,11 @@ export default function AnalyticsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const TAB_GROUPS: Array<{ groupKey: string; accent?: boolean; tabs: Array<{ id: Tab; label: string; icon: string; descKey: string }> }> = [
-    {
-      groupKey: 'analytics.group_start',
-      accent: true,
-      tabs: [
-        { id: 'niche_finder', label: t('analytics.tab_niche_finder'), icon: '🎯', descKey: 'analytics.desc_niche_finder' },
-        { id: 'channel_plan', label: t('analytics.tab_channel_plan'), icon: '🚀', descKey: 'analytics.desc_channel_plan' },
-      ],
-    },
-    {
-      groupKey: 'analytics.group_research',
-      tabs: [
-        { id: 'trends',   label: t('analytics.tab_trends'),   icon: '🔥', descKey: 'analytics.desc_trends' },
-        { id: 'keywords', label: t('analytics.tab_keywords'), icon: '🔑', descKey: 'analytics.desc_keywords' },
-        { id: 'revenue',  label: t('analytics.tab_revenue'),  icon: '💰', descKey: 'analytics.desc_revenue' },
-      ],
-    },
-    {
-      groupKey: 'analytics.group_competitors',
-      tabs: [
-        { id: 'niche',        label: t('analytics.tab_niche'),        icon: '🧭', descKey: 'analytics.desc_niche' },
-        { id: 'channel',      label: t('analytics.tab_channel'),      icon: '📊', descKey: 'analytics.desc_channel' },
-        { id: 'compare',      label: t('analytics.tab_compare'),      icon: '⚖️', descKey: 'analytics.desc_compare' },
-        { id: 'rising_stars', label: t('analytics.tab_rising_stars'), icon: '⭐', descKey: 'analytics.desc_rising_stars' },
-        { id: 'comments',     label: t('analytics.tab_comments'),     icon: '💬', descKey: 'analytics.desc_comments' },
-      ],
-    },
-    {
-      groupKey: 'analytics.group_history',
-      tabs: [
-        { id: 'history', label: t('analytics.tab_history'), icon: '📋', descKey: 'analytics.desc_history' },
-      ],
-    },
-  ]
+  const TAB_GROUPS: Array<{ groupKey: string; accent?: boolean; tabs: Array<{ id: Tab; label: string; icon: string; descKey: string }> }> =
+    ANALYTICS_GROUPS.map(g => ({
+      ...g,
+      tabs: g.tabs.map(tabCfg => ({ ...tabCfg, id: tabCfg.id as Tab, label: t(tabCfg.labelKey) })),
+    }))
   const TABS = TAB_GROUPS.flatMap((g) => g.tabs)
 
   const TAB_COST: Record<Tab, number> = {
