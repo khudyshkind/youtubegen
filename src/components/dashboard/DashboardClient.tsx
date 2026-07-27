@@ -153,7 +153,7 @@ export default function DashboardClient({ profile, projects }: Props) {
       </div>
 
       {/* Section blocks */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 items-start">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
 
         {/* Block 1: Studio */}
         <Link
@@ -169,7 +169,7 @@ export default function DashboardClient({ profile, projects }: Props) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
           </div>
-          <p className="text-xs text-slate-400 leading-relaxed mb-3">{t('dashboard.block_studio_desc')}</p>
+          <p className="text-xs text-slate-400 leading-relaxed mb-3">{t('dashboard.block_studio_desc').replace('{n}', String(STUDIO_STEPS.length))}</p>
           <div className="flex flex-col gap-0.5">
             {STUDIO_STEPS.map((step) => (
               <div key={step.labelKey} className="flex items-center gap-2 px-2 py-1 text-xs text-slate-400">

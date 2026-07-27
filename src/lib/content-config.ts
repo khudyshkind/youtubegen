@@ -109,12 +109,14 @@ export const ANALYTICS_GROUPS: AnalyticsGroupConfig[] = [
   },
 ]
 
-// Studio pipeline steps shown in the dashboard block (no individual links — whole block → /studio)
+// Studio pipeline steps — mirrors StepWizard.tsx steps 1-8 exactly (studio.step* keys defined in i18n.ts:91-98)
 export const STUDIO_STEPS = [
-  { icon: '📝', labelKey: 'dashboard.step_script' },
-  { icon: '🎙️', labelKey: 'dashboard.step_audio' },
-  { icon: '🎧', labelKey: 'dashboard.step_subtitles' },
-  { icon: '🖌️', labelKey: 'dashboard.step_illustrations' },
-  { icon: '🎬', labelKey: 'dashboard.step_video' },
-  { icon: '🎯', labelKey: 'dashboard.step_seo' },
+  { icon: '💡', labelKey: 'studio.step1' },
+  { icon: '📋', labelKey: 'studio.step2' },
+  { icon: '📝', labelKey: 'studio.step3' },
+  { icon: '🎙️', labelKey: 'studio.step4' },
+  { icon: '🎧', labelKey: 'studio.step5' },
+  { icon: '🖌️', labelKey: 'studio.step6' },
+  { icon: '🎬', labelKey: 'studio.step7' },
+  { icon: '🎯', labelKey: 'studio.step8' },
 ]
