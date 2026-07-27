@@ -220,6 +220,7 @@ export const translations = {
     'step2.err_file_big':  'Файл слишком большой (макс. 5 МБ)',
     'step2.err_file_empty':'Файл пустой',
     'step2.err_file_read': 'Не удалось прочитать файл',
+    'step2.dur_label':     'Примерная длительность:',
 
     // ── Buttons (general) ────────────────────────────────────────────────────
     'btn.generate':    'Сгенерировать',
@@ -579,6 +580,8 @@ export const translations = {
     'step3.chars':          'символов',
     'step3.cost':           'Стоимость озвучки:',
     'step3.cr_per_k':       'кр / 1000 симв',
+    'step3.cost_total':     'Итого:',
+    'step3.kblocks':        'блоков',
     'step3.voices_loading': 'Загрузка голосов...',
     'step3.select_voice':   'Выберите голос...',
     'step3.voices_error':   'Не удалось загрузить голоса',
@@ -652,6 +655,8 @@ export const translations = {
     'step4.desc':        'Распознаёт речь и создаёт блоки субтитров с тайм-кодами',
     'step4.transcribing':'Транскрибация... (30–60 сек)',
     'step4.generate_btn':'📝 Создать субтитры (−180 кр./мин)',
+    'step4.cost_total':  'Итого:',
+    'step4.cr_per_min':  'кр/мин',
     'step4.no_audio':    'Сначала сгенерируйте аудио на шаге 4',
     'step4.upload_srt':  'Загрузить .srt файл',
     'step4.regenerate':  '↺ Перегенерировать',
@@ -1566,6 +1571,7 @@ export const translations = {
     'step2.err_file_big':  'File too large (max 5 MB)',
     'step2.err_file_empty':'File is empty',
     'step2.err_file_read': 'Failed to read file',
+    'step2.dur_label':     'Estimated length:',
 
     // ── Buttons (general) ────────────────────────────────────────────────────
     'btn.generate':    'Generate',
@@ -1925,6 +1931,8 @@ export const translations = {
     'step3.chars':          'characters',
     'step3.cost':           'Voiceover cost:',
     'step3.cr_per_k':       'cr / 1k chars',
+    'step3.cost_total':     'Total:',
+    'step3.kblocks':        'blocks',
     'step3.voices_loading': 'Loading voices...',
     'step3.select_voice':   'Select voice...',
     'step3.voices_error':   'Failed to load voices',
@@ -1997,6 +2005,8 @@ export const translations = {
     'step4.desc':        'Recognizes speech and creates subtitle blocks with timestamps',
     'step4.transcribing':'Transcribing... (30–60 sec)',
     'step4.generate_btn':'📝 Create subtitles (−180 cr./min)',
+    'step4.cost_total':  'Total:',
+    'step4.cr_per_min':  'cr/min',
     'step4.no_audio':    'First generate audio in step 4',
     'step4.upload_srt':  'Upload .srt file',
     'step4.regenerate':  '↺ Regenerate',

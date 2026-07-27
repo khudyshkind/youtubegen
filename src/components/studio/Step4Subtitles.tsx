@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import ConfirmModal from '@/components/shared/ConfirmModal'
 
@@ -9,7 +9,7 @@ function extractAudioTs(url: string | null): number | null {
   const m = url.match(/[?&]t=(\d+)/)
   return m ? parseInt(m[1], 10) : null
 }
-import type { SubtitleBlock } from '@/lib/types'
+import { CREDIT_COSTS, type SubtitleBlock } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
 import { useLang } from '@/hooks/useLang'
@@ -65,6 +65,14 @@ export default function Step4Subtitles() {
   const [srtUploadError, setSrtUploadError] = useState('')
   const [showSkipModal, setShowSkipModal] = useState(false)
   const srtFileRef = useRef<HTMLInputElement>(null)
+  const [audioDurationSec, setAudioDurationSec] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!audioUrl) { setAudioDurationSec(null); return }
+    const audio = new Audio(audioUrl)
+    audio.onloadedmetadata = () => setAudioDurationSec(audio.duration)
+    audio.onerror = () => setAudioDurationSec(null)
+  }, [audioUrl])
 
   function handleSrtUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -167,6 +175,16 @@ export default function Step4Subtitles() {
               {t('step4.desc')}
             </p>
           </div>
+
+          {audioUrl && audioDurationSec !== null && (
+            <p className="text-xs text-slate-400 leading-relaxed">
+              −{CREDIT_COSTS.subtitles_per_minute} {t('step4.cr_per_min')}
+              <span className="mx-1.5 text-slate-600">·</span>
+              <strong className="text-slate-200">{Math.ceil(audioDurationSec / 60)}</strong> {t('step2.min_label')}
+              <span className="mx-1.5 text-slate-600">·</span>
+              {t('step4.cost_total')} <strong className="text-violet-400">{Math.ceil(audioDurationSec / 60) * CREDIT_COSTS.subtitles_per_minute} {t('nav.credits_suffix')}</strong>
+            </p>
+          )}
 
           <button
             type="button"

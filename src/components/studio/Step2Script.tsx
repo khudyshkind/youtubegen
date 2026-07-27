@@ -642,6 +642,12 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
         </div>
       )}
 
+      {ownScript && hasScript && (
+        <p className="text-xs text-slate-400 leading-relaxed">
+          {t('step2.dur_label')} <strong className="text-slate-200">~{estimatedMin} {t('step2.min_label')}</strong>
+        </p>
+      )}
+
       <div className="flex gap-3">
         <button
           type="button"

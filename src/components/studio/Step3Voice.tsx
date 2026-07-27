@@ -1448,6 +1448,17 @@ export default function Step3Voice() {
         </div>
       )}
 
+      {/* Cost breakdown before generate */}
+      {scriptChars > 0 && (
+        <p className="text-xs text-slate-400 leading-relaxed">
+          −{audioCost(1000, engine, apihostVoiceType)} {t('step3.cr_per_k')}
+          <span className="mx-1.5 text-slate-600">·</span>
+          <strong className="text-slate-200">{Math.ceil(scriptChars / 1000)}</strong> {t('step3.kblocks')}
+          <span className="mx-1.5 text-slate-600">·</span>
+          {t('step3.cost_total')} <strong className="text-violet-400">{cost} {t('nav.credits_suffix')}</strong>
+        </p>
+      )}
+
       {/* Generate button */}
       <button
         type="button"
