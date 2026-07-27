@@ -980,6 +980,7 @@ export async function POST(request: NextRequest) {
 
         const hasSubtitles = Array.isArray(resolvedSubtitleBlocks) && resolvedSubtitleBlocks.length > 0
         console.log(`[images] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
+        const t0Request = Date.now()
 
         // Derive a short clean topic label from the script instead of using raw user input.
         // scriptParams.topic may contain thousands of chars of pasted source material
@@ -1006,11 +1007,14 @@ export async function POST(request: NextRequest) {
         }
         console.log(`[scenes] fallbackTopic source: ${fallbackTopicSource} → "${fallbackTopic}"`)
 
+        const t0Claude = Date.now()
         const scenes = hasSubtitles
           ? await generateScenesFromSubtitles(effectiveTopic, count, duration_sec, resolvedSubtitleBlocks!, styleConfig, fallbackTopic)
           : await generateScenesFromScript(script, effectiveTopic, duration_sec, count, styleConfig, fallbackTopic)
+        const claudeSec = ((Date.now() - t0Claude) / 1000).toFixed(1)
 
         console.log(`[images] scenes generated: ${scenes.length}`)
+        console.log(`[images] claude_phase: ${scenes.length} scenes, ${claudeSec}s`)
 
         // Tell the client how many images to expect so it can show a progress bar
         controller.enqueue(send({ type: 'start', total: scenes.length }))
@@ -1026,10 +1030,15 @@ export async function POST(request: NextRequest) {
           ? GPT_BATCH_SIZE
           : parseInt(process.env.FAL_CONCURRENCY_LIMIT ?? '40')
         console.log(`[images] engine: ${engine}, concurrency: ${CONCURRENCY}, total: ${scenes.length}`)
+        console.log(`[images] concurrency_env: FAL_CONCURRENCY_LIMIT=${process.env.FAL_CONCURRENCY_LIMIT ?? '(not set, default 40)'} GPT_BATCH_SIZE=${process.env.GPT_BATCH_SIZE ?? '(not set, default 3)'}`)
+        const t0Images = Date.now()
         for (let batchStart = 0; batchStart < scenes.length; batchStart += CONCURRENCY) {
           const batchEnd = Math.min(batchStart + CONCURRENCY, scenes.length)
           const batchNewImages: SceneImage[] = []
           console.log(`[images] batch ${Math.floor(batchStart / CONCURRENCY) + 1}: scenes ${batchStart + 1}–${batchEnd}`)
+          const batchT0 = Date.now()
+          const batchSuccessBefore = successCount
+          const batchFailBefore = failCount
 
           await Promise.all(
             scenes.slice(batchStart, batchEnd).map(async (scn, batchIdx) => {
@@ -1079,6 +1088,12 @@ export async function POST(request: NextRequest) {
             })
           )
 
+          const batchSec = ((Date.now() - batchT0) / 1000).toFixed(1)
+          const batchOk = successCount - batchSuccessBefore
+          const batchFail = failCount - batchFailBefore
+          const accumulatedSec = ((Date.now() - t0Images) / 1000).toFixed(1)
+          console.log(`[images] batch ${Math.floor(batchStart / CONCURRENCY) + 1} done: engine=${engine} size=${batchEnd - batchStart} ok=${batchOk} fail=${batchFail} batch_sec=${batchSec}s accumulated_sec=${accumulatedSec}s`)
+
           // Send progress after every batch so the client can update its UI immediately
           controller.enqueue(send({
             type: 'progress',
@@ -1102,6 +1117,10 @@ export async function POST(request: NextRequest) {
         }
 
         console.log(`[images] done: success=${successCount} failed=${failCount} total=${scenes.length}`)
+        const totalSec = ((Date.now() - t0Request) / 1000).toFixed(1)
+        const imagesSec = ((Date.now() - t0Images) / 1000).toFixed(1)
+        const avgSec = successCount > 0 ? ((Date.now() - t0Images) / 1000 / successCount).toFixed(2) : 'N/A'
+        console.log(`[images] SUMMARY: engine=${engine} ordered=${count} created=${successCount} total_sec=${totalSec}s claude_sec=${claudeSec}s images_sec=${imagesSec}s avg_per_image=${avgSec}s concurrency=${CONCURRENCY}`)
 
         const validImages = sceneImages.filter(Boolean)
         if (project_id) {
