@@ -895,18 +895,51 @@ async function generateImageGptMini(
 // All image_urls are relative paths → must be prefixed with SS_ORIGIN.
 // Output resolution: 1376×768. No resize applied — sharp is not in project deps.
 // One active task per key; do not call concurrently.
-const SS_ORIGIN     = 'https://secretslider.com'
-const SS_POLL_MS    = 5_000
-const SS_TIMEOUT_MS = 200_000  // stay within maxDuration=300 s
+const SS_ORIGIN  = 'https://secretslider.com'
+const SS_POLL_MS = 5_000
+// SS timeout is computed dynamically per call — see ssBudgetMs inside generateImagesSecretSlider.
 
 interface SsTaskResult {
   status:   string
   results?: { image_urls?: string[]; image_count?: number }
 }
 
-async function generateImagesSecretSlider(prompts: string[]): Promise<string[]> {
+async function generateImagesSecretSlider(prompts: string[], requestStartMs: number): Promise<string[]> {
   const apiKey = env('SECRETSLIDER_API_KEY')
   if (!apiKey) throw new Error('[secretslider] SECRETSLIDER_API_KEY not configured')
+
+  // 270000 = maxDuration 300 с минус 30 с запаса, нужного чтобы успели отработать catch и finally.
+  // 3500 мс/изображение — оценка, не замер; уточнить по логу [images/secretslider] upload после накопления статистики.
+  const uploadReserveMs = 3_500 * prompts.length
+  const ssBudgetMs = 270_000 - (Date.now() - requestStartMs) - uploadReserveMs
+  console.log(`[secretslider] budget: pre=${Math.round((Date.now() - requestStartMs) / 1000)}s reserve=${Math.round(uploadReserveMs / 1000)}s ss_budget=${Math.round(ssBudgetMs / 1000)}s prompts=${prompts.length}`)
+  if (ssBudgetMs < 30_000) {
+    throw new Error(
+      `[secretslider] не осталось времени на генерацию: бюджет ${Math.round(ssBudgetMs / 1000)}s после накладных расходов (${prompts.length} промптов × 3.5 с заливки)`
+    )
+  }
+
+  // Guard: reject early if a task for this key is already running.
+  // One active task per key is a hard API limit — a second POST would 429 immediately.
+  // If the guard itself fails, we proceed — it must never block a valid path.
+  try {
+    const activeRes = await fetch(`${SS_ORIGIN}/api/v2/tasks/active`, {
+      headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (activeRes.ok) {
+      const active = await activeRes.json() as { active_count?: number; active_tasks?: Array<{ estimated_wait_seconds?: number }> }
+      if ((active.active_count ?? 0) > 0) {
+        const waitSec = active.active_tasks?.[0]?.estimated_wait_seconds ?? 0
+        throw new Error(`SS_BUSY:${waitSec}`)
+      }
+    } else {
+      console.warn(`[secretslider] tasks/active returned ${activeRes.status}, proceeding`)
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('SS_BUSY')) throw err
+    console.warn('[secretslider] tasks/active check failed, proceeding:', err instanceof Error ? err.message : String(err))
+  }
 
   // Content-Type (incl. boundary) set automatically by fetch when body is FormData.
   const form = new FormData()
@@ -921,6 +954,12 @@ async function generateImagesSecretSlider(prompts: string[]): Promise<string[]> 
     body: form,
     signal: AbortSignal.timeout(30_000),
   })
+  if (genRes.status === 429) {
+    const body = await genRes.text().catch(() => '')
+    let retrySec = 0
+    try { retrySec = (JSON.parse(body) as { retry_after?: number }).retry_after ?? 0 } catch { /* non-JSON body */ }
+    throw new Error(`SS_BUSY:${retrySec}`)
+  }
   if (genRes.status !== 202) {
     const body = await genRes.text().catch(() => '')
     throw new Error(`[secretslider] POST /generate returned ${genRes.status}: ${body.slice(0, 300)}`)
@@ -931,7 +970,7 @@ async function generateImagesSecretSlider(prompts: string[]): Promise<string[]> 
   console.log(`[secretslider] task=${taskId} prompts=${prompts.length}`)
 
   const t0 = Date.now()
-  const deadline = t0 + SS_TIMEOUT_MS
+  const deadline = t0 + ssBudgetMs
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, SS_POLL_MS))
     const elapsed = Math.round((Date.now() - t0) / 1000)
@@ -961,6 +1000,8 @@ async function generateImagesSecretSlider(prompts: string[]): Promise<string[]> 
           `[secretslider] image_count mismatch: expected ${prompts.length}, got ${urls.length} (image_count=${poll.results?.image_count ?? '?'})`
         )
       }
+      // One-line stat for latency analysis: grep [secretslider] STATS to collect data.
+      console.log(`[secretslider] STATS: prompts=${prompts.length} total_sec=${((Date.now() - t0) / 1000).toFixed(1)} status=${poll.status}`)
       return urls.map(u => {
         if (u.startsWith('/')) return `${SS_ORIGIN}${u}`
         if (u.startsWith('http://')) return `https://${u.slice(7)}`
@@ -969,7 +1010,7 @@ async function generateImagesSecretSlider(prompts: string[]): Promise<string[]> 
     }
   }
 
-  throw new Error(`[secretslider] task ${taskId} timed out after ${SS_TIMEOUT_MS / 1000}s`)
+  throw new Error(`[secretslider] task ${taskId} timed out (budget=${Math.round(ssBudgetMs / 1000)}s)`)
 }
 
 export async function POST(request: NextRequest) {
@@ -1010,14 +1051,14 @@ export async function POST(request: NextRequest) {
     }, { status: 400 })
   }
 
-  if (engine === 'secretslider' && count > 40) {
+  if (engine === 'secretslider' && count > 15) {
     return NextResponse.json({
       ok: false,
       code: 'TOO_MANY_FOR_SECRETSLIDER',
-      // Measurements: ~1.67 s/image + unpredictable tail on the final image up to 115 s;
-      // at 54 prompts worst-case observed 305 s exceeds maxDuration=300.
-      error: `Secret Slider поддерживает максимум 40 иллюстраций за запуск`,
-      maxAllowed: 40,
+      // замеры дали разброс времени задачи 32–200+ с независимо от размера батча,
+      // плюс ~3.5 с на заливку каждой картинки; при 30 шт расчёт даёт 375 с против maxDuration 300.
+      error: `Secret Slider поддерживает максимум 15 иллюстраций за запуск`,
+      maxAllowed: 15,
       requested: count,
     }, { status: 400 })
   }
@@ -1140,7 +1181,7 @@ export async function POST(request: NextRequest) {
           })
           console.log(`[images/secretslider] batch: ${allStyledPrompts.length} prompts`)
 
-          const ssUrls = await generateImagesSecretSlider(allStyledPrompts)
+          const ssUrls = await generateImagesSecretSlider(allStyledPrompts, t0Request)
           console.log(`[images/secretslider] received ${ssUrls.length} URLs in ${((Date.now() - t0Images) / 1000).toFixed(1)}s`)
 
           for (let i = 0; i < scenes.length; i++) {
@@ -1150,9 +1191,11 @@ export async function POST(request: NextRequest) {
             try {
               // Images arrive at 1376×768; no resize applied — sharp is not in project deps (see report п.4).
               const storagePath = project_id ? `${user.id}/${project_id}/scene_ss_${i}.jpg` : undefined
+              const t0Upload = Date.now()
               const url = project_id
                 ? await uploadFalToStorage(ssUrl, storagePath!, 'image/jpeg', serviceClient)
                 : ssUrl
+              const uploadMs = project_id ? Date.now() - t0Upload : 0
               const audioFp = duration_sec != null ? Math.round(duration_sec) : undefined
               const img: SceneImage = {
                 scene_index: i, prompt: styledPrompt, url,
@@ -1166,7 +1209,7 @@ export async function POST(request: NextRequest) {
                 const chargeResult = await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
                 if (chargeResult.ok) chargedCount++
               }
-              console.log(`[images/secretslider] scene ${i + 1} url: ${url?.slice(0, 100) ?? 'NULL'}`)
+              console.log(`[images/secretslider] scene ${i + 1} upload: ${uploadMs}ms url=${url?.slice(0, 80) ?? 'NULL'}`)
             } catch (err) {
               failCount++
               const msg = err instanceof Error ? err.message : String(err)
@@ -1305,13 +1348,23 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error)
         console.error('[generate/images] stream error:', msg)
-        Sentry.captureException(error)
-        if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/images').catch(() => {})
-        else await notifyError('/generate/images', msg).catch(() => {})
-        try {
-          controller.enqueue(send({ type: 'error', error: 'Ошибка генерации иллюстраций' }))
-          controller.close()
-        } catch { /* controller may already be closed on a second error */ }
+        if (msg.startsWith('SS_BUSY')) {
+          // Concurrency limit from Secret Slider — not a bug, do not send to Sentry/Telegram.
+          const waitSec = parseInt(msg.split(':')[1] ?? '0', 10) || 0
+          console.log(`[secretslider] BUSY: retry_after=${waitSec}s`)
+          try {
+            controller.enqueue(send({ type: 'error', code: 'BUSY_SECRETSLIDER', retry_after: waitSec }))
+            controller.close()
+          } catch { /* controller may already be closed */ }
+        } else {
+          Sentry.captureException(error)
+          if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/images').catch(() => {})
+          else await notifyError('/generate/images', msg).catch(() => {})
+          try {
+            controller.enqueue(send({ type: 'error', error: 'Ошибка генерации иллюстраций' }))
+            controller.close()
+          } catch { /* controller may already be closed on a second error */ }
+        }
       } finally {
         if (!generationSucceeded && project_id) {
           try {

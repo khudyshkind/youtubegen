@@ -311,6 +311,8 @@ export default function IllustrationsTool({
             charged_count?: number
             fail_count?: number
             error?: string
+            code?: string
+            retry_after?: number
           }
           try {
             data = JSON.parse(line.slice(6))
@@ -359,6 +361,13 @@ export default function IllustrationsTool({
             setSavedId(pid)
             setPhase('done')
           } else if (data.type === 'error') {
+            if (data.code === 'BUSY_SECRETSLIDER') {
+              const secs = data.retry_after ?? 0
+              throw new Error(secs > 0
+                ? t('tools.ill_err_ss_busy_wait').replace('{secs}', String(secs))
+                : t('tools.ill_err_ss_busy')
+              )
+            }
             throw new Error(data.error ?? t('tools.ill_err_gen'))
           }
         }
@@ -496,9 +505,9 @@ export default function IllustrationsTool({
               <input
                 type="number"
                 min={1}
-                max={30}
+                max={engine === 'secretslider' ? 15 : 30}
                 value={manualCount}
-                onChange={(e) => setManualCount(Math.min(30, Math.max(1, parseInt(e.target.value) || 1)))}
+                onChange={(e) => setManualCount(Math.min(engine === 'secretslider' ? 15 : 30, Math.max(1, parseInt(e.target.value) || 1)))}
                 className="w-20 px-3 py-1.5 rounded-lg text-sm text-slate-100 bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/60"
               />
             )}
