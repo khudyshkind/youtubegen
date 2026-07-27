@@ -4287,6 +4287,7 @@ async function processVideoJob(jobId, body) {
   await updateJob(jobId, { status: 'processing', progress: 0, phase: 'clips' })
   const T = (label) => `[${jobId.slice(0,8)}] ${label}`
   console.time(T('TOTAL'))
+  let tempImageB2Keys = []
 
   try {
     const {
@@ -4379,7 +4380,6 @@ async function processVideoJob(jobId, body) {
     // flux_schnell may fall back to fal.ai CDN URLs when Supabase upload fails;
     // VGF hitting 155 fal.ai URLs simultaneously can cause rate-limit failures.
     const isFalCdnUrl = url => typeof url === 'string' && /\bfal\.(media|run|ai)\b|cdn\.fal\.ai/i.test(url)
-    const tempImageB2Keys = []
     const resolvedImages = await Promise.all(images.map(async (img, i) => {
       const needsProxy = img.url && (img.engine === 'gpt_mini' || isFalCdnUrl(img.url))
       if (!needsProxy) return img
@@ -4722,7 +4722,7 @@ async function processVideoJob(jobId, body) {
     } catch (e) {
       console.warn('[cleanup] rmSync failed:', e.message)
     }
-    if (typeof tempImageB2Keys !== 'undefined' && tempImageB2Keys.length) {
+    if (tempImageB2Keys.length) {
       await deleteTempImagesFromB2(tempImageB2Keys).catch(e => console.warn('[b2-cleanup] images:', e.message))
     }
     await deleteTempImagesFromB2([`temp/subs_${jobId}.ass`]).catch(e => console.warn('[b2-cleanup] subs:', e.message))
