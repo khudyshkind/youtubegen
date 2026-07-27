@@ -5,6 +5,7 @@ export const translations = {
     // ── Navbar ────────────────────────────────────────────────────────────────
     'nav.create_video':   'Создать видео',
     'nav.dashboard':      'Дашборд',
+    'nav.studio':         'Студия',
     'nav.tools':          'Инструменты',
     'nav.billing':        'Оплата',
     'nav.settings':       'Настройки',
@@ -47,6 +48,19 @@ export const translations = {
     'dashboard.template_tutorial':   'Обучающее видео',
     'dashboard.template_tutorial_desc':'Пошаговое объяснение темы',
     'dashboard.or_scratch':          'или начни с чистого листа',
+    'dashboard.all_tools':               'Все инструменты →',
+    'dashboard.entry_video':             'Готовое видео из темы',
+    'dashboard.entry_video_need':        'Нужно: только тема',
+    'dashboard.entry_video_get':         'Сценарий, озвучка, субтитры, картинки и готовое видео',
+    'dashboard.entry_illustrations':     'Иллюстрации к тексту',
+    'dashboard.entry_illustrations_need':'Нужно: свой текст',
+    'dashboard.entry_illustrations_get': 'Набор картинок по сценам',
+    'dashboard.entry_tts':               'Озвучка текста',
+    'dashboard.entry_tts_need':          'Нужно: свой текст',
+    'dashboard.entry_tts_get':           'Готовый аудиофайл',
+    'dashboard.entry_analytics':         'Аналитика канала',
+    'dashboard.entry_analytics_need':    'Нужно: ссылка на канал',
+    'dashboard.entry_analytics_get':     'Отчёт по каналу, нише и трендам',
 
     'regen_confirm.message': 'Проект уже завершён. Перегенерация изменит его и вернёт в статус «в процессе». Продолжить?',
 
@@ -916,6 +930,8 @@ export const translations = {
     // ── Tools hub ─────────────────────────────────────────────────────────────
     'tools.hub_title':          'Инструменты',
     'tools.hub_subtitle':       'Быстрые инструменты — без создания видео целиком',
+    'tools.studio_hint':        'Каждый инструмент решает одну задачу по отдельности.',
+    'tools.studio_link':        'Студия проведёт через все шаги до готового видео →',
     'tools.card_script':        'Сценарий для видео',
     'tools.card_script_desc':   'Профессиональный сценарий по теме — с планом или без',
     'tools.card_seo':           'SEO-пакет для ролика',
@@ -1323,6 +1339,7 @@ export const translations = {
     // ── Navbar ────────────────────────────────────────────────────────────────
     'nav.create_video':   'Create video',
     'nav.dashboard':      'Dashboard',
+    'nav.studio':         'Studio',
     'nav.tools':          'Tools',
     'nav.billing':        'Billing',
     'nav.settings':       'Settings',
@@ -1365,6 +1382,19 @@ export const translations = {
     'dashboard.template_tutorial':   'Tutorial',
     'dashboard.template_tutorial_desc':'Step-by-step topic explanation',
     'dashboard.or_scratch':          'or start from scratch',
+    'dashboard.all_tools':               'All tools →',
+    'dashboard.entry_video':             'Full video from topic',
+    'dashboard.entry_video_need':        'You need: only a topic',
+    'dashboard.entry_video_get':         'Script, voiceover, subtitles, images and finished video',
+    'dashboard.entry_illustrations':     'Illustrations for your text',
+    'dashboard.entry_illustrations_need':'You need: your own text',
+    'dashboard.entry_illustrations_get': 'A set of scene images',
+    'dashboard.entry_tts':               'Text-to-speech',
+    'dashboard.entry_tts_need':          'You need: your own text',
+    'dashboard.entry_tts_get':           'Ready audio file',
+    'dashboard.entry_analytics':         'Channel analytics',
+    'dashboard.entry_analytics_need':    'You need: channel URL',
+    'dashboard.entry_analytics_get':     'Report on channel, niche and trends',
 
     'regen_confirm.message': 'This project is already complete. Regenerating will reset it to in-progress status. Continue?',
 
@@ -2233,6 +2263,8 @@ export const translations = {
     // ── Tools hub ─────────────────────────────────────────────────────────────
     'tools.hub_title':          'Tools',
     'tools.hub_subtitle':       'Quick tools without creating a full video',
+    'tools.studio_hint':        'Each tool handles one task on its own.',
+    'tools.studio_link':        'Studio guides you through every step to a finished video →',
     'tools.card_script':        'Video Script',
     'tools.card_script_desc':   'Professional script on any topic — with or without an outline',
     'tools.card_seo':           'SEO Package',

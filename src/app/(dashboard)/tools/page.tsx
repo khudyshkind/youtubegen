@@ -77,6 +77,12 @@ export default function ToolsPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-slate-100">{t('tools.hub_title')}</h1>
         <p className="text-slate-500 text-sm mt-1">{t('tools.hub_subtitle')}</p>
+        <p className="text-slate-600 text-sm mt-2">
+          {t('tools.studio_hint')}{' '}
+          <Link href="/studio" className="text-violet-400 hover:text-violet-300 transition-colors">
+            {t('tools.studio_link')}
+          </Link>
+        </p>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

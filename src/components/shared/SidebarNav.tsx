@@ -29,6 +29,11 @@ export default function SidebarNav() {
       ),
     },
     {
+      href: '/studio',
+      label: t('nav.studio'),
+      icon: studioIcon,
+    },
+    {
       href: '/tools',
       label: t('nav.tools'),
       icon: (
@@ -149,8 +154,8 @@ export default function SidebarNav() {
           <span className="truncate">{t('nav.create_video').split(' ')[0]}</span>
         </Link>
 
-        {/* Rest of nav */}
-        {NAV_ITEMS.map((item) => {
+        {/* Rest of nav — Studio already rendered above as violet CTA */}
+        {NAV_ITEMS.filter((item) => item.href !== '/studio').map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
           return (
             <Link

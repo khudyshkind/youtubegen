@@ -160,19 +160,97 @@ export default function DashboardClient({ profile, projects }: Props) {
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100">
-            {t('dashboard.hello')}, {profile?.full_name?.split(' ')[0] ?? (lang === 'en' ? 'user' : 'пользователь')} 👋
-          </h1>
-          <p className="text-slate-500 text-sm mt-1">{t('dashboard.subtitle')}</p>
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-slate-100">
+          {t('dashboard.hello')}, {profile?.full_name?.split(' ')[0] ?? (lang === 'en' ? 'user' : 'пользователь')} 👋
+        </h1>
+        <p className="text-slate-500 text-sm mt-1">{t('dashboard.subtitle')}</p>
+      </div>
+
+      {/* Entry cards — always visible */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+
+        {/* Card 1: Full video from topic */}
+        <div
+          className="flex flex-col rounded-2xl p-5"
+          style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}
+        >
+          <span className="text-2xl mb-3">🎬</span>
+          <p className="text-sm font-semibold text-violet-300 mb-1">{t('dashboard.entry_video')}</p>
+          <p className="text-xs text-slate-500 mb-0.5">{t('dashboard.entry_video_need')}</p>
+          <p className="text-xs text-slate-400 mb-4 flex-1">{t('dashboard.entry_video_get')}</p>
+
+          {/* Templates */}
+          <div className="flex flex-col gap-1.5 mb-3">
+            {TEMPLATES.map((tpl) => (
+              <button
+                key={tpl.id}
+                type="button"
+                onClick={() => handleTemplate(tpl.id)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white transition-all text-left cursor-pointer"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)')}
+              >
+                <span>{tpl.emoji}</span>
+                <span>{t(tpl.titleKey)}</span>
+              </button>
+            ))}
+          </div>
+
+          <NewProjectButton className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold btn-gradient text-white">
+            {t('dashboard.create_video')}
+          </NewProjectButton>
         </div>
-        <NewProjectButton className="inline-flex items-center gap-2 px-5 py-3 btn-gradient text-white font-semibold rounded-xl text-sm shadow-lg">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          {t('dashboard.create_video')}
-        </NewProjectButton>
+
+        {/* Card 2: Illustrations */}
+        <Link
+          href="/tools/illustrations"
+          className="flex flex-col rounded-2xl p-5 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(168,85,247,0.45)')}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(168,85,247,0.2)')}
+        >
+          <span className="text-2xl mb-3">🖌️</span>
+          <p className="text-sm font-semibold mb-1" style={{ color: '#c084fc' }}>{t('dashboard.entry_illustrations')}</p>
+          <p className="text-xs text-slate-500 mb-0.5">{t('dashboard.entry_illustrations_need')}</p>
+          <p className="text-xs text-slate-400 flex-1">{t('dashboard.entry_illustrations_get')}</p>
+        </Link>
+
+        {/* Card 3: TTS */}
+        <Link
+          href="/tools/tts"
+          className="flex flex-col rounded-2xl p-5 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          style={{ background: 'rgba(236,72,153,0.08)', border: '1px solid rgba(236,72,153,0.2)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(236,72,153,0.45)')}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(236,72,153,0.2)')}
+        >
+          <span className="text-2xl mb-3">🎙️</span>
+          <p className="text-sm font-semibold mb-1" style={{ color: '#f472b6' }}>{t('dashboard.entry_tts')}</p>
+          <p className="text-xs text-slate-500 mb-0.5">{t('dashboard.entry_tts_need')}</p>
+          <p className="text-xs text-slate-400 flex-1">{t('dashboard.entry_tts_get')}</p>
+        </Link>
+
+        {/* Card 4: Analytics */}
+        <Link
+          href="/analytics"
+          className="flex flex-col rounded-2xl p-5 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          style={{ background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.2)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(6,182,212,0.45)')}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(6,182,212,0.2)')}
+        >
+          <span className="text-2xl mb-3">📊</span>
+          <p className="text-sm font-semibold mb-1" style={{ color: '#22d3ee' }}>{t('dashboard.entry_analytics')}</p>
+          <p className="text-xs text-slate-500 mb-0.5">{t('dashboard.entry_analytics_need')}</p>
+          <p className="text-xs text-slate-400 flex-1">{t('dashboard.entry_analytics_get')}</p>
+        </Link>
+      </div>
+
+      {/* All tools link */}
+      <div className="mb-8 text-right">
+        <Link href="/tools" className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
+          {t('dashboard.all_tools')}
+        </Link>
       </div>
 
       {/* Stats row */}
@@ -226,32 +304,7 @@ export default function DashboardClient({ profile, projects }: Props) {
           <div className="py-12 px-4">
             <div className="max-w-2xl mx-auto text-center">
               <h3 className="text-xl font-bold text-slate-100 mb-2">{t('dashboard.welcome_title')}</h3>
-              <p className="text-slate-400 text-sm mb-8">{t('dashboard.welcome_subtitle')}</p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-                {TEMPLATES.map((tpl) => (
-                  <button
-                    key={tpl.id}
-                    type="button"
-                    onClick={() => handleTemplate(tpl.id)}
-                    className="flex flex-col items-center gap-2 p-5 rounded-2xl text-left cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
-                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)')}
-                  >
-                    <span className="text-3xl">{tpl.emoji}</span>
-                    <span className="text-sm font-semibold text-slate-200">{t(tpl.titleKey)}</span>
-                    <span className="text-xs text-slate-500 text-center">{t(tpl.descKey)}</span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-4 mb-6">
-                <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
-                <span className="text-xs text-slate-600">{t('dashboard.or_scratch')}</span>
-                <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
-              </div>
-
+              <p className="text-slate-400 text-sm mb-6">{t('dashboard.welcome_subtitle')}</p>
               <NewProjectButton className="px-6 py-2.5 rounded-xl text-sm font-semibold text-slate-300 transition-all hover:text-slate-100 bg-white/[0.06] border border-white/10">
                 {t('dashboard.create_first')}
               </NewProjectButton>
