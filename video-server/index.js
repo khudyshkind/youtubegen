@@ -5568,8 +5568,8 @@ app.listen(PORT, async () => {
   console.log('[bot] starting cron jobs...')
 
   console.log('[boot] OWNER_ID:', OWNER_ID || '(not set)')
-  if (ownerId) {
-    tgApi('sendMessage', { chat_id: ownerId, text: '🟢 Бот перезапущен' })
+  if (OWNER_ID) {
+    tgApi('sendMessage', { chat_id: OWNER_ID, text: '🟢 Бот перезапущен' })
       .then(r => console.log('[boot] owner notified ok, tg response ok:', r?.ok))
       .catch(e => console.log('[boot] owner notify FAILED:', e.message))
   }
