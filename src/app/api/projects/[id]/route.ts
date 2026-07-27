@@ -136,8 +136,22 @@ export async function PATCH(
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
 
-    const body = await request.json() as { title?: string; generate_from?: string; language?: string }
-    const { title, generate_from, language } = body
+    const body = await request.json() as { title?: string; generate_from?: string; language?: string; duration_minutes?: number }
+    const { title, generate_from, language, duration_minutes } = body
+
+    // Fast path: duration_minutes update (own-script word-count recalculation)
+    if (duration_minutes !== undefined && !generate_from && !title && !language) {
+      const val = Math.round(Number(duration_minutes))
+      if (!Number.isFinite(val) || val < 1 || val > 120) {
+        return NextResponse.json({ ok: false, error: 'duration_minutes must be 1–120' }, { status: 400 })
+      }
+      const { error } = await supabase.from('projects').update({ duration_minutes: val }).eq('id', id).eq('user_id', user.id)
+      if (error) {
+        console.error('[projects/:id PATCH] duration_minutes update failed:', error.message)
+        return NextResponse.json({ ok: false, error: 'Ошибка обновления проекта' }, { status: 500 })
+      }
+      return NextResponse.json({ ok: true, data: { duration_minutes: val } })
+    }
 
     // Fast path: direct language write (e.g. user changed outputLang dropdown — no Haiku needed)
     if (language && !generate_from && !title) {

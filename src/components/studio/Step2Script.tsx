@@ -77,9 +77,29 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
   const [scriptShortWarn, setScriptShortWarn] = useState<{ actual: number; target: number } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const nextRef = useRef<() => void>(() => {})
+  const durationDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
     onRegisterNext?.(() => { nextRef.current() })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => { if (durationDebounceRef.current) clearTimeout(durationDebounceRef.current) }
+  }, [])
+
+  function saveDurationMinutes(minutes: number) {
+    if (!projectId) return
+    fetch(`/api/projects/${projectId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duration_minutes: minutes }),
+    }).then(async (res) => {
+      const json = await res.json().catch(() => ({ ok: false, error: 'non-JSON response' }))
+      if (!json.ok) console.error('[Step2Script] duration_minutes save failed:', json.error)
+    }).catch((err: Error) => {
+      console.error('[Step2Script] duration_minutes save error:', err.message)
+    })
+  }
 
   const MODEL_LABELS: Record<string, string> = {
     'claude-sonnet': t('model.standard'),
@@ -155,7 +175,9 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
       const trimmed = text.trim()
       setScript(trimmed)
       if (ownScript) {
-        setScriptParams({ duration_minutes: Math.max(1, Math.round(countWords(trimmed) / 130)) })
+        const dur = Math.max(1, Math.round(countWords(trimmed) / 130))
+        setScriptParams({ duration_minutes: dur })
+        saveDurationMinutes(dur)
       }
       // Auto-fill topic from first 50 chars if topic is missing or placeholder
       const { topic } = useStudioStore.getState().scriptParams
@@ -608,7 +630,10 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
             onChange={(e) => {
               setScript(e.target.value)
               if (ownScript) {
-                setScriptParams({ duration_minutes: Math.max(1, Math.round(countWords(e.target.value) / 130)) })
+                const dur = Math.max(1, Math.round(countWords(e.target.value) / 130))
+                setScriptParams({ duration_minutes: dur })
+                if (durationDebounceRef.current) clearTimeout(durationDebounceRef.current)
+                durationDebounceRef.current = setTimeout(() => saveDurationMinutes(dur), 800)
               }
             }}
             placeholder="..."
