@@ -10,7 +10,7 @@ import type { ScenePreview } from '@/lib/scene-split'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type EngineType  = 'flux_schnell' | 'flux' | 'nano_banana'
+type EngineType  = 'flux_schnell' | 'flux' | 'nano_banana' | 'secretslider'
 type StyleMode   = 'preset' | 'custom' | 'reference'
 type Phase       = 'input' | 'previewing' | 'generating' | 'done'
 
@@ -46,12 +46,13 @@ const STYLE_LABELS: Record<ImageStyleKey, string> = {
 
 const ENGINE_OPTIONS: { key: EngineType; labelKey: string; credits: number }[] = [
   { key: 'flux_schnell', labelKey: 'tools.ill_engine_fast',    credits: CREDIT_COSTS.image_flux_schnell },
+  { key: 'secretslider', labelKey: 'tools.ill_engine_photo',   credits: CREDIT_COSTS.image_secretslider },
   { key: 'flux',         labelKey: 'tools.ill_engine_quality', credits: CREDIT_COSTS.image_flux },
   { key: 'nano_banana',  labelKey: 'tools.ill_engine_pro',     credits: CREDIT_COSTS.image_nano_banana },
 ]
 
 function parseEngine(s: string): EngineType {
-  if (s === 'flux' || s === 'flux_schnell' || s === 'nano_banana') return s
+  if (s === 'flux' || s === 'flux_schnell' || s === 'nano_banana' || s === 'secretslider') return s
   return 'flux_schnell'
 }
 
@@ -125,8 +126,9 @@ export default function IllustrationsTool({
 
   // ─── Computed ─────────────────────────────────────────────────────────────
 
-  const costPerImage = engine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell
-    : engine === 'nano_banana' ? CREDIT_COSTS.image_nano_banana
+  const costPerImage = engine === 'flux_schnell'  ? CREDIT_COSTS.image_flux_schnell
+    : engine === 'secretslider'                  ? CREDIT_COSTS.image_secretslider
+    : engine === 'nano_banana'                   ? CREDIT_COSTS.image_nano_banana
     : CREDIT_COSTS.image_flux
 
   const effectiveStyleValue = styleMode === 'preset' && selectedStyleKey
@@ -540,7 +542,7 @@ export default function IllustrationsTool({
                   onChange={() => setEngine(opt.key)}
                   className="accent-violet-500"
                 />
-                <span className="text-sm text-slate-300">{t(opt.labelKey as Parameters<typeof t>[0])}</span>
+                <span className="text-sm text-slate-300">{t(opt.labelKey as Parameters<typeof t>[0])} — {opt.credits} {t('tools.ill_engine_unit')}</span>
               </label>
             ))}
           </div>

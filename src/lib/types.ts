@@ -34,6 +34,12 @@ export const CREDIT_COSTS = {
   image_flux_schnell: 100,
   image_gpt_mini: 1230,    // gpt-image-2 medium 1536×1024 @ $0.041
   image_nano_banana: 1170, // fal-ai/nano-banana @ $0.039
+  // закупка 0.30 руб за изображение по тарифу Стартовый, что по формуле остальных ключей
+  // (себестоимость в долларах умножить на 30000) дало бы 115 кредитов; 200 поставлено осознанно
+  // как премия за риск неидентифицированного поставщика и как пол, ниже себестоимости резервного
+  // nano_banana в 433 кредита опускаться нельзя; единственный движок с рублёвой закупкой,
+  // цена поедет при движении курса, пересматривать при изменении курса или их тарифа.
+  image_secretslider: 200,
   style_analysis: 30,
 
   // Video (per-minute rate; billing logic updated separately)
@@ -277,7 +283,7 @@ export interface SceneImage {
   scene?: string
   timecode_start?: string
   timecode_end?: string
-  engine?: 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana'
+  engine?: 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana' | 'secretslider'
   audio_fingerprint?: number
   nsfw_blocked?: boolean  // true when fal safety checker returned a black frame
 }

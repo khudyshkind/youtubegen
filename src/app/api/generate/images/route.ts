@@ -320,7 +320,7 @@ ${fullText.slice(0, 3000)}`,
   }
 }
 
-type ImageEngine = 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana'
+type ImageEngine = 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana' | 'secretslider'
 
 interface ImagesRequest {
   script: string
@@ -889,6 +889,89 @@ async function generateImageGptMini(
   throw new Error(`GPT Image: max retries exceeded (${lastError})`)
 }
 
+// ─── Secret Slider adapter ────────────────────────────────────────────────────
+// Async batch API: one POST returns a task_id; poll until status=completed.
+// Auth: X-API-Key header (NOT Authorization Bearer).
+// All image_urls are relative paths → must be prefixed with SS_ORIGIN.
+// Output resolution: 1376×768. No resize applied — sharp is not in project deps.
+// One active task per key; do not call concurrently.
+const SS_ORIGIN     = 'https://secretslider.com'
+const SS_POLL_MS    = 5_000
+const SS_TIMEOUT_MS = 200_000  // stay within maxDuration=300 s
+
+interface SsTaskResult {
+  status:   string
+  results?: { image_urls?: string[]; image_count?: number }
+}
+
+async function generateImagesSecretSlider(prompts: string[]): Promise<string[]> {
+  const apiKey = env('SECRETSLIDER_API_KEY')
+  if (!apiKey) throw new Error('[secretslider] SECRETSLIDER_API_KEY not configured')
+
+  // Content-Type (incl. boundary) set automatically by fetch when body is FormData.
+  const form = new FormData()
+  form.append('mode', 'visual')
+  form.append('prompts', JSON.stringify(prompts))
+  form.append('num_images', '1')
+  form.append('aspect_ratio', '16:9')
+
+  const genRes = await fetch(`${SS_ORIGIN}/api/v2/generate`, {
+    method: 'POST',
+    headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
+    body: form,
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (genRes.status !== 202) {
+    const body = await genRes.text().catch(() => '')
+    throw new Error(`[secretslider] POST /generate returned ${genRes.status}: ${body.slice(0, 300)}`)
+  }
+
+  const { task_id: taskId } = await genRes.json() as { task_id: string }
+  if (!taskId) throw new Error('[secretslider] no task_id in response')
+  console.log(`[secretslider] task=${taskId} prompts=${prompts.length}`)
+
+  const t0 = Date.now()
+  const deadline = t0 + SS_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, SS_POLL_MS))
+    const elapsed = Math.round((Date.now() - t0) / 1000)
+
+    const pollRes = await fetch(`${SS_ORIGIN}/api/v2/task/${taskId}`, {
+      headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!pollRes.ok) {
+      console.warn(`[secretslider] poll ${elapsed}s http=${pollRes.status}`)
+      continue
+    }
+
+    const poll = await pollRes.json() as SsTaskResult
+    console.log(`[secretslider] poll ${elapsed}s status=${poll.status} image_count=${poll.results?.image_count ?? '?'}`)
+
+    if (poll.status === 'failed') {
+      throw new Error(`[secretslider] task ${taskId} failed`)
+    }
+
+    if (poll.status === 'completed' || poll.status === 'partial_success') {
+      const urls = poll.results?.image_urls ?? []
+      if (urls.length !== prompts.length) {
+        // Without a per-image binding field, index is the only prompt→image link.
+        // A count mismatch shifts every subsequent scene to the wrong image — reject entirely.
+        throw new Error(
+          `[secretslider] image_count mismatch: expected ${prompts.length}, got ${urls.length} (image_count=${poll.results?.image_count ?? '?'})`
+        )
+      }
+      return urls.map(u => {
+        if (u.startsWith('/')) return `${SS_ORIGIN}${u}`
+        if (u.startsWith('http://')) return `https://${u.slice(7)}`
+        return u
+      })
+    }
+  }
+
+  throw new Error(`[secretslider] task ${taskId} timed out after ${SS_TIMEOUT_MS / 1000}s`)
+}
+
 export async function POST(request: NextRequest) {
   // === Pre-stream checks — return plain JSON on failure ===
   const supabase = await createServerSupabase()
@@ -910,9 +993,10 @@ export async function POST(request: NextRequest) {
   const count = Math.max(1, Math.min(IMAGE_COUNT_MAX, image_count ?? 1))
   const interval = Math.max(3, Math.min(300, image_interval ?? 10))
   const costPerImage =
-    engine === 'gpt_mini'     ? CREDIT_COSTS.image_gpt_mini :
-    engine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell :
-    engine === 'nano_banana'  ? CREDIT_COSTS.image_nano_banana :
+    engine === 'gpt_mini'       ? CREDIT_COSTS.image_gpt_mini :
+    engine === 'flux_schnell'   ? CREDIT_COSTS.image_flux_schnell :
+    engine === 'nano_banana'    ? CREDIT_COSTS.image_nano_banana :
+    engine === 'secretslider'   ? CREDIT_COSTS.image_secretslider :
     CREDIT_COSTS.image_flux
   const totalCost = costPerImage * count
 
@@ -922,6 +1006,18 @@ export async function POST(request: NextRequest) {
       code: 'TOO_MANY_FOR_GPT_MINI',
       error: `${ENGINE_DISPLAY.gpt_mini.name} поддерживает максимум 20 иллюстраций за запуск`,
       maxAllowed: 20,
+      requested: count,
+    }, { status: 400 })
+  }
+
+  if (engine === 'secretslider' && count > 40) {
+    return NextResponse.json({
+      ok: false,
+      code: 'TOO_MANY_FOR_SECRETSLIDER',
+      // Measurements: ~1.67 s/image + unpredictable tail on the final image up to 115 s;
+      // at 54 prompts worst-case observed 305 s exceeds maxDuration=300.
+      error: `Secret Slider поддерживает максимум 40 иллюстраций за запуск`,
+      maxAllowed: 40,
       requested: count,
     }, { status: 400 })
   }
@@ -1034,87 +1130,151 @@ export async function POST(request: NextRequest) {
         const rawGpt = process.env.GPT_BATCH_SIZE
         console.log(`[images] concurrency_env: FAL_CONCURRENCY_LIMIT=${rawFal ?? '(not set)'}[len=${rawFal?.length ?? 0}] GPT_BATCH_SIZE=${rawGpt ?? '(not set)'}[len=${rawGpt?.length ?? 0}]`)
         const t0Images = Date.now()
-        for (let batchStart = 0; batchStart < scenes.length; batchStart += CONCURRENCY) {
-          const batchEnd = Math.min(batchStart + CONCURRENCY, scenes.length)
-          const batchNewImages: SceneImage[] = []
-          console.log(`[images] batch ${Math.floor(batchStart / CONCURRENCY) + 1}: scenes ${batchStart + 1}–${batchEnd}`)
-          const batchT0 = Date.now()
-          const batchSuccessBefore = successCount
-          const batchFailBefore = failCount
 
-          await Promise.all(
-            scenes.slice(batchStart, batchEnd).map(async (scn, batchIdx) => {
-              const i = batchStart + batchIdx
-              const sanitizedPrompt = sanitizeScenePrompt(scn.prompt, i)
-              const styledPrompt = `${sanitizedPrompt}, ${styleConfig.fluxSuffix}`
-              console.log(`[images] scene ${i + 1} REQUESTED style: "${image_style ?? 'default'}"`)
-              console.log(`[images] scene ${i + 1} claude prompt result: "${scn.prompt}"`)
-              console.log(`[images] scene ${i + 1} FINAL flux prompt: "${styledPrompt}"`)
-              console.log(`[images] scene ${i + 1} NEGATIVE prompt: "${styleConfig.negativePrompt}"`)
-              try {
-                const sceneLabel = `scene ${i + 1}`
-                const url = engine === 'gpt_mini'
-                  ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
-                  : await withImageRetry(
-                      () => engine === 'flux_schnell'
-                        ? generateImageFluxSchnell(styledPrompt, user.id, project_id, i, serviceClient)
-                        : engine === 'nano_banana'
-                        ? generateImageNanoBanana(styledPrompt, user.id, project_id, i, serviceClient)
-                        : generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient),
-                      sceneLabel,
-                    )
-                const audioFp = duration_sec != null ? Math.round(duration_sec) : undefined
-                const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine, audio_fingerprint: audioFp }
-                sceneImages[i] = img
-                successCount++
-                if (url) {
-                  batchNewImages.push(img)
-                  // Spend credits only for images that actually landed in Supabase Storage.
-                  // Track chargedCount separately so the client displays exactly what was deducted.
-                  const chargeResult = await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
-                  if (chargeResult.ok) chargedCount++
-                }
-                console.log(`[images] scene ${i + 1} RESULT url: ${url?.slice(0, 100) ?? 'NULL'}`)
-              } catch (err) {
-                failCount++
-                const msg = err instanceof Error ? err.message : String(err)
-                const nsfwBlocked = msg.startsWith('NSFW_FILTERED')
-                console.error(`[images] scene ${i + 1} ${nsfwBlocked ? 'NSFW_FILTERED (both attempts)' : 'FAILED'}:`, msg)
-                sceneImages[i] = {
-                  scene_index: i, prompt: styledPrompt, url: null,
-                  scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end,
-                  engine, audio_fingerprint: duration_sec != null ? Math.round(duration_sec) : undefined,
-                  nsfw_blocked: nsfwBlocked || undefined,
-                }
+        if (engine === 'secretslider') {
+          // === Secret Slider: single batch call, URLs distributed to scenes by index ===
+          const allStyledPrompts: string[] = scenes.map((scn, i) => {
+            const styledPrompt = `${sanitizeScenePrompt(scn.prompt, i)}, ${styleConfig.fluxSuffix}`
+            console.log(`[images/secretslider] scene ${i + 1} prompt: "${styledPrompt.slice(0, 120)}"`)
+            return styledPrompt
+          })
+          console.log(`[images/secretslider] batch: ${allStyledPrompts.length} prompts`)
+
+          const ssUrls = await generateImagesSecretSlider(allStyledPrompts)
+          console.log(`[images/secretslider] received ${ssUrls.length} URLs in ${((Date.now() - t0Images) / 1000).toFixed(1)}s`)
+
+          for (let i = 0; i < scenes.length; i++) {
+            const scn = scenes[i]
+            const styledPrompt = allStyledPrompts[i]
+            const ssUrl = ssUrls[i]
+            try {
+              // Images arrive at 1376×768; no resize applied — sharp is not in project deps (see report п.4).
+              const storagePath = project_id ? `${user.id}/${project_id}/scene_ss_${i}.jpg` : undefined
+              const url = project_id
+                ? await uploadFalToStorage(ssUrl, storagePath!, 'image/jpeg', serviceClient)
+                : ssUrl
+              const audioFp = duration_sec != null ? Math.round(duration_sec) : undefined
+              const img: SceneImage = {
+                scene_index: i, prompt: styledPrompt, url,
+                scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end,
+                engine, audio_fingerprint: audioFp,
               }
-            })
-          )
+              sceneImages[i] = img
+              successCount++
+              if (url) {
+                // Spend credits only after image lands in Supabase Storage — same invariant as the per-batch path.
+                const chargeResult = await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
+                if (chargeResult.ok) chargedCount++
+              }
+              console.log(`[images/secretslider] scene ${i + 1} url: ${url?.slice(0, 100) ?? 'NULL'}`)
+            } catch (err) {
+              failCount++
+              const msg = err instanceof Error ? err.message : String(err)
+              console.error(`[images/secretslider] scene ${i + 1} FAILED:`, msg)
+              sceneImages[i] = {
+                scene_index: i, prompt: styledPrompt, url: null,
+                scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end,
+                engine, audio_fingerprint: duration_sec != null ? Math.round(duration_sec) : undefined,
+              }
+            }
+            controller.enqueue(send({
+              type: 'progress',
+              completed: successCount + failCount,
+              total: scenes.length,
+              images: sceneImages[i]?.url ? [sceneImages[i]!] : [],
+            }))
+            if (project_id) {
+              await supabase
+                .from('projects')
+                .update({ scene_images: sceneImages.filter(Boolean) })
+                .eq('id', project_id)
+                .eq('user_id', user.id)
+              console.log(`[images/secretslider] incremental save: ${sceneImages.filter(Boolean).length}/${scenes.length}`)
+            }
+          }
+        } else {
+          for (let batchStart = 0; batchStart < scenes.length; batchStart += CONCURRENCY) {
+            const batchEnd = Math.min(batchStart + CONCURRENCY, scenes.length)
+            const batchNewImages: SceneImage[] = []
+            console.log(`[images] batch ${Math.floor(batchStart / CONCURRENCY) + 1}: scenes ${batchStart + 1}–${batchEnd}`)
+            const batchT0 = Date.now()
+            const batchSuccessBefore = successCount
+            const batchFailBefore = failCount
 
-          const batchSec = ((Date.now() - batchT0) / 1000).toFixed(1)
-          const batchOk = successCount - batchSuccessBefore
-          const batchFail = failCount - batchFailBefore
-          const accumulatedSec = ((Date.now() - t0Images) / 1000).toFixed(1)
-          console.log(`[images] batch ${Math.floor(batchStart / CONCURRENCY) + 1} done: engine=${engine} size=${batchEnd - batchStart} ok=${batchOk} fail=${batchFail} batch_sec=${batchSec}s accumulated_sec=${accumulatedSec}s`)
+            await Promise.all(
+              scenes.slice(batchStart, batchEnd).map(async (scn, batchIdx) => {
+                const i = batchStart + batchIdx
+                const sanitizedPrompt = sanitizeScenePrompt(scn.prompt, i)
+                const styledPrompt = `${sanitizedPrompt}, ${styleConfig.fluxSuffix}`
+                console.log(`[images] scene ${i + 1} REQUESTED style: "${image_style ?? 'default'}"`)
+                console.log(`[images] scene ${i + 1} claude prompt result: "${scn.prompt}"`)
+                console.log(`[images] scene ${i + 1} FINAL flux prompt: "${styledPrompt}"`)
+                console.log(`[images] scene ${i + 1} NEGATIVE prompt: "${styleConfig.negativePrompt}"`)
+                try {
+                  const sceneLabel = `scene ${i + 1}`
+                  const url = engine === 'gpt_mini'
+                    ? await generateImageGptMini(styledPrompt, user.id, project_id, i, serviceClient)
+                    : await withImageRetry(
+                        () => engine === 'flux_schnell'
+                          ? generateImageFluxSchnell(styledPrompt, user.id, project_id, i, serviceClient)
+                          : engine === 'nano_banana'
+                          ? generateImageNanoBanana(styledPrompt, user.id, project_id, i, serviceClient)
+                          : generateImageFlux(styledPrompt, styleConfig.negativePrompt, user.id, project_id, i, serviceClient),
+                        sceneLabel,
+                      )
+                  const audioFp = duration_sec != null ? Math.round(duration_sec) : undefined
+                  const img: SceneImage = { scene_index: i, prompt: styledPrompt, url, scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end, engine, audio_fingerprint: audioFp }
+                  sceneImages[i] = img
+                  successCount++
+                  if (url) {
+                    batchNewImages.push(img)
+                    // Spend credits only for images that actually landed in Supabase Storage.
+                    // Track chargedCount separately so the client displays exactly what was deducted.
+                    const chargeResult = await spendCredits(user.id, costPerImage, `image_${engine}`, project_id)
+                    if (chargeResult.ok) chargedCount++
+                  }
+                  console.log(`[images] scene ${i + 1} RESULT url: ${url?.slice(0, 100) ?? 'NULL'}`)
+                } catch (err) {
+                  failCount++
+                  const msg = err instanceof Error ? err.message : String(err)
+                  const nsfwBlocked = msg.startsWith('NSFW_FILTERED')
+                  console.error(`[images] scene ${i + 1} ${nsfwBlocked ? 'NSFW_FILTERED (both attempts)' : 'FAILED'}:`, msg)
+                  sceneImages[i] = {
+                    scene_index: i, prompt: styledPrompt, url: null,
+                    scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end,
+                    engine, audio_fingerprint: duration_sec != null ? Math.round(duration_sec) : undefined,
+                    nsfw_blocked: nsfwBlocked || undefined,
+                  }
+                }
+              })
+            )
 
-          // Send progress after every batch so the client can update its UI immediately
-          controller.enqueue(send({
-            type: 'progress',
-            completed: successCount + failCount,
-            total: scenes.length,
-            images: batchNewImages,
-          }))
+            const batchSec = ((Date.now() - batchT0) / 1000).toFixed(1)
+            const batchOk = successCount - batchSuccessBefore
+            const batchFail = failCount - batchFailBefore
+            const accumulatedSec = ((Date.now() - t0Images) / 1000).toFixed(1)
+            console.log(`[images] batch ${Math.floor(batchStart / CONCURRENCY) + 1} done: engine=${engine} size=${batchEnd - batchStart} ok=${batchOk} fail=${batchFail} batch_sec=${batchSec}s accumulated_sec=${accumulatedSec}s`)
 
-          // Persist after every batch: if Vercel kills the function the user keeps
-          // all paid images. filter(Boolean) strips uninitialised (undefined) slots
-          // for future batches; null-url slots (failed FAL calls) are kept so the
-          // video renderer knows which scenes need re-generation.
-          if (project_id) {
-            await supabase
-              .from('projects')
-              .update({ scene_images: sceneImages.filter(Boolean) })
-              .eq('id', project_id)
-              .eq('user_id', user.id)
-            console.log(`[images] incremental save: ${sceneImages.filter(Boolean).length}/${scenes.length} scenes persisted`)
+            // Send progress after every batch so the client can update its UI immediately
+            controller.enqueue(send({
+              type: 'progress',
+              completed: successCount + failCount,
+              total: scenes.length,
+              images: batchNewImages,
+            }))
+
+            // Persist after every batch: if Vercel kills the function the user keeps
+            // all paid images. filter(Boolean) strips uninitialised (undefined) slots
+            // for future batches; null-url slots (failed FAL calls) are kept so the
+            // video renderer knows which scenes need re-generation.
+            if (project_id) {
+              await supabase
+                .from('projects')
+                .update({ scene_images: sceneImages.filter(Boolean) })
+                .eq('id', project_id)
+                .eq('user_id', user.id)
+              console.log(`[images] incremental save: ${sceneImages.filter(Boolean).length}/${scenes.length} scenes persisted`)
+            }
           }
         }
 

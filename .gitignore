@@ -46,3 +46,9 @@ next-env.d.ts
 tmp/
 
 .env*
+
+# test/probe artifacts (ss-probe outputs, control files)
+scripts/ss-*.jpg
+scripts/ss-*.json
+scripts/ss-probe.mjs
+control_job.tmp
