@@ -70,7 +70,7 @@ export const TOOL_CARDS = [
 export type AnalyticsGroupConfig = {
   groupKey: string
   accent?: boolean
-  tabs: Array<{ id: string; labelKey: string; icon: string; descKey: string }>
+  tabs: Array<{ id: string; labelKey: string; icon: string; descKey: string; showInDashboard: boolean }>
 }
 
 export const ANALYTICS_GROUPS: AnalyticsGroupConfig[] = [
@@ -78,32 +78,43 @@ export const ANALYTICS_GROUPS: AnalyticsGroupConfig[] = [
     groupKey: 'analytics.group_start',
     accent: true,
     tabs: [
-      { id: 'niche_finder', labelKey: 'analytics.tab_niche_finder', icon: '🎯', descKey: 'analytics.desc_niche_finder' },
-      { id: 'channel_plan', labelKey: 'analytics.tab_channel_plan', icon: '🚀', descKey: 'analytics.desc_channel_plan' },
+      { id: 'niche_finder', labelKey: 'analytics.tab_niche_finder', icon: '🎯', descKey: 'analytics.desc_niche_finder', showInDashboard: true },
+      { id: 'channel_plan', labelKey: 'analytics.tab_channel_plan', icon: '🚀', descKey: 'analytics.desc_channel_plan', showInDashboard: true },
     ],
   },
   {
     groupKey: 'analytics.group_research',
     tabs: [
-      { id: 'trends',   labelKey: 'analytics.tab_trends',   icon: '🔥', descKey: 'analytics.desc_trends'   },
-      { id: 'keywords', labelKey: 'analytics.tab_keywords', icon: '🔑', descKey: 'analytics.desc_keywords' },
-      { id: 'revenue',  labelKey: 'analytics.tab_revenue',  icon: '💰', descKey: 'analytics.desc_revenue'  },
+      { id: 'trends',   labelKey: 'analytics.tab_trends',   icon: '🔥', descKey: 'analytics.desc_trends',   showInDashboard: true },
+      { id: 'keywords', labelKey: 'analytics.tab_keywords', icon: '🔑', descKey: 'analytics.desc_keywords', showInDashboard: true },
+      { id: 'revenue',  labelKey: 'analytics.tab_revenue',  icon: '💰', descKey: 'analytics.desc_revenue',  showInDashboard: true },
     ],
   },
   {
     groupKey: 'analytics.group_competitors',
     tabs: [
-      { id: 'niche',        labelKey: 'analytics.tab_niche',        icon: '🧭', descKey: 'analytics.desc_niche'        },
-      { id: 'channel',      labelKey: 'analytics.tab_channel',      icon: '📊', descKey: 'analytics.desc_channel'      },
-      { id: 'compare',      labelKey: 'analytics.tab_compare',      icon: '⚖️', descKey: 'analytics.desc_compare'      },
-      { id: 'rising_stars', labelKey: 'analytics.tab_rising_stars', icon: '⭐', descKey: 'analytics.desc_rising_stars' },
-      { id: 'comments',     labelKey: 'analytics.tab_comments',     icon: '💬', descKey: 'analytics.desc_comments'     },
+      { id: 'niche',        labelKey: 'analytics.tab_niche',        icon: '🧭', descKey: 'analytics.desc_niche',        showInDashboard: true },
+      { id: 'channel',      labelKey: 'analytics.tab_channel',      icon: '📊', descKey: 'analytics.desc_channel',      showInDashboard: true },
+      { id: 'compare',      labelKey: 'analytics.tab_compare',      icon: '⚖️', descKey: 'analytics.desc_compare',      showInDashboard: true },
+      { id: 'rising_stars', labelKey: 'analytics.tab_rising_stars', icon: '⭐', descKey: 'analytics.desc_rising_stars', showInDashboard: true },
+      { id: 'comments',     labelKey: 'analytics.tab_comments',     icon: '💬', descKey: 'analytics.desc_comments',     showInDashboard: true },
     ],
   },
   {
     groupKey: 'analytics.group_history',
     tabs: [
-      { id: 'history', labelKey: 'analytics.tab_history', icon: '📋', descKey: 'analytics.desc_history' },
+      // showInDashboard=false: this is the user's request log, not a report type
+      { id: 'history', labelKey: 'analytics.tab_history', icon: '📋', descKey: 'analytics.desc_history', showInDashboard: false },
     ],
   },
+]
+
+// Studio pipeline steps shown in the dashboard block (no individual links — whole block → /studio)
+export const STUDIO_STEPS = [
+  { icon: '📝', labelKey: 'dashboard.step_script' },
+  { icon: '🎙️', labelKey: 'dashboard.step_audio' },
+  { icon: '🎧', labelKey: 'dashboard.step_subtitles' },
+  { icon: '🖌️', labelKey: 'dashboard.step_illustrations' },
+  { icon: '🎬', labelKey: 'dashboard.step_video' },
+  { icon: '🎯', labelKey: 'dashboard.step_seo' },
 ]

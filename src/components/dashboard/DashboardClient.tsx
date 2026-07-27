@@ -5,7 +5,7 @@ import { useLang } from '@/hooks/useLang'
 import NewProjectButton from '@/components/shared/NewProjectButton'
 import DeleteProjectButton from '@/components/shared/DeleteProjectButton'
 import type { Profile, Project, ProjectStatus, ProjectType } from '@/lib/types'
-import { TOOL_CARDS, ANALYTICS_GROUPS } from '@/lib/content-config'
+import { TOOL_CARDS, ANALYTICS_GROUPS, STUDIO_STEPS } from '@/lib/content-config'
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
   draft: 'bg-white/5 text-slate-400 border border-white/10',
@@ -169,7 +169,15 @@ export default function DashboardClient({ profile, projects }: Props) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
           </div>
-          <p className="text-xs text-slate-400 leading-relaxed">{t('dashboard.block_studio_desc')}</p>
+          <p className="text-xs text-slate-400 leading-relaxed mb-3">{t('dashboard.block_studio_desc')}</p>
+          <div className="flex flex-col gap-0.5">
+            {STUDIO_STEPS.map((step) => (
+              <div key={step.labelKey} className="flex items-center gap-2 px-2 py-1 text-xs text-slate-400">
+                <span>{step.icon}</span>
+                <span>{t(step.labelKey)}</span>
+              </div>
+            ))}
+          </div>
         </Link>
 
         {/* Block 2: Tools */}
@@ -216,17 +224,18 @@ export default function DashboardClient({ profile, projects }: Props) {
             </svg>
           </Link>
           <p className="text-xs text-slate-500 mb-3">{t('dashboard.block_analytics_desc')}</p>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-0.5">
             {ANALYTICS_GROUPS
-              .filter((g) => g.groupKey !== 'analytics.group_history')
-              .map((group) => (
+              .flatMap((g) => g.tabs)
+              .filter((tab) => tab.showInDashboard)
+              .map((tab) => (
                 <Link
-                  key={group.groupKey}
+                  key={tab.id}
                   href="/analytics"
-                  className="flex items-center justify-between px-2 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                  className="flex items-center gap-2 px-2 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
                 >
-                  <span>{t(group.groupKey)}</span>
-                  <span className="text-slate-600 tabular-nums">({group.tabs.length})</span>
+                  <span>{tab.icon}</span>
+                  <span>{t(tab.labelKey)}</span>
                 </Link>
               ))}
           </div>
