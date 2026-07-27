@@ -23,7 +23,7 @@ interface PaddleSubInfo {
 }
 
 async function fetchPaddleSubscriptions(): Promise<Map<string, PaddleSubInfo>> {
-  const apiKey = process.env.PADDLE_API_KEY?.replace(/^﻿/, '').trim()
+  const apiKey = env('PADDLE_API_KEY')
   const map = new Map<string, PaddleSubInfo>()
   if (!apiKey) return map
 

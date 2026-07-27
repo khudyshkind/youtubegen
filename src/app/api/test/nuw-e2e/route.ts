@@ -7,6 +7,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase-server'
+import { env } from '@/lib/env'
 
 const GATE_SECRET = 'nuw-e2e-2026-q8k5'
 const WEBHOOK_URL = 'https://lefiro.co/api/webhooks/new-user'
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
   }
 
   const svc = createServiceClient()
-  const webhookSecret = process.env.NEW_USER_WEBHOOK_SECRET ?? ''
+  const webhookSecret = env('NEW_USER_WEBHOOK_SECRET')
 
   // ── 1. No Authorization header → 401 ────────────────────────────────────
   {
@@ -101,8 +102,8 @@ export async function GET(req: NextRequest) {
 
   // ── 9. Telegram ping: prove bot is alive ────────────────────────────────
   {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN ?? ''
-    const ownerId  = process.env.TELEGRAM_OWNER_ID  ?? ''
+    const botToken = env('TELEGRAM_BOT_TOKEN')
+    const ownerId  = env('TELEGRAM_OWNER_ID')
     if (!botToken || !ownerId) {
       assert(false, '9. Telegram ping', 'TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID not set')
     } else {

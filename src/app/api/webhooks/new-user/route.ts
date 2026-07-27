@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase-server'
 import { sendTelegramAlert } from '@/lib/telegram'
+import { env } from '@/lib/env'
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const secret = process.env.NEW_USER_WEBHOOK_SECRET
+  const secret = env('NEW_USER_WEBHOOK_SECRET')
 
   // Secret not configured: log, return 200 so pg_net doesn't retry endlessly
   if (!secret) {

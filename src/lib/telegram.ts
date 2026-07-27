@@ -1,8 +1,9 @@
 import { createServiceClient } from './supabase-server'
+import { env } from './env'
 
 export async function sendTelegramAlert(text: string): Promise<void> {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN
-  const ownerId = process.env.TELEGRAM_OWNER_ID
+  const botToken = env('TELEGRAM_BOT_TOKEN')
+  const ownerId = env('TELEGRAM_OWNER_ID')
   if (!botToken || !ownerId) {
     console.warn('[telegram] TELEGRAM_BOT_TOKEN or TELEGRAM_OWNER_ID not set')
     return

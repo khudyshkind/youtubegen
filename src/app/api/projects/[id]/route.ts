@@ -85,8 +85,8 @@ export async function DELETE(
     // Timeout 10s; errors are logged but must not block the user-facing delete response.
     ;(async () => {
       try {
-        const railwayUrl = (process.env.RAILWAY_VIDEO_SERVER_URL ?? '').replace(/\/$/, '')
-        const railwaySecret = process.env.RAILWAY_API_SECRET ?? ''
+        const railwayUrl = env('RAILWAY_VIDEO_SERVER_URL').replace(/\/$/, '')
+        const railwaySecret = env('RAILWAY_API_SECRET')
         if (!railwayUrl || !railwaySecret) return
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), 10_000)

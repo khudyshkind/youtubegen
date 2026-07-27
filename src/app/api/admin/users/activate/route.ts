@@ -5,6 +5,7 @@ import { createServiceClient } from '@/lib/supabase-server'
 import { activatePlan } from '@/lib/activate-plan'
 import { TOPUP_PACKAGES, PLAN_PRICES } from '@/lib/types'
 import type { Plan } from '@/lib/types'
+import { env } from '@/lib/env'
 
 const VALID_PLANS: Plan[] = ['basic', 'starter', 'pro', 'agency']
 
@@ -18,7 +19,7 @@ const TOPUP_KEY_MAP: Record<string, number> = {
 
 export async function POST(request: NextRequest) {
   try {
-    const secret = process.env.RAILWAY_API_SECRET
+    const secret = env('RAILWAY_API_SECRET')
     if (!secret || request.headers.get('x-api-secret') !== secret) {
       return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
     }

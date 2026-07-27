@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { env } from '@/lib/env'
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -232,7 +233,7 @@ async function fetchSharedVoices(apiKey: string, language: string): Promise<Norm
 
 export async function GET(request: NextRequest) {
   try {
-    const apiKey = process.env.ELEVENLABS_API_KEY ?? ''
+    const apiKey = env('ELEVENLABS_API_KEY')
     const language = request.nextUrl.searchParams.get('language') ?? ''
 
     const [ownVoices, sharedVoices] = await Promise.all([

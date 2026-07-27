@@ -393,7 +393,7 @@ async function generateGptThumbnail(prompt: string): Promise<string> {
 
 async function generateGeminiThumbnail(prompt: string): Promise<string> {
   const key = env('GEMINI_API_KEY')
-  const model = process.env.GEMINI_IMAGE_MODEL ?? 'gemini-3-pro-image-preview'
+  const model = env('GEMINI_IMAGE_MODEL') || 'gemini-3-pro-image-preview'
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
@@ -608,7 +608,7 @@ export async function POST(request: NextRequest) {
     // THUMBNAIL_AI_TEXT_ENGINE: when set to 'gpt' or 'gemini', mode=ai uses external engine for text-in-image.
     // Default 'nano_banana_2' (NB2 cascade). Set in Vercel env if switching engines.
     const AI_TEXT_ENGINE_HINT = text_mode === 'ai'
-      ? (process.env.THUMBNAIL_AI_TEXT_ENGINE ?? 'nano_banana_2')
+      ? (env('THUMBNAIL_AI_TEXT_ENGINE') || 'nano_banana_2')
       : 'overlay'
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, text_mode, engine: AI_TEXT_ENGINE_HINT })
@@ -670,7 +670,7 @@ export async function POST(request: NextRequest) {
       const prompt = fluxSuffix ? `${rawPrompt}, ${fluxSuffix}` : rawPrompt
 
       // Mode B: GPT/Gemini only if explicitly set via env; default → nano-banana-2 cascade
-      const AI_TEXT_ENGINE = (process.env.THUMBNAIL_AI_TEXT_ENGINE ?? 'nano_banana_2') as 'flux' | 'gpt' | 'gemini' | 'nano_banana_2'
+      const AI_TEXT_ENGINE = (env('THUMBNAIL_AI_TEXT_ENGINE') || 'nano_banana_2') as 'flux' | 'gpt' | 'gemini' | 'nano_banana_2'
       const usesExternalEngine = text_mode === 'ai' && (AI_TEXT_ENGINE === 'gpt' || AI_TEXT_ENGINE === 'gemini')
 
       if (usesExternalEngine) {

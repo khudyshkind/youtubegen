@@ -1,17 +1,24 @@
 'use strict'
 
+// Strips BOM (U+FEFF, char code 65279) and trims whitespace.
+// Mirrors src/lib/env.ts — duplicated here because video-server is standalone CJS with no shared build.
+function env(key) {
+  const val = process.env[key] ?? ''
+  return (val.charCodeAt(0) === 0xfeff ? val.slice(1) : val).trim()
+}
+
 // Sentry must be initialized before all other requires
 let Sentry
 try {
   const SentryPkg = require('@sentry/node')
   SentryPkg.init({
-    dsn: process.env.SENTRY_DSN || '',
+    dsn: env('SENTRY_DSN'),
     tracesSampleRate: 0,
     defaultIntegrations: false,
     integrations: [],
     debug: false,
   })
-  console.log('[sentry] initialized, DSN present:', !!process.env.SENTRY_DSN)
+  console.log('[sentry] initialized, DSN present:', !!env('SENTRY_DSN'))
   Sentry = SentryPkg
 } catch (e) {
   console.warn('[sentry] unavailable:', e.message)
@@ -58,11 +65,11 @@ try {
 const app = express()
 app.use(express.json({ limit: '2mb' }))
 
-const API_SECRET            = process.env.RAILWAY_API_SECRET
-const SUPABASE_URL          = process.env.NEXT_PUBLIC_SUPABASE_URL
-const SUPABASE_SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
+const API_SECRET            = env('RAILWAY_API_SECRET')
+const SUPABASE_URL          = env('NEXT_PUBLIC_SUPABASE_URL')
+const SUPABASE_SERVICE_KEY  = env('SUPABASE_SERVICE_ROLE_KEY')
 
-const VGF_API_KEY = process.env.VGF_API_KEY
+const VGF_API_KEY = env('VGF_API_KEY')
 
 // Max parallel clip-encode submissions to VGF. Too high causes 504s on VGF's edge proxy.
 const VGF_CLIP_CONCURRENCY = 12
@@ -72,19 +79,19 @@ const VGF_SUBMIT_RETRIES = 3
 // Keys = jobId, values = { phase, clipsDone, totalClips }
 const renderActiveJobs = new Map()
 
-const VERCEL_TOKEN = process.env.VERCEL_TOKEN
+const VERCEL_TOKEN = env('VERCEL_TOKEN')
 
 // ── Russia payment config ─────────────────────────────────────────────────────
-const USDT_TRC20  = process.env.USDT_TRC20  || 'TW6Z6iZECebHe764YCKAsv5MfVFG6G947L'
-const USDT_ERC20  = process.env.USDT_ERC20  || '0x0f8d57d74367c4379b809399b1205f587f46104a'
-const APP_URL     = process.env.APP_URL     || 'https://lefiro.co'
+const USDT_TRC20  = env('USDT_TRC20')  || 'TW6Z6iZECebHe764YCKAsv5MfVFG6G947L'
+const USDT_ERC20  = env('USDT_ERC20')  || '0x0f8d57d74367c4379b809399b1205f587f46104a'
+const APP_URL     = env('APP_URL')     || 'https://lefiro.co'
 
 // ── Telegram config ───────────────────────────────────────────────────────────
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
-const CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID
-const OWNER_ID = String(process.env.TELEGRAM_OWNER_ID || '')
-const SERVER_URL = process.env.RAILWAY_PUBLIC_DOMAIN
-  ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+const BOT_TOKEN  = env('TELEGRAM_BOT_TOKEN')
+const CHANNEL_ID = env('TELEGRAM_CHANNEL_ID')
+const OWNER_ID   = env('TELEGRAM_OWNER_ID')
+const SERVER_URL = env('RAILWAY_PUBLIC_DOMAIN')
+  ? `https://${env('RAILWAY_PUBLIC_DOMAIN')}`
   : 'https://ytgen-video-server-production.up.railway.app'
 
 // ── AI consultant ──────────────────────────────────────────────────────────────
@@ -102,7 +109,7 @@ const aiRateLimit = new Map() // chatId → [timestamps]; cleared by natural GC 
 // Env: RETENTION_MEDIA_HOURS (default 72).
 // Legacy RETENTION_MEDIA_FREE_HOURS / RETENTION_MEDIA_PAID_HOURS are ignored;
 // set RETENTION_MEDIA_HOURS=72 in Railway Variables (remove the legacy pair).
-const RETENTION_MEDIA_HOURS = parseInt(process.env.RETENTION_MEDIA_HOURS ?? '72')
+const RETENTION_MEDIA_HOURS = parseInt(env('RETENTION_MEDIA_HOURS') || '72')
 
 // Compute when a project's media should expire (ISO string).
 // Source of truth used by cron (writes media_expires_at to DB) and UI (countdown badge).
@@ -115,10 +122,10 @@ function computeMediaExpiry(updatedAt) {
 // DeleteObjects.  Returns [] / noop when R2 is not configured so callers are safe.
 
 async function r2ListObjects(prefix) {
-  const accountId = (process.env.R2_ACCOUNT_ID        || '').trim()
-  const bucket    = (process.env.R2_BUCKET             || '').trim()
-  const accessKey = (process.env.R2_ACCESS_KEY_ID      || '').trim()
-  const secretKey = (process.env.R2_SECRET_ACCESS_KEY  || '').trim()
+  const accountId = env('R2_ACCOUNT_ID')
+  const bucket    = env('R2_BUCKET')
+  const accessKey = env('R2_ACCESS_KEY_ID')
+  const secretKey = env('R2_SECRET_ACCESS_KEY')
   if (!accountId || !bucket || !accessKey || !secretKey) return []
 
   const host     = `${accountId}.r2.cloudflarestorage.com`
@@ -160,10 +167,10 @@ async function r2ListObjects(prefix) {
 
 async function r2DeleteObjects(keys) {
   if (!keys.length) return
-  const accountId = (process.env.R2_ACCOUNT_ID        || '').trim()
-  const bucket    = (process.env.R2_BUCKET             || '').trim()
-  const accessKey = (process.env.R2_ACCESS_KEY_ID      || '').trim()
-  const secretKey = (process.env.R2_SECRET_ACCESS_KEY  || '').trim()
+  const accountId = env('R2_ACCOUNT_ID')
+  const bucket    = env('R2_BUCKET')
+  const accessKey = env('R2_ACCESS_KEY_ID')
+  const secretKey = env('R2_SECRET_ACCESS_KEY')
   if (!accountId || !bucket || !accessKey || !secretKey) throw new Error('R2 env vars not set')
 
   const host     = `${accountId}.r2.cloudflarestorage.com`
@@ -869,8 +876,8 @@ function channelPostLink(res) {
 }
 
 // ── Email helpers (Resend API, used by expiry notifications) ─────────────────
-const RESEND_API_KEY    = process.env.RESEND_API_KEY
-const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Lefiro <noreply@lefiro.co>'
+const RESEND_API_KEY    = env('RESEND_API_KEY')
+const RESEND_FROM_EMAIL = env('RESEND_FROM_EMAIL') || 'Lefiro <noreply@lefiro.co>'
 // APP_URL already declared at module top (line 82)
 
 async function sendRawEmail(to, subject, html) {
@@ -1008,7 +1015,7 @@ async function forwardProofToOwner(userChatId, message, pst) {
 async function activateUserPlan(email, plan, claimId = null, telegramChatId = null) {
   const res = await fetch(`${APP_URL}/api/admin/users/activate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-secret': process.env.RAILWAY_API_SECRET || '' },
+    headers: { 'Content-Type': 'application/json', 'x-api-secret': API_SECRET },
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
       plan,
@@ -1022,7 +1029,7 @@ async function activateUserPlan(email, plan, claimId = null, telegramChatId = nu
 }
 
 // ── Claude helpers ────────────────────────────────────────────────────────────
-function claude() { return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) }
+function claude() { return new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') }) }
 
 async function generatePost(topic) {
   const msg = await claude().messages.create({
@@ -1094,7 +1101,7 @@ function withTimeout(promise, ms, label) {
 }
 
 async function generateImage(topic) {
-  const FAL_KEY = process.env.FAL_KEY
+  const FAL_KEY = env('FAL_KEY')
   if (!FAL_KEY) { console.warn('[fal] FAL_KEY not set, skipping image'); return null }
 
   const prompt = await withTimeout(generateImagePrompt(topic), 15000, 'image-prompt')
@@ -1830,7 +1837,7 @@ app.post('/telegram/webhook', async (req, res) => {
     if (sst?.step === 'waiting_description' && !isCommand && text) {
       console.log('[support] description received from userId:', userId, 'chatId:', chatId)
       console.log('[support] category:', sst.category)
-      console.log('[support] sending to owner:', process.env.TELEGRAM_OWNER_ID)
+      console.log('[support] sending to owner:', OWNER_ID)
 
       const cat          = SUPPORT_CATEGORIES[sst.category]
       const ticketNumber = await createSupportTicket(chatId, sst.username || message.from?.username, sst.category, text)
@@ -2231,9 +2238,9 @@ app.post('/telegram/webhook', async (req, res) => {
 // ── Database backup to B2 ────────────────────────────────────────────────────
 // SigV4 helper for backup bucket operations (GET list / PUT upload / DELETE)
 function b2BackupSign(method, key, queryString, contentType, bodyHash) {
-  const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
-  const region   = (process.env.B2_REGION   || 'us-east-005').trim()
-  const bucket   = (process.env.B2_BACKUP_BUCKET || 'youtubegen-db-backups').trim()
+  const endpoint = env('B2_ENDPOINT').replace(/\/$/, '')
+  const region   = env('B2_REGION') || 'us-east-005'
+  const bucket   = env('B2_BACKUP_BUCKET') || 'youtubegen-db-backups'
 
   const now           = new Date()
   const amzDate       = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
@@ -2259,8 +2266,8 @@ function b2BackupSign(method, key, queryString, contentType, bodyHash) {
   const canonReq = [method, urlPath, canonicalQS, canonHeaders, signedHdrs, bodyHash].join('\n')
   const sts      = ['AWS4-HMAC-SHA256', amzDate, credScope, crypto.createHash('sha256').update(canonReq).digest('hex')].join('\n')
   const hmac     = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
-  const backupKeyId  = process.env.B2_BACKUP_KEY_ID  || process.env.B2_KEY_ID
-  const backupAppKey = process.env.B2_BACKUP_APPLICATION_KEY || process.env.B2_APPLICATION_KEY
+  const backupKeyId  = env('B2_BACKUP_KEY_ID')  || env('B2_KEY_ID')
+  const backupAppKey = env('B2_BACKUP_APPLICATION_KEY') || env('B2_APPLICATION_KEY')
   const sigKey   = hmac(hmac(hmac(hmac(`AWS4${backupAppKey}`, dateStamp), region), service), 'aws4_request')
   const sig      = crypto.createHmac('sha256', sigKey).update(sts).digest('hex')
 
@@ -2305,8 +2312,8 @@ async function b2BackupDelete(key) {
 }
 
 async function backupDatabase() {
-  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '')
-  const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const supabaseUrl = SUPABASE_URL.replace(/\/$/, '')
+  const serviceKey  = SUPABASE_SERVICE_KEY
   if (!supabaseUrl || !serviceKey) {
     console.warn('[backup] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set — skipping')
     return
@@ -2421,9 +2428,9 @@ async function backupDatabase() {
 
 // ── Media retention: B2 helpers (main bucket, not backup) ────────────────────
 function b2MediaSign(method, key, queryString, contentType, bodyHash) {
-  const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
-  const region   = (process.env.B2_REGION   || 'us-east-005').trim()
-  const bucket   = (process.env.B2_BUCKET   || '').trim()
+  const endpoint = env('B2_ENDPOINT').replace(/\/$/, '')
+  const region   = env('B2_REGION') || 'us-east-005'
+  const bucket   = env('B2_BUCKET')
   const now      = new Date()
   const amzDate  = now.toISOString().replace(/[:\-]/g, '').replace(/\.\d{3}Z$/, 'Z')
   const dateStamp = amzDate.slice(0, 8)
@@ -2443,7 +2450,7 @@ function b2MediaSign(method, key, queryString, contentType, bodyHash) {
   const canonReq = [method, parsed.pathname, canonicalQS, canonHeaders, signedHdrs, bodyHash].join('\n')
   const sts      = ['AWS4-HMAC-SHA256', amzDate, credScope, crypto.createHash('sha256').update(canonReq).digest('hex')].join('\n')
   const hmac     = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
-  const sigKey   = hmac(hmac(hmac(hmac(`AWS4${process.env.B2_APPLICATION_KEY}`, dateStamp), region), service), 'aws4_request')
+  const sigKey   = hmac(hmac(hmac(hmac(`AWS4${env('B2_APPLICATION_KEY')}`, dateStamp), region), service), 'aws4_request')
   const sig      = crypto.createHmac('sha256', sigKey).update(sts).digest('hex')
   return {
     fullUrl,
@@ -2451,7 +2458,7 @@ function b2MediaSign(method, key, queryString, contentType, bodyHash) {
       ...(contentType ? { 'Content-Type': contentType } : {}),
       'x-amz-content-sha256': bodyHash,
       'x-amz-date': amzDate,
-      'Authorization': `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credScope}, SignedHeaders=${signedHdrs}, Signature=${sig}`,
+      'Authorization': `AWS4-HMAC-SHA256 Credential=${env('B2_KEY_ID')}/${credScope}, SignedHeaders=${signedHdrs}, Signature=${sig}`,
     },
   }
 }
@@ -2527,7 +2534,7 @@ async function supabaseStorageRemove(bucket, prefixes) {
 // NEW MODEL: projects row is NEVER deleted. Only media (images/audio/video) are purged.
 // Sets media_purged_at on the project so UI can show banner and block render.
 async function cleanupExpiredMedia() {
-  const DRY_RUN = process.env.RETENTION_DRY_RUN !== 'false'
+  const DRY_RUN = env('RETENTION_DRY_RUN') !== 'false'
   const tag = DRY_RUN ? '[retention/dry]' : '[retention]'
   console.log(`${tag} pass start, dry=${DRY_RUN}`)
   console.log(`${tag} thresholds: free=${RETENTION_MEDIA_HOURS.free}h paid=${RETENTION_MEDIA_HOURS.paid}h`)
@@ -2747,10 +2754,10 @@ async function cleanupExpiredMedia() {
 }
 
 // ── Balance monitoring — fal.ai, ElevenLabs, APIHOST ─────────────────────────
-const FAL_ADMIN_KEY                    = process.env.FAL_ADMIN_KEY || process.env.FAL_KEY || ''
-const FAL_BALANCE_THRESHOLD            = parseFloat(process.env.FAL_BALANCE_ALERT_THRESHOLD      ?? '10')
-const ELEVENLABS_CHARS_ALERT_THRESHOLD = parseInt  (process.env.ELEVENLABS_CHARS_ALERT_THRESHOLD ?? '50000')
-const APIHOST_BALANCE_ALERT_THRESHOLD  = parseFloat(process.env.APIHOST_BALANCE_ALERT_THRESHOLD  ?? '100')
+const FAL_ADMIN_KEY                    = env('FAL_ADMIN_KEY') || env('FAL_KEY')
+const FAL_BALANCE_THRESHOLD            = parseFloat(env('FAL_BALANCE_ALERT_THRESHOLD')      || '10')
+const ELEVENLABS_CHARS_ALERT_THRESHOLD = parseInt  (env('ELEVENLABS_CHARS_ALERT_THRESHOLD') || '50000')
+const APIHOST_BALANCE_ALERT_THRESHOLD  = parseFloat(env('APIHOST_BALANCE_ALERT_THRESHOLD')  || '100')
 
 // Send billing-exhaustion alert from Railway with 1h dedup per service.
 async function notifyBillingErrorRailway(service, route) {
@@ -2875,7 +2882,7 @@ async function checkFalBalance() {
 
 // ── ElevenLabs characters balance ─────────────────────────────────────────────
 async function fetchElevenLabsBalance() {
-  const apiKey = process.env.ELEVENLABS_API_KEY
+  const apiKey = env('ELEVENLABS_API_KEY')
   if (!apiKey) return { error: 'no_key' }
   const controller = new AbortController()
   const t = setTimeout(() => controller.abort(), 10_000)
@@ -2956,7 +2963,7 @@ async function checkElevenLabsBalance() {
 
 // ── APIHOST ruble balance ──────────────────────────────────────────────────────
 async function fetchApihostBalance() {
-  const apiKey = process.env.APIHOST_API_KEY
+  const apiKey = env('APIHOST_API_KEY')
   if (!apiKey) return { error: 'no_key' }
   const controller = new AbortController()
   const t = setTimeout(() => controller.abort(), 10_000)
@@ -3247,10 +3254,10 @@ cron.schedule('0 9 * * *', async () => {
 }, { timezone: 'UTC' })
 
 // ── Watchdog: stuck projects / audio_jobs ─────────────────────────────────────
-const WATCHDOG_DRY_RUN            = process.env.WATCHDOG_DRY_RUN !== 'false'
-const WATCHDOG_IMAGES_TIMEOUT_MIN = parseInt(process.env.WATCHDOG_IMAGES_TIMEOUT_MIN || '15', 10)
-const WATCHDOG_VIDEO_TIMEOUT_MIN  = parseInt(process.env.WATCHDOG_VIDEO_TIMEOUT_MIN  || '40', 10)
-const WATCHDOG_AUDIO_TIMEOUT_MIN  = parseInt(process.env.WATCHDOG_AUDIO_TIMEOUT_MIN  || '20', 10)
+const WATCHDOG_DRY_RUN            = env('WATCHDOG_DRY_RUN') !== 'false'
+const WATCHDOG_IMAGES_TIMEOUT_MIN = parseInt(env('WATCHDOG_IMAGES_TIMEOUT_MIN') || '15', 10)
+const WATCHDOG_VIDEO_TIMEOUT_MIN  = parseInt(env('WATCHDOG_VIDEO_TIMEOUT_MIN')  || '40', 10)
+const WATCHDOG_AUDIO_TIMEOUT_MIN  = parseInt(env('WATCHDOG_AUDIO_TIMEOUT_MIN')  || '20', 10)
 
 async function runWatchdog() {
   const tag = WATCHDOG_DRY_RUN ? '[watchdog/dry]' : '[watchdog]'
@@ -3452,9 +3459,9 @@ function verifySecret(req, res, next) {
 // NOTE: R2 keys use the same users/${userId}/${projectId}/... path format as B2.
 // Future retention cleanup will need an R2 S3-compatible client to enumerate and delete these keys.
 async function uploadVideoToR2(filePath, projectId, userId) {
-  const accountId = (process.env.R2_ACCOUNT_ID || '').trim()
-  const bucket = (process.env.R2_BUCKET || '').trim()
-  const publicBase = (process.env.R2_PUBLIC_BASE || '').trim().replace(/\/$/, '')
+  const accountId = env('R2_ACCOUNT_ID')
+  const bucket = env('R2_BUCKET')
+  const publicBase = env('R2_PUBLIC_BASE').replace(/\/$/, '')
 
   const endpoint = `https://${accountId}.r2.cloudflarestorage.com`
   const key = `users/${userId}/${projectId}/output_${Date.now()}.mp4`
@@ -3493,10 +3500,10 @@ async function uploadVideoToR2(filePath, projectId, userId) {
   ].join('\n')
 
   const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
-  const signingKey = hmac(hmac(hmac(hmac(`AWS4${process.env.R2_SECRET_ACCESS_KEY}`, dateStamp), region), service), 'aws4_request')
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${env('R2_SECRET_ACCESS_KEY')}`, dateStamp), region), service), 'aws4_request')
   const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex')
   const authorization =
-    `AWS4-HMAC-SHA256 Credential=${process.env.R2_ACCESS_KEY_ID}/${credentialScope}, ` +
+    `AWS4-HMAC-SHA256 Credential=${env('R2_ACCESS_KEY_ID')}/${credentialScope}, ` +
     `SignedHeaders=${signedHeaders}, Signature=${signature}`
 
   // Stream file — avoids loading large videos into RAM (OOM risk on 1 GB+).
@@ -3528,10 +3535,10 @@ async function uploadVideoToR2(filePath, projectId, userId) {
 // Used as fallback when R2 upload fails (both attempts). Streams file to avoid OOM on large videos.
 async function uploadVideoToB2(filePath, projectId, userId) {
   const key = `users/${userId}/${projectId}/output_${Date.now()}.mp4`
-  const bucket = (process.env.B2_BUCKET || '').trim()
-  const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
-  const region = (process.env.B2_REGION || 'us-east-005').trim()
-  const b2PublicBase = (process.env.B2_PUBLIC_BASE || '').trim().replace(/\/$/, '')
+  const bucket = env('B2_BUCKET')
+  const endpoint = env('B2_ENDPOINT').replace(/\/$/, '')
+  const region = env('B2_REGION') || 'us-east-005'
+  const b2PublicBase = env('B2_PUBLIC_BASE').replace(/\/$/, '')
   const fileSize = fs.statSync(filePath).size
 
   console.log(`[b2] node:${process.version}  endpoint: ${endpoint}  bucket: ${bucket}`)
@@ -3578,10 +3585,10 @@ async function uploadVideoToB2(filePath, projectId, userId) {
   ].join('\n')
 
   const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
-  const signingKey = hmac(hmac(hmac(hmac(`AWS4${process.env.B2_APPLICATION_KEY}`, dateStamp), region), service), 'aws4_request')
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${env('B2_APPLICATION_KEY')}`, dateStamp), region), service), 'aws4_request')
   const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex')
   const authorization =
-    `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credentialScope}, ` +
+    `AWS4-HMAC-SHA256 Credential=${env('B2_KEY_ID')}/${credentialScope}, ` +
     `SignedHeaders=${signedHeaders}, Signature=${signature}`
 
   const res = await fetch(uploadUrl, {
@@ -4037,10 +4044,10 @@ async function getAudioDuration(url) {
 // omit for temp files (subtitle ASS, proxied images) which are deleted after render.
 // Cache-Control is included in SigV4 canonical headers when provided.
 async function uploadBytesToB2(buffer, key, contentType = 'application/octet-stream', cacheControl = null) {
-  const bucket      = (process.env.B2_BUCKET || '').trim()
-  const endpoint    = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
-  const region      = (process.env.B2_REGION || 'us-east-005').trim()
-  const b2PublicBase = (process.env.B2_PUBLIC_BASE || '').trim().replace(/\/$/, '')
+  const bucket      = env('B2_BUCKET')
+  const endpoint    = env('B2_ENDPOINT').replace(/\/$/, '')
+  const region      = env('B2_REGION') || 'us-east-005'
+  const b2PublicBase = env('B2_PUBLIC_BASE').replace(/\/$/, '')
   const uploadUrl   = `${endpoint}/${bucket}/${key}`
   const parsed      = new URL(uploadUrl)
   const now         = new Date()
@@ -4065,10 +4072,10 @@ async function uploadBytesToB2(buffer, key, contentType = 'application/octet-str
     crypto.createHash('sha256').update(canonicalRequest).digest('hex'),
   ].join('\n')
   const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
-  const signingKey = hmac(hmac(hmac(hmac(`AWS4${process.env.B2_APPLICATION_KEY}`, dateStamp), region), service), 'aws4_request')
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${env('B2_APPLICATION_KEY')}`, dateStamp), region), service), 'aws4_request')
   const signature  = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex')
   const authorization =
-    `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credentialScope}, ` +
+    `AWS4-HMAC-SHA256 Credential=${env('B2_KEY_ID')}/${credentialScope}, ` +
     `SignedHeaders=${signedHeaders}, Signature=${signature}`
   const fetchHeaders = { 'Content-Type': contentType, 'x-amz-content-sha256': bodyHash, 'x-amz-date': amzDate, 'Authorization': authorization }
   if (cacheControl) fetchHeaders['Cache-Control'] = cacheControl
@@ -4086,9 +4093,9 @@ async function uploadBytesToB2(buffer, key, contentType = 'application/octet-str
 // Delete temp files from B2 by key list
 async function deleteTempImagesFromB2(keys) {
   if (!keys.length) return
-  const bucket   = (process.env.B2_BUCKET || '').trim()
-  const endpoint = (process.env.B2_ENDPOINT || '').trim().replace(/\/$/, '')
-  const region   = (process.env.B2_REGION || 'us-east-005').trim()
+  const bucket   = env('B2_BUCKET')
+  const endpoint = env('B2_ENDPOINT').replace(/\/$/, '')
+  const region   = env('B2_REGION') || 'us-east-005'
   const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
   const emptyHash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
   await Promise.all(keys.map(async (key) => {
@@ -4108,10 +4115,10 @@ async function deleteTempImagesFromB2(keys) {
       const canonicalRequest = ['DELETE', parsed.pathname, '', canonicalHeaders, signedHeaders, emptyHash].join('\n')
       const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope,
         crypto.createHash('sha256').update(canonicalRequest).digest('hex')].join('\n')
-      const signingKey = hmac(hmac(hmac(hmac(`AWS4${process.env.B2_APPLICATION_KEY}`, dateStamp), region), service), 'aws4_request')
+      const signingKey = hmac(hmac(hmac(hmac(`AWS4${env('B2_APPLICATION_KEY')}`, dateStamp), region), service), 'aws4_request')
       const signature  = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex')
       const authorization =
-        `AWS4-HMAC-SHA256 Credential=${process.env.B2_KEY_ID}/${credentialScope}, ` +
+        `AWS4-HMAC-SHA256 Credential=${env('B2_KEY_ID')}/${credentialScope}, ` +
         `SignedHeaders=${signedHeaders}, Signature=${signature}`
       const res = await fetch(deleteUrl, {
         method: 'DELETE',
@@ -4774,7 +4781,7 @@ app.post('/transcribe', verifySecret, async (req, res) => {
   const { audio_url, language } = req.body
   if (!audio_url) return res.status(400).json({ ok: false, error: 'audio_url required' })
 
-  const openaiKey = process.env.OPENAI_API_KEY
+  const openaiKey = env('OPENAI_API_KEY')
   if (!openaiKey) return res.status(503).json({ ok: false, error: 'OPENAI_API_KEY not configured on video-server' })
 
   try {
@@ -5026,8 +5033,8 @@ const TTS_CHUNK_LIMITS = {
   voicer:       { maxChars: 195000, measureBytes: false },
 }
 
-const SV_CHUNK_TIMEOUT_MS     = parseInt(process.env.SV_CHUNK_TIMEOUT_MS     ?? '600000',  10) // 10 min default
-const VOICER_CHUNK_TIMEOUT_MS = parseInt(process.env.VOICER_CHUNK_TIMEOUT_MS ?? '1800000', 10) // 30 min default
+const SV_CHUNK_TIMEOUT_MS     = parseInt(env('SV_CHUNK_TIMEOUT_MS')     || '600000',  10) // 10 min default
+const VOICER_CHUNK_TIMEOUT_MS = parseInt(env('VOICER_CHUNK_TIMEOUT_MS') || '1800000', 10) // 30 min default
 
 // Strip ID3v2 tag from start of MP3 buffer.
 // Applied to all non-first chunks before Buffer.concat to prevent PTS-reset drift
@@ -5130,7 +5137,7 @@ async function runLimited(fns, limit) {
 // Submit one text chunk to SecretVoicer; poll until COMPLETED.
 // Returns Buffer (MP3). Throws on failure or timeout.
 async function synthesizeSecretVoicerChunk(text, voiceId, settings, jobId) {
-  const apiKey = process.env.SECRETVOICER_API_KEY
+  const apiKey = env('SECRETVOICER_API_KEY')
   const chunkStart = Date.now()
   const res = await fetch(`${SV_BASE}/synthesize`, {
     method: 'POST',
@@ -5190,7 +5197,7 @@ async function synthesizeSecretVoicerChunk(text, voiceId, settings, jobId) {
 // Submit one text chunk to Voicer; poll until completed.
 // Returns Buffer (MP3). Throws on failure, timeout, or content-block.
 async function synthesizeVoicerChunk(text, voiceId, settings, jobId) {
-  const apiKey     = process.env.VOICER_API_KEY
+  const apiKey     = env('VOICER_API_KEY')
   const authHeader = `Bearer ${apiKey}`
   const chunkStart = Date.now()
 
@@ -5539,7 +5546,7 @@ async function recoverOrphanedAudioJobs() {
 // Must be added AFTER all routes
 Sentry.setupExpressErrorHandler(app)
 
-const PORT = parseInt(process.env.PORT || '3001', 10)
+const PORT = parseInt(env('PORT') || '3001', 10)
 app.listen(PORT, async () => {
   console.log(`ytgen-video-server on :${PORT}`)
   await loadSettingsFromDB().catch(err => console.warn('[bot] settings load failed:', err.message))
@@ -5560,8 +5567,7 @@ app.listen(PORT, async () => {
   ]).catch(err => console.warn('[startup] threshold write failed:', err.message))
   console.log('[bot] starting cron jobs...')
 
-  const ownerId = process.env.TELEGRAM_OWNER_ID
-  console.log('[boot] OWNER_ID:', ownerId || '(not set)')
+  console.log('[boot] OWNER_ID:', OWNER_ID || '(not set)')
   if (ownerId) {
     tgApi('sendMessage', { chat_id: ownerId, text: '🟢 Бот перезапущен' })
       .then(r => console.log('[boot] owner notified ok, tg response ok:', r?.ok))

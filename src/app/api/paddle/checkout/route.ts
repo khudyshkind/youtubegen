@@ -6,7 +6,7 @@ import { TOPUP_PACKAGES } from '@/lib/types'
 import type { Plan } from '@/lib/types'
 
 function getPaddle() {
-  const useSandbox = process.env.PADDLE_SANDBOX === 'true'
+  const useSandbox = env('PADDLE_SANDBOX') === 'true'
   return new Paddle(env('PADDLE_API_KEY'), {
     environment: useSandbox ? Environment.sandbox : Environment.production,
   })
@@ -14,10 +14,10 @@ function getPaddle() {
 
 function getPlanPriceIds(): Record<Exclude<Plan, 'free'>, string> {
   const ids = {
-    basic:   process.env.PADDLE_PRICE_BASIC,
-    starter: process.env.PADDLE_PRICE_STARTER,
-    pro:     process.env.PADDLE_PRICE_PRO,
-    agency:  process.env.PADDLE_PRICE_AGENCY,
+    basic:   env('PADDLE_PRICE_BASIC')   || undefined,
+    starter: env('PADDLE_PRICE_STARTER') || undefined,
+    pro:     env('PADDLE_PRICE_PRO')     || undefined,
+    agency:  env('PADDLE_PRICE_AGENCY')  || undefined,
   }
   console.log('[checkout] plan price ids:', ids)
   return ids as Record<Exclude<Plan, 'free'>, string>
@@ -25,9 +25,9 @@ function getPlanPriceIds(): Record<Exclude<Plan, 'free'>, string> {
 
 function getTopupPriceIds(): string[] {
   const ids = [
-    process.env.PADDLE_PRICE_TOPUP_500,
-    process.env.PADDLE_PRICE_TOPUP_2000,
-    process.env.PADDLE_PRICE_TOPUP_5000,
+    env('PADDLE_PRICE_TOPUP_500')  || undefined,
+    env('PADDLE_PRICE_TOPUP_2000') || undefined,
+    env('PADDLE_PRICE_TOPUP_5000') || undefined,
   ]
   console.log('[checkout] topup price ids:', ids)
   return ids as string[]

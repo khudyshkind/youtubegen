@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase-server'
 import { sendTelegramAlert } from '@/lib/telegram'
+import { env } from '@/lib/env'
 
 const DEDUP_TTL_MS = 10 * 60 * 1000 // 10 minutes
 
@@ -33,7 +34,7 @@ function levelEmoji(level: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const secret = process.env.SENTRY_WEBHOOK_SECRET
+  const secret = env('SENTRY_WEBHOOK_SECRET')
   if (!secret) {
     console.error('[sentry-webhook] SENTRY_WEBHOOK_SECRET not configured')
     return NextResponse.json({ error: 'not configured' }, { status: 500 })

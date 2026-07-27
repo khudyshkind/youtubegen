@@ -8,7 +8,7 @@ import { env } from '@/lib/env'
 import type { Plan } from '@/lib/types'
 
 function getPaddle() {
-  const useSandbox = process.env.PADDLE_SANDBOX === 'true'
+  const useSandbox = env('PADDLE_SANDBOX') === 'true'
   return new Paddle(env('PADDLE_API_KEY'), {
     environment: useSandbox ? Environment.sandbox : Environment.production,
   })

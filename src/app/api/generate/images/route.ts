@@ -1025,12 +1025,14 @@ export async function POST(request: NextRequest) {
         let chargedCount = 0
         let failCount = 0
 
-        const GPT_BATCH_SIZE = parseInt(process.env.GPT_BATCH_SIZE ?? '3')
+        const GPT_BATCH_SIZE = parseInt(env('GPT_BATCH_SIZE') || '3')
         const CONCURRENCY = engine === 'gpt_mini'
           ? GPT_BATCH_SIZE
-          : parseInt(process.env.FAL_CONCURRENCY_LIMIT ?? '40')
+          : parseInt(env('FAL_CONCURRENCY_LIMIT') || '40')
         console.log(`[images] engine: ${engine}, concurrency: ${CONCURRENCY}, total: ${scenes.length}`)
-        console.log(`[images] concurrency_env: FAL_CONCURRENCY_LIMIT=${process.env.FAL_CONCURRENCY_LIMIT ?? '(not set, default 40)'} GPT_BATCH_SIZE=${process.env.GPT_BATCH_SIZE ?? '(not set, default 3)'}`)
+        const rawFal = process.env.FAL_CONCURRENCY_LIMIT
+        const rawGpt = process.env.GPT_BATCH_SIZE
+        console.log(`[images] concurrency_env: FAL_CONCURRENCY_LIMIT=${rawFal ?? '(not set)'}[len=${rawFal?.length ?? 0}] GPT_BATCH_SIZE=${rawGpt ?? '(not set)'}[len=${rawGpt?.length ?? 0}]`)
         const t0Images = Date.now()
         for (let batchStart = 0; batchStart < scenes.length; batchStart += CONCURRENCY) {
           const batchEnd = Math.min(batchStart + CONCURRENCY, scenes.length)

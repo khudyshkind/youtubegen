@@ -189,8 +189,8 @@ async function checkElevenLabs(): Promise<ServiceResult> {
 
 async function checkFal(): Promise<ServiceResult> {
   const base = { key: 'fal', name: 'fal.ai (Flux / Изображения)', icon: '🎨', link: 'https://fal.ai/dashboard' }
-  const adminKey  = process.env.FAL_ADMIN_KEY ?? process.env.FAL_KEY ?? ''
-  const threshold = parseFloat(process.env.FAL_BALANCE_ALERT_THRESHOLD ?? '10')
+  const adminKey  = env('FAL_ADMIN_KEY') || env('FAL_KEY')
+  const threshold = parseFloat(env('FAL_BALANCE_ALERT_THRESHOLD') || '10')
 
   if (!adminKey) return unconfigured(base, 'FAL_KEY')
 
