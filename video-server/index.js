@@ -3104,7 +3104,7 @@ cron.schedule('0 * * * *', async () => {
 
 // ── Subscription expiry cron — 09:00 UTC daily ───────────────────────────────
 // Downgrades paid users whose plan_expires_at < now().
-// 20% protection: if expired count > 20% of all paid users → abort, send alert.
+// Fuses: contradiction (totalPaid=0 with N>0), credit-volume, ratio (≥10 paid), absolute (<10 paid).
 cron.schedule('0 9 * * *', async () => {
   console.log('[cron/subscriptions] checking expired plans')
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
@@ -3114,13 +3114,42 @@ cron.schedule('0 9 * * *', async () => {
   try {
     const now = new Date().toISOString()
 
-    // Count all paid users for 20% protection threshold
+    // ── Expiry fuse constants ─────────────────────────────────────────────────
+    // Ratio threshold: abort if expired / totalPaid exceeds this fraction.
+    // Applied only when pool is large enough (>= EXPIRY_RATIO_MIN_PAID) to avoid
+    // false positives — e.g. 1 expiry out of 3 paid users is 33% but not anomalous.
+    const EXPIRY_RATIO_THRESHOLD   = 0.20
+    // Minimum paid-user count required to use ratio mode; below this, absolute cap applies.
+    const EXPIRY_RATIO_MIN_PAID    = 10
+    // Absolute cap for small pools (totalPaid < EXPIRY_RATIO_MIN_PAID).
+    // Blocks unexpectedly large batches when the pool is too small for a ratio to be meaningful.
+    const EXPIRY_ABS_MAX           = 5
+    // Credit-volume cap per run. Anything above this is anomalous at current scale
+    // and likely indicates a data or date bug. Revisit when monthly plan-credit totals
+    // grow materially beyond this figure.
+    const EXPIRY_MAX_CREDITS_PER_RUN = 300_000
+
+    // Count all paid users — required for ratio fuse; failure is treated as unknown, not zero.
     const allPaidRes = await fetch(
       `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&select=id`,
       { headers: { ...sbHeaders(), 'Prefer': 'count=exact' } },
     )
+    if (!allPaidRes.ok) {
+      const errText = await allPaidRes.text().catch(() => '')
+      const alertMsg = `⚠️ [subscriptions] ABORTED — paid-user count query failed (HTTP ${allPaidRes.status}). expire_plan не вызван.\n${errText.slice(0, 200)}`
+      console.error('[cron/subscriptions]', alertMsg)
+      if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: alertMsg })
+      return
+    }
     const contentRange = allPaidRes.headers.get('content-range') ?? ''
-    const totalPaid = parseInt(contentRange.split('/')[1] ?? '0', 10) || 0
+    const totalPaidRaw = contentRange.split('/')[1]
+    const totalPaid = totalPaidRaw !== undefined ? parseInt(totalPaidRaw, 10) : NaN
+    if (!Number.isFinite(totalPaid)) {
+      const alertMsg = `⚠️ [subscriptions] ABORTED — не удалось разобрать число платных из Content-Range "${contentRange}". expire_plan не вызван.`
+      console.error('[cron/subscriptions]', alertMsg)
+      if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: alertMsg })
+      return
+    }
 
     // Find expired paid users — include notification fields
     const expiredRes = await fetch(
@@ -3129,7 +3158,10 @@ cron.schedule('0 9 * * *', async () => {
       { headers: sbHeaders() },
     )
     if (!expiredRes.ok) {
-      console.error('[cron/subscriptions] query failed:', await expiredRes.text())
+      const errText = await expiredRes.text().catch(() => '')
+      const alertMsg = `⚠️ [subscriptions] ABORTED — expired-users query failed (HTTP ${expiredRes.status}). expire_plan не вызван.\n${errText.slice(0, 200)}`
+      console.error('[cron/subscriptions]', alertMsg)
+      if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: alertMsg })
       return
     }
     const expired = await expiredRes.json()
@@ -3137,11 +3169,29 @@ cron.schedule('0 9 * * *', async () => {
 
     if (N === 0) {
       console.log('[subscriptions] no expired plans')
+      if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: `✅ Подписки (cron 09:00 UTC): проверка выполнена, истёкших нет. Платных пользователей: ${totalPaid}.` })
     } else {
-      // 20% mass-expiry protection
-      if (totalPaid > 0 && N / totalPaid > 0.20) {
-        const alertMsg = `⚠️ [subscriptions] suspicious mass expiry: ${N}/${totalPaid} paid users would be downgraded — ABORTED. Manual review required.`
-        console.error(alertMsg)
+      const totalCreditsToBurn = expired.reduce((s, u) => s + (u.plan_credits ?? 0), 0)
+
+      // Contradiction: expired paid users found but totalPaid reports zero — data inconsistency.
+      if (totalPaid === 0) {
+        const alertMsg = `⚠️ [subscriptions] ABORTED — противоречие: N=${N} истёкших платных, но totalPaid=0.\nИстёкших: ${N} · Платных всего: 0 · Кредитов к списанию: ${totalCreditsToBurn.toLocaleString()}.\nexpire_plan не вызван. Нужна ручная проверка.`
+        console.error('[cron/subscriptions]', alertMsg)
+        if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: alertMsg })
+      // Credit-volume fuse: total plan_credits about to burn exceeds anomaly threshold.
+      } else if (totalCreditsToBurn > EXPIRY_MAX_CREDITS_PER_RUN) {
+        const alertMsg = `⚠️ [subscriptions] ABORTED — кредитный предохранитель (credit-volume fuse).\nИстёкших: ${N} · Платных всего: ${totalPaid} · Кредитов к списанию: ${totalCreditsToBurn.toLocaleString()} > порог ${EXPIRY_MAX_CREDITS_PER_RUN.toLocaleString()}.\nexpire_plan не вызван. Нужна ручная проверка.`
+        console.error('[cron/subscriptions]', alertMsg)
+        if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: alertMsg })
+      // Ratio fuse: applied only on pools large enough for the ratio to be meaningful.
+      } else if (totalPaid >= EXPIRY_RATIO_MIN_PAID && N / totalPaid > EXPIRY_RATIO_THRESHOLD) {
+        const alertMsg = `⚠️ [subscriptions] ABORTED — процентный предохранитель (ratio fuse): ${N}/${totalPaid} = ${(N / totalPaid * 100).toFixed(1)}% > ${EXPIRY_RATIO_THRESHOLD * 100}%.\nИстёкших: ${N} · Платных всего: ${totalPaid} · Кредитов к списанию: ${totalCreditsToBurn.toLocaleString()}.\nexpire_plan не вызван. Нужна ручная проверка.`
+        console.error('[cron/subscriptions]', alertMsg)
+        if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: alertMsg })
+      // Absolute fuse: ratio is meaningless on tiny pools; use a hard count cap instead.
+      } else if (totalPaid < EXPIRY_RATIO_MIN_PAID && N > EXPIRY_ABS_MAX) {
+        const alertMsg = `⚠️ [subscriptions] ABORTED — абсолютный предохранитель (absolute fuse): ${N} > ${EXPIRY_ABS_MAX} на малой базе из ${totalPaid} платных.\nИстёкших: ${N} · Платных всего: ${totalPaid} · Кредитов к списанию: ${totalCreditsToBurn.toLocaleString()}.\nexpire_plan не вызван. Нужна ручная проверка.`
+        console.error('[cron/subscriptions]', alertMsg)
         if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: alertMsg })
       } else {
         let successCount = 0
@@ -3191,6 +3241,8 @@ cron.schedule('0 9 * * *', async () => {
             `Списано план-кредитов: ${totalBurned.toLocaleString()}\n` +
             (errors.length > 0 ? `⚠️ Ошибок: ${errors.length}` : '✅ Без ошибок')
           await tgApi('sendMessage', { chat_id: OWNER_ID, text: tgMsg })
+        } else if (OWNER_ID) {
+          await tgApi('sendMessage', { chat_id: OWNER_ID, text: `✅ Подписки (cron 09:00 UTC): проверено ${N} истёкших, фактически не списано (пользователи уже переведены на free ранее). Платных пользователей: ${totalPaid}.` })
         }
       }
     }
