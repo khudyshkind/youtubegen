@@ -307,7 +307,7 @@ function ScriptGenContent() {
               )}
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-300">{t('tools.script_with_plan')}</p>
+              <p className="text-sm font-medium text-slate-300">{t('tools.script_with_plan')} (+{CREDIT_COSTS.plan} {t('nav.credits_suffix')})</p>
               <p className="text-xs text-slate-500 mt-0.5">{t('tools.script_plan_hint')}</p>
             </div>
           </div>

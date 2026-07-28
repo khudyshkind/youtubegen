@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react'
 import Link from 'next/link'
 import { useLang } from '@/hooks/useLang'
+import { CREDIT_COSTS } from '@/lib/types'
 import type { SubtitleBlock } from '@/lib/types'
 import { SCRIPT_LANGUAGES } from '@/lib/languages'
 
@@ -293,7 +294,7 @@ export default function SubtitlesTool({ initialBlocks, initialTitle, restoredId 
       </div>
 
       {/* Cost note */}
-      <p className="text-xs text-slate-600 mb-6">{t('tools.subtitles_cost_note')}</p>
+      <p className="text-xs text-slate-600 mb-6">{t('tools.subtitles_cost_note').replace('{cost}', String(CREDIT_COSTS.subtitles_per_minute)).replace('{cost}', String(CREDIT_COSTS.subtitles_per_minute)).replace('{per_min}', t('step4.cr_per_min')).replace('{unit}', t('nav.credits_suffix'))}</p>
 
       {/* Error */}
       {error && (

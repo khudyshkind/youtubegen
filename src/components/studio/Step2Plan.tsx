@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
+import { CREDIT_COSTS } from '@/lib/types'
 import type { PlanSection } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { useLang } from '@/hooks/useLang'
@@ -141,9 +142,9 @@ export default function Step2Plan() {
                 {t('plan.generating')}
               </>
             ) : planSections.length > 0 ? (
-              t('plan.regenerate_btn')
+              <>{t('plan.regenerate_btn')} (−{CREDIT_COSTS.plan} {t('nav.credits_suffix')})</>
             ) : (
-              t('plan.generate_btn')
+              <>{t('plan.generate_btn')} (−{CREDIT_COSTS.plan} {t('nav.credits_suffix')})</>
             )}
           </button>
         </>

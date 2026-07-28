@@ -227,7 +227,11 @@ export default function Step2Script({ onRegisterNext }: Step2ScriptProps) {
           setOriginalScript(script)
           setScript(uniqueized)
           void refreshCredits()
-          setError(t('step2.err_both_partial'))
+          setError(
+            t('step2.err_both_partial')
+              .replace('{cost}', String(CREDIT_COSTS.uniqueize))
+              .replace('{unit}', t('nav.credits_suffix'))
+          )
           return
         }
         finalText = json2.data.script

@@ -335,7 +335,7 @@ function ThumbnailSection({ seoTitle, topic }: { seoTitle: string; topic: string
             {refAnalyzing ? (
               <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('thumb.ref_analyzing')}</>
             ) : (
-              t('thumb.ref_btn')
+              `${t('thumb.ref_btn')} (−${CREDIT_COSTS.style_analysis} ${t('nav.credits_suffix')})`
             )}
           </button>
           <button

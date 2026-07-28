@@ -521,7 +521,7 @@ export default function IllustrationsTool({
                 {manualCount} × {costPerImage} кр. = <strong>{displayCost} кр.</strong>
               </p>
               {styleMode === 'reference' && refAnalyzed && (
-                <p className="text-xs text-slate-600 mt-0.5">{t('tools.ill_ref_cost_note')}</p>
+                <p className="text-xs text-slate-600 mt-0.5">{t('tools.ill_ref_cost_note').replace('{cost}', String(CREDIT_COSTS.style_analysis)).replace('{unit}', t('nav.credits_suffix'))}</p>
               )}
             </div>
           )}
@@ -689,7 +689,7 @@ export default function IllustrationsTool({
                     <p className="text-xs text-slate-500 truncate">📎 {refFileName}</p>
                   )}
                   <p className="text-xs text-slate-300 leading-relaxed italic">&ldquo;{refStyleDesc}&rdquo;</p>
-                  <p className="text-xs text-slate-600">{t('tools.ill_ref_cost_note')}</p>
+                  <p className="text-xs text-slate-600">{t('tools.ill_ref_cost_note').replace('{cost}', String(CREDIT_COSTS.style_analysis)).replace('{unit}', t('nav.credits_suffix'))}</p>
                 </div>
               )}
               {refError && (
@@ -798,7 +798,7 @@ export default function IllustrationsTool({
             {(effectiveStyleValue || effectiveCustomStyle) && ` · Стиль: ${styleLabel}`}
           </p>
           {styleMode === 'reference' && refAnalyzed && (
-            <p className="text-xs text-slate-600 mt-1">{t('tools.ill_ref_cost_note')}</p>
+            <p className="text-xs text-slate-600 mt-1">{t('tools.ill_ref_cost_note').replace('{cost}', String(CREDIT_COSTS.style_analysis)).replace('{unit}', t('nav.credits_suffix'))}</p>
           )}
         </div>
 

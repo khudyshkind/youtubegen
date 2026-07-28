@@ -396,7 +396,7 @@ export default function Step3Voice() {
     { id: 'elevenlabs',   medal: '🥇', name: 'Voice Studio',     quality: t('voice.el_desc'),        meta: t('voice.el_meta'),      costLabel: `${CREDIT_COSTS.audio_elevenlabs_per_1000} ${t('step3.cr_per_k')}` },
     { id: 'voicer',       medal: '💎', name: 'Voice Pro',         quality: t('voice.el_desc'),        meta: t('voice.voicer_meta'), costLabel: `${CREDIT_COSTS.audio_voicer_per_1000} ${t('step3.cr_per_k')}`, premiumOnly: true },
     { id: 'openai',       medal: '🥈', name: 'Voice Plus',        quality: t('voice.openai_quality'), meta: t('voice.openai_meta'), costLabel: `${CREDIT_COSTS.audio_openai_per_1000} ${t('step3.cr_per_k')}` },
-    { id: 'apihost',      medal: '🏠', name: 'Voice Lite',        quality: t('voice.apihost_quality'),meta: t('voice.apihost_meta'),costLabel: t('voice.apihost_cost') },
+    { id: 'apihost',      medal: '🏠', name: 'Voice Lite',        quality: t('voice.apihost_quality'),meta: t('voice.apihost_meta'),costLabel: `${CREDIT_COSTS.audio_apihost_basic_per_1000}–${CREDIT_COSTS.audio_apihost_studio_per_1000} ${t('step3.cr_per_k')}` },
     { id: 'google',       medal: '🥉', name: 'Voice Global',      quality: t('voice.google_quality'), meta: t('voice.google_meta'), costLabel: `${CREDIT_COSTS.audio_google_per_1000} ${t('step3.cr_per_k')}`, soon: true },
   ]
 
@@ -1509,7 +1509,7 @@ export default function Step3Voice() {
             return [
               `${t('step3.your_text')} ${scriptChars.toLocaleString()} ${t('step3.chars')}`,
               voiceName ? `${t('step3.voice')}: ${voiceName} (${t(`apihost.${apihostVoiceType}` as const)})` : null,
-              `${t('step3.cost')} ${cost} ${t('nav.credits_suffix')} (${rate} ${t('step3.cr_per_k')}, ${t('apihost.min_note')})`,
+              `${t('step3.cost')} ${cost} ${t('nav.credits_suffix')} (${rate} ${t('step3.cr_per_k')}, ${t('apihost.min_note').replace('{cost}', String(CREDIT_COSTS.audio_apihost_basic_per_1000)).replace('{unit}', t('nav.credits_suffix'))})`,
             ].filter(Boolean).join(' · ')
           })()}
         </p>

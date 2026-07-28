@@ -11,7 +11,7 @@ import AnimatedCounter from './AnimatedCounter'
 import FaqAccordion from './FaqAccordion'
 import { useLang } from '@/hooks/useLang'
 import { createClient } from '@/lib/supabase'
-import { PLAN_CREDITS, PLAN_PRICES, PLAN_PRICES_RUB } from '@/lib/types'
+import { PLAN_CREDITS, PLAN_PRICES, PLAN_PRICES_RUB, CREDIT_COSTS } from '@/lib/types'
 
 const BG = '#0A0A0F'
 const DIV_LINE = '1px solid rgba(255,255,255,0.05)'
@@ -415,7 +415,16 @@ export default function LandingBody() {
             <p className="text-slate-300 font-medium">
               🎁 <span className="text-violet-400 font-semibold">{t('landing.free_credits')}</span> {t('landing.free_credits_suffix')}
             </p>
-            <p className="text-sm text-slate-600">{t('landing.credits_note')}</p>
+            <p className="text-sm text-slate-600">{t('landing.credits_note')
+              .replace('{cost_s_min}', String(CREDIT_COSTS.script_sonnet))
+              .replace('{cost_s_max}', String(CREDIT_COSTS.script_opus))
+              .replace('{cost_v_min}', String(CREDIT_COSTS.audio_apihost_basic_per_1000))
+              .replace('{cost_v_max}', String(CREDIT_COSTS.audio_elevenlabs_per_1000))
+              .replace('{cost_sub}', String(CREDIT_COSTS.subtitles_per_minute))
+              .replace('{cost_i_min}', String(Math.min(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana, CREDIT_COSTS.image_gpt_mini)))
+              .replace('{cost_i_max}', String(Math.max(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana, CREDIT_COSTS.image_gpt_mini)))
+              .replace('{cost_vid}', String(CREDIT_COSTS.video))
+              .replace('{cost_seo}', String(CREDIT_COSTS.seo))}</p>
           </div>
 
           {/* How to receive order — public delivery info */}

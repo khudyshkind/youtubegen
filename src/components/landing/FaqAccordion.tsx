@@ -2,16 +2,27 @@
 
 import { useState } from 'react'
 import { useLang } from '@/hooks/useLang'
+import { CREDIT_COSTS } from '@/lib/types'
 
 export default function FaqAccordion() {
   const [open, setOpen] = useState<number | null>(null)
   const { t } = useLang()
 
+  const faq4ImgMin = Math.min(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana, CREDIT_COSTS.image_gpt_mini)
+  const faq4ImgMax = Math.max(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana, CREDIT_COSTS.image_gpt_mini)
+  const faq4Answer = t('faq.a4')
+    .replace('{cost_s_min}', String(CREDIT_COSTS.script_sonnet))
+    .replace('{cost_s_max}', String(CREDIT_COSTS.script_opus))
+    .replace('{cost_i_min}', String(faq4ImgMin))
+    .replace('{cost_i_max}', String(faq4ImgMax))
+    .replace('{cost_vid}', String(CREDIT_COSTS.video))
+    .replace('{cost_seo}', String(CREDIT_COSTS.seo))
+
   const FAQ = [
     { q: t('faq.q1'), a: t('faq.a1') },
     { q: t('faq.q2'), a: t('faq.a2') },
     { q: t('faq.q3'), a: t('faq.a3') },
-    { q: t('faq.q4'), a: t('faq.a4') },
+    { q: t('faq.q4'), a: faq4Answer },
     { q: t('faq.q5'), a: t('faq.a5') },
     { q: t('faq.q6'), a: t('faq.a6') },
     { q: t('faq.q7'), a: t('faq.a7') },

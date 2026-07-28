@@ -656,10 +656,10 @@ export default function Step5Images() {
         <p className="text-sm font-semibold text-slate-300">{t('step5.engine_label')}</p>
         <div className="grid grid-cols-3 gap-2">
           {([
-            { id: 'flux',         name: t('step5.engine_flux_name'),     desc: t('step5.engine_flux_desc')    },
-            { id: 'flux_schnell', name: t('step5.engine_schnell_name'),  desc: t('step5.engine_schnell_desc') },
-            { id: 'nano_banana',  name: t('step5.engine_nano_name'),     desc: t('step5.engine_nano_desc')    },
-            { id: 'gpt_mini',     name: t('step5.engine_gpt_name'),      desc: t('step5.engine_gpt_desc')     },
+            { id: 'flux',         name: t('step5.engine_flux_name'),     desc: t('step5.engine_flux_desc').replace('{cost}', String(CREDIT_COSTS.image_flux)).replace('{unit}', t('tools.ill_engine_unit'))    },
+            { id: 'flux_schnell', name: t('step5.engine_schnell_name'),  desc: t('step5.engine_schnell_desc').replace('{cost}', String(CREDIT_COSTS.image_flux_schnell)).replace('{unit}', t('tools.ill_engine_unit')) },
+            { id: 'nano_banana',  name: t('step5.engine_nano_name'),     desc: t('step5.engine_nano_desc').replace('{cost}', String(CREDIT_COSTS.image_nano_banana)).replace('{unit}', t('tools.ill_engine_unit'))    },
+            { id: 'gpt_mini',     name: t('step5.engine_gpt_name'),      desc: t('step5.engine_gpt_desc').replace('{cost}', String(CREDIT_COSTS.image_gpt_mini)).replace('{unit}', t('tools.ill_engine_unit'))     },
           ] as const).filter((eng) => !(HIDDEN_ENGINES as readonly string[]).includes(eng.id)).map((eng) => {
             const active = imageEngine === eng.id
             return (
@@ -835,7 +835,7 @@ export default function Step5Images() {
             {refAnalyzing ? (
               <><SpinnerIcon className="w-3.5 h-3.5 animate-spin" />{t('step5.ref_analyzing')}</>
             ) : (
-              t('step5.ref_btn')
+              `${t('step5.ref_btn')} (−${CREDIT_COSTS.style_analysis} ${t('nav.credits_suffix')})`
             )}
           </button>
           {refStyle && (

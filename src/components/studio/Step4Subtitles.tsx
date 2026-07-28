@@ -201,7 +201,7 @@ export default function Step4Subtitles() {
                 {t('step4.transcribing')}
               </>
             ) : (
-              t('step4.generate_btn')
+              `${t('step4.generate_btn')} (−${CREDIT_COSTS.subtitles_per_minute} ${t('step4.cr_per_min')})`
             )}
           </button>
 
