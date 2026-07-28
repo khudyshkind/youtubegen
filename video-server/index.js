@@ -3129,9 +3129,10 @@ cron.schedule('0 9 * * *', async () => {
     // grow materially beyond this figure.
     const EXPIRY_MAX_CREDITS_PER_RUN = 300_000
 
-    // Count all paid users — required for ratio fuse; failure is treated as unknown, not zero.
+    // Count active paid users (plan != 'free' AND plan_expires_at > now) — required for ratio fuse.
+    // Excludes profiles whose plan was set without activatePlan (plan_expires_at IS NULL).
     const allPaidRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&select=id`,
+      `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&plan_expires_at=gt.${now}&select=id`,
       { headers: { ...sbHeaders(), 'Prefer': 'count=exact' } },
     )
     if (!allPaidRes.ok) {
@@ -3151,6 +3152,23 @@ cron.schedule('0 9 * * *', async () => {
       return
     }
 
+    // Count anomalous: plan != 'free' but plan_expires_at IS NULL or already expired.
+    // These were set outside activatePlan and will never expire through the normal mechanism.
+    const anomalyRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&select=id`,
+      { headers: { ...sbHeaders(), 'Prefer': 'count=exact' } },
+    )
+    let anomalyCount = 0
+    if (!anomalyRes.ok) {
+      console.error('[cron/subscriptions] anomaly count query failed:', anomalyRes.status)
+    } else {
+      const anomalyRange = anomalyRes.headers.get('content-range') ?? ''
+      const anomalyRaw = anomalyRange.split('/')[1]
+      const totalNonFree = anomalyRaw !== undefined ? parseInt(anomalyRaw, 10) : NaN
+      if (Number.isFinite(totalNonFree)) anomalyCount = Math.max(0, totalNonFree - totalPaid)
+    }
+    const anomalySuffix = anomalyCount > 0 ? `\nТарифы мимо механизма: ${anomalyCount}` : ''
+
     // Find expired paid users — include notification fields
     const expiredRes = await fetch(
       `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&plan_expires_at=lt.${now}` +
@@ -3169,7 +3187,7 @@ cron.schedule('0 9 * * *', async () => {
 
     if (N === 0) {
       console.log('[subscriptions] no expired plans')
-      if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: `✅ Подписки (cron 09:00 UTC): проверка выполнена, истёкших нет. Платных пользователей: ${totalPaid}.` })
+      if (OWNER_ID) await tgApi('sendMessage', { chat_id: OWNER_ID, text: `✅ Подписки (cron 09:00 UTC): проверка выполнена, истёкших нет. Платных пользователей: ${totalPaid}.${anomalySuffix}` })
     } else {
       const totalCreditsToBurn = expired.reduce((s, u) => s + (u.plan_credits ?? 0), 0)
 
@@ -3242,7 +3260,7 @@ cron.schedule('0 9 * * *', async () => {
             (errors.length > 0 ? `⚠️ Ошибок: ${errors.length}` : '✅ Без ошибок')
           await tgApi('sendMessage', { chat_id: OWNER_ID, text: tgMsg })
         } else if (OWNER_ID) {
-          await tgApi('sendMessage', { chat_id: OWNER_ID, text: `✅ Подписки (cron 09:00 UTC): проверено ${N} истёкших, фактически не списано (пользователи уже переведены на free ранее). Платных пользователей: ${totalPaid}.` })
+          await tgApi('sendMessage', { chat_id: OWNER_ID, text: `✅ Подписки (cron 09:00 UTC): проверено ${N} истёкших, фактически не списано (пользователи уже переведены на free ранее). Платных пользователей: ${totalPaid}.${anomalySuffix}` })
         }
       }
     }
