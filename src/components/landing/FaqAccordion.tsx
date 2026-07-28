@@ -8,8 +8,10 @@ export default function FaqAccordion() {
   const [open, setOpen] = useState<number | null>(null)
   const { t } = useLang()
 
-  const faq4ImgMin = Math.min(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana, CREDIT_COSTS.image_gpt_mini)
-  const faq4ImgMax = Math.max(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana, CREDIT_COSTS.image_gpt_mini)
+  // UI engines: flux_schnell (100), secretslider (200), flux (780), nano_banana (1170).
+  // gpt_mini excluded — hidden from UI via HIDDEN_ENGINES in Step5Images.tsx.
+  const faq4ImgMin = Math.min(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana)
+  const faq4ImgMax = Math.max(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana)
   const faq4Answer = t('faq.a4')
     .replace('{cost_s_min}', String(CREDIT_COSTS.script_sonnet))
     .replace('{cost_s_max}', String(CREDIT_COSTS.script_opus))

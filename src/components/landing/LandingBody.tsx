@@ -421,8 +421,10 @@ export default function LandingBody() {
               .replace('{cost_v_min}', String(CREDIT_COSTS.audio_apihost_basic_per_1000))
               .replace('{cost_v_max}', String(CREDIT_COSTS.audio_elevenlabs_per_1000))
               .replace('{cost_sub}', String(CREDIT_COSTS.subtitles_per_minute))
-              .replace('{cost_i_min}', String(Math.min(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana, CREDIT_COSTS.image_gpt_mini)))
-              .replace('{cost_i_max}', String(Math.max(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana, CREDIT_COSTS.image_gpt_mini)))
+              // UI engines: flux_schnell (100), secretslider (200), flux (780), nano_banana (1170).
+              // gpt_mini excluded — hidden from UI via HIDDEN_ENGINES in Step5Images.tsx.
+              .replace('{cost_i_min}', String(Math.min(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana)))
+              .replace('{cost_i_max}', String(Math.max(CREDIT_COSTS.image_flux_schnell, CREDIT_COSTS.image_secretslider, CREDIT_COSTS.image_flux, CREDIT_COSTS.image_nano_banana)))
               .replace('{cost_vid}', String(CREDIT_COSTS.video))
               .replace('{cost_seo}', String(CREDIT_COSTS.seo))}</p>
           </div>
