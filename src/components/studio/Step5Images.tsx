@@ -371,6 +371,12 @@ export default function Step5Images() {
     setProgress(null)
     setSceneImages([])
 
+    // Secret Slider uses async background job (Railway) — poll instead of SSE stream.
+    if (effectiveEngine === 'secretslider' && !overrideEngine) {
+      await handleGenerateAsync(effectiveCount)
+      return
+    }
+
     try {
       const res = await fetch('/api/generate/images', {
         method: 'POST',
@@ -467,6 +473,88 @@ export default function Step5Images() {
       if (!completedNormally) {
         setError(t('step5.err_interrupted'))
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('step5.err_gen'))
+    } finally {
+      setLoading(false)
+      setProgress(null)
+    }
+  }
+
+  async function handleGenerateAsync(count: number) {
+    try {
+      // Step 1: submit job to Railway via Next.js proxy
+      const submitRes = await fetch('/api/generate/images-async', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          script, topic: scriptParams.topic, duration_sec: audioDurationSec,
+          image_count: count, project_id: projectId, image_interval: imageInterval,
+          engine: 'secretslider',
+          image_style: imageStyle ?? undefined,
+          custom_style: refStyle ?? undefined,
+        }),
+      })
+
+      const submitJson = await submitRes.json() as { ok: boolean; data?: { job_id: string }; error?: string; code?: string }
+      if (!submitJson.ok) {
+        if (submitJson.code === 'NO_CREDITS') {
+          setError(`${t('step5.err_gen')} (${count * CREDIT_COSTS.image_secretslider} ${t('nav.credits_suffix')})`)
+        } else {
+          setError(submitJson.error ?? t('step5.err_gen'))
+        }
+        return
+      }
+
+      const jobId = submitJson.data?.job_id
+      if (!jobId) { setError(t('step5.err_gen')); return }
+
+      setProgress({ completed: 0, total: count })
+
+      // Step 2: poll /api/generate/images-async/status every 5 seconds
+      await new Promise<void>((resolve, reject) => {
+        const interval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(
+              `/api/generate/images-async/status?job_id=${jobId}&project_id=${projectId ?? ''}`,
+            )
+            const statusJson = await statusRes.json() as {
+              ok: boolean
+              status: string
+              progress: number
+              scene_images?: SceneImage[]
+              error_message?: string | null
+            }
+
+            if (!statusJson.ok) {
+              clearInterval(interval)
+              reject(new Error(statusJson.error_message ?? t('step5.err_gen')))
+              return
+            }
+
+            // Update progress bar from job progress field (0-100 mapped to image count)
+            const approxCompleted = Math.round((statusJson.progress / 100) * count)
+            setProgress({ completed: approxCompleted, total: count })
+
+            if (statusJson.status === 'completed') {
+              clearInterval(interval)
+              const ts = Date.now()
+              setSceneImages((statusJson.scene_images ?? []).map((img) => ({
+                ...img,
+                url: img.url ? `${img.url}?t=${ts}` : img.url,
+              })))
+              void refreshCredits()
+              resolve()
+            } else if (statusJson.status === 'failed') {
+              clearInterval(interval)
+              reject(new Error(statusJson.error_message ?? t('step5.err_gen')))
+            }
+          } catch (pollErr) {
+            clearInterval(interval)
+            reject(pollErr)
+          }
+        }, 5_000)
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step5.err_gen'))
     } finally {

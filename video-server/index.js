@@ -46,6 +46,9 @@ const Anthropic = AnthropicPkg.default ?? AnthropicPkg
 const { Readable } = require('stream')
 const cron = require('node-cron')
 const RssParser = require('rss-parser')
+// Image style configs and scene prompts — single source of truth shared with Next.js via JSON files.
+const { STYLE_CONFIGS: IMG_STYLE_CONFIGS, DEFAULT_STYLE_CONFIG: IMG_DEFAULT_STYLE } = require('./image-style-configs.json')
+const { scenesPromptPhoto: IMG_SCENES_SYSTEM_PROMPT_PHOTO, scenesPromptIllustration: IMG_SCENES_SYSTEM_PROMPT_ILLUSTRATION } = require('./image-scene-prompts.json')
 // R2 upload uses Node's native https + manual AWS SigV4 (no SDK dependency)
 
 // Ensure pg_dump is available at startup (Docker build cache may skip the apt-get layer)
@@ -3403,17 +3406,40 @@ async function runWatchdog() {
     }
   } catch (e) { console.warn(`${tag} audio query failed:`, e.message) }
 
+  try {
+    const rows = await sbGet('image_jobs',
+      `status=in.(pending,processing)&updated_at=lt.${cutoffImages}&select=id,project_id,user_id,status,updated_at,credits_charged,credits_refunded_at`)
+    for (const row of (Array.isArray(rows) ? rows : [])) {
+      const ageMin = Math.round((now - new Date(row.updated_at).getTime()) / 60_000)
+      console.log(`${tag} image_job ${row.id} stuck in ${row.status} ${ageMin} min (project ${row.project_id})`)
+      const needsRefund = !!(row.credits_charged > 0 && !row.credits_refunded_at)
+      if (!WATCHDOG_DRY_RUN) {
+        await updateImageJob(row.id, { status: 'failed', error_message: `watchdog: stuck in '${row.status}' for ${ageMin} min` })
+        if (row.project_id) await sbPatch('projects', `id=eq.${row.project_id}&status=eq.generating_images`, { status: 'failed' })
+          .catch(e => console.warn(`${tag} project reset for ${row.id}:`, e.message))
+        try {
+          await refundImageJobCredits(row.id, row.user_id, row.project_id)
+        } catch (e) {
+          console.warn(`${tag} image_job refund failed for ${row.id}: ${e.message}`)
+        }
+      }
+      resets.push({ type: 'image_job', id: row.id, project_id: row.project_id, jobStatus: row.status, ageMin, creditsCharged: row.credits_charged ?? 0, needsRefund })
+    }
+  } catch (e) { console.warn(`${tag} image_jobs query failed:`, e.message) }
+
   if (resets.length === 0) { console.log(`${tag} clean`); return }
 
   if (!OWNER_ID) return
   const dryLabel = WATCHDOG_DRY_RUN ? ' [DRY RUN]' : ''
   if (resets.length <= 5) {
     for (const r of resets) {
-      const emoji   = r.type === 'audio' ? '🔊' : r.type === 'video' ? '🎬' : '🖼'
+      const emoji   = r.type === 'audio' ? '🔊' : r.type === 'video' ? '🎬' : r.type === 'image_job' ? '🖼' : '🖼'
       const subject = r.type === 'audio'
         ? `audio_job ${r.id.slice(0, 8)} (${r.jobStatus}, project ${(r.project_id ?? '?').slice(0, 8)})`
+        : r.type === 'image_job'
+        ? `image_job ${r.id.slice(0, 8)} (${r.jobStatus}, project ${(r.project_id ?? '?').slice(0, 8)})`
         : `project ${r.id.slice(0, 8)} (generating_${r.type})`
-      const refundNote = r.type === 'audio'
+      const refundNote = (r.type === 'audio' || r.type === 'image_job')
         ? (r.needsRefund ? `, ${r.creditsCharged} кр. возвращены` : ', refund не потребовался')
         : r.type === 'video' && r.creditsCharged > 0
         ? (r.needsVideoRefund ? `, ${r.creditsCharged} кр. возвращены` : ', refund не потребовался')
@@ -3423,13 +3449,15 @@ async function runWatchdog() {
         .catch(e => console.warn(`${tag} tg notify failed:`, e.message))
     }
   } else {
-    const imgs   = resets.filter(r => r.type === 'images').length
-    const vids   = resets.filter(r => r.type === 'video').length
-    const audios = resets.filter(r => r.type === 'audio').length
+    const imgs      = resets.filter(r => r.type === 'images').length
+    const imgJobs   = resets.filter(r => r.type === 'image_job').length
+    const vids      = resets.filter(r => r.type === 'video').length
+    const audios    = resets.filter(r => r.type === 'audio').length
     const lines  = [
-      imgs   ? `🖼 generating_images: ${imgs}`  : '',
-      vids   ? `🎬 generating_video: ${vids}`   : '',
-      audios ? `🔊 audio_jobs: ${audios}`        : '',
+      imgs      ? `🖼 generating_images: ${imgs}`    : '',
+      imgJobs   ? `🖼 image_jobs: ${imgJobs}`         : '',
+      vids      ? `🎬 generating_video: ${vids}`      : '',
+      audios    ? `🔊 audio_jobs: ${audios}`           : '',
     ].filter(Boolean).join('\n')
     await tgApi('sendMessage', { chat_id: OWNER_ID, text: `⚠️ Watchdog${dryLabel}\nСброшено ${resets.length} задач:\n${lines}` })
       .catch(e => console.warn(`${tag} tg notify failed:`, e.message))
@@ -5000,6 +5028,69 @@ app.post('/synthesize-audio', verifySecret, async (req, res) => {
   return res.json({ ok: true, job_id: job.id, status: 'pending' })
 })
 
+// ── Async image generation endpoints ─────────────────────────────────────────
+
+app.post('/generate-images', verifySecret, async (req, res) => {
+  const { project_id, user_id, engine = 'secretslider', image_count, image_interval = 10,
+    image_style, custom_style, script, topic, duration_sec, credits_charged = 0 } = req.body
+  if (!user_id) return res.status(400).json({ ok: false, error: 'user_id required' })
+  if (!image_count || image_count < 1) return res.status(400).json({ ok: false, error: 'image_count required' })
+  if (!script?.trim()) return res.status(400).json({ ok: false, error: 'script required' })
+
+  try {
+    const rows = await sbPost('image_jobs', {
+      project_id: project_id ?? null,
+      user_id,
+      engine,
+      status: 'pending',
+      progress: 0,
+      image_count,
+      image_interval,
+      image_style: image_style ?? null,
+      custom_style: custom_style ?? null,
+      script,
+      topic: topic ?? '',
+      duration_sec: duration_sec ?? null,
+      credits_charged,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    const jobId = Array.isArray(rows) ? rows[0]?.id : rows?.id
+    if (!jobId) throw new Error('image_jobs insert returned no id')
+    console.log(`[image-job:${jobId}] created engine=${engine} count=${image_count} project=${project_id ?? '(none)'}`)
+
+    setImmediate(() => {
+      processImageJob(jobId, req.body).catch(async (err) => {
+        console.error(`[image-job:${jobId}] unhandled:`, err.message)
+        Sentry.captureException(err, { extra: { jobId, stage: 'processImageJob_unhandled' } })
+        await updateImageJob(jobId, { status: 'failed', error_message: `unhandled: ${err.message}` }).catch(() => {})
+        if (project_id) {
+          await sbPatch('projects', `id=eq.${project_id}&status=eq.generating_images`, { status: 'failed' }).catch(() => {})
+        }
+      })
+    })
+
+    return res.json({ ok: true, job_id: jobId, status: 'pending' })
+  } catch (e) {
+    console.error('[generate-images] create job failed:', e.message)
+    Sentry.captureException(e)
+    return res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+app.get('/image-status/:jobId', verifySecret, async (req, res) => {
+  const { jobId } = req.params
+  try {
+    const rows = await sbGet('image_jobs', `id=eq.${jobId}&select=id,status,progress,scene_images,error_message,completed_at`)
+    const job = Array.isArray(rows) ? rows[0] : null
+    if (!job) return res.status(404).json({ ok: false, error: 'Job not found' })
+    return res.json({ ok: true, ...job })
+  } catch (e) {
+    console.error(`[image-status:${jobId}] failed:`, e.message)
+    return res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
 // ── Supabase Storage / Audio-job helpers ──────────────────────────────────────
 async function uploadToSupabaseStorage(buffer, userId, projectId) {
   const storagePath = `${userId}/${projectId}/audio.mp3`
@@ -5098,7 +5189,736 @@ async function refundVideoJobCredits(jobId, userId, projectId) {
   }
 }
 
-// ── TTS: SecretVoicer + Voicer synthesis helpers ──────────────────────────────
+// ── Async image generation helpers ────────────────────────────────────────────
+
+async function updateImageJob(jobId, fields) {
+  try {
+    await sbPatch('image_jobs', `id=eq.${jobId}`, { ...fields, updated_at: new Date().toISOString() })
+  } catch (e) {
+    console.error(`[image-job:${jobId}] updateImageJob failed:`, e.message)
+    Sentry.captureException(e, { extra: { jobId, fields } })
+  }
+}
+
+async function refundImageJobCredits(jobId, userId, projectId) {
+  try {
+    const rows = await sbGet('image_jobs', `id=eq.${jobId}&select=credits_charged,credits_refunded_at`)
+    const row = Array.isArray(rows) ? rows[0] : null
+    if (!row || !(row.credits_charged > 0) || row.credits_refunded_at) return
+
+    const updated = await sbPatch('image_jobs', `id=eq.${jobId}&credits_refunded_at=is.null`, {
+      credits_refunded_at: new Date().toISOString(),
+    })
+    if (!Array.isArray(updated) || updated.length === 0) return
+
+    const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/add_credits`, {
+      method: 'POST',
+      headers: sbHeaders(),
+      body: JSON.stringify({
+        p_user_id:    userId,
+        p_amount:     row.credits_charged,
+        p_operation:  'image_refund',
+        p_project_id: projectId ?? null,
+      }),
+    })
+    if (!rpcRes.ok) throw new Error(`add_credits RPC: ${rpcRes.status} ${await rpcRes.text().catch(() => '')}`)
+    console.log(`[image-job:${jobId}] refunded ${row.credits_charged} credits to ${userId}`)
+  } catch (e) {
+    console.error(`[image-job:${jobId}] refundImageJobCredits failed:`, e.message)
+    Sentry.captureException(e, { extra: { jobId, userId, projectId } })
+  }
+}
+
+// Upload an image from a URL to Supabase Storage 'images' bucket (with retry).
+async function uploadImageUrlToStorage(imageUrl, storagePath) {
+  const delays = [500, 1000, 1500]
+  let lastErr = new Error('upload failed')
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) })
+      if (!imgRes.ok) throw new Error(`fetch image: HTTP ${imgRes.status}`)
+      const buffer = await imgRes.arrayBuffer()
+
+      const uploadUrl = `${SUPABASE_URL}/storage/v1/object/images/${storagePath}?upsert=true`
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'apikey':        SUPABASE_SERVICE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+          'Content-Type':  'image/jpeg',
+          'x-upsert':      'true',
+        },
+        body: buffer,
+      })
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text().catch(() => '')
+        throw new Error(`Storage upload: ${uploadRes.status} ${errText.slice(0, 200)}`)
+      }
+      return `${SUPABASE_URL}/storage/v1/object/public/images/${storagePath}`
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err))
+      if (attempt < 2) await new Promise(r => setTimeout(r, delays[attempt]))
+    }
+  }
+  throw lastErr
+}
+
+// ── Image scene generation (ported from src/app/api/generate/images/route.ts) ─
+
+const IMG_SS_ORIGIN  = 'https://secretslider.com'
+const IMG_SS_POLL_MS = 5_000
+
+function imgGetStyleConfig(imageStyle, customStyle) {
+  if (customStyle?.trim()) {
+    return {
+      claudeInstruction: `${customStyle.trim()}. Describe each scene strictly in this visual style.`,
+      fluxSuffix: customStyle.trim(),
+      negativePrompt: IMG_DEFAULT_STYLE.negativePrompt,
+      fallbackPrompt: IMG_DEFAULT_STYLE.fallbackPrompt,
+      illustrative: false,
+    }
+  }
+  return imageStyle ? (IMG_STYLE_CONFIGS[imageStyle] ?? IMG_DEFAULT_STYLE) : IMG_DEFAULT_STYLE
+}
+
+function imgBuildScenesSystemPrompt(illustrative) {
+  return illustrative ? IMG_SCENES_SYSTEM_PROMPT_ILLUSTRATION : IMG_SCENES_SYSTEM_PROMPT_PHOTO
+}
+
+function imgParseJsonArray(text) {
+  const cleaned = text.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
+  try {
+    const v = JSON.parse(cleaned)
+    return Array.isArray(v) ? v : []
+  } catch {
+    const match = cleaned.match(/\[[\s\S]*\]/)
+    if (!match) return []
+    try {
+      const v = JSON.parse(match[0])
+      return Array.isArray(v) ? v : []
+    } catch { return [] }
+  }
+}
+
+function imgSanitizeScenePrompt(prompt, sceneIdx) {
+  const replacements = [
+    [/question marks?/gi, 'tilted-head puzzled pose'],
+    [/uncertainty symbols?/gi, 'tilted-head puzzled pose'],
+    [/(speech|thought) bubble/gi, ''],
+    [/caption box/gi, ''],
+    [/montage of/gi, 'scene showing'],
+    [/split screen/gi, 'single scene showing'],
+    [/comic panels?/gi, 'single scene showing'],
+    [/multiple panels?/gi, 'single scene showing'],
+    [/\bgrid\b/gi, 'single scene showing'],
+    [/text overlay/gi, ''],
+    [/\bcaption\b/gi, ''],
+  ]
+  let result = prompt
+  for (const [pattern, replacement] of replacements) {
+    result = result.replace(pattern, (match) => {
+      console.log(`[sanitize] scene ${sceneIdx}: replaced "${match}" → "${replacement || '(removed)'}"`)
+      return replacement
+    })
+  }
+  return result.replace(/\s{2,}/g, ' ').trim()
+}
+
+function imgFmtSec(s) {
+  const m = Math.floor(s / 60)
+  const sec = (s % 60).toFixed(2)
+  return `${String(m).padStart(2, '0')}:${sec.padStart(5, '0')}`
+}
+
+async function imgExtractCharacters(fullText, topic, styleConfig) {
+  const styleDirective = styleConfig.illustrative
+    ? `\nSTYLE: ILLUSTRATION MODE. Describe each character as a flat drawn SHAPE, not as anatomy.\nFORBIDDEN words in descriptions: hair, fur, mane, molars, teeth, jaw, gut, belly, swollen, coarse, texture, muscle, skin, nostril, pore.\nUse shape-language only: "round head", "flat body", "small ears", "thin stick arms", "short curvy tail".\n`
+    : ''
+
+  const descriptionTask = styleConfig.illustrative
+    ? 'For each recurring character, write a concise 15–25 word ENGLISH description of drawn appearance: shape, flat color, key visual features. This will be copied verbatim into illustration prompts.'
+    : 'For each recurring character, write a concise 15–25 word ENGLISH visual description covering: species/type, distinctive color, key physical features, size/scale. This description will be copied verbatim into prompts.'
+
+  try {
+    const msg = await claude().messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      messages: [{
+        role: 'user',
+        content: `Analyze this video script about "${topic}". Identify visual characters (animals, creatures, people, beings) that appear visually in multiple scenes.
+
+PURPOSE: These profiles ensure the character looks IDENTICAL every time it appears in an illustration. A profile does NOT mean the character must appear in every scene.
+${styleDirective}
+${descriptionTask}
+
+Rules:
+- Include a character only if it will be visually depicted in 2 or more scenes
+- Return [] if all scenes show completely different subjects with no visual repeats
+- Maximum 4 characters
+- Descriptions must be purely visual
+
+Respond ONLY with valid JSON, no markdown:
+[{"name": "name or species as used in script", "description": "english visual description"}]
+
+Script (first 3000 chars):
+${fullText.slice(0, 3000)}`,
+      }],
+    })
+    const raw = msg.content[0].type === 'text' ? msg.content[0].text.trim() : '[]'
+    return imgParseJsonArray(raw).slice(0, 4)
+  } catch (e) {
+    console.error('[images] extractCharacters failed:', e instanceof Error ? e.message : e)
+    return []
+  }
+}
+
+const IMG_CLAUDE_CHUNK = 50
+
+function imgSplitSubtitlesIntoGroups(blocks, n) {
+  const groups = Array.from({ length: n }, () => [])
+  if (!blocks.length) return groups
+  const startTime = blocks[0].start
+  const totalDuration = blocks[blocks.length - 1].end - startTime
+  const groupDuration = totalDuration / n
+  for (const block of blocks) {
+    const idx = Math.min(n - 1, Math.floor((block.start - startTime) / groupDuration))
+    groups[idx].push(block)
+  }
+  return groups
+}
+
+async function imgGenerateScenesFromSubtitles(topic, imageCount, durationSec, subtitleBlocks, styleConfig, fallbackTopic) {
+  const groups = imgSplitSubtitlesIntoGroups(subtitleBlocks, imageCount)
+  const scenesWithText = groups.map((group, i) => {
+    const start = group.length > 0 ? group[0].start : (durationSec / imageCount) * i
+    const end = group.length > 0 ? group[group.length - 1].end : (durationSec / imageCount) * (i + 1)
+    const text = group.map(b => b.text).join(' ').trim() || `Сцена ${i + 1}`
+    return { start, end, text }
+  })
+
+  const fullText = subtitleBlocks.map(b => b.text).join(' ')
+  const characters = await imgExtractCharacters(fullText, topic, styleConfig)
+  const charSection = characters.length > 0
+    ? `\nПЕРСОНАЖИ — включать точные описания в промпты для сцен где они присутствуют:\n${characters.map(c => `• ${c.name}: ${c.description}`).join('\n')}\n`
+    : ''
+
+  const totalChunks = Math.ceil(scenesWithText.length / IMG_CLAUDE_CHUNK)
+  console.log(`[images/subtitles] scenes: ${scenesWithText.length}, chunks: ${totalChunks}`)
+  let sceneFallbackCount = 0
+
+  const chunkOutputs = await Promise.all(
+    Array.from({ length: totalChunks }, async (_, ci) => {
+      const chunkStart = ci * IMG_CLAUDE_CHUNK
+      const chunk = scenesWithText.slice(chunkStart, chunkStart + IMG_CLAUDE_CHUNK)
+      const chunkSize = chunk.length
+      const maxTokens = Math.min(64000, Math.max(8000, chunkSize * 250))
+      const label = `subtitles chunk ${ci + 1}/${totalChunks}`
+      const t0 = Date.now()
+
+      const callChunk = () => claude().messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: maxTokens,
+        system: [{ type: 'text', text: imgBuildScenesSystemPrompt(styleConfig.illustrative ?? false), cache_control: { type: 'ephemeral' } }],
+        messages: [{
+          role: 'user',
+          content: `Видео на тему: "${topic}". Ниже — ${chunkSize} сцен из реальной расшифровки аудио (Whisper).
+
+СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
+${styleConfig.claudeInstruction}
+${charSection}
+СЦЕНЫ:
+${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${imgFmtSec(s.start)}–${imgFmtSec(s.end)}]: "${s.text}"`).join('\n')}
+
+Ответь JSON массивом ровно ${chunkSize} элементов.`,
+        }],
+      })
+
+      let e1Msg = ''
+      const ta = Date.now()
+      const message = await callChunk().catch(async (e1) => {
+        e1Msg = e1 instanceof Error ? e1.message.slice(0, 150) : String(e1)
+        const dur1 = ((Date.now() - ta) / 1000).toFixed(1)
+        console.warn(`[images/subtitles] ${label} attempt 1 failed (${dur1}s): ${e1Msg} — retrying in 5s`)
+        await new Promise(r => setTimeout(r, 5000))
+        return callChunk().catch((e2) => {
+          const e2Msg = e2 instanceof Error ? e2.message.slice(0, 150) : String(e2)
+          console.error(`[images/subtitles] ${label} both attempts failed: ${e1Msg} | ${e2Msg}`)
+          return null
+        })
+      })
+
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      if (!message) {
+        sceneFallbackCount += chunkSize
+        return Array.from({ length: chunkSize }, (_, j) => ({
+          scene: `Сцена ${chunkStart + j + 1}`,
+          prompt: imgSanitizeScenePrompt(styleConfig.fallbackPrompt, chunkStart + j),
+        }))
+      }
+
+      console.log(`[images/subtitles] ${label} done in ${elapsed}s`)
+      const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
+      const chunkResults = imgParseJsonArray(rawText)
+      while (chunkResults.length < chunkSize) {
+        const absIdx = chunkStart + chunkResults.length
+        sceneFallbackCount++
+        chunkResults.push({ scene: `Сцена ${absIdx + 1}`, prompt: imgSanitizeScenePrompt(styleConfig.fallbackPrompt, absIdx) })
+      }
+      return chunkResults
+    })
+  )
+
+  let promptResults = chunkOutputs.flat()
+  if (promptResults.length > imageCount) promptResults = promptResults.slice(0, imageCount)
+  while (promptResults.length < imageCount) {
+    const fallbackIdx = promptResults.length
+    sceneFallbackCount++
+    promptResults.push({ scene: `Сцена ${fallbackIdx + 1}`, prompt: imgSanitizeScenePrompt(styleConfig.fallbackPrompt, fallbackIdx) })
+  }
+
+  if (sceneFallbackCount > 0) {
+    console.warn(`[images/subtitles] ${sceneFallbackCount}/${imageCount} scenes used fallback prompts`)
+  }
+
+  return promptResults.map((p, i) => ({
+    ...p,
+    timecode_start: imgFmtSec(scenesWithText[i].start),
+    timecode_end: imgFmtSec(scenesWithText[i].end),
+  }))
+}
+
+function imgSplitScriptByWords(script, n) {
+  const sentences = script.split(/(?<=[.!?…])\s+/).filter(s => s.trim())
+  if (sentences.length === 0) return [script]
+  const totalWords = script.split(/\s+/).filter(Boolean).length
+  const wordsPerBlock = totalWords / n
+  const blocks = []
+  let currentBlock = []
+  let currentWordCount = 0
+  for (const sentence of sentences) {
+    currentBlock.push(sentence)
+    currentWordCount += sentence.split(/\s+/).filter(Boolean).length
+    if (currentWordCount >= wordsPerBlock && blocks.length < n - 1) {
+      blocks.push(currentBlock.join(' '))
+      currentBlock = []
+      currentWordCount = 0
+    }
+  }
+  if (currentBlock.length > 0) blocks.push(currentBlock.join(' '))
+  while (blocks.length < n) blocks.push(blocks[blocks.length - 1] ?? script)
+  return blocks.slice(0, n)
+}
+
+function imgCalculateTimecodes(blocks, totalDurationSec) {
+  const counts = blocks.map(b => b.split(/\s+/).filter(Boolean).length)
+  const total = counts.reduce((a, b) => a + b, 0) || 1
+  let currentTime = 0
+  return blocks.map((text, i) => {
+    const duration = (counts[i] / total) * totalDurationSec
+    const start = currentTime
+    currentTime += duration
+    return { start, end: currentTime, text }
+  })
+}
+
+async function imgGenerateScenesFromScript(script, topic, durationSec, imageCount, styleConfig) {
+  const blocks = imgSplitScriptByWords(script, imageCount)
+  const blocksWithTimecodes = imgCalculateTimecodes(blocks, durationSec)
+
+  const characters = await imgExtractCharacters(script, topic, styleConfig)
+  const charSection = characters.length > 0
+    ? `\nПЕРСОНАЖИ — включать точные описания в промпты для сцен где они присутствуют:\n${characters.map(c => `• ${c.name}: ${c.description}`).join('\n')}\n`
+    : ''
+
+  const totalChunks = Math.ceil(blocksWithTimecodes.length / IMG_CLAUDE_CHUNK)
+  console.log(`[images/script] scenes: ${blocksWithTimecodes.length}, chunks: ${totalChunks}`)
+  let sceneFallbackCount = 0
+
+  const chunkOutputs = await Promise.all(
+    Array.from({ length: totalChunks }, async (_, ci) => {
+      const chunkStart = ci * IMG_CLAUDE_CHUNK
+      const chunk = blocksWithTimecodes.slice(chunkStart, chunkStart + IMG_CLAUDE_CHUNK)
+      const chunkSize = chunk.length
+      const maxTokens = Math.min(64000, Math.max(8000, chunkSize * 250))
+      const label = `script chunk ${ci + 1}/${totalChunks}`
+      const t0 = Date.now()
+
+      const callChunk = () => claude().messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: maxTokens,
+        system: [{ type: 'text', text: imgBuildScenesSystemPrompt(styleConfig.illustrative ?? false), cache_control: { type: 'ephemeral' } }],
+        messages: [{
+          role: 'user',
+          content: `Видео на тему: "${topic}". Ниже — ${chunkSize} отрывков сценария с тайм-кодами.
+
+СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
+${styleConfig.claudeInstruction}
+${charSection}
+ОТРЫВКИ:
+${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${imgFmtSec(b.start)}–${imgFmtSec(b.end)}]:\n"${b.text.slice(0, 400)}"`).join('\n\n')}
+
+Ответь JSON массивом ровно ${chunkSize} элементов.`,
+        }],
+      })
+
+      let e1Msg = ''
+      const ta = Date.now()
+      const message = await callChunk().catch(async (e1) => {
+        e1Msg = e1 instanceof Error ? e1.message.slice(0, 150) : String(e1)
+        const dur1 = ((Date.now() - ta) / 1000).toFixed(1)
+        console.warn(`[images/script] ${label} attempt 1 failed (${dur1}s): ${e1Msg} — retrying in 5s`)
+        await new Promise(r => setTimeout(r, 5000))
+        return callChunk().catch((e2) => {
+          const e2Msg = e2 instanceof Error ? e2.message.slice(0, 150) : String(e2)
+          console.error(`[images/script] ${label} both attempts failed: ${e1Msg} | ${e2Msg}`)
+          return null
+        })
+      })
+
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      if (!message) {
+        sceneFallbackCount += chunkSize
+        return Array.from({ length: chunkSize }, (_, j) => {
+          const absIdx = chunkStart + j
+          return {
+            scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
+            prompt: imgSanitizeScenePrompt(styleConfig.fallbackPrompt, absIdx),
+          }
+        })
+      }
+
+      console.log(`[images/script] ${label} done in ${elapsed}s`)
+      const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : '[]'
+      const chunkResults = imgParseJsonArray(rawText)
+      while (chunkResults.length < chunkSize) {
+        const absIdx = chunkStart + chunkResults.length
+        sceneFallbackCount++
+        chunkResults.push({
+          scene: blocksWithTimecodes[absIdx]?.text.slice(0, 80).trim() ?? `Сцена ${absIdx + 1}`,
+          prompt: imgSanitizeScenePrompt(styleConfig.fallbackPrompt, absIdx),
+        })
+      }
+      return chunkResults
+    })
+  )
+
+  let promptResults = chunkOutputs.flat()
+  if (promptResults.length > imageCount) promptResults = promptResults.slice(0, imageCount)
+  while (promptResults.length < imageCount) {
+    const i = promptResults.length
+    sceneFallbackCount++
+    promptResults.push({
+      scene: blocksWithTimecodes[i]?.text.slice(0, 80).trim() ?? `Сцена ${i + 1}`,
+      prompt: imgSanitizeScenePrompt(styleConfig.fallbackPrompt, i),
+    })
+  }
+
+  if (sceneFallbackCount > 0) {
+    console.warn(`[images/script] ${sceneFallbackCount}/${imageCount} scenes used fallback prompts`)
+  }
+
+  return promptResults.map((p, i) => ({
+    ...p,
+    timecode_start: imgFmtSec(blocksWithTimecodes[i].start),
+    timecode_end: imgFmtSec(blocksWithTimecodes[i].end),
+  }))
+}
+
+async function imgGenerateSecretSlider(prompts, requestStartMs) {
+  const apiKey = env('SECRETSLIDER_API_KEY')
+  if (!apiKey) throw new Error('[secretslider] SECRETSLIDER_API_KEY not configured')
+
+  // No hard maxDuration on Railway — but set a generous deadline (10 min) to avoid hanging.
+  const uploadReserveMs = 3_500 * prompts.length
+  const ssBudgetMs = Math.max(30_000, 600_000 - (Date.now() - requestStartMs) - uploadReserveMs)
+  console.log(`[secretslider] budget: pre=${Math.round((Date.now() - requestStartMs) / 1000)}s reserve=${Math.round(uploadReserveMs / 1000)}s ss_budget=${Math.round(ssBudgetMs / 1000)}s prompts=${prompts.length}`)
+
+  // Guard: reject if a task is already running (one active task per key).
+  try {
+    const activeRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/tasks/active`, {
+      headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (activeRes.ok) {
+      const active = await activeRes.json()
+      if ((active.active_count ?? 0) > 0) {
+        const waitSec = active.active_tasks?.[0]?.estimated_wait_seconds ?? 0
+        throw new Error(`SS_BUSY:${waitSec}`)
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('SS_BUSY')) throw err
+    console.warn('[secretslider] tasks/active check failed, proceeding:', err instanceof Error ? err.message : String(err))
+  }
+
+  const form = new FormData()
+  form.append('mode', 'visual')
+  form.append('prompts', JSON.stringify(prompts))
+  form.append('num_images', '1')
+  form.append('aspect_ratio', '16:9')
+
+  const genRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/generate`, {
+    method: 'POST',
+    headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
+    body: form,
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (genRes.status === 429) {
+    const body = await genRes.text().catch(() => '')
+    let retrySec = 0
+    try { retrySec = JSON.parse(body).retry_after ?? 0 } catch { /* non-JSON */ }
+    throw new Error(`SS_BUSY:${retrySec}`)
+  }
+  if (genRes.status !== 202) {
+    const body = await genRes.text().catch(() => '')
+    throw new Error(`[secretslider] POST /generate returned ${genRes.status}: ${body.slice(0, 300)}`)
+  }
+
+  const { task_id: taskId } = await genRes.json()
+  if (!taskId) throw new Error('[secretslider] no task_id in response')
+  console.log(`[secretslider] task=${taskId} prompts=${prompts.length}`)
+
+  const t0 = Date.now()
+  const deadline = t0 + ssBudgetMs
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, IMG_SS_POLL_MS))
+    const elapsed = Math.round((Date.now() - t0) / 1000)
+
+    const pollRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/task/${taskId}`, {
+      headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!pollRes.ok) {
+      console.warn(`[secretslider] poll ${elapsed}s http=${pollRes.status}`)
+      continue
+    }
+
+    const poll = await pollRes.json()
+    console.log(`[secretslider] poll ${elapsed}s status=${poll.status} image_count=${poll.results?.image_count ?? '?'}`)
+
+    if (poll.status === 'failed') throw new Error(`[secretslider] task ${taskId} failed`)
+
+    if (poll.status === 'completed' || poll.status === 'partial_success') {
+      const urls = poll.results?.image_urls ?? []
+      if (urls.length !== prompts.length) {
+        throw new Error(`[secretslider] image_count mismatch: expected ${prompts.length}, got ${urls.length}`)
+      }
+      console.log(`[secretslider] STATS: prompts=${prompts.length} total_sec=${((Date.now() - t0) / 1000).toFixed(1)} status=${poll.status}`)
+      return urls.map(u => {
+        if (u.startsWith('/')) return `${IMG_SS_ORIGIN}${u}`
+        if (u.startsWith('http://')) return `https://${u.slice(7)}`
+        return u
+      })
+    }
+  }
+  throw new Error(`[secretslider] task ${taskId} timed out (budget=${Math.round(ssBudgetMs / 1000)}s)`)
+}
+
+async function processImageJob(jobId, body) {
+  const { project_id, user_id, engine, image_count, image_interval, image_style, custom_style, script, topic, duration_sec, cost_per_image = 0 } = body
+  const count = Math.max(1, image_count)
+  const interval = Math.max(3, Math.min(300, image_interval ?? 10))
+  const t0Request = Date.now()
+
+  await updateImageJob(jobId, { status: 'processing', progress: 5 })
+  if (project_id) {
+    await sbPatch('projects', `id=eq.${project_id}&user_id=eq.${user_id}`, { status: 'generating_images', scene_images: [] })
+      .catch(e => console.warn(`[image-job:${jobId}] project status set failed:`, e.message))
+  }
+
+  try {
+    const styleConfig = imgGetStyleConfig(image_style, custom_style)
+    console.log(`[image-job:${jobId}] engine=${engine} style="${image_style ?? 'default'}" count=${count}`)
+
+    // Read subtitle_blocks from projects table (avoids large payload in POST body).
+    let subtitleBlocks = null
+    let projectTitle = ''
+    if (project_id) {
+      try {
+        const projRows = await sbGet('projects', `id=eq.${project_id}&user_id=eq.${user_id}&select=subtitle_blocks,title`)
+        const proj = Array.isArray(projRows) ? projRows[0] : null
+        subtitleBlocks = proj?.subtitle_blocks ?? null
+        projectTitle = (proj?.title ?? '').trim()
+      } catch (e) {
+        console.warn(`[image-job:${jobId}] project read failed:`, e.message)
+      }
+    }
+    const hasSubtitles = Array.isArray(subtitleBlocks) && subtitleBlocks.length > 0
+
+    const effectiveTopic = (script ?? '').split(/\s+/).slice(0, 20).join(' ').trim() || (topic ?? '').slice(0, 150)
+    const rawUserTopic = (topic ?? '').trim()
+    const fallbackTopic = rawUserTopic && rawUserTopic.length <= 120
+      ? rawUserTopic.split(/\s+/).slice(0, 8).join(' ')
+      : projectTitle && projectTitle.length <= 120
+        ? projectTitle.split(/\s+/).slice(0, 8).join(' ')
+        : (script ?? '').split(/\s+/).slice(0, 8).join(' ')
+
+    console.log(`[image-job:${jobId}] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
+    await updateImageJob(jobId, { progress: 10 })
+
+    const t0Claude = Date.now()
+    const scenes = hasSubtitles
+      ? await imgGenerateScenesFromSubtitles(effectiveTopic, count, duration_sec ?? 300, subtitleBlocks, styleConfig, fallbackTopic)
+      : await imgGenerateScenesFromScript(script ?? '', effectiveTopic, duration_sec ?? 300, count, styleConfig)
+    const claudeSec = ((Date.now() - t0Claude) / 1000).toFixed(1)
+    console.log(`[image-job:${jobId}] claude done: ${scenes.length} scenes in ${claudeSec}s`)
+    await updateImageJob(jobId, { progress: 30 })
+
+    if (engine !== 'secretslider') {
+      throw new Error(`[image-job] engine '${engine}' is not supported on Railway; only secretslider`)
+    }
+
+    const allStyledPrompts = scenes.map((scn, i) => {
+      const styledPrompt = `${imgSanitizeScenePrompt(scn.prompt, i)}, ${styleConfig.fluxSuffix}`
+      console.log(`[image-job:${jobId}] scene ${i + 1} prompt: "${styledPrompt.slice(0, 120)}"`)
+      return styledPrompt
+    })
+
+    const ssUrls = await imgGenerateSecretSlider(allStyledPrompts, t0Request)
+    console.log(`[image-job:${jobId}] secretslider returned ${ssUrls.length} URLs in ${((Date.now() - t0Request) / 1000).toFixed(1)}s`)
+    await updateImageJob(jobId, { progress: 70 })
+
+    const sceneImages = new Array(scenes.length)
+    let successCount = 0
+    let failCount = 0
+    let chargedCredits = 0
+    // Set to { stoppedAt: i, reason: string } when deduct_credits fails — triggers early stop after loop.
+    let creditExhausted = null
+
+    for (let i = 0; i < scenes.length; i++) {
+      const scn = scenes[i]
+      const styledPrompt = allStyledPrompts[i]
+      const ssUrl = ssUrls[i]
+      try {
+        const storagePath = project_id ? `${user_id}/${project_id}/scene_ss_${i}.jpg` : null
+        const t0Upload = Date.now()
+        const url = project_id
+          ? await uploadImageUrlToStorage(ssUrl, storagePath)
+          : ssUrl
+        const uploadMs = Date.now() - t0Upload
+        const audioFp = duration_sec != null ? Math.round(duration_sec) : undefined
+        sceneImages[i] = {
+          scene_index: i, prompt: styledPrompt, url,
+          scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end,
+          engine, audio_fingerprint: audioFp,
+        }
+        successCount++
+        // Charge one credit per successfully uploaded image (mirrors images/route.ts:1279).
+        // credits_charged tracks cumulative total in DB so watchdog/recovery can refund exactly.
+        if (cost_per_image > 0) {
+          const chargeRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/deduct_credits`, {
+            method: 'POST',
+            headers: sbHeaders(),
+            body: JSON.stringify({
+              p_user_id:    user_id,
+              p_amount:     cost_per_image,
+              p_operation:  `image_${engine}`,
+              p_project_id: project_id ?? null,
+            }),
+            signal: AbortSignal.timeout(10_000),
+          })
+          if (chargeRes.ok) {
+            const chargeJson = await chargeRes.json().catch(() => null)
+            if (chargeJson?.success) {
+              chargedCredits += cost_per_image
+            } else {
+              // HTTP 200 + success:false = insufficient balance — stop loop.
+              // Image at index i is uploaded (storage file exists) but NOT charged and NOT included in paidImages.
+              console.warn(`[image-job:${jobId}] deduct_credits scene ${i + 1}: insufficient balance (remaining=${chargeJson?.remaining ?? '?'}) — stopping`)
+              creditExhausted = { stoppedAt: i, reason: `insufficient, remaining=${chargeJson?.remaining ?? '?'}` }
+            }
+          } else {
+            console.warn(`[image-job:${jobId}] deduct_credits scene ${i + 1} http=${chargeRes.status} — stopping`)
+            creditExhausted = { stoppedAt: i, reason: `deduct_credits http=${chargeRes.status}` }
+          }
+        }
+        console.log(`[image-job:${jobId}] scene ${i + 1} upload: ${uploadMs}ms url=${url?.slice(0, 80) ?? 'NULL'}`)
+      } catch (err) {
+        failCount++
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[image-job:${jobId}] scene ${i + 1} upload FAILED:`, msg)
+        sceneImages[i] = {
+          scene_index: i, prompt: styledPrompt, url: null,
+          scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end,
+          engine, audio_fingerprint: duration_sec != null ? Math.round(duration_sec) : undefined,
+        }
+      }
+      const progress = 70 + Math.round(((i + 1) / scenes.length) * 25)
+      await updateImageJob(jobId, { progress, credits_charged: chargedCredits })
+      if (creditExhausted) break
+    }
+
+    // ── Credit-exhausted early stop ────────────────────────────────────────
+    // Paid images (indices 0..stoppedAt-1) stay with the user; no refund for them.
+    // Image at stoppedAt was uploaded but NOT charged — excluded from paidImages.
+    if (creditExhausted) {
+      const paidImages = sceneImages.slice(0, creditExhausted.stoppedAt).filter(Boolean)
+      const paidCount = cost_per_image > 0 ? chargedCredits / cost_per_image : paidImages.length
+      const errMsg = `Недостаточно кредитов — сгенерировано ${paidCount} из ${scenes.length} иллюстраций`
+      console.warn(`[image-job:${jobId}] credit stop: ${creditExhausted.reason}; paid=${paidCount}/${scenes.length}`)
+      await updateImageJob(jobId, {
+        status: 'failed',
+        progress: 70 + Math.round((creditExhausted.stoppedAt / scenes.length) * 25),
+        credits_charged: chargedCredits,
+        scene_images: paidImages.length > 0 ? paidImages : null,
+        error_message: errMsg,
+        completed_at: new Date().toISOString(),
+      })
+      if (project_id) {
+        if (paidImages.length > 0) {
+          await sbPatch('projects', `id=eq.${project_id}&user_id=eq.${user_id}`, {
+            scene_images: paidImages,
+            image_interval: interval,
+            image_style: image_style ?? null,
+            status: 'draft',
+          }).catch(e => console.warn(`[image-job:${jobId}] project partial write failed:`, e.message))
+        } else {
+          await sbPatch('projects', `id=eq.${project_id}&status=eq.generating_images`, { status: 'failed' })
+            .catch(e => console.warn(`[image-job:${jobId}] project failure mark (no paid images) failed:`, e.message))
+        }
+      }
+      return
+    }
+    // ── end credit-exhausted handler ───────────────────────────────────────
+
+    const validImages = sceneImages.filter(Boolean)
+    const totalSec = ((Date.now() - t0Request) / 1000).toFixed(1)
+    console.log(`[image-job:${jobId}] SUMMARY: engine=${engine} created=${successCount} failed=${failCount} total_sec=${totalSec}s`)
+
+    await updateImageJob(jobId, {
+      status: 'completed',
+      progress: 100,
+      scene_images: validImages,
+      completed_at: new Date().toISOString(),
+    })
+
+    if (project_id) {
+      await sbPatch('projects', `id=eq.${project_id}&user_id=eq.${user_id}`, {
+        scene_images: validImages,
+        image_interval: interval,
+        image_style: image_style ?? null,
+        status: 'draft',
+      }).catch(e => console.warn(`[image-job:${jobId}] project final write failed:`, e.message))
+      console.log(`[image-job:${jobId}] project updated with ${validImages.length} images`)
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[image-job:${jobId}] failed:`, msg)
+    Sentry.captureException(err, { extra: { jobId, project_id, user_id, engine } })
+    await updateImageJob(jobId, { status: 'failed', error_message: msg })
+    await refundImageJobCredits(jobId, user_id, project_id)
+    if (project_id) {
+      await sbPatch('projects', `id=eq.${project_id}&status=eq.generating_images`, { status: 'failed' })
+        .catch(e => console.warn(`[image-job:${jobId}] project failure mark failed:`, e.message))
+    }
+    if (OWNER_ID) {
+      tgApi('sendMessage', { chat_id: OWNER_ID, text: `⚠️ image_job ${jobId.slice(0, 8)} failed: ${msg.slice(0, 200)}` })
+        .catch(() => {})
+    }
+  }
+}
+
+// TTS: SecretVoicer + Voicer synthesis helpers ──────────────────────────────
 
 const SV_BASE       = 'https://secret-voicer.ru/api/v1'
 const VOICER_DOMAIN = 'https://voicer.mat3u.com'
@@ -5620,6 +6440,32 @@ async function recoverOrphanedAudioJobs() {
   }
 }
 
+async function recoverOrphanedImageJobs() {
+  try {
+    const staleIso = new Date(Date.now() - 15 * 60 * 1000).toISOString()
+    const orphans = await sbGet('image_jobs',
+      `or=(status.eq.pending,status.eq.processing)&created_at=lt.${staleIso}&select=id,user_id,project_id,credits_charged,credits_refunded_at`)
+    if (!Array.isArray(orphans) || !orphans.length) {
+      console.log('[startup/image-recovery] no stale image jobs')
+      return
+    }
+    console.log(`[startup/image-recovery] found ${orphans.length} stale image job(s)`)
+    for (const job of orphans) {
+      console.log(`[startup/image-recovery] stale image_job ${job.id.slice(0, 8)} project:${(job.project_id ?? '?').slice(0, 8)}`)
+      await updateImageJob(job.id, { status: 'failed', error_message: 'Container restart — job abandoned' })
+      if (job.project_id) {
+        await sbPatch('projects', `id=eq.${job.project_id}&status=eq.generating_images`, { status: 'failed' })
+          .catch(e => console.warn(`[startup/image-recovery] project patch:`, e.message))
+      }
+      await refundImageJobCredits(job.id, job.user_id, job.project_id)
+        .catch(e => console.warn(`[startup/image-recovery] refund:`, e.message))
+    }
+  } catch (e) {
+    console.error('[startup/image-recovery] failed:', e.message)
+    Sentry.captureException(e, { extra: { fn: 'recoverOrphanedImageJobs' } })
+  }
+}
+
 // Must be added AFTER all routes
 Sentry.setupExpressErrorHandler(app)
 
@@ -5636,6 +6482,7 @@ app.listen(PORT, async () => {
   setInterval(() => refreshPlansFromVercel(true).catch(console.warn), 60 * 60 * 1000)
   await recoverOrphanedJobs()
   await recoverOrphanedAudioJobs()
+  await recoverOrphanedImageJobs()
   // Write thresholds to bot_settings so the Vercel admin panel can read them
   await Promise.all([
     setSetting('fal_balance_threshold',        String(FAL_BALANCE_THRESHOLD)),

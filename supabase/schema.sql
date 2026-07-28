@@ -645,3 +645,40 @@ alter table public.credit_transactions add column if not exists payment_currency
 create index if not exists credit_transactions_created_at_idx on public.credit_transactions (created_at);
 create index if not exists credit_transactions_operation_idx  on public.credit_transactions (operation);
 create index if not exists video_jobs_status_idx              on public.video_jobs (status);
+
+-- ─────────────────────────────────────────
+-- Async image generation jobs
+-- Mirrors video_jobs / audio_jobs pattern.
+-- Managed by video-server (Railway).
+-- ─────────────────────────────────────────
+
+create table if not exists public.image_jobs (
+  id                  uuid        default gen_random_uuid() primary key,
+  project_id          uuid        references public.projects(id) on delete set null,
+  user_id             uuid        not null,
+  engine              text        not null default 'secretslider',
+  status              text        not null default 'pending'
+                        check (status in ('pending', 'processing', 'completed', 'failed')),
+  progress            integer     not null default 0,
+  script              text,
+  topic               text,
+  duration_sec        integer,
+  image_count         integer     not null,
+  image_interval      integer     not null default 10,
+  image_style         text,
+  custom_style        text,
+  scene_images        jsonb,
+  credits_charged     integer     not null default 0,
+  credits_refunded_at timestamptz,
+  error_message       text,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  completed_at        timestamptz
+);
+
+create index if not exists image_jobs_status_idx      on public.image_jobs (status);
+create index if not exists image_jobs_user_id_idx     on public.image_jobs (user_id);
+create index if not exists image_jobs_project_id_idx  on public.image_jobs (project_id);
+create index if not exists image_jobs_created_at_idx  on public.image_jobs (created_at);
+
+grant all on public.image_jobs to service_role;

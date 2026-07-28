@@ -15,6 +15,7 @@ COPY video-server/package.json ./
 RUN npm install --omit=dev
 
 COPY video-server/index.js video-server/instrument.js ./
+COPY video-server/image-style-configs.json video-server/image-scene-prompts.json ./
 COPY knowledge/lefiro_kb_bot.md ./knowledge/
 
 EXPOSE 3001
