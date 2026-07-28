@@ -332,8 +332,7 @@ export default function Step5Images() {
       }
       const desc: string = json.data.style_description
       setRefStyle(desc)
-      setImageStyle(desc)
-      setSelectedStyleKey('none')
+      // imageStyle (preset key) stays intact — reference description goes via custom_style at generation time.
       void refreshCredits()
       if (json.data?.ref_url) {
         fetch('/api/upload/sign', {
@@ -382,6 +381,7 @@ export default function Step5Images() {
           subtitle_blocks: subtitleBlocks.length > 0 ? subtitleBlocks : undefined,
           engine: effectiveEngine,
           image_style: imageStyle ?? undefined,
+          custom_style: refStyle ?? undefined,
         }),
       })
 
@@ -498,7 +498,7 @@ export default function Step5Images() {
       const res = await fetch('/api/generate/image-single', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, scene_index: sceneIndex, prompt: promptToSend, engine: imageEngine, image_style: imageStyle ?? undefined }),
+        body: JSON.stringify({ project_id: projectId, scene_index: sceneIndex, prompt: promptToSend, engine: imageEngine, image_style: imageStyle ?? undefined, custom_style: refStyle ?? undefined }),
       })
       const json = await res.json()
       if (!json.ok) {
@@ -817,7 +817,7 @@ export default function Step5Images() {
               <img src={refPreviewUrl} alt="ref" className="w-10 h-10 object-cover rounded-lg" />
               <button
                 type="button"
-                onClick={() => { setRefPreviewUrl(null); setRefStyle(null); setImageStyle(selectedStyleKey !== 'none' ? IMAGE_STYLES[selectedStyleKey] : null) }}
+                onClick={() => { setRefPreviewUrl(null); setRefStyle(null) }}
                 className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-white flex items-center justify-center"
                 style={{ background: '#EF4444', fontSize: 10, lineHeight: 1 }}
               >
@@ -842,6 +842,9 @@ export default function Step5Images() {
             <p className="text-xs flex-1 min-w-0" style={{ color: '#A78BFA' }}>
               <span className="text-slate-500">{t('step5.ref_detected')} </span>
               {refStyle.length > 60 ? `${refStyle.slice(0, 60)}…` : refStyle}
+              {selectedStyleKey !== 'none' && (
+                <span style={{ color: '#F59E0B' }}> · перекрывает «{t(`step5.style_${selectedStyleKey}` as Parameters<typeof t>[0])}»</span>
+              )}
             </p>
           )}
           <input

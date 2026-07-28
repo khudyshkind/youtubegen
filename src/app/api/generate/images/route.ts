@@ -1080,6 +1080,9 @@ export async function POST(request: NextRequest) {
         illustrative: false,
       }
     : getStyleConfig(image_style)
+  if (!custom_style?.trim() && image_style && styleConfig === DEFAULT_STYLE_CONFIG) {
+    console.warn(`[images] image_style not in STYLE_CONFIGS — using default. value="${image_style.slice(0, 80)}"`)
+  }
   console.log(`[images] engine=${engine} style="${image_style ?? 'default'}" custom_style="${custom_style ?? ''}" suffix="${styleConfig.fluxSuffix.slice(0, 60)}"`)
 
   // === SSE streaming — keeps the connection alive for the full generation ===
