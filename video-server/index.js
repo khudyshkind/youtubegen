@@ -3152,22 +3152,29 @@ cron.schedule('0 9 * * *', async () => {
       return
     }
 
-    // Count anomalous: plan != 'free' but plan_expires_at IS NULL or already expired.
-    // These were set outside activatePlan and will never expire through the normal mechanism.
+    // Count anomalous: plan != 'free' with plan_expires_at IS NULL — set outside activatePlan,
+    // never expire through the normal mechanism. Штатно истёкшие (expires_at < now) не включены.
     const anomalyRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&select=id`,
+      `${SUPABASE_URL}/rest/v1/profiles?plan=neq.free&plan_expires_at=is.null&select=id`,
       { headers: { ...sbHeaders(), 'Prefer': 'count=exact' } },
     )
-    let anomalyCount = 0
+    let anomalySuffix
     if (!anomalyRes.ok) {
       console.error('[cron/subscriptions] anomaly count query failed:', anomalyRes.status)
+      anomalySuffix = '\nТарифы мимо механизма: не удалось проверить'
     } else {
       const anomalyRange = anomalyRes.headers.get('content-range') ?? ''
       const anomalyRaw = anomalyRange.split('/')[1]
-      const totalNonFree = anomalyRaw !== undefined ? parseInt(anomalyRaw, 10) : NaN
-      if (Number.isFinite(totalNonFree)) anomalyCount = Math.max(0, totalNonFree - totalPaid)
+      const anomalyCount = anomalyRaw !== undefined ? parseInt(anomalyRaw, 10) : NaN
+      if (Number.isFinite(anomalyCount) && anomalyCount > 0) {
+        anomalySuffix = `\nТарифы мимо механизма: ${anomalyCount}`
+      } else if (Number.isFinite(anomalyCount)) {
+        anomalySuffix = ''
+      } else {
+        console.error('[cron/subscriptions] anomaly count: unparseable content-range:', anomalyRange)
+        anomalySuffix = '\nТарифы мимо механизма: не удалось проверить'
+      }
     }
-    const anomalySuffix = anomalyCount > 0 ? `\nТарифы мимо механизма: ${anomalyCount}` : ''
 
     // Find expired paid users — include notification fields
     const expiredRes = await fetch(
