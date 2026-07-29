@@ -105,8 +105,16 @@ Example: NOT "Bipedal primate with coarse body hair, massive jaw with thick mola
     : ''
 
   const descriptionTask = styleConfig.illustrative
-    ? 'For each recurring character, write a concise 15–25 word ENGLISH description of drawn appearance: shape, flat color, key visual features (ears, tail, size). This will be copied verbatim into illustration prompts.'
-    : 'For each recurring character, write a concise 15–25 word ENGLISH visual description covering: species/type, distinctive color, key physical features, size/scale. This description will be copied verbatim into prompts for scenes where that character is physically present.'
+    ? `For each recurring character, write a concise 15–35 word ENGLISH description of flat drawn appearance with mandatory shape anchors — self-contained, no script context needed:
+• Human figures: age hint via shape (e.g. "small round-headed child figure", "tall stick adult"), flat hair-shape and color, beard shape or "no beard", flat clothing color.
+• Drawn animals/creatures: species, flat body color(s), pattern shapes (e.g. "dark oval spots"), size relative to frame, two distinctive shape features (e.g. "wide flat ears", "short curvy tail").
+FORBIDDEN — exclude any term that does not anchor flat-drawn appearance: "average", "ordinary", "typical", "generic".
+This description will be copied verbatim into illustration prompts.`
+    : `For each recurring character, write a concise 15–35 word ENGLISH visual description with mandatory visual anchors — self-contained, recognisable without reading the script:
+• Humans: approximate age (e.g. "mid-30s"), hair color and length, hairstyle shape, facial hair or explicitly "no beard", skin tone, eye color, one characteristic clothing item with color.
+• Animals and creatures: species, coat color and pattern (e.g. "white with black spots"), size (e.g. "large"), two or three distinctive body parts.
+FORBIDDEN — exclude any term that adds no visual anchor: "average build", "casual appearance", "adult male human", "ordinary", "typical".
+This description will be copied verbatim into scene prompts.`
 
   try {
     const msg = await anthropic.messages.create({
@@ -140,6 +148,24 @@ ${fullText.slice(0, 3000)}`,
     console.error('[images] extractCharacters failed:', e instanceof Error ? e.message : e)
     return []
   }
+}
+
+function injectCharacterProfiles(
+  prompts: string[],
+  characters: CharacterProfile[],
+): string[] {
+  if (!characters.length) return prompts
+  return prompts.map((p) => {
+    for (const char of characters) {
+      if (!char.name || !char.description) continue
+      const nameEscaped = char.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const namePattern = new RegExp(`(?<![\\p{L}\\p{N}_])${nameEscaped}(?![\\p{L}\\p{N}_])`, 'iu')
+      if (!namePattern.test(p)) continue
+      if (p.includes(char.description)) continue
+      p = p.replace(namePattern, `${char.name} (${char.description})`)
+    }
+    return p
+  })
 }
 
 type ImageEngine = 'flux' | 'flux_schnell' | 'gpt_mini' | 'nano_banana' | 'secretslider'
@@ -349,6 +375,14 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
     await notifyError('/generate/images/scenes', alertMsg).catch(() => {})
   }
 
+  const rawPromptsForInject = promptResults.map(r => r.prompt)
+  const injectedPrompts = injectCharacterProfiles(rawPromptsForInject, characters)
+  const injectedCount = injectedPrompts.filter((p, i) => p !== rawPromptsForInject[i]).length
+  console.log(`[characters] extracted=${characters.length} names=${characters.map(c => c.name).join(', ')} injected=${injectedCount} prompts_total=${promptResults.length} first_desc="${(characters[0]?.description ?? '').slice(0, 80)}"`)
+  if (injectedCount > 0) {
+    promptResults = promptResults.map((r, i) => ({ ...r, prompt: injectedPrompts[i] }))
+  }
+
   return promptResults.map((p, i) => ({
     ...p,
     timecode_start: fmtSec(scenesWithText[i].start),
@@ -529,6 +563,14 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
     const alertMsg = `${sceneFallbackCount} of ${imageCount} scenes fallback (${pct}%)${lastChunkFailInfo ? ` — ${lastChunkFailInfo}` : ''}`
     console.error(`[images/script] ALERT scenes_fallback: ${alertMsg}`)
     await notifyError('/generate/images/scenes', alertMsg).catch(() => {})
+  }
+
+  const rawPromptsForInject = promptResults.map(r => r.prompt)
+  const injectedPrompts = injectCharacterProfiles(rawPromptsForInject, characters)
+  const injectedCount = injectedPrompts.filter((p, i) => p !== rawPromptsForInject[i]).length
+  console.log(`[characters] extracted=${characters.length} names=${characters.map(c => c.name).join(', ')} injected=${injectedCount} prompts_total=${promptResults.length} first_desc="${(characters[0]?.description ?? '').slice(0, 80)}"`)
+  if (injectedCount > 0) {
+    promptResults = promptResults.map((r, i) => ({ ...r, prompt: injectedPrompts[i] }))
   }
 
   return promptResults.map((p, i) => ({
