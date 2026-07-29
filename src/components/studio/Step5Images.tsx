@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import ConfirmModal from '@/components/shared/ConfirmModal'
 import { exportPrompts } from '@/lib/exportPrompts'
-import { CREDIT_COSTS, IMAGE_STYLES, IMAGE_INTERVAL_MIN, IMAGE_INTERVAL_MAX, IMAGE_COUNT_MAX } from '@/lib/types'
+import { CREDIT_COSTS, IMAGE_STYLES, IMAGE_INTERVAL_MIN, IMAGE_INTERVAL_MAX, IMAGE_COUNT_MAX, CONFIRM_GEN_COST_THRESHOLD } from '@/lib/types'
 import type { SceneImage, ImageStyleKey } from '@/lib/types'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
@@ -189,6 +189,10 @@ export default function Step5Images() {
   const { t } = useLang()
   const [showGptLimitModal, setShowGptLimitModal] = useState(false)
   const [showSkipModal, setShowSkipModal] = useState(false)
+  const [showCostConfirm, setShowCostConfirm] = useState(false)
+  const [costConfirmData, setCostConfirmData] = useState<{ count: number; cost: number } | null>(null)
+  const costConfirmedRef = useRef(false)
+  const pendingArgsRef = useRef<{ overrideEngine?: 'flux' | 'flux_schnell'; overrideCount?: number } | null>(null)
   // Overrides imageCount for display/cost when user picks "Reduce to 20" from modal
   const [gptCountOverride, setGptCountOverride] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -240,9 +244,10 @@ export default function Step5Images() {
   const isCountCapped = Math.ceil(audioDurationSec / imageInterval) > IMAGE_COUNT_MAX
   const effectiveIntervalWhenCapped = isCountCapped ? Math.ceil(audioDurationSec / IMAGE_COUNT_MAX) : null
   const costPerImage =
-    imageEngine === 'gpt_mini'     ? CREDIT_COSTS.image_gpt_mini :
-    imageEngine === 'flux_schnell' ? CREDIT_COSTS.image_flux_schnell :
-    imageEngine === 'nano_banana'  ? CREDIT_COSTS.image_nano_banana :
+    imageEngine === 'gpt_mini'      ? CREDIT_COSTS.image_gpt_mini :
+    imageEngine === 'flux_schnell'  ? CREDIT_COSTS.image_flux_schnell :
+    imageEngine === 'nano_banana'   ? CREDIT_COSTS.image_nano_banana :
+    imageEngine === 'secretslider'  ? CREDIT_COSTS.image_secretslider :
     CREDIT_COSTS.image_flux
   // displayCount respects the "reduce to 20" GPT-mini override; imageCount already clamped to IMAGE_COUNT_MAX
   const displayCount = gptCountOverride ?? imageCount
@@ -353,11 +358,29 @@ export default function Step5Images() {
   async function handleGenerate(overrideEngine?: 'flux' | 'flux_schnell', overrideCount?: number) {
     if (!script?.trim()) { setError(t('step5.err_no_script')); return }
 
-    // Show confirmation only for the initial call (not the recursive modal override)
-    if (!overrideEngine && !confirmRegenIfCompleted(t('regen_confirm.message'))) return
-
     const effectiveEngine = overrideEngine ?? imageEngine
     const effectiveCount = overrideCount ?? imageCount
+
+    // High-cost confirmation — fires before regen confirm so retry from modal doesn't double-prompt.
+    // Applies to all engines; uses effective params so gpt-modal overrides are also covered.
+    const effectiveCostPerImage =
+      effectiveEngine === 'gpt_mini'      ? CREDIT_COSTS.image_gpt_mini :
+      effectiveEngine === 'flux_schnell'  ? CREDIT_COSTS.image_flux_schnell :
+      effectiveEngine === 'nano_banana'   ? CREDIT_COSTS.image_nano_banana :
+      effectiveEngine === 'secretslider'  ? CREDIT_COSTS.image_secretslider :
+      CREDIT_COSTS.image_flux
+    const effectiveTotalCost = effectiveCount * effectiveCostPerImage
+
+    if (!costConfirmedRef.current && effectiveTotalCost > CONFIRM_GEN_COST_THRESHOLD) {
+      pendingArgsRef.current = { overrideEngine, overrideCount }
+      setCostConfirmData({ count: effectiveCount, cost: effectiveTotalCost })
+      setShowCostConfirm(true)
+      return
+    }
+    costConfirmedRef.current = false
+
+    // Show confirmation only for the initial call (not the recursive modal override)
+    if (!overrideEngine && !confirmRegenIfCompleted(t('regen_confirm.message'))) return
 
     // Pre-check: show modal if GPT Mini with too many images
     if (!overrideEngine && effectiveEngine === 'gpt_mini' && effectiveCount > MAX_GPT_MINI_SAFE) {
@@ -742,12 +765,13 @@ export default function Step5Images() {
       {/* Engine selector */}
       <div className="flex flex-col gap-2">
         <p className="text-sm font-semibold text-slate-300">{t('step5.engine_label')}</p>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {([
-            { id: 'flux',         name: t('step5.engine_flux_name'),     desc: t('step5.engine_flux_desc').replace('{cost}', String(CREDIT_COSTS.image_flux)).replace('{unit}', t('tools.ill_engine_unit'))    },
+            { id: 'flux',         name: t('step5.engine_flux_name'),     desc: t('step5.engine_flux_desc').replace('{cost}', String(CREDIT_COSTS.image_flux)).replace('{unit}', t('tools.ill_engine_unit'))           },
             { id: 'flux_schnell', name: t('step5.engine_schnell_name'),  desc: t('step5.engine_schnell_desc').replace('{cost}', String(CREDIT_COSTS.image_flux_schnell)).replace('{unit}', t('tools.ill_engine_unit')) },
-            { id: 'nano_banana',  name: t('step5.engine_nano_name'),     desc: t('step5.engine_nano_desc').replace('{cost}', String(CREDIT_COSTS.image_nano_banana)).replace('{unit}', t('tools.ill_engine_unit'))    },
-            { id: 'gpt_mini',     name: t('step5.engine_gpt_name'),      desc: t('step5.engine_gpt_desc').replace('{cost}', String(CREDIT_COSTS.image_gpt_mini)).replace('{unit}', t('tools.ill_engine_unit'))     },
+            { id: 'nano_banana',  name: t('step5.engine_nano_name'),     desc: t('step5.engine_nano_desc').replace('{cost}', String(CREDIT_COSTS.image_nano_banana)).replace('{unit}', t('tools.ill_engine_unit'))     },
+            { id: 'gpt_mini',     name: t('step5.engine_gpt_name'),      desc: t('step5.engine_gpt_desc').replace('{cost}', String(CREDIT_COSTS.image_gpt_mini)).replace('{unit}', t('tools.ill_engine_unit'))        },
+            { id: 'secretslider', name: t('step5.engine_studio_name'),    desc: t('step5.engine_studio_desc').replace('{cost}', String(CREDIT_COSTS.image_secretslider)).replace('{unit}', t('tools.ill_engine_unit'))   },
           ] as const).filter((eng) => !(HIDDEN_ENGINES as readonly string[]).includes(eng.id)).map((eng) => {
             const active = imageEngine === eng.id
             return (
@@ -1276,6 +1300,54 @@ export default function Step5Images() {
         onConfirm={() => { setShowSkipModal(false); setStep(7) }}
         onCancel={() => setShowSkipModal(false)}
       />
+    )}
+
+    {showCostConfirm && costConfirmData && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+      >
+        <div
+          className="w-full max-w-sm mx-4 rounded-2xl p-6 flex flex-col gap-4"
+          style={{ background: '#1E1B2E', border: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          <p className="text-base font-semibold text-slate-100">{t('step5.cost_confirm_title')}</p>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            {t('step5.cost_confirm_body')
+              .replace('{count}', String(costConfirmData.count))
+              .replace('{cost}', String(costConfirmData.cost))}
+          </p>
+          <div className="flex gap-3 mt-1">
+            <button
+              type="button"
+              className="flex-1 rounded-xl py-2.5 text-sm font-medium text-slate-300 transition-colors"
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+              onClick={() => {
+                setShowCostConfirm(false)
+                setCostConfirmData(null)
+                pendingArgsRef.current = null
+              }}
+            >
+              {t('step5.cost_confirm_cancel')}
+            </button>
+            <button
+              type="button"
+              className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white transition-colors"
+              style={{ background: '#7C3AED' }}
+              onClick={() => {
+                const args = pendingArgsRef.current
+                costConfirmedRef.current = true
+                setShowCostConfirm(false)
+                setCostConfirmData(null)
+                pendingArgsRef.current = null
+                void handleGenerate(args?.overrideEngine, args?.overrideCount)
+              }}
+            >
+              {t('step5.cost_confirm_ok')}
+            </button>
+          </div>
+        </div>
+      </div>
     )}
     </>
   )

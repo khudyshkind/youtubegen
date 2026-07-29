@@ -30,16 +30,6 @@ export async function POST(request: NextRequest) {
 
   const count = Math.max(1, Math.min(IMAGE_COUNT_MAX, image_count ?? 1))
 
-  if (count > 15) {
-    return NextResponse.json({
-      ok: false,
-      code: 'TOO_MANY_FOR_SECRETSLIDER',
-      error: 'Secret Slider поддерживает максимум 15 иллюстраций за запуск',
-      maxAllowed: 15,
-      requested: count,
-    }, { status: 400 })
-  }
-
   const costPerImage = CREDIT_COSTS.image_secretslider
   const totalCost = costPerImage * count
 
