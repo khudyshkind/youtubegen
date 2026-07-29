@@ -3335,7 +3335,8 @@ cron.schedule('0 9 * * *', async () => {
 
 // ── Watchdog: stuck projects / audio_jobs ─────────────────────────────────────
 const WATCHDOG_DRY_RUN            = env('WATCHDOG_DRY_RUN') !== 'false'
-const WATCHDOG_IMAGES_TIMEOUT_MIN = parseInt(env('WATCHDOG_IMAGES_TIMEOUT_MIN') || '15', 10)
+// Must exceed IMAGES_ASYNC_POLL_MAX_MIN (default 30 min) so watchdog never kills a still-polling job
+const WATCHDOG_IMAGES_TIMEOUT_MIN = parseInt(env('WATCHDOG_IMAGES_TIMEOUT_MIN') || '45', 10)
 const WATCHDOG_VIDEO_TIMEOUT_MIN  = parseInt(env('WATCHDOG_VIDEO_TIMEOUT_MIN')  || '40', 10)
 const WATCHDOG_AUDIO_TIMEOUT_MIN  = parseInt(env('WATCHDOG_AUDIO_TIMEOUT_MIN')  || '20', 10)
 
@@ -5663,14 +5664,12 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${imgFmtSec(b.start)}�
   }))
 }
 
-async function imgGenerateSecretSlider(prompts, requestStartMs) {
+async function imgGenerateSecretSlider(prompts, jobId) {
   const apiKey = env('SECRETSLIDER_API_KEY')
   if (!apiKey) throw new Error('[secretslider] SECRETSLIDER_API_KEY not configured')
 
-  // No hard maxDuration on Railway — but set a generous deadline (10 min) to avoid hanging.
-  const uploadReserveMs = 3_500 * prompts.length
-  const ssBudgetMs = Math.max(30_000, 600_000 - (Date.now() - requestStartMs) - uploadReserveMs)
-  console.log(`[secretslider] budget: pre=${Math.round((Date.now() - requestStartMs) / 1000)}s reserve=${Math.round(uploadReserveMs / 1000)}s ss_budget=${Math.round(ssBudgetMs / 1000)}s prompts=${prompts.length}`)
+  const pollMaxMs = parseInt(env('IMAGES_ASYNC_POLL_MAX_MIN') || '30', 10) * 60_000
+  console.log(`[secretslider] task start: prompts=${prompts.length} poll_max=${Math.round(pollMaxMs / 1000)}s`)
 
   // Guard: reject if a task is already running (one active task per key).
   try {
@@ -5716,9 +5715,15 @@ async function imgGenerateSecretSlider(prompts, requestStartMs) {
   const { task_id: taskId } = await genRes.json()
   if (!taskId) throw new Error('[secretslider] no task_id in response')
   console.log(`[secretslider] task=${taskId} prompts=${prompts.length}`)
+  if (jobId) {
+    await updateImageJob(jobId, { provider_task_id: taskId })
+    console.log(`[images-async] provider task id: ${taskId}`)
+  }
 
   const t0 = Date.now()
-  const deadline = t0 + ssBudgetMs
+  const deadline = t0 + pollMaxMs
+  let polls = 0
+  let lastPoll = null
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, IMG_SS_POLL_MS))
     const elapsed = Math.round((Date.now() - t0) / 1000)
@@ -5728,21 +5733,25 @@ async function imgGenerateSecretSlider(prompts, requestStartMs) {
       signal: AbortSignal.timeout(15_000),
     })
     if (!pollRes.ok) {
+      polls++
       console.warn(`[secretslider] poll ${elapsed}s http=${pollRes.status}`)
       continue
     }
 
     const poll = await pollRes.json()
+    polls++
+    lastPoll = poll
     console.log(`[secretslider] poll ${elapsed}s status=${poll.status} image_count=${poll.results?.image_count ?? '?'}`)
 
     if (poll.status === 'failed') throw new Error(`[secretslider] task ${taskId} failed`)
 
-    if (poll.status === 'completed' || poll.status === 'partial_success') {
+    if (poll.status === 'completed') {
       const urls = poll.results?.image_urls ?? []
       if (urls.length !== prompts.length) {
         throw new Error(`[secretslider] image_count mismatch: expected ${prompts.length}, got ${urls.length}`)
       }
-      console.log(`[secretslider] STATS: prompts=${prompts.length} total_sec=${((Date.now() - t0) / 1000).toFixed(1)} status=${poll.status}`)
+      const duration = Math.round((Date.now() - t0) / 1000)
+      console.log(`[secretslider] task done: task=${taskId} prompts=${prompts.length} duration=${duration}s polls=${polls}`)
       return urls.map(u => {
         if (u.startsWith('/')) return `${IMG_SS_ORIGIN}${u}`
         if (u.startsWith('http://')) return `https://${u.slice(7)}`
@@ -5750,7 +5759,26 @@ async function imgGenerateSecretSlider(prompts, requestStartMs) {
       })
     }
   }
-  throw new Error(`[secretslider] task ${taskId} timed out (budget=${Math.round(ssBudgetMs / 1000)}s)`)
+  // One final check — task may have completed during the last poll interval
+  const finalRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/task/${taskId}`, {
+    headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => null)
+  const finalPoll = finalRes?.ok ? await finalRes.json().catch(() => null) : null
+  const finalUrls = finalPoll?.results?.image_urls ?? []
+  if (finalPoll?.status === 'completed' && finalUrls.length === prompts.length) {
+    console.log(`[secretslider] RECOVERED after poll timeout: task=${taskId}`)
+    return finalUrls.map(u => {
+      if (u.startsWith('/')) return `${IMG_SS_ORIGIN}${u}`
+      if (u.startsWith('http://')) return `https://${u.slice(7)}`
+      return u
+    })
+  }
+  const waited = Math.round((Date.now() - t0) / 1000)
+  const lastStatus = finalPoll?.status ?? lastPoll?.status ?? 'unreachable'
+  const lastImages = finalPoll?.results?.image_urls?.length ?? lastPoll?.results?.image_urls?.length ?? 0
+  console.log(`[secretslider] task NOT done: task=${taskId} prompts=${prompts.length} waited=${waited}s last_status=${lastStatus} images=${lastImages}`)
+  throw new Error('Генерация не завершилась в отведённое время. Кредиты за неполученные изображения не списаны. Попробуйте повторить.')
 }
 
 async function processImageJob(jobId, body) {
@@ -5813,7 +5841,7 @@ async function processImageJob(jobId, body) {
       return styledPrompt
     })
 
-    const ssUrls = await imgGenerateSecretSlider(allStyledPrompts, t0Request)
+    const ssUrls = await imgGenerateSecretSlider(allStyledPrompts, jobId)
     console.log(`[image-job:${jobId}] secretslider returned ${ssUrls.length} URLs in ${((Date.now() - t0Request) / 1000).toFixed(1)}s`)
     await updateImageJob(jobId, { progress: 70 })
 
