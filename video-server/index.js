@@ -5450,13 +5450,28 @@ function imgSplitSubtitlesIntoGroups(blocks, n) {
   return groups
 }
 
-async function imgGenerateScenesFromSubtitles(topic, imageCount, durationSec, subtitleBlocks, styleConfig, fallbackTopic) {
+async function imgGenerateScenesFromSubtitles(topic, imageCount, durationSec, subtitleBlocks, styleConfig, fallbackTopic, jobId = 'unknown') {
   const groups = imgSplitSubtitlesIntoGroups(subtitleBlocks, imageCount)
-  const scenesWithText = groups.map((group, i) => {
-    const start = group.length > 0 ? group[0].start : (durationSec / imageCount) * i
-    const end = group.length > 0 ? group[group.length - 1].end : (durationSec / imageCount) * (i + 1)
-    const text = group.map(b => b.text).join(' ').trim() || `Сцена ${i + 1}`
-    return { start, end, text }
+  // Pass 1: build timecodes; empty windows get empty string — no "Сцена N" placeholder.
+  const scenesRaw = groups.map((group, i) => ({
+    start: group.length > 0 ? group[0].start : (durationSec / imageCount) * i,
+    end:   group.length > 0 ? group[group.length - 1].end : (durationSec / imageCount) * (i + 1),
+    text:  group.map(b => b.text).join(' ').trim(),
+  }))
+  // Pass 2: fill empty windows with text from the nearest non-empty neighbours.
+  const scenesWithText = scenesRaw.map((s, i) => {
+    if (s.text) return s
+    const prevBlocks = []
+    for (let p = i - 1; p >= 0; p--) {
+      if (groups[p].length > 0) { prevBlocks.push(...groups[p].slice(-2).map(b => b.text)); break }
+    }
+    const nextBlocks = []
+    for (let n = i + 1; n < groups.length; n++) {
+      if (groups[n].length > 0) { nextBlocks.push(...groups[n].slice(0, 2).map(b => b.text)); break }
+    }
+    const neighbourText = [...prevBlocks, ...nextBlocks].join(' ').trim() || topic
+    console.log(`[image-job:${jobId}] scene ${i + 1}: empty subtitle window, using neighbours (prev: ${prevBlocks.join(' ').length} chars, next: ${nextBlocks.join(' ').length} chars)`)
+    return { ...s, text: neighbourText }
   })
 
   const fullText = subtitleBlocks.map(b => b.text).join(' ')
@@ -5485,6 +5500,9 @@ async function imgGenerateScenesFromSubtitles(topic, imageCount, durationSec, su
         messages: [{
           role: 'user',
           content: `Видео на тему: "${topic}". Ниже — ${chunkSize} сцен из реальной расшифровки аудио (Whisper).
+
+КОНТЕКСТ РОЛИКА: «${topic}»
+Если текст конкретной сцены краткий — иллюстрируй характерный момент из этой темы, не используй обобщённые фигуры без сюжета.
 
 СТИЛЬ ИЛЛЮСТРАЦИЙ (соблюдать в каждом промте):
 ${styleConfig.claudeInstruction}
@@ -5864,7 +5882,7 @@ async function processImageJob(jobId, body) {
 
     const t0Claude = Date.now()
     const scenes = hasSubtitles
-      ? await imgGenerateScenesFromSubtitles(effectiveTopic, count, duration_sec ?? 300, subtitleBlocks, styleConfig, fallbackTopic)
+      ? await imgGenerateScenesFromSubtitles(effectiveTopic, count, duration_sec ?? 300, subtitleBlocks, styleConfig, fallbackTopic, jobId)
       : await imgGenerateScenesFromScript(script ?? '', effectiveTopic, duration_sec ?? 300, count, styleConfig)
     const claudeSec = ((Date.now() - t0Claude) / 1000).toFixed(1)
     console.log(`[image-job:${jobId}] claude done: ${scenes.length} scenes in ${claudeSec}s`)
