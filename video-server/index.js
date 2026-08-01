@@ -7,6 +7,8 @@ function env(key) {
   return (val.charCodeAt(0) === 0xfeff ? val.slice(1) : val).trim()
 }
 
+const STARTED_AT = new Date().toISOString()
+
 // Sentry must be initialized before all other requires
 let Sentry
 try {
@@ -3914,7 +3916,16 @@ function getVfFilter(_img, dur, sceneIdx, hasKenBurns) {
   }
 }
 
-app.get('/health', (_req, res) => res.json({ ok: true }))
+const BUILD_COMMIT = env('RAILWAY_GIT_COMMIT_SHA') || null
+const BUILD_TS     = env('RAILWAY_GIT_COMMIT_TIMESTAMP') || null
+
+app.get('/health', (_req, res) => res.json({
+  ok:          true,
+  commit:      BUILD_COMMIT,
+  deployed_at: BUILD_TS,
+  started_at:  STARTED_AT,
+  source:      BUILD_COMMIT ? 'github' : 'manual-upload',
+}))
 
 // ── Purge-project: delete B2 objects for a specific project ──────────────────
 // Called by Vercel DELETE /api/projects/[id] when the user deletes a project.
@@ -6619,6 +6630,7 @@ app.listen(PORT, async () => {
   console.log('[bot] starting cron jobs...')
 
   console.log('[boot] OWNER_ID:', OWNER_ID || '(not set)')
+  console.log(`[boot] build: source=${BUILD_COMMIT ? 'github' : 'manual-upload'} commit=${BUILD_COMMIT ?? 'n/a'} deployed_at=${BUILD_TS ?? 'n/a'} started_at=${STARTED_AT}`)
   if (OWNER_ID) {
     tgApi('sendMessage', { chat_id: OWNER_ID, text: '🟢 Бот перезапущен' })
       .then(r => console.log('[boot] owner notified ok, tg response ok:', r?.ok))
