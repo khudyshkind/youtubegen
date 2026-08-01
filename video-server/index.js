@@ -5268,6 +5268,8 @@ async function uploadImageUrlToStorage(imageUrl, storagePath) {
 
 const IMG_SS_ORIGIN  = 'https://secretslider.com'
 const IMG_SS_POLL_MS = 5_000
+// Empirical: API returned prompt_too_long above this; not from documentation.
+const SS_PROMPT_MAX_CHARS = 1000
 
 function imgGetStyleConfig(imageStyle, customStyle) {
   if (customStyle?.trim()) {
@@ -5323,6 +5325,43 @@ function imgSanitizeScenePrompt(prompt, sceneIdx) {
     })
   }
   return result.replace(/\s{2,}/g, ' ').trim()
+}
+
+function imgTruncateSecretSliderPrompt(sceneText, fluxSuffix, limit, jobId, sceneIdx) {
+  const suffixPart = `, ${fluxSuffix}`
+  const full = `${sceneText}${suffixPart}`
+  if (full.length <= limit) return full
+
+  // Step a: remove injected character profiles (longest first).
+  // imgInjectCharacterProfiles adds " (visual description 30+ chars)" after each name.
+  const profiles = []
+  const profileRe = /\s*\(([^)]{30,})\)/g
+  let m
+  while ((m = profileRe.exec(sceneText)) !== null) {
+    profiles.push(m[0])
+  }
+  profiles.sort((a, b) => b.length - a.length)
+
+  let trimmedScene = sceneText
+  let removedCount = 0
+  for (const profileMatch of profiles) {
+    if (`${trimmedScene}${suffixPart}`.length <= limit) break
+    trimmedScene = trimmedScene.replace(profileMatch, '').replace(/\s{2,}/g, ' ').trim()
+    removedCount++
+  }
+
+  // Step b: if still over limit after removing all profiles, truncate at word boundary.
+  if (`${trimmedScene}${suffixPart}`.length > limit) {
+    const maxSceneChars = limit - suffixPart.length
+    let cut = maxSceneChars > 0 ? trimmedScene.slice(0, maxSceneChars) : ''
+    const lastSpace = cut.lastIndexOf(' ')
+    if (lastSpace > 0) cut = cut.slice(0, lastSpace)
+    trimmedScene = cut.trim()
+  }
+
+  const result = `${trimmedScene}${suffixPart}`
+  console.log(`[image-job:${jobId}] prompt truncated scene ${sceneIdx + 1}: было ${full.length} символов, стало ${result.length}, удалено профилей: ${removedCount}`)
+  return result
 }
 
 function imgFmtSec(s) {
@@ -5836,7 +5875,10 @@ async function processImageJob(jobId, body) {
     }
 
     const allStyledPrompts = scenes.map((scn, i) => {
-      const styledPrompt = `${imgSanitizeScenePrompt(scn.prompt, i)}, ${styleConfig.fluxSuffix}`
+      const cleanedScene = imgSanitizeScenePrompt(scn.prompt, i)
+      const styledPrompt = engine === 'secretslider'
+        ? imgTruncateSecretSliderPrompt(cleanedScene, styleConfig.fluxSuffix, SS_PROMPT_MAX_CHARS, jobId, i)
+        : `${cleanedScene}, ${styleConfig.fluxSuffix}`
       console.log(`[image-job:${jobId}] scene ${i + 1} prompt: "${styledPrompt.slice(0, 120)}"`)
       return styledPrompt
     })
