@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Geist } from 'next/font/google'
 import './globals.css'
 import Navbar from '@/components/shared/Navbar'
+import UtmCapture from '@/components/shared/UtmCapture'
 
 const geist = Geist({
   variable: '--font-geist',
@@ -40,6 +41,7 @@ export default function RootLayout({
     <html lang="ru" className={`${geist.variable} h-full antialiased`}>
       <body className="min-h-screen flex flex-col text-gray-900" style={{ background: '#0A0A0F' }}>
         <Navbar />
+        <UtmCapture />
         <main className="flex-1">{children}</main>
       </body>
     </html>
