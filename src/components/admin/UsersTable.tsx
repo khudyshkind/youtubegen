@@ -20,6 +20,11 @@ interface UserRow {
   nextBilledAt: string | null
   totalSpent: number
   spentCurrency: string
+  // signup tracking — may be null on legacy accounts or before migration
+  signup_ip:      string | null
+  signup_country: string | null
+  signup_city:    string | null
+  utm_source:     string | null
 }
 
 interface Props {
@@ -251,6 +256,9 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
               <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Потрачено $</th>
               <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Реф.</th>
               <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Дата</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">IP</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Город/Страна</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">UTM</th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
@@ -293,6 +301,13 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
                   )}
                 </td>
                 <td className="px-4 py-3 text-right text-xs text-gray-400">{fmtDate(u.created_at)}</td>
+                <td className="px-4 py-3 font-mono text-xs text-gray-500">{u.signup_ip ?? '—'}</td>
+                <td className="px-4 py-3 text-xs text-gray-500">
+                  {u.signup_city && u.signup_country
+                    ? `${u.signup_city}, ${u.signup_country}`
+                    : (u.signup_country ?? '—')}
+                </td>
+                <td className="px-4 py-3 text-xs text-gray-500">{u.utm_source ?? '—'}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1">
                     <button onClick={() => openCredits(u)}
@@ -319,7 +334,7 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
             ))}
             {users.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-6 py-10 text-center text-sm text-gray-400">
+                <td colSpan={13} className="px-6 py-10 text-center text-sm text-gray-400">
                   {hasServiceKey === false
                     ? 'Данные недоступны — добавьте SUPABASE_SERVICE_ROLE_KEY в Vercel env vars'
                     : 'Пользователи не найдены'}

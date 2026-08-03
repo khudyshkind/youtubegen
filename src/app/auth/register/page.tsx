@@ -24,6 +24,23 @@ function RegisterForm() {
   const supabase = useMemo(() => createClient(), [])
   const { t } = useLang()
 
+  const UTM_SS_KEY = 'lefiro_utm'
+
+  async function trackSignup() {
+    try {
+      const raw = sessionStorage.getItem(UTM_SS_KEY)
+      const utms: Record<string, string> = raw
+        ? (JSON.parse(raw) as Record<string, string>)
+        : {}
+      await fetch('/api/auth/track-signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(utms),
+      })
+      sessionStorage.removeItem(UTM_SS_KEY)
+    } catch { /* best-effort */ }
+  }
+
   async function acceptLegal() {
     try {
       await fetch('/api/legal/accept', { method: 'POST' })
@@ -83,6 +100,7 @@ function RegisterForm() {
 
     // Email confirmation disabled — session returned immediately
     if (data.session && data.user) {
+      void trackSignup()
       await applyReferralClient(data.user.id)
       await acceptLegal()
       router.push(safeRedirect)

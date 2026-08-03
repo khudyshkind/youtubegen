@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 import { applyReferral } from '@/lib/referral'
 import { sendWelcomeEmail } from '@/lib/email'
+import { saveSignupTracking } from '@/lib/save-signup-tracking'
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url)
@@ -56,6 +57,14 @@ export async function GET(request: NextRequest) {
           email: data.user.email!,
           name: data.user.user_metadata?.full_name ?? data.user.user_metadata?.name ?? null,
         })
+        // For Google OAuth, this callback IS the server-side request from the user's browser
+        // so request headers contain the real IP and geo data.
+        // (UTMs are not captured here; for email flow they come via /api/auth/track-signup.)
+        try {
+          await saveSignupTracking(request, data.user.id)
+        } catch (err) {
+          console.error('[callback] saveSignupTracking non-fatal:', err)
+        }
       }
     }
 

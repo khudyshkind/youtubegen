@@ -99,15 +99,26 @@ async function UsersList({ q, plan }: { q: string; plan: string }) {
 
   const users = (profiles ?? []).map((p) => {
     const paddleInfo = p.paddle_customer_id ? paddleSubs.get(p.paddle_customer_id) : undefined
+    // signup_* and utm_* columns exist after migration 012; cast required until types are regenerated.
+    const pEx = p as typeof p & {
+      signup_ip?: string | null
+      signup_country?: string | null
+      signup_city?: string | null
+      utm_source?: string | null
+    }
     return {
       ...p,
-      plan_expires_at: (p.plan_expires_at as string | null) ?? null,
-      projectCount: pcMap[p.id] ?? 0,
-      lastActivity: null as string | null,
-      subscriptionStatus: paddleInfo?.status ?? null,
-      nextBilledAt: paddleInfo?.nextBilledAt ?? null,
-      totalSpent: paddleInfo?.totalSpent ?? 0,
-      spentCurrency: paddleInfo?.currency ?? 'USD',
+      plan_expires_at:    (p.plan_expires_at as string | null) ?? null,
+      projectCount:        pcMap[p.id] ?? 0,
+      lastActivity:        null as string | null,
+      subscriptionStatus:  paddleInfo?.status ?? null,
+      nextBilledAt:        paddleInfo?.nextBilledAt ?? null,
+      totalSpent:          paddleInfo?.totalSpent ?? 0,
+      spentCurrency:       paddleInfo?.currency ?? 'USD',
+      signup_ip:           pEx.signup_ip      ?? null,
+      signup_country:      pEx.signup_country ?? null,
+      signup_city:         pEx.signup_city    ?? null,
+      utm_source:          pEx.utm_source     ?? null,
     }
   })
 
@@ -120,6 +131,113 @@ async function UsersList({ q, plan }: { q: string; plan: string }) {
       hasServiceKey={hasServiceKey}
       queryError={profilesError?.message}
     />
+  )
+}
+
+// ─── duplicate IP detection ────────────────────────────────────────────────────
+// Equivalent SQL (run in Supabase SQL Editor for full dataset):
+//   SELECT signup_ip, COUNT(*) AS account_count,
+//     array_agg(LEFT(split_part(email,'@',1),2)||'***@'||split_part(email,'@',2)) AS emails,
+//     MIN(created_at) AS first_reg, MAX(created_at) AS last_reg
+//   FROM public.profiles
+//   WHERE signup_ip IS NOT NULL
+//   GROUP BY signup_ip
+//   HAVING COUNT(*) > 1
+//   ORDER BY account_count DESC;
+
+function maskEmail(email: string): string {
+  const at = email.indexOf('@')
+  if (at < 0) return email
+  return email.slice(0, 2) + '***' + email.slice(at)
+}
+
+function fmtDateShort(iso: string) {
+  return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
+
+interface IpGroup {
+  ip: string
+  count: number
+  emails: string[]
+  countries: string[]
+  firstReg: string
+  lastReg: string
+}
+
+async function DuplicateIPs() {
+  const svc = createServiceClient()
+
+  const { data, error } = await svc
+    .from('profiles')
+    .select('id, email, plan, signup_ip, signup_country, signup_city, created_at')
+    .not('signup_ip', 'is', null)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    return (
+      <p className="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-lg">
+        Ошибка загрузки IP-данных: {error.message}
+      </p>
+    )
+  }
+
+  const byIp = new Map<string, typeof data>()
+  for (const p of data ?? []) {
+    if (!p.signup_ip) continue
+    const g = byIp.get(p.signup_ip) ?? []
+    g.push(p)
+    byIp.set(p.signup_ip, g)
+  }
+
+  const groups: IpGroup[] = [...byIp.entries()]
+    .filter(([, users]) => users.length > 1)
+    .map(([ip, users]) => ({
+      ip,
+      count: users.length,
+      emails: users.map((u) => maskEmail(u.email)),
+      countries: [...new Set(users.map((u) => u.signup_country ?? '?'))],
+      firstReg: users[0]?.created_at ?? '',
+      lastReg:  users[users.length - 1]?.created_at ?? '',
+    }))
+    .sort((a, b) => b.count - a.count)
+
+  if (groups.length === 0) {
+    return (
+      <p className="text-sm text-gray-400 text-center py-4">
+        Совпадающих IP при регистрации не найдено
+      </p>
+    )
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-amber-200 overflow-x-auto">
+      <table className="w-full text-sm min-w-[700px]">
+        <thead>
+          <tr className="border-b border-amber-100 bg-amber-50">
+            <th className="text-left px-4 py-3 text-xs font-semibold text-amber-700 uppercase tracking-wide">IP</th>
+            <th className="text-center px-4 py-3 text-xs font-semibold text-amber-700 uppercase tracking-wide">Аккаунтов</th>
+            <th className="text-left px-4 py-3 text-xs font-semibold text-amber-700 uppercase tracking-wide">Email (маск.)</th>
+            <th className="text-left px-4 py-3 text-xs font-semibold text-amber-700 uppercase tracking-wide">Страна</th>
+            <th className="text-right px-4 py-3 text-xs font-semibold text-amber-700 uppercase tracking-wide">Первая рег.</th>
+            <th className="text-right px-4 py-3 text-xs font-semibold text-amber-700 uppercase tracking-wide">Последняя рег.</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-50">
+          {groups.map((g) => (
+            <tr key={g.ip} className="hover:bg-amber-50 transition-colors">
+              <td className="px-4 py-3 font-mono text-xs text-gray-700">{g.ip}</td>
+              <td className="px-4 py-3 text-center font-semibold text-red-600">{g.count}</td>
+              <td className="px-4 py-3 text-xs text-gray-600 max-w-[260px]">
+                {g.emails.join(', ')}
+              </td>
+              <td className="px-4 py-3 text-xs text-gray-500">{g.countries.join(', ')}</td>
+              <td className="px-4 py-3 text-right text-xs text-gray-400">{fmtDateShort(g.firstReg)}</td>
+              <td className="px-4 py-3 text-right text-xs text-gray-400">{fmtDateShort(g.lastReg)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -141,6 +259,16 @@ export default async function AdminUsersPage({ searchParams }: Props) {
       <Suspense fallback={<div className="text-sm text-gray-400 py-8 text-center">Загрузка данных...</div>}>
         <UsersList q={q} plan={plan} />
       </Suspense>
+
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900 mb-1">Совпадающие IP при регистрации</h2>
+        <p className="text-xs text-gray-400 mb-3">
+          Группировка по signup_ip, где число аккаунтов &gt; 1. Признак возможной множественной регистрации.
+        </p>
+        <Suspense fallback={<div className="text-sm text-gray-400 py-4 text-center">Анализ IP...</div>}>
+          <DuplicateIPs />
+        </Suspense>
+      </div>
     </div>
   )
 }
