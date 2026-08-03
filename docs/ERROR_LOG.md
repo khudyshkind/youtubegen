@@ -20,6 +20,18 @@
 
 ---
 
+### [2026-07-22] YooKassa webhook: рутпричина + платёжные инциденты (SHA 9901805)
+**Симптом:** Все вебхуки ЮKassa ack-ались без активации тарифа; платежи клиентов не активировались.
+**Причина:** Код проверял `body.type` (всегда `"notification"`) вместо `body.event` (`"payment.succeeded"`) — каждый вебхук тихо ack-ался без активации. Дополнительно отсутствовал диапазон `77.75.154.128/25` в IP whitelist.
+**Решение:**
+- Исправлена проверка: `body.event === 'payment.succeeded'` (SHA 4587d78)
+- IP whitelist: добавлен `77.75.154.128/25`, поддержка `::ffff:x.x.x.x` и IPv6-prefix `2a02:5180:` (SHA 01e17cb)
+- Разрешена покупка любого тарифа, кнопка «Продлить» на карточке текущего тарифа (SHA 9989791)
+- Таблица `payment_incidents`: UNIQUE(payment_id), upsert+ignoreDuplicates; все ветки вебхука (`bad_metadata`, `unknown_plan`, `amount_mismatch`, `activation_failed`) пишут инцидент + TG alert (SHA 6a38589)
+**Файлы:** `src/app/api/webhooks/yookassa/route.ts`, `supabase/migrations/008_payment_incidents.sql`, `src/app/(dashboard)/billing/page.tsx`
+
+---
+
 ### [2026-07-22] «Ошибка генерации субтитров» в инструменте Субтитры по аудио
 **Симптом:** Загрузка MP3 в инструменте → «Ошибка генерации субтитров» сразу после PUT.
 **Причина:** `upload/sign` вызывал `createSignedUrl` для чтения ДО PUT-загрузки файла. Supabase Storage возвращает "Object not found" если объект не существует → `access_url` = '' → Railway `/transcribe` получает пустой `audio_url` → 400 "audio_url required" → Next.js generate/subtitles возвращает 502 → страница показывает ошибку.
