@@ -22,8 +22,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     let utms: Record<string, string | null> = {}
-    try { utms = await req.json() as Record<string, string | null> }
-    catch { /* UTMs are optional — malformed body is fine */ }
+    try {
+      const rawBody = await req.text() // TEMP DIAGNOSTIC
+      console.log('[TEMP DIAGNOSTIC] track-signup: raw body text:', JSON.stringify(rawBody)) // TEMP DIAGNOSTIC
+      utms = JSON.parse(rawBody) as Record<string, string | null> // TEMP DIAGNOSTIC
+      console.log('[TEMP DIAGNOSTIC] track-signup: parsed utms:', JSON.stringify(utms)) // TEMP DIAGNOSTIC
+    } catch (e) {
+      console.log('[TEMP DIAGNOSTIC] track-signup: body parse error:', e) // TEMP DIAGNOSTIC
+      /* UTMs are optional — malformed body is fine */
+    }
 
     await saveSignupTracking(req, user.id, utms)
 
