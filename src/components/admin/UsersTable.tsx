@@ -81,6 +81,13 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
   const [extendError, setExtendError] = useState('')
   const [extendSuccess, setExtendSuccess] = useState('')
 
+  // ── delete modal ───────────────────────────────────────────────────────────
+  const [deleteUser, setDeleteUser] = useState<UserRow | null>(null)
+  const [deleteEmailInput, setDeleteEmailInput] = useState('')
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const [deleteSuccess, setDeleteSuccess] = useState<{ projects: number; files: number; imageJobs: number } | null>(null)
+
   // ── bulk extend modal ──────────────────────────────────────────────────────
   const [showBulk, setShowBulk] = useState(false)
   const [bulkDays, setBulkDays] = useState('')
@@ -191,9 +198,35 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
     finally { setBulkLoading(false) }
   }
 
+  // ── delete handler ─────────────────────────────────────────────────────────
+  async function handleDeleteUser() {
+    if (!deleteUser || deleteEmailInput !== deleteUser.email) return
+    setDeleteLoading(true); setDeleteError('')
+    try {
+      const res = await fetch(`/api/admin/users/${deleteUser.id}/delete`, { method: 'DELETE' })
+      const json = await res.json() as {
+        ok: boolean
+        error?: string
+        summary?: { projectsDeleted: number; filesDeleted: number; imageJobsDeleted: number }
+      }
+      if (!json.ok) { setDeleteError(json.error ?? 'Ошибка'); return }
+      setDeleteSuccess({
+        projects: json.summary?.projectsDeleted ?? 0,
+        files: json.summary?.filesDeleted ?? 0,
+        imageJobs: json.summary?.imageJobsDeleted ?? 0,
+      })
+      setTimeout(() => {
+        setDeleteUser(null); setDeleteEmailInput(''); setDeleteSuccess(null)
+        router.refresh()
+      }, 2500)
+    } catch { setDeleteError('Ошибка соединения') }
+    finally { setDeleteLoading(false) }
+  }
+
   function openCredits(u: UserRow) { setEditCreditsUser(u); setCreditAmount(''); setCreditReason(''); setCreditError('') }
   function openPlan(u: UserRow)    { setEditPlanUser(u); setNewPlan(u.plan); setPlanError('') }
   function openExtend(u: UserRow)  { setExtendUser(u); setExtendDays(''); setExtendReason(''); setExtendError(''); setExtendSuccess('') }
+  function openDelete(u: UserRow)  { setDeleteUser(u); setDeleteEmailInput(''); setDeleteError(''); setDeleteSuccess(null) }
 
   const planColors: Record<Plan, string> = {
     free: 'bg-gray-100 text-gray-600',
@@ -328,6 +361,10 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
                       className="px-2 py-1 text-xs bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg transition-colors whitespace-nowrap">
                       Просмотр
                     </a>
+                    <button onClick={() => openDelete(u)}
+                      className="px-2 py-1 text-xs bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors whitespace-nowrap">
+                      Удалить
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -462,6 +499,54 @@ export default function UsersTable({ users, total, hasServiceKey, queryError }: 
                 {extendLoading ? 'Продление...' : 'Продлить'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Modal */}
+      {deleteUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-base font-semibold text-gray-900 mb-1">Удалить аккаунт</h3>
+            <p className="text-sm text-gray-500 mb-4">{deleteUser.email}</p>
+            {!deleteSuccess ? (
+              <>
+                <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700 mb-4">
+                  Это действие необратимо. Удалятся аккаунт, все проекты, файлы в хранилище, история транзакций и аналитика.
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 mb-1 block">
+                    Введите email пользователя для подтверждения
+                  </label>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={deleteEmailInput}
+                    onChange={(e) => setDeleteEmailInput(e.target.value)}
+                    placeholder={deleteUser.email}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                  />
+                </div>
+                {deleteError && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg mt-3">{deleteError}</p>}
+                <div className="flex gap-2 mt-5">
+                  <button onClick={() => setDeleteUser(null)}
+                    className="flex-1 py-2.5 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">
+                    Отмена
+                  </button>
+                  <button
+                    onClick={handleDeleteUser}
+                    disabled={deleteLoading || deleteEmailInput !== deleteUser.email}
+                    className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm"
+                  >
+                    {deleteLoading ? 'Удаление...' : 'Удалить навсегда'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-green-700 bg-green-50 px-3 py-2 rounded-lg">
+                ✓ Аккаунт удалён. Проектов: {deleteSuccess.projects}, файлов: {deleteSuccess.files}, image_jobs: {deleteSuccess.imageJobs}.
+              </p>
+            )}
           </div>
         </div>
       )}
