@@ -574,3 +574,39 @@ SUMMARY: engine=flux_schnell ordered=8 created=8 total_sec=15.0s
 - Кэш на роутах Opus не проверен.
 - Кап 30 в инструменте «Иллюстрации» для FAL-движков — по-прежнему без обоснования.
 - **Задачи роста по-прежнему не двинулись:** ⭐ третий путь «свой текст + своё аудио», демо-видео на лендинге, привлечение трафика. Но появился **первый платящий клиент**, и модель у него другая: пришёл и сразу заплатил, дошёл дальше картинок. Одна точка — не тренд, но это первое движение метрики за всё время.
+
+---
+
+## Архитектура загрузки файлов (upload)
+
+На каждом шаге добавлены кнопки «Загрузить» и «Пропустить».
+
+**Схема загрузки:**
+1. Client → `POST /api/upload/sign` → получает `{ signed_url, access_url }` ⚠️ Δ13: расходится с кодом — для `type=tool_audio` `/upload/sign` больше не возвращает `access_url` (фикс SHA 442b63f, см. ERROR_LOG 2026-07-22)
+2. Client → `PUT signed_url` с телом файла (напрямую в Supabase Storage, минуя Vercel 4.5MB limit)
+3. `access_url` сохраняется в store (для аудио — signed read URL на 1 час; для изображений — public URL)
+
+**Audio bucket** (private): возвращает signed read URL через `createSignedUrl(path, 3600)`
+**Images bucket** (public): возвращает public URL через `getPublicUrl(path)`
+
+**Шаги:**
+- Step2: FileReader.readAsText(.txt) → setScript()
+- Step3: signed upload → setAudioUrl(access_url)  — кредиты не списываются
+- Step4: FileReader.readAsText(.srt) → parseSrt() → setSubtitleBlocks()
+- Step5: до 20 файлов, каждый через свой signed URL, scene_index = i+1
+
+---
+
+## Стек проверок платёжного вебхука
+
+Финальный стек проверок `/api/webhooks/yookassa/route.ts` (SHA 9901805):
+
+1. IP whitelist (`77.75.154.128/25`, `::ffff:`, `2a02:5180:`)
+2. Signature verify (HMAC)
+3. `body.event === 'payment.succeeded'` ← было сломано (проверялся `body.type` = `"notification"`)
+4. Re-fetch payment from YooKassa API (доверяем только им, не телу вебхука)
+5. userId/kind из metadata → `bad_metadata` branch
+6. Plan/topup lookup → `unknown_plan` branch
+7. Amount check vs `PLAN_PRICES_RUB` / `TOPUP_PACKAGES` → `amount_mismatch` branch
+8. Idempotency claim → `already_activated` branch
+9. `activatePlan` / `add_credits_purchased` → `activation_failed` branch
