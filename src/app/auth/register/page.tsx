@@ -32,12 +32,12 @@ function RegisterForm() {
       const utms: Record<string, string> = raw
         ? (JSON.parse(raw) as Record<string, string>)
         : {}
-      await fetch('/api/auth/track-signup', {
+      const res = await fetch('/api/auth/track-signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(utms),
       })
-      sessionStorage.removeItem(UTM_SS_KEY)
+      if (res.ok) sessionStorage.removeItem(UTM_SS_KEY)
     } catch { /* best-effort */ }
   }
 
@@ -100,9 +100,11 @@ function RegisterForm() {
 
     // Email confirmation disabled — session returned immediately
     if (data.session && data.user) {
-      void trackSignup()
-      await applyReferralClient(data.user.id)
-      await acceptLegal()
+      await Promise.allSettled([
+        trackSignup(),
+        applyReferralClient(data.user.id),
+        acceptLegal(),
+      ])
       router.push(safeRedirect)
       router.refresh()
       return
