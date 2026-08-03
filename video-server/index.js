@@ -813,29 +813,46 @@ async function sendTo(chatId, text, extra = {}) {
 }
 
 // Notify a platform user that their long background job finished.
-// Best-effort: never throws, never logs errors (missing chat_id is expected).
+// Best-effort: never throws. Three distinct log levels:
+//   log  — no chat_id (expected for non-bot users) or bot blocked by user (user action, not a bug)
+//   warn — sbGet failure or unexpected Telegram error (infrastructure problem worth investigating)
 async function notifyUserJobDone(userId, kind, payload = {}) {
   if (!userId) return
+
+  let rows
   try {
-    const rows = await sbGet('profiles', `id=eq.${userId}&select=telegram_chat_id`)
-    const chatId = Array.isArray(rows) && rows[0]?.telegram_chat_id
-    if (!chatId) return
+    rows = await sbGet('profiles', `id=eq.${userId}&select=telegram_chat_id`)
+  } catch (err) {
+    console.warn('[notify] profile lookup failed:', err.message)
+    return
+  }
 
-    let msg
-    if (kind === 'video') {
-      msg = `🎬 Видео готово!\nСборка завершена — можно скачать или запустить SEO-оптимизацию.\n${APP_URL}/studio`
-    } else if (kind === 'images') {
-      const count = payload.count ?? 0
-      msg = `🖼 Иллюстрации готовы! (${count} шт.)\n${APP_URL}/studio`
-    } else if (kind === 'audio') {
-      msg = `🎙 Озвучка готова!\nАудио загружено — переходите к субтитрам.\n${APP_URL}/studio`
+  const chatId = Array.isArray(rows) && rows[0]?.telegram_chat_id
+  if (!chatId) {
+    console.log('[notify] skip: no chat_id user=' + userId)
+    return
+  }
+
+  let msg
+  if (kind === 'video') {
+    msg = `🎬 Видео готово!\nСборка завершена — можно скачать или запустить SEO-оптимизацию.\n${APP_URL}/studio`
+  } else if (kind === 'images') {
+    const count = payload.count ?? 0
+    msg = `🖼 Иллюстрации готовы! (${count} шт.)\n${APP_URL}/studio`
+  } else if (kind === 'audio') {
+    msg = `🎙 Озвучка готова!\nАудио загружено — переходите к субтитрам.\n${APP_URL}/studio`
+  } else {
+    return
+  }
+
+  // tgApi never throws (catches internally and returns null); check result.ok for Telegram-level errors
+  const result = await tgApi('sendMessage', { chat_id: chatId, text: msg, reply_markup: PUBLIC_KB })
+  if (result && !result.ok) {
+    if (result.error_code === 403) {
+      console.log('[notify] user blocked bot chat_id=' + chatId)
     } else {
-      return
+      console.warn('[notify] send failed:', result.error_code, result.description)
     }
-
-    await safeSendMessage(chatId, msg, { reply_markup: PUBLIC_KB })
-  } catch (_) {
-    // best-effort: notification failure must never affect job status
   }
 }
 
