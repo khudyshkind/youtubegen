@@ -12,8 +12,8 @@ export async function saveSignupTracking(
   const rawCity = req.headers.get('x-vercel-ip-city')
   const city    = rawCity ? decodeURIComponent(rawCity) : null
 
-  const svc = createServiceClient()
-  await svc.from('profiles').update({
+  console.log('[TEMP DIAGNOSTIC] saveSignupTracking: utms param received:', JSON.stringify(utms)) // TEMP DIAGNOSTIC
+  const updatePayload = {
     signup_ip:         ip,
     signup_user_agent: ua,
     signup_country:    country,
@@ -23,5 +23,8 @@ export async function saveSignupTracking(
       utm_medium:   utms.utm_medium   ?? null,
       utm_campaign: utms.utm_campaign ?? null,
     } : {}),
-  }).eq('id', userId)
+  }
+  console.log('[TEMP DIAGNOSTIC] saveSignupTracking: update payload going to DB:', JSON.stringify(updatePayload)) // TEMP DIAGNOSTIC
+  const svc = createServiceClient()
+  await svc.from('profiles').update(updatePayload).eq('id', userId)
 }
