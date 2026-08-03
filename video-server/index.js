@@ -817,7 +817,10 @@ async function sendTo(chatId, text, extra = {}) {
 //   log  — no chat_id (expected for non-bot users) or bot blocked by user (user action, not a bug)
 //   warn — sbGet failure or unexpected Telegram error (infrastructure problem worth investigating)
 async function notifyUserJobDone(userId, kind, payload = {}) {
-  if (!userId) return
+  if (!userId) {
+    console.log('[notify] skip: no userId kind=' + kind)
+    return
+  }
 
   let rows
   try {
