@@ -812,6 +812,33 @@ async function sendTo(chatId, text, extra = {}) {
   return safeSendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup: MAIN_KB, ...extra })
 }
 
+// Notify a platform user that their long background job finished.
+// Best-effort: never throws, never logs errors (missing chat_id is expected).
+async function notifyUserJobDone(userId, kind, payload = {}) {
+  if (!userId) return
+  try {
+    const rows = await sbGet('profiles', `id=eq.${userId}&select=telegram_chat_id`)
+    const chatId = Array.isArray(rows) && rows[0]?.telegram_chat_id
+    if (!chatId) return
+
+    let msg
+    if (kind === 'video') {
+      msg = `🎬 Видео готово!\nСборка завершена — можно скачать или запустить SEO-оптимизацию.\n${APP_URL}/studio`
+    } else if (kind === 'images') {
+      const count = payload.count ?? 0
+      msg = `🖼 Иллюстрации готовы! (${count} шт.)\n${APP_URL}/studio`
+    } else if (kind === 'audio') {
+      msg = `🎙 Озвучка готова!\nАудио загружено — переходите к субтитрам.\n${APP_URL}/studio`
+    } else {
+      return
+    }
+
+    await safeSendMessage(chatId, msg, { reply_markup: PUBLIC_KB })
+  } catch (_) {
+    // best-effort: notification failure must never affect job status
+  }
+}
+
 // ── AI consultant helpers ─────────────────────────────────────────────────────
 function consultantSystem() {
   return (
@@ -4404,6 +4431,7 @@ async function processVideoJob(jobId, body) {
   await updateJob(jobId, { status: 'processing', progress: 0, phase: 'clips' })
   const T = (label) => `[${jobId.slice(0,8)}] ${label}`
   console.time(T('TOTAL'))
+  const t0Job = Date.now()
   let tempImageB2Keys = []
 
   try {
@@ -4795,6 +4823,10 @@ async function processVideoJob(jobId, body) {
       completed_at: new Date().toISOString(),
     })
     console.log(`[job:${jobId}] done →`, publicUrl)
+
+    if (Date.now() - t0Job > 90_000) {
+      notifyUserJobDone(user_id, 'video').catch(() => {})
+    }
 
     // Write video_url to projects so the video appears after page reload
     // without requiring frontend polling. Idempotent: WHERE video_url IS NULL
@@ -6030,6 +6062,10 @@ async function processImageJob(jobId, body) {
       completed_at: new Date().toISOString(),
     })
 
+    if (Date.now() - t0Request > 90_000) {
+      notifyUserJobDone(user_id, 'images', { count: validImages.length }).catch(() => {})
+    }
+
     if (project_id) {
       await sbPatch('projects', `id=eq.${project_id}&user_id=eq.${user_id}`, {
         scene_images: validImages,
@@ -6313,6 +6349,7 @@ const STYLE_EXAGGERATION_MAP = {
 // Inputs (voice_id, script, status:'generating_audio') are written by the Vercel dispatch Lambda.
 async function processAudioJob(job) {
   const jobId = job.id
+  const t0Job = Date.now()
   console.log(`[audio-job:${jobId}] start engine=${job.engine} project=${job.project_id}`)
 
   try {
@@ -6440,6 +6477,10 @@ async function processAudioJob(job) {
       result_url:   publicUrl,
       completed_at: new Date().toISOString(),
     })
+
+    if (Date.now() - t0Job > 90_000) {
+      notifyUserJobDone(job.user_id, 'audio').catch(() => {})
+    }
 
     // 11. Update projects with RESULT ONLY — mirrors synchronous audio/route.ts status transition.
     //     voice_id and script are written by the Vercel dispatch Lambda (inputs, not results).
