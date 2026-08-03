@@ -29,21 +29,16 @@ function RegisterForm() {
   async function trackSignup() {
     try {
       const raw = sessionStorage.getItem(UTM_SS_KEY)
-      console.log('[TEMP DIAGNOSTIC] trackSignup: raw sessionStorage value:', raw) // TEMP DIAGNOSTIC
       const utms: Record<string, string> = raw
         ? (JSON.parse(raw) as Record<string, string>)
         : {}
-      console.log('[TEMP DIAGNOSTIC] trackSignup: parsed utms object:', JSON.stringify(utms)) // TEMP DIAGNOSTIC
-      const body = JSON.stringify(utms)
-      console.log('[TEMP DIAGNOSTIC] trackSignup: fetch body string:', body) // TEMP DIAGNOSTIC
       const res = await fetch('/api/auth/track-signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body,
+        body: JSON.stringify(utms),
       })
-      console.log('[TEMP DIAGNOSTIC] trackSignup: response status:', res.status, 'ok:', res.ok) // TEMP DIAGNOSTIC
       if (res.ok) sessionStorage.removeItem(UTM_SS_KEY)
-    } catch (e) { console.error('[TEMP DIAGNOSTIC] trackSignup: caught error:', e) } // TEMP DIAGNOSTIC
+    } catch { /* best-effort */ }
   }
 
   async function acceptLegal() {
