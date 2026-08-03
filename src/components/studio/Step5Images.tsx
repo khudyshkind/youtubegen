@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStudioStore } from '@/lib/studio-store'
 import ConfirmModal from '@/components/shared/ConfirmModal'
 import { exportPrompts } from '@/lib/exportPrompts'
@@ -16,6 +16,9 @@ const MAX_GPT_MINI_SAFE = 20
 const HIDDEN_ENGINES = ['gpt_mini'] as const
 // Styles where Schnell (4 inference steps) produces visible artifacts on faces/hands
 const RISKY_STYLES_FOR_SCHNELL = ['realistic', 'cinematic'] as const
+// Stop polling only after this many *consecutive* bad responses (transient 502s are skipped).
+const POLL_FAIL_THRESHOLD = 5
+function jobStoreKey(pid: string) { return `img_job_v1_${pid}` }
 
 // Parse timecode "M:SS.mm" → seconds. Returns -1 if invalid.
 function parseTimecode(tc: string | undefined): number {
@@ -193,6 +196,7 @@ export default function Step5Images() {
   const [costConfirmData, setCostConfirmData] = useState<{ count: number; cost: number } | null>(null)
   const costConfirmedRef = useRef(false)
   const pendingArgsRef = useRef<{ overrideEngine?: 'flux' | 'flux_schnell'; overrideCount?: number } | null>(null)
+  const pollingStartedRef = useRef(false)
   // Overrides imageCount for display/cost when user picks "Reduce to 20" from modal
   const [gptCountOverride, setGptCountOverride] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -256,6 +260,29 @@ export default function Step5Images() {
   const customN = parseInt(customInterval, 10)
   const isIntervalValid = customInterval !== '' && !isNaN(customN) && customN >= IMAGE_INTERVAL_MIN && customN <= IMAGE_INTERVAL_MAX
   const isIntervalInvalid = customInterval !== '' && !isIntervalValid
+
+  // On mount: if the page was closed while a secretslider job was running, resume polling.
+  // localStorage is the persistence layer — survives reload, scoped to origin, no extra deps.
+  useEffect(() => {
+    if (!projectId || pollingStartedRef.current) return
+    if (sceneImages.length > 0) {
+      // Images already loaded from DB — clear any stale pending-job entry.
+      localStorage.removeItem(jobStoreKey(projectId))
+      return
+    }
+    const raw = localStorage.getItem(jobStoreKey(projectId))
+    if (!raw) return
+    let stored: { jobId: string; count: number }
+    try { stored = JSON.parse(raw) as { jobId: string; count: number } }
+    catch { localStorage.removeItem(jobStoreKey(projectId)); return }
+    pollingStartedRef.current = true
+    setLoading(true)
+    setError('')
+    setProgress({ completed: 0, total: stored.count })
+    pollUntilDone(stored.jobId, stored.count)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : t('step5.err_gen')))
+      .finally(() => { setLoading(false); setProgress(null) })
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleIntervalPreset(sec: number) {
     setImageInterval(sec)
@@ -504,6 +531,75 @@ export default function Step5Images() {
     }
   }
 
+  // Polls /api/generate/images-async/status until the job completes or fails.
+  // Transient non-JSON responses (Vercel 502, gateway timeout HTML pages) are counted
+  // as skipped ticks rather than fatal errors; only POLL_FAIL_THRESHOLD consecutive
+  // bad responses abort the loop.
+  async function pollUntilDone(jobId: string, count: number) {
+    let consecutiveFailures = 0
+    await new Promise<void>((resolve, reject) => {
+      const iv = setInterval(async () => {
+        try {
+          const statusRes = await fetch(
+            `/api/generate/images-async/status?job_id=${jobId}&project_id=${projectId ?? ''}`,
+          )
+
+          const ct = statusRes.headers.get('content-type') ?? ''
+          if (!statusRes.ok || !ct.includes('application/json')) {
+            consecutiveFailures++
+            if (consecutiveFailures >= POLL_FAIL_THRESHOLD) {
+              clearInterval(iv)
+              reject(new Error(t('step5.err_poll_lost')))
+            }
+            return
+          }
+
+          consecutiveFailures = 0
+
+          const statusJson = await statusRes.json() as {
+            ok: boolean
+            status: string
+            progress: number
+            scene_images?: SceneImage[]
+            error_message?: string | null
+          }
+
+          if (!statusJson.ok) {
+            clearInterval(iv)
+            if (projectId) localStorage.removeItem(jobStoreKey(projectId))
+            reject(new Error(statusJson.error_message ?? t('step5.err_gen')))
+            return
+          }
+
+          const approxCompleted = Math.round((statusJson.progress / 100) * count)
+          setProgress({ completed: approxCompleted, total: count })
+
+          if (statusJson.status === 'completed') {
+            clearInterval(iv)
+            if (projectId) localStorage.removeItem(jobStoreKey(projectId))
+            const ts = Date.now()
+            setSceneImages((statusJson.scene_images ?? []).map((img) => ({
+              ...img,
+              url: img.url ? `${img.url}?t=${ts}` : img.url,
+            })))
+            void refreshCredits()
+            resolve()
+          } else if (statusJson.status === 'failed') {
+            clearInterval(iv)
+            if (projectId) localStorage.removeItem(jobStoreKey(projectId))
+            reject(new Error(statusJson.error_message ?? t('step5.err_gen')))
+          }
+        } catch (pollErr) {
+          consecutiveFailures++
+          if (consecutiveFailures >= POLL_FAIL_THRESHOLD) {
+            clearInterval(iv)
+            reject(pollErr)
+          }
+        }
+      }, 5_000)
+    })
+  }
+
   async function handleGenerateAsync(count: number) {
     try {
       // Step 1: submit job to Railway via Next.js proxy
@@ -519,6 +615,20 @@ export default function Step5Images() {
         }),
       })
 
+      // Check status and content-type before .json() — mirrors handleGenerate (SSE path,
+      // lines 420-427) to avoid SyntaxError when Vercel returns an HTML error page.
+      if (!submitRes.ok) {
+        const ct = submitRes.headers.get('content-type') ?? ''
+        if (!ct.includes('application/json')) throw new Error(t('step5.err_timeout'))
+        const errJson = await submitRes.json() as { ok: boolean; error?: string; code?: string }
+        if (errJson.code === 'NO_CREDITS') {
+          setError(`${t('step5.err_gen')} (${count * CREDIT_COSTS.image_secretslider} ${t('nav.credits_suffix')})`)
+        } else {
+          setError(errJson.error ?? t('step5.err_gen'))
+        }
+        return
+      }
+
       const submitJson = await submitRes.json() as { ok: boolean; data?: { job_id: string }; error?: string; code?: string }
       if (!submitJson.ok) {
         if (submitJson.code === 'NO_CREDITS') {
@@ -532,52 +642,12 @@ export default function Step5Images() {
       const jobId = submitJson.data?.job_id
       if (!jobId) { setError(t('step5.err_gen')); return }
 
-      setProgress({ completed: 0, total: count })
+      // Persist job_id so polling can resume if the page is reloaded mid-generation.
+      if (projectId) localStorage.setItem(jobStoreKey(projectId), JSON.stringify({ jobId, count }))
 
       // Step 2: poll /api/generate/images-async/status every 5 seconds
-      await new Promise<void>((resolve, reject) => {
-        const interval = setInterval(async () => {
-          try {
-            const statusRes = await fetch(
-              `/api/generate/images-async/status?job_id=${jobId}&project_id=${projectId ?? ''}`,
-            )
-            const statusJson = await statusRes.json() as {
-              ok: boolean
-              status: string
-              progress: number
-              scene_images?: SceneImage[]
-              error_message?: string | null
-            }
-
-            if (!statusJson.ok) {
-              clearInterval(interval)
-              reject(new Error(statusJson.error_message ?? t('step5.err_gen')))
-              return
-            }
-
-            // Update progress bar from job progress field (0-100 mapped to image count)
-            const approxCompleted = Math.round((statusJson.progress / 100) * count)
-            setProgress({ completed: approxCompleted, total: count })
-
-            if (statusJson.status === 'completed') {
-              clearInterval(interval)
-              const ts = Date.now()
-              setSceneImages((statusJson.scene_images ?? []).map((img) => ({
-                ...img,
-                url: img.url ? `${img.url}?t=${ts}` : img.url,
-              })))
-              void refreshCredits()
-              resolve()
-            } else if (statusJson.status === 'failed') {
-              clearInterval(interval)
-              reject(new Error(statusJson.error_message ?? t('step5.err_gen')))
-            }
-          } catch (pollErr) {
-            clearInterval(interval)
-            reject(pollErr)
-          }
-        }, 5_000)
-      })
+      setProgress({ completed: 0, total: count })
+      await pollUntilDone(jobId, count)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step5.err_gen'))
     } finally {
