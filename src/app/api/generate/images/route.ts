@@ -956,6 +956,7 @@ export async function POST(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       let generationSucceeded = false
+      let t0Request = Date.now()
       try {
         if (project_id) {
           await supabase
@@ -984,7 +985,7 @@ export async function POST(request: NextRequest) {
 
         const hasSubtitles = Array.isArray(resolvedSubtitleBlocks) && resolvedSubtitleBlocks.length > 0
         console.log(`[images] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
-        const t0Request = Date.now()
+        t0Request = Date.now()
 
         // Derive a short clean topic label from the script instead of using raw user input.
         // scriptParams.topic may contain thousands of chars of pasted source material
@@ -1223,6 +1224,13 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error)
         console.error('[generate/images] stream error:', msg)
+        if (Date.now() - t0Request > 90_000) {
+          const appUrl = env('NEXT_PUBLIC_APP_URL') || ''
+          await notifyUserTelegram(
+            user.id,
+            `⚠️ Генерация иллюстраций прервалась.\nСозданные картинки и кредиты за них сохранены.\nСтудия: ${appUrl}/studio`
+          ).catch(() => {})
+        }
         if (msg.startsWith('SS_BUSY')) {
           // Concurrency limit from Secret Slider — not a bug, do not send to Sentry/Telegram.
           const waitSec = parseInt(msg.split(':')[1] ?? '0', 10) || 0
