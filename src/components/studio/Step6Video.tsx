@@ -126,18 +126,21 @@ function TelegramBanner() {
   }
   return (
     <div
-      className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 flex-wrap"
-      style={{ background: 'rgba(37,99,235,0.07)', border: '1px solid rgba(37,99,235,0.2)' }}
+      className="flex items-center gap-4 rounded-xl px-4 py-3.5 flex-wrap"
+      style={{ background: 'rgba(37,99,235,0.18)', border: '1.5px solid rgba(59,130,246,0.5)' }}
     >
-      <p className="text-xs text-blue-300 leading-relaxed">
-        Рендер займёт несколько минут. Подключите Telegram — сообщим, когда видео будет готово.
-      </p>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-white leading-snug">
+          Получите уведомление в Telegram, когда видео будет готово
+        </p>
+        <p className="text-xs text-blue-300 mt-0.5">Рендер займёт несколько минут — можно уйти от экрана</p>
+      </div>
       <button
         type="button"
         onClick={() => void connect()}
         disabled={busy}
-        className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
-        style={{ background: 'rgba(37,99,235,0.2)', border: '1px solid rgba(37,99,235,0.4)', color: '#93c5fd' }}
+        className="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-50"
+        style={{ background: '#2563EB' }}
       >
         {busy ? '…' : '✈️ Подключить'}
       </button>
@@ -881,8 +884,11 @@ export default function Step6Video() {
                 : renderProgress < 85 ? t('step6.progress_subs')
                 : t('step6.progress_upload')}
             </p>
-            {tgLinked === false && <TelegramBanner />}
           </div>
+        )}
+
+        {(renderState === 'queued' || renderState === 'processing') && tgLinked === false && (
+          <TelegramBanner />
         )}
 
         {renderState === 'done' && videoUrl && (
