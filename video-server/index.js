@@ -2133,6 +2133,43 @@ app.post('/telegram/webhook', async (req, res) => {
             'Уведомление придёт сюда, как только задача завершится.',
             { parse_mode: 'Markdown' }
           )
+
+          // Catch-up: job may have finished between "Подключить" click and pressing START in Telegram.
+          // If no job is currently running, check for recently completed ones and notify now.
+          try {
+            const uid = row.user_id
+            const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+            const [actImg, actAud, actVid] = await Promise.all([
+              sbGet('image_jobs', `user_id=eq.${uid}&status=in.(pending,processing)&select=id`),
+              sbGet('audio_jobs', `user_id=eq.${uid}&status=in.(pending,processing)&select=id`),
+              sbGet('video_jobs', `user_id=eq.${uid}&status=in.(pending,processing)&select=id`),
+            ])
+            const hasActive = (actImg?.length || 0) + (actAud?.length || 0) + (actVid?.length || 0) > 0
+            if (!hasActive) {
+              const [doneImg, doneAud, doneVid] = await Promise.all([
+                sbGet('image_jobs', `user_id=eq.${uid}&status=eq.completed&completed_at=gte.${encodeURIComponent(tenMinAgo)}&order=completed_at.desc&limit=1&select=scene_images`),
+                sbGet('audio_jobs', `user_id=eq.${uid}&status=eq.completed&completed_at=gte.${encodeURIComponent(tenMinAgo)}&limit=1&select=id`),
+                sbGet('video_jobs', `user_id=eq.${uid}&status=eq.completed&completed_at=gte.${encodeURIComponent(tenMinAgo)}&limit=1&select=id`),
+              ])
+              const parts = []
+              if (doneImg?.length) {
+                const count = Array.isArray(doneImg[0].scene_images) ? doneImg[0].scene_images.filter(Boolean).length : 0
+                parts.push(`🖼 Иллюстрации готовы! (${count} шт.)`)
+              }
+              if (doneAud?.length) parts.push('🎙 Озвучка готова!')
+              if (doneVid?.length) parts.push('🎬 Видео готово!')
+              if (parts.length > 0) {
+                console.log(`[link] catch-up notify user=${uid} chat_id=${chatId}: ${parts.join(', ')}`)
+                await safeSendMessage(chatId, parts.join('\n') + `\nПерейти в студию: ${APP_URL}/studio`)
+              } else {
+                console.log(`[link] catch-up: no recent completed jobs for user=${uid}`)
+              }
+            } else {
+              console.log(`[link] catch-up: active job found for user=${uid}, skip (will notify on completion)`)
+            }
+          } catch (catchUpErr) {
+            console.warn('[link] catch-up check failed:', catchUpErr.message)
+          }
         } catch (e) {
           console.error('[link] error:', e.message)
           await safeSendMessage(chatId, '❌ Ошибка при привязке. Попробуйте позже.').catch(() => {})
