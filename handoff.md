@@ -2,47 +2,42 @@
 
 ## Что сделано
 
-**Разведка: привязка Telegram через deep link.** Кода не менялось.
+**Фича: привязка Telegram через deep link.** Коммит `9460822`.
 
-### Пункт 1 — /start в боте
+### 1. Миграция — `supabase/migrations/013_tg_link_tokens.sql`
 
-`index.js:2094` — условие `text === '/start' || text.startsWith('/start ')`.
-`index.js:2103` — payload уже извлекается: `startArg = text.slice(7).trim()`.
-Два существующих ветки: `support` (2108) и `pay_<plan>` (2122).
-При `/start abc123` — `startArg = 'abc123'` не матчится ни с чем → default: приветствие. Токен молча игнорируется. Добавлять новую ветку достаточно.
-
-### Пункт 2 — Генерация и хранение токенов
-
-Механизма одноразовых токенов нет: в `supabase/schema.sql` только `plan_expires_at` (строка 52) и `telegram_chat_id` (строка 53). Таблицы `link_tokens`, `verification_tokens` не существует.
-
-Есть в криптографии: AES-256-GCM (`src/lib/crypto.ts`), HMAC-SHA256 (`sentry/route.ts:11`), AWS S4 sigv4 (`index.js:147`), `randomUUID()` в двух API-роутах.
-
-Рекомендация: stateful-токен — `crypto.randomBytes(16).toString('hex')` → новая таблица `tg_link_tokens(token pk, user_id, expires_at, used_at)`. Stateless HMAC(user_id+expires, BOT_TOKEN) возможен, но нельзя отозвать раньше TTL.
-
-### Пункт 3 — Где показывать кнопку
-
-Страница настроек: `/settings` → `src/components/settings/SettingsClient.tsx`. Пять секций, Telegram отсутствует — место для новой секции.
-
-Момент долгой генерации (рекомендованное место):
-- Картинки: `Step5Images.tsx:847` — блок `phase === 'generating'` (ждать 5+ мин)
-- Видео: `Step6Video.tsx:802` — `renderState === 'queued'|'processing'` (до 15 мин)
-
-### Пункт 4 — Текущее состояние привязки
-
-Поле `profiles.telegram_chat_id text` добавлено через `schema.sql:53`.
-Запрос состояния:
 ```sql
-SELECT COUNT(*) FILTER (WHERE telegram_chat_id IS NOT NULL) AS bound, COUNT(*) AS total FROM profiles;
+tg_link_tokens (token text pk, user_id uuid → profiles, created_at, expires_at, used_at)
 ```
-В интерфейсе статус не отображается (`SettingsClient.tsx` не использует `telegram_chat_id`, хотя тип `Profile` включает его на строке 217 `src/lib/types.ts`). Механизма отвязки нет.
 
-### Пункт 5 — Безопасность
+Индекс по `user_id`. `REVOKE` anon/authenticated, `GRANT service_role`. Нужно запустить вручную в Supabase SQL Editor.
 
-Владелец: `OWNER_ID = env('TELEGRAM_OWNER_ID')` (`index.js:97`), проверка `userId !== OWNER_ID` (`index.js:1728, 2029`). `userId` = `message.from.id` из Telegram.
+### 2. API — `src/app/api/telegram/link/route.ts`
 
-Подписанные токены: не используются для сессионных данных. YouTube API-ключ зашифрован AES-256-GCM, Sentry-вебхук верифицируется HMAC — но это входящая верификация, не выдача токенов.
+- `GET` → `{ ok, linked }` — проверить статус привязки (для баннеров в студии)
+- `POST` → создаёт `randomBytes(16)` токен, TTL 60 мин, инвалидирует предыдущие unused токены этого пользователя, возвращает `{ ok, link: 'https://t.me/<bot>?start=link_<token>' }`. Имя бота из `TELEGRAM_BOT_USERNAME` env.
+- `DELETE` → обнуляет `profiles.telegram_chat_id`
 
-Для нового deep-link токена модуль `crypto` уже подключён с обеих сторон. Хватает `randomBytes(16)`.
+### 3. Бот — `video-server/index.js` (~строка 2107)
+
+Новая ветка `startArg.startsWith('link_')` перед `support`:
+
+| Ситуация | Ответ |
+|---|---|
+| Токен не найден | «Ссылка недействительна. Получите новую в настройках…» |
+| `used_at` уже заполнен | «Ссылка уже была использована. Получите новую…» |
+| `expires_at` в прошлом | «Ссылка устарела — она действует 60 минут. Получите новую…» |
+| Успех | Запись `chat_id` → `profiles`, гашение `used_at`, сообщение «Telegram подключён» со списком уведомлений |
+
+### 4. Настройки — `src/components/settings/SettingsClient.tsx`
+
+Секция «Telegram-уведомления» между YouTube API и Appearance:
+- `telegram_chat_id` пуст → кнопка «Подключить Telegram» (POST → window.open)
+- Заполнен → «✓ Подключено» + кнопка «Отвязать» (DELETE)
+
+### 5. Студия — `Step5Images.tsx` и `Step6Video.tsx`
+
+`TelegramBanner` компонент добавлен в оба файла. Показывается только если `tgLinked === false` (не null, т.е. проверка завершена) во время генерации. Статус запрашивается `GET /api/telegram/link` один раз при монтировании. Уже подключённым не показывается.
 
 ## Что не получилось
 
@@ -50,12 +45,14 @@ SELECT COUNT(*) FILTER (WHERE telegram_chat_id IS NOT NULL) AS bound, COUNT(*) A
 
 ## Изменения в файлах состояния
 
-TASKS:   задача «Привязка Telegram через deep link» дополнена результатами разведки
+TASKS:   задача «Привязка Telegram» закрыта `[x]`; добавлена в 📌 ЗАКРЫТО
 CONTEXT: без изменений
 WORKFLOW: без изменений
 
 ## Открытые вопросы владельцу
 
-1. **Подход к хранению токена:** новая таблица `tg_link_tokens` (чисто, отзываемо) или два поля в `profiles` (`tg_link_token + tg_link_token_expires_at`, без отзыва по требованию)? Рекомендую таблицу.
-2. **TTL токена:** 15 минут достаточно? Пользователь должен успеть нажать кнопку, пока ждёт генерацию.
-3. **Механизм отвязки:** показывать кнопку «Отвязать» в настройках или оставить только привязку?
+1. **Запустить миграцию 013** в Supabase SQL Editor (`supabase/migrations/013_tg_link_tokens.sql`).
+2. **Добавить `TELEGRAM_BOT_USERNAME`** в env Vercel + Railway (значение без `@`, например `lefiro_bot`).
+   Без этой переменной `POST /api/telegram/link` вернёт 503.
+3. После деплоя Railway — ветка `link_` в боте активируется.
+   Протестировать: открыть `/settings`, нажать «Подключить Telegram», пройти по ссылке, проверить ответ бота.
