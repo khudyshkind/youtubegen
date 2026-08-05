@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { trackEvent } from '@/lib/analytics'
+import { sendTelegramAlert } from '@/lib/telegram'
 
 export const maxDuration = 15
 
@@ -79,18 +80,26 @@ export async function GET(request: NextRequest) {
 
       if (refunded && refunded.length > 0) {
         // Won the write race → refund to purchased (eternal) wallet via add_credits RPC.
-        await svc.rpc('add_credits', {
+        const rpcRes = await svc.rpc('add_credits', {
           p_user_id:    user.id,
           p_amount:     job.credits_charged,
           p_operation:  'audio_refund',
           p_project_id: job.project_id ?? null,
         })
-        console.log(`[audio/status] refunded ${job.credits_charged} credits to ${user.id} for failed job ${job.id}`)
-        void trackEvent(user.id, 'audio_refunded', {
-          job_id:     job.id,
-          project_id: job.project_id,
-          amount:     job.credits_charged,
-        })
+        if (rpcRes.error) {
+          console.error(`[audio/status] refund RPC failed for job ${job.id}:`, rpcRes.error.message)
+          Sentry.captureException(new Error(`audio refund RPC failed: ${rpcRes.error.message}`), { extra: { job_id: job.id, user_id: user.id, amount: job.credits_charged } })
+          await sendTelegramAlert(
+            `🔴 <b>Возврат кредитов упал (audio/status)</b>\njob: <code>${job.id.slice(0, 8)}</code>\nuser: <code>${user.id}</code>\nкредитов: ${job.credits_charged}\nerror: ${rpcRes.error.message}`,
+          ).catch(() => {})
+        } else {
+          console.log(`[audio/status] refunded ${job.credits_charged} credits to ${user.id} for failed job ${job.id}`)
+          void trackEvent(user.id, 'audio_refunded', {
+            job_id:     job.id,
+            project_id: job.project_id,
+            amount:     job.credits_charged,
+          })
+        }
       }
     }
 

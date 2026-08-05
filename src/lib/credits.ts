@@ -1,6 +1,7 @@
 import { createServiceClient } from './supabase-server'
 import { CREDIT_COSTS } from './types'
 import { sendLowCreditsEmail } from './email'
+import { sendTelegramAlert } from './telegram'
 import type { ApiResponse, Plan } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -63,16 +64,24 @@ export async function addCredits(
   amount: number,
   operation: 'purchase' | 'signup_bonus' | 'referral_bonus' | 'referral_reward' | 'topup',
   projectId?: string
-): Promise<void> {
+): Promise<{ ok: boolean; error?: string }> {
   const supabase = createServiceClient()
   // add_credits RPC routes to purchased_credits (eternal wallet, no cap).
   // Plan credit batches use add_plan_credits() via activatePlan() instead.
-  await supabase.rpc('add_credits', {
+  const { error } = await supabase.rpc('add_credits', {
     p_user_id:    userId,
     p_amount:     amount,
     p_operation:  operation,
     p_project_id: projectId ?? null,
   })
+  if (error) {
+    console.error(`[addCredits] RPC failed: user=${userId} op=${operation} amount=${amount} err=${error.message}`)
+    await sendTelegramAlert(
+      `🔴 <b>addCredits failed</b>\nuser: <code>${userId}</code>\nop: ${operation} · ${amount} кр.\nerror: ${error.message}`,
+    ).catch(() => {})
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
 }
 
 export async function requireCreditsAmount(

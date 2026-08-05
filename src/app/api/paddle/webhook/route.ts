@@ -107,7 +107,20 @@ export async function POST(request: NextRequest) {
           const userId = customData?.userId
           const credits = customData?.credits
           if (userId && credits && credits > 0) {
-            await addCredits(userId, credits, 'topup')
+            const grantResult = await addCredits(userId, credits, 'topup')
+            if (!grantResult.ok) {
+              // addCredits already sent Telegram alert. Record in payment_incidents for manual review.
+              const { error: incErr } = await supabase.from('payment_incidents').insert({
+                payment_id:    null,
+                user_id:       userId,
+                kind:          'topup',
+                plan_or_topup: String(credits),
+                reason:        'activation_failed',
+                raw_payload:   { paddle_tx_id: tx.id, userId, credits, error: grantResult.error },
+              })
+              if (incErr) console.error('[paddle/webhook] payment_incidents insert failed:', incErr.message)
+              // Return 200 to prevent Paddle retries that could double-credit if RPC was partially applied.
+            }
           }
           break
         }
