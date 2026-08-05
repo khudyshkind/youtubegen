@@ -23,18 +23,21 @@ function TelegramBanner() {
   }
   return (
     <div
-      className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 flex-wrap"
-      style={{ background: 'rgba(37,99,235,0.07)', border: '1px solid rgba(37,99,235,0.2)' }}
+      className="flex items-center gap-4 rounded-xl px-4 py-3.5 flex-wrap"
+      style={{ background: 'rgba(37,99,235,0.18)', border: '1.5px solid rgba(59,130,246,0.5)' }}
     >
-      <p className="text-xs text-blue-300 leading-relaxed">
-        Это займёт несколько минут. Подключите Telegram — сообщим, когда будет готово.
-      </p>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-white leading-snug">
+          Получите уведомление в Telegram, когда будет готово
+        </p>
+        <p className="text-xs text-blue-300 mt-0.5">Это займёт несколько минут — можно уйти от экрана</p>
+      </div>
       <button
         type="button"
         onClick={() => void connect()}
         disabled={busy}
-        className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
-        style={{ background: 'rgba(37,99,235,0.2)', border: '1px solid rgba(37,99,235,0.4)', color: '#93c5fd' }}
+        className="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-50"
+        style={{ background: '#2563EB' }}
       >
         {busy ? '…' : '✈️ Подключить'}
       </button>
@@ -1083,18 +1086,20 @@ export default function Step5Images() {
         </div>
       </div>
 
-      {/* Info about AI scene splitting */}
-      <div
-        className="flex items-start gap-3 rounded-xl px-4 py-3"
-        style={{ background: 'rgba(37,99,235,0.08)', border: '1px solid rgba(37,99,235,0.2)' }}
-      >
-        <svg className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <p className="text-xs text-blue-300 leading-relaxed">
-          <strong>{imageCount}</strong> {t('step6.scenes_count')} · {t('step5.generating')}
-        </p>
-      </div>
+      {/* Info about AI scene splitting — hidden during generation (progress block takes its place) */}
+      {!loading && (
+        <div
+          className="flex items-start gap-3 rounded-xl px-4 py-3"
+          style={{ background: 'rgba(37,99,235,0.08)', border: '1px solid rgba(37,99,235,0.2)' }}
+        >
+          <svg className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-xs text-blue-300 leading-relaxed">
+            <strong>{imageCount}</strong> {t('step6.scenes_count')} · {t('step5.generating')}
+          </p>
+        </div>
+      )}
 
       <button
         type="button"
@@ -1105,10 +1110,7 @@ export default function Step5Images() {
         {loading ? (
           <>
             <SpinnerIcon className="w-4 h-4 animate-spin" />
-            {progress
-              ? `${progress.completed} / ${progress.total} · ${t('step5.generating')}`
-              : t('step5.generating')
-            }
+            {t('step5.generating')}
           </>
         ) : sceneImages.length > 0 ? (
           `↺ ${t('step2.regenerate')} (−${creditCost} ${t('nav.credits_suffix')})`
@@ -1137,12 +1139,10 @@ export default function Step5Images() {
               }}
             />
           </div>
-          <p className="text-xs" style={{ color: '#64748B' }}>
-            {progress.completed} {t('step5.progress_of')} {progress.total} {t('step5.progress_images')}
-          </p>
-          {tgLinked === false && <TelegramBanner />}
         </div>
       )}
+
+      {loading && tgLinked === false && <TelegramBanner />}
 
       {!loading && (
         <div className="flex gap-2">
