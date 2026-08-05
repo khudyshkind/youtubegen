@@ -2,42 +2,44 @@
 
 ## Что сделано
 
-**Фича: привязка Telegram через deep link.** Коммит `9460822`.
+**Разведка: баннер «Подключить Telegram» не появляется в Step5Images во время генерации.**
+Кода не менялось.
 
-### 1. Миграция — `supabase/migrations/013_tg_link_tokens.sql`
+### Пункт 1 — Блок JSX
 
-```sql
-tg_link_tokens (token text pk, user_id uuid → profiles, created_at, expires_at, used_at)
+Баннер стоит в правильном месте: `Step5Images.tsx:1146` — `{loading && tgLinked === false && <TelegramBanner />}`. Условие по `loading` верное — `loading` становится `true` на строке 464 до любой ветки генерации.
+
+Проблема: компонент **не переключается в «режим генерации»** — вся форма (выбор интервала, движка, стилей, инфо-блок) остаётся видна. Баннер внизу длинного UI, пользователь мог просто не прокрутить страницу.
+
+### Пункт 2 — Получение статуса и поведение при ошибке
+
+Fetch (`Step5Images.tsx:300–308`):
+```js
+fetch('/api/telegram/link')
+  .then((r) => r.json())
+  .then((d) => { if (d.ok) setTgLinked(d.linked ?? false) })
+  .catch(() => {})  // ТИХО
 ```
 
-Индекс по `user_id`. `REVOKE` anon/authenticated, `GRANT service_role`. Нужно запустить вручную в Supabase SQL Editor.
+`tgLinked` инициализирован `null`. Если fetch упал или API вернул `ok: false` — `setTgLinked` не вызывается. `null === false` — строгое сравнение — `false`. Баннер не рендерится. Ошибка нигде не проявляется.
 
-### 2. API — `src/app/api/telegram/link/route.ts`
+### Пункт 3 — GET-обработчик и TELEGRAM_BOT_USERNAME
 
-- `GET` → `{ ok, linked }` — проверить статус привязки (для баннеров в студии)
-- `POST` → создаёт `randomBytes(16)` токен, TTL 60 мин, инвалидирует предыдущие unused токены этого пользователя, возвращает `{ ok, link: 'https://t.me/<bot>?start=link_<token>' }`. Имя бота из `TELEGRAM_BOT_USERNAME` env.
-- `DELETE` → обнуляет `profiles.telegram_chat_id`
+`TELEGRAM_BOT_USERNAME` проверяется только в `POST` (route.ts:32). GET ею не пользуется. Для `telegram_chat_id = null` возвращает `{ ok: true, linked: false }` корректно.
 
-### 3. Бот — `video-server/index.js` (~строка 2107)
+### Пункт 4 — DELETE → следующий GET
 
-Новая ветка `startArg.startsWith('link_')` перед `support`:
+DELETE обнуляет `telegram_chat_id`, GET читает его повторно из БД. Цепочка верная. ✓
 
-| Ситуация | Ответ |
-|---|---|
-| Токен не найден | «Ссылка недействительна. Получите новую в настройках…» |
-| `used_at` уже заполнен | «Ссылка уже была использована. Получите новую…» |
-| `expires_at` в прошлом | «Ссылка устарела — она действует 60 минут. Получите новую…» |
-| Успех | Запись `chat_id` → `profiles`, гашение `used_at`, сообщение «Telegram подключён» со списком уведомлений |
+### Пункт 5 — Кеширование GET
 
-### 4. Настройки — `src/components/settings/SettingsClient.tsx`
+`export const dynamic = 'force-dynamic'` (строка 1 route.ts) отключает Next.js server cache. Браузерного кеширования для JSON API без `Cache-Control: max-age` нет. Кеш не причина.
 
-Секция «Telegram-уведомления» между YouTube API и Appearance:
-- `telegram_chat_id` пуст → кнопка «Подключить Telegram» (POST → window.open)
-- Заполнен → «✓ Подключено» + кнопка «Отвязать» (DELETE)
+### Основная версия причины — две, скорее всего обе:
 
-### 5. Студия — `Step5Images.tsx` и `Step6Video.tsx`
+**А) Баннер вне видимой области** — рендерится, но пользователь не прокрутил.
 
-`TelegramBanner` компонент добавлен в оба файла. Показывается только если `tgLinked === false` (не null, т.е. проверка завершена) во время генерации. Статус запрашивается `GET /api/telegram/link` один раз при монтировании. Уже подключённым не показывается.
+**Б) `tgLinked` навсегда `null`** — если GET-запрос упал с любой ошибкой, `catch(() => {})` молча проглотил. `null === false` → баннер никогда не рендерится. Проверяется в DevTools → Network → `/api/telegram/link`.
 
 ## Что не получилось
 
@@ -45,14 +47,12 @@ tg_link_tokens (token text pk, user_id uuid → profiles, created_at, expires_at
 
 ## Изменения в файлах состояния
 
-TASKS:   задача «Привязка Telegram» закрыта `[x]`; добавлена в 📌 ЗАКРЫТО
+TASKS:   добавлена задача «Баннер «Подключить Telegram» не отображается» с фиксами А и Б
 CONTEXT: без изменений
 WORKFLOW: без изменений
 
 ## Открытые вопросы владельцу
 
-1. **Запустить миграцию 013** в Supabase SQL Editor (`supabase/migrations/013_tg_link_tokens.sql`).
-2. **Добавить `TELEGRAM_BOT_USERNAME`** в env Vercel + Railway (значение без `@`, например `lefiro_bot`).
-   Без этой переменной `POST /api/telegram/link` вернёт 503.
-3. После деплоя Railway — ветка `link_` в боте активируется.
-   Протестировать: открыть `/settings`, нажать «Подключить Telegram», пройти по ссылке, проверить ответ бота.
+1. Проверить в DevTools → Network → шаг 5 в студии: есть ли GET `/api/telegram/link`, какой статус, что вернул?
+2. Реализовать фикс Б: `catch(() => { setTgLinked(false) })` в Step5Images и Step6Video — тогда при любой ошибке баннер показывается (показать лишний раз лучше, чем скрыть нужный).
+3. Решить: переместить баннер выше кнопки Generate, или переключать UI на «экран генерации» без формы (как IllustrationsTool).
