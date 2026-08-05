@@ -2,32 +2,47 @@
 
 ## Что сделано
 
-**Баг: ссылка на пост в теме группы открывала лендинг lefiro.co вместо сообщения.**
+**Разведка: привязка Telegram через deep link.** Кода не менялось.
 
-Причина: `groupPostLink` строил `t.me/c/{numId}/{threadId}/{msgId}` — формат для приватных групп.
-У группы `Lefiro_community` есть публичный username; правильный формат: `t.me/Lefiro_community/3/4`.
+### Пункт 1 — /start в боте
 
-**Фикс:**
+`index.js:2094` — условие `text === '/start' || text.startsWith('/start ')`.
+`index.js:2103` — payload уже извлекается: `startArg = text.slice(7).trim()`.
+Два существующих ветки: `support` (2108) и `pay_<plan>` (2122).
+При `/start abc123` — `startArg = 'abc123'` не матчится ни с чем → default: приветствие. Токен молча игнорируется. Добавлять новую ветку достаточно.
 
-1. `groupConfig` расширен полем `groupUsername` (читается из `tg_group_username` в `bot_settings`).
-2. `channelConfig = { username: null }` — читается из `tg_channel_username` (был хардкод `lefiro_channel`).
-3. `groupPostLink`:
-   - username есть → `t.me/{username}/{threadId}/{msgId}`
-   - только groupId → `t.me/c/{numId}/{threadId}/{msgId}` (приватная группа)
-   - ни того ни другого → `null` (ссылка не вставляется, не ведёт на лендинг)
-4. `channelPostLink`: убран хардкод, читает `channelConfig.username`; нет username → `null`.
-5. Промпт генерации поста: явный запрет `#`, `##`, `---`, списков `- / *`.
-   Telegram Markdown v1 рендерит только `*жирный*` и `_курсив_`.
+### Пункт 2 — Генерация и хранение токенов
 
-Коммит: `f4b41b9` (main).
+Механизма одноразовых токенов нет: в `supabase/schema.sql` только `plan_expires_at` (строка 52) и `telegram_chat_id` (строка 53). Таблицы `link_tokens`, `verification_tokens` не существует.
 
-**Действие владельца (обязательно для активации фикса):**
-Добавить в таблицу `bot_settings` две строки:
-- `tg_group_username` = `Lefiro_community`
-- `tg_channel_username` = `lefiro_channel`
+Есть в криптографии: AES-256-GCM (`src/lib/crypto.ts`), HMAC-SHA256 (`sentry/route.ts:11`), AWS S4 sigv4 (`index.js:147`), `randomUUID()` в двух API-роутах.
 
-До этого: `channelPostLink` и `groupPostLink` вернут `null` → ссылки в подтверждениях
-просто не будут вставляться (лучше, чем вести на лендинг).
+Рекомендация: stateful-токен — `crypto.randomBytes(16).toString('hex')` → новая таблица `tg_link_tokens(token pk, user_id, expires_at, used_at)`. Stateless HMAC(user_id+expires, BOT_TOKEN) возможен, но нельзя отозвать раньше TTL.
+
+### Пункт 3 — Где показывать кнопку
+
+Страница настроек: `/settings` → `src/components/settings/SettingsClient.tsx`. Пять секций, Telegram отсутствует — место для новой секции.
+
+Момент долгой генерации (рекомендованное место):
+- Картинки: `Step5Images.tsx:847` — блок `phase === 'generating'` (ждать 5+ мин)
+- Видео: `Step6Video.tsx:802` — `renderState === 'queued'|'processing'` (до 15 мин)
+
+### Пункт 4 — Текущее состояние привязки
+
+Поле `profiles.telegram_chat_id text` добавлено через `schema.sql:53`.
+Запрос состояния:
+```sql
+SELECT COUNT(*) FILTER (WHERE telegram_chat_id IS NOT NULL) AS bound, COUNT(*) AS total FROM profiles;
+```
+В интерфейсе статус не отображается (`SettingsClient.tsx` не использует `telegram_chat_id`, хотя тип `Profile` включает его на строке 217 `src/lib/types.ts`). Механизма отвязки нет.
+
+### Пункт 5 — Безопасность
+
+Владелец: `OWNER_ID = env('TELEGRAM_OWNER_ID')` (`index.js:97`), проверка `userId !== OWNER_ID` (`index.js:1728, 2029`). `userId` = `message.from.id` из Telegram.
+
+Подписанные токены: не используются для сессионных данных. YouTube API-ключ зашифрован AES-256-GCM, Sentry-вебхук верифицируется HMAC — но это входящая верификация, не выдача токенов.
+
+Для нового deep-link токена модуль `crypto` уже подключён с обеих сторон. Хватает `randomBytes(16)`.
 
 ## Что не получилось
 
@@ -35,12 +50,12 @@
 
 ## Изменения в файлах состояния
 
-TASKS:    закрыта «Ссылка на пост в теме группы» (строка 232 → `- [x]`);
-          добавлена в 📌 ЗАКРЫТО запись groupPostLink/channelPostLink [Δ13]
-CONTEXT:  без изменений
+TASKS:   задача «Привязка Telegram через deep link» дополнена результатами разведки
+CONTEXT: без изменений
 WORKFLOW: без изменений
 
 ## Открытые вопросы владельцу
 
-1. Внести два ключа в `bot_settings`: `tg_group_username = Lefiro_community` и `tg_channel_username = lefiro_channel`.
-   После Railway-деплоя ссылки заработают правильно.
+1. **Подход к хранению токена:** новая таблица `tg_link_tokens` (чисто, отзываемо) или два поля в `profiles` (`tg_link_token + tg_link_token_expires_at`, без отзыва по требованию)? Рекомендую таблицу.
+2. **TTL токена:** 15 минут достаточно? Пользователь должен успеть нажать кнопку, пока ждёт генерацию.
+3. **Механизм отвязки:** показывать кнопку «Отвязать» в настройках или оставить только привязку?
