@@ -1228,7 +1228,7 @@ export async function POST(request: NextRequest) {
           const appUrl = env('NEXT_PUBLIC_APP_URL') || ''
           await notifyUserTelegram(
             user.id,
-            `⚠️ Генерация иллюстраций прервалась.\nСозданные картинки и кредиты за них сохранены.\nСтудия: ${appUrl}/studio`
+            `⚠️ Генерация иллюстраций прервалась.\nПопробуйте снова в студии: ${appUrl}/studio`
           ).catch(() => {})
         }
         if (msg.startsWith('SS_BUSY')) {

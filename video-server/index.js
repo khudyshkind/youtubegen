@@ -860,11 +860,11 @@ async function notifyUserJobDone(userId, kind, payload = {}) {
   } else if (kind === 'audio') {
     msg = `🎙 Озвучка готова!\nАудио загружено — переходите к субтитрам.\n${APP_URL}/studio`
   } else if (kind === 'video_failed') {
-    msg = `⚠️ Сборка видео не удалась. Кредиты возвращены.\nПопробуйте снова в студии: ${APP_URL}/studio`
+    msg = `⚠️ Сборка видео не удалась.\nПопробуйте снова в студии: ${APP_URL}/studio`
   } else if (kind === 'images_failed') {
-    msg = `⚠️ Генерация иллюстраций прервалась. Кредиты возвращены.\nПопробуйте снова в студии: ${APP_URL}/studio`
+    msg = `⚠️ Генерация иллюстраций прервалась.\nПопробуйте снова в студии: ${APP_URL}/studio`
   } else if (kind === 'audio_failed') {
-    msg = `⚠️ Синтез озвучки не удался. Кредиты возвращены.\nПопробуйте снова в студии: ${APP_URL}/studio`
+    msg = `⚠️ Синтез озвучки не удался.\nПопробуйте снова в студии: ${APP_URL}/studio`
   } else {
     return
   }

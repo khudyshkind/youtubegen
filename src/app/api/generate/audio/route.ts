@@ -915,7 +915,7 @@ export async function POST(request: NextRequest) {
       const appUrl = env('NEXT_PUBLIC_APP_URL') || ''
       await notifyUserTelegram(
         userId,
-        `⚠️ Синтез озвучки прервался. Попробуйте снова в студии: ${appUrl}/studio`
+        `⚠️ Синтез озвучки не удался.\nПопробуйте снова в студии: ${appUrl}/studio`
       ).catch(() => {})
     }
     return NextResponse.json({ ok: false, error: 'Ошибка генерации аудио' }, { status: 500 })
