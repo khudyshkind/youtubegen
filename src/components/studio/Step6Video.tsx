@@ -217,7 +217,7 @@ export default function Step6Video() {
     fetch('/api/telegram/link')
       .then((r) => r.json() as Promise<{ ok: boolean; linked?: boolean }>)
       .then((d) => { if (d.ok) setTgLinked(d.linked ?? false) })
-      .catch(() => {})
+      .catch((err) => { console.warn('[telegram/link]', err); setTgLinked(false) })
   }, [])
 
   // Stop polling on unmount
@@ -881,11 +881,8 @@ export default function Step6Video() {
                 : renderProgress < 85 ? t('step6.progress_subs')
                 : t('step6.progress_upload')}
             </p>
+            {tgLinked === false && <TelegramBanner />}
           </div>
-        )}
-
-        {(renderState === 'queued' || renderState === 'processing') && tgLinked === false && (
-          <TelegramBanner />
         )}
 
         {renderState === 'done' && videoUrl && (

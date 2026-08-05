@@ -302,7 +302,7 @@ export default function Step5Images() {
     fetch('/api/telegram/link')
       .then((r) => r.json() as Promise<{ ok: boolean; linked?: boolean }>)
       .then((d) => { if (d.ok) setTgLinked(d.linked ?? false) })
-      .catch(() => {})
+      .catch((err) => { console.warn('[telegram/link]', err); setTgLinked(false) })
   }, [])
 
   // On mount: if the page was closed while a secretslider job was running, resume polling.
@@ -1140,11 +1140,8 @@ export default function Step5Images() {
           <p className="text-xs" style={{ color: '#64748B' }}>
             {progress.completed} {t('step5.progress_of')} {progress.total} {t('step5.progress_images')}
           </p>
+          {tgLinked === false && <TelegramBanner />}
         </div>
-      )}
-
-      {loading && tgLinked === false && (
-        <TelegramBanner />
       )}
 
       {!loading && (
