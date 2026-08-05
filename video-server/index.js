@@ -3650,23 +3650,25 @@ async function runWatchdog() {
       const ageMin = Math.round((now - new Date(row.updated_at).getTime()) / 60_000)
       console.log(`${tag} project ${row.id} stuck in generating_video ${ageMin} min`)
       let creditsCharged = 0
-      let needsVideoRefund = false
+      let wdVideoRefund = null
       if (!WATCHDOG_DRY_RUN) {
         await sbPatch('projects', `id=eq.${row.id}`, { status: 'failed' })
         try {
           const vJobs = await sbGet('video_jobs',
             `project_id=eq.${row.id}&status=in.(pending,processing)&select=id,user_id,credits_charged,credits_refunded_at,phase`)
           for (const vj of (Array.isArray(vJobs) ? vJobs : [])) {
-            needsVideoRefund = !!(vj.credits_charged > 0 && !vj.credits_refunded_at)
             creditsCharged = vj.credits_charged ?? 0
             await updateJob(vj.id, { status: 'failed', error_message: `watchdog: no progress ${ageMin} min (phase: ${vj.phase ?? 'unknown'})` })
-            await refundVideoJobCredits(vj.id, vj.user_id, row.id)
+            wdVideoRefund = await refundVideoJobCredits(vj.id, vj.user_id, row.id)
+            if (!wdVideoRefund.ok && wdVideoRefund.amount > 0) {
+              await recordRefundIncident(vj.id, vj.user_id, wdVideoRefund.amount, 'video', wdVideoRefund.error)
+            }
           }
         } catch (e) {
           console.warn(`${tag} video_jobs cleanup for project ${row.id}:`, e.message)
         }
       }
-      resets.push({ type: 'video', id: row.id, ageMin, creditsCharged, needsVideoRefund })
+      resets.push({ type: 'video', id: row.id, ageMin, creditsCharged, refundResult: wdVideoRefund })
     }
   } catch (e) { console.warn(`${tag} video query failed:`, e.message) }
 
@@ -3677,16 +3679,16 @@ async function runWatchdog() {
       const ageMin = Math.round((now - new Date(row.updated_at).getTime()) / 60_000)
       console.log(`${tag} audio_job ${row.id} stuck in ${row.status} ${ageMin} min (project ${row.project_id})`)
       const needsRefund = !!(row.credits_charged > 0 && !row.credits_refunded_at)
+      let wdAudioRefund = null
       if (!WATCHDOG_DRY_RUN) {
         await updateAudioJob(row.id, { status: 'failed', error: `watchdog: stuck in '${row.status}' for ${ageMin} min` })
         if (row.project_id) await sbPatch('projects', `id=eq.${row.project_id}`, { status: 'failed' })
-        try {
-          await refundAudioJobCredits(row.id, row.user_id, row.project_id)
-        } catch (e) {
-          console.warn(`${tag} refund failed for ${row.id}: ${e.message}`)
+        wdAudioRefund = await refundAudioJobCredits(row.id, row.user_id, row.project_id)
+        if (!wdAudioRefund.ok && wdAudioRefund.amount > 0) {
+          await recordRefundIncident(row.id, row.user_id, wdAudioRefund.amount, 'audio', wdAudioRefund.error)
         }
       }
-      resets.push({ type: 'audio', id: row.id, project_id: row.project_id, jobStatus: row.status, ageMin, creditsCharged: row.credits_charged ?? 0, needsRefund })
+      resets.push({ type: 'audio', id: row.id, project_id: row.project_id, jobStatus: row.status, ageMin, creditsCharged: row.credits_charged ?? 0, needsRefund, refundResult: wdAudioRefund })
     }
   } catch (e) { console.warn(`${tag} audio query failed:`, e.message) }
 
@@ -3697,17 +3699,17 @@ async function runWatchdog() {
       const ageMin = Math.round((now - new Date(row.updated_at).getTime()) / 60_000)
       console.log(`${tag} image_job ${row.id} stuck in ${row.status} ${ageMin} min (project ${row.project_id})`)
       const needsRefund = !!(row.credits_charged > 0 && !row.credits_refunded_at)
+      let wdImageRefund = null
       if (!WATCHDOG_DRY_RUN) {
         await updateImageJob(row.id, { status: 'failed', error_message: `watchdog: stuck in '${row.status}' for ${ageMin} min` })
         if (row.project_id) await sbPatch('projects', `id=eq.${row.project_id}&status=eq.generating_images`, { status: 'failed' })
           .catch(e => console.warn(`${tag} project reset for ${row.id}:`, e.message))
-        try {
-          await refundImageJobCredits(row.id, row.user_id, row.project_id)
-        } catch (e) {
-          console.warn(`${tag} image_job refund failed for ${row.id}: ${e.message}`)
+        wdImageRefund = await refundImageJobCredits(row.id, row.user_id, row.project_id)
+        if (!wdImageRefund.ok && wdImageRefund.amount > 0) {
+          await recordRefundIncident(row.id, row.user_id, wdImageRefund.amount, 'image', wdImageRefund.error)
         }
       }
-      resets.push({ type: 'image_job', id: row.id, project_id: row.project_id, jobStatus: row.status, ageMin, creditsCharged: row.credits_charged ?? 0, needsRefund })
+      resets.push({ type: 'image_job', id: row.id, project_id: row.project_id, jobStatus: row.status, ageMin, creditsCharged: row.credits_charged ?? 0, needsRefund, refundResult: wdImageRefund })
     }
   } catch (e) { console.warn(`${tag} image_jobs query failed:`, e.message) }
 
@@ -3723,11 +3725,13 @@ async function runWatchdog() {
         : r.type === 'image_job'
         ? `image_job ${r.id.slice(0, 8)} (${r.jobStatus}, project ${(r.project_id ?? '?').slice(0, 8)})`
         : `project ${r.id.slice(0, 8)} (generating_${r.type})`
-      const refundNote = (r.type === 'audio' || r.type === 'image_job')
-        ? (r.needsRefund ? `, ${r.creditsCharged} кр. возвращены` : ', refund не потребовался')
-        : r.type === 'video' && r.creditsCharged > 0
-        ? (r.needsVideoRefund ? `, ${r.creditsCharged} кр. возвращены` : ', refund не потребовался')
-        : ''
+      const refundNote = r.refundResult
+        ? (r.refundResult.ok && r.refundResult.amount > 0
+            ? `, ${r.refundResult.amount} кр. возвращены`
+            : r.refundResult.ok
+            ? ', refund не потребовался'
+            : `, возврат ${r.refundResult.amount} кр. — СБОЙ`)
+        : (r.creditsCharged > 0 ? ', refund пропущен (dry run)' : '')
       const msg = `${emoji} Watchdog${dryLabel}\n${subject} stuck ${r.ageMin} min → reset to failed${refundNote}`
       await tgApi('sendMessage', { chat_id: OWNER_ID, text: msg })
         .catch(e => console.warn(`${tag} tg notify failed:`, e.message))
@@ -5113,7 +5117,10 @@ async function processVideoJob(jobId, body) {
     })
     try { console.timeEnd(T('TOTAL')) } catch (_) {}
     await updateJob(jobId, { status: 'failed', error_message: err.message })
-    await refundVideoJobCredits(jobId, body.user_id, body.project_id)
+    const videoRefund = await refundVideoJobCredits(jobId, body.user_id, body.project_id)
+    if (!videoRefund.ok && videoRefund.amount > 0) {
+      await recordRefundIncident(jobId, body.user_id, videoRefund.amount, 'video', videoRefund.error)
+    }
     if (body.project_id) {
       await sbPatch('projects', `id=eq.${body.project_id}&status=eq.generating_video`, { status: 'failed' })
         .catch(e => console.warn(`[job:${jobId}] project status reset failed:`, e.message))
@@ -5427,66 +5434,74 @@ async function updateAudioJob(jobId, fields) {
 // The credits_refunded_at IS NULL guard ensures the Vercel poll fallback in
 // status/route.ts cannot double-refund even if it races with this function.
 async function refundAudioJobCredits(jobId, userId, projectId) {
+  let amount = 0
   try {
     const rows = await sbGet('audio_jobs', `id=eq.${jobId}&select=credits_charged,credits_refunded_at`)
     const row = Array.isArray(rows) ? rows[0] : null
-    if (!row || !(row.credits_charged > 0) || row.credits_refunded_at) return
+    if (!row || !(row.credits_charged > 0) || row.credits_refunded_at) return { ok: true, amount: 0 }
+    amount = row.credits_charged
 
     const updated = await sbPatch(
       'audio_jobs',
       `id=eq.${jobId}&credits_refunded_at=is.null`,
       { credits_refunded_at: new Date().toISOString() }
     )
-    if (!Array.isArray(updated) || updated.length === 0) return
+    if (!Array.isArray(updated) || updated.length === 0) return { ok: true, amount: 0 }
 
     const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/add_credits`, {
       method: 'POST',
       headers: sbHeaders(),
       body: JSON.stringify({
         p_user_id:    userId,
-        p_amount:     row.credits_charged,
+        p_amount:     amount,
         p_operation:  'audio_refund',
         p_project_id: projectId ?? null,
       }),
     })
     if (!rpcRes.ok) throw new Error(`add_credits RPC: ${rpcRes.status} ${await rpcRes.text().catch(() => '')}`)
-    console.log(`[audio-job:${jobId}] refunded ${row.credits_charged} credits to ${userId}`)
+    console.log(`[audio-job:${jobId}] refunded ${amount} credits to ${userId}`)
+    return { ok: true, amount }
   } catch (e) {
     console.error(`[audio-job:${jobId}] refundAudioJobCredits failed:`, e.message)
     Sentry.captureException(e, { extra: { jobId, userId, projectId } })
+    return { ok: false, amount, error: e.message }
   }
 }
 
 // Mirror of refundAudioJobCredits for video jobs. Called from processVideoJob catch
 // and the watchdog video branch. The Vercel status route has a secondary fallback.
 async function refundVideoJobCredits(jobId, userId, projectId) {
+  let amount = 0
   try {
     const rows = await sbGet('video_jobs', `id=eq.${jobId}&select=credits_charged,credits_refunded_at`)
     const row = Array.isArray(rows) ? rows[0] : null
-    if (!row || !(row.credits_charged > 0) || row.credits_refunded_at) return
+    if (!row || !(row.credits_charged > 0) || row.credits_refunded_at) return { ok: true, amount: 0 }
+    amount = row.credits_charged
 
     const updated = await sbPatch(
       'video_jobs',
       `id=eq.${jobId}&credits_refunded_at=is.null`,
       { credits_refunded_at: new Date().toISOString() }
     )
-    if (!Array.isArray(updated) || updated.length === 0) return
+    if (!Array.isArray(updated) || updated.length === 0) return { ok: true, amount: 0 }
 
     const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/add_credits`, {
       method: 'POST',
       headers: sbHeaders(),
       body: JSON.stringify({
         p_user_id:    userId,
-        p_amount:     row.credits_charged,
+        p_amount:     amount,
         p_operation:  'video_refund',
         p_project_id: projectId ?? null,
       }),
     })
     if (!rpcRes.ok) throw new Error(`add_credits RPC: ${rpcRes.status} ${await rpcRes.text().catch(() => '')}`)
-    console.log(`[video-job:${jobId}] refunded ${row.credits_charged} credits to ${userId}`)
+    console.log(`[video-job:${jobId}] refunded ${amount} credits to ${userId}`)
+    return { ok: true, amount }
   } catch (e) {
     console.error(`[video-job:${jobId}] refundVideoJobCredits failed:`, e.message)
     Sentry.captureException(e, { extra: { jobId, userId, projectId } })
+    return { ok: false, amount, error: e.message }
   }
 }
 
@@ -5502,31 +5517,60 @@ async function updateImageJob(jobId, fields) {
 }
 
 async function refundImageJobCredits(jobId, userId, projectId) {
+  let amount = 0
   try {
     const rows = await sbGet('image_jobs', `id=eq.${jobId}&select=credits_charged,credits_refunded_at`)
     const row = Array.isArray(rows) ? rows[0] : null
-    if (!row || !(row.credits_charged > 0) || row.credits_refunded_at) return
+    if (!row || !(row.credits_charged > 0) || row.credits_refunded_at) return { ok: true, amount: 0 }
+    amount = row.credits_charged
 
     const updated = await sbPatch('image_jobs', `id=eq.${jobId}&credits_refunded_at=is.null`, {
       credits_refunded_at: new Date().toISOString(),
     })
-    if (!Array.isArray(updated) || updated.length === 0) return
+    if (!Array.isArray(updated) || updated.length === 0) return { ok: true, amount: 0 }
 
     const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/add_credits`, {
       method: 'POST',
       headers: sbHeaders(),
       body: JSON.stringify({
         p_user_id:    userId,
-        p_amount:     row.credits_charged,
+        p_amount:     amount,
         p_operation:  'image_refund',
         p_project_id: projectId ?? null,
       }),
     })
     if (!rpcRes.ok) throw new Error(`add_credits RPC: ${rpcRes.status} ${await rpcRes.text().catch(() => '')}`)
-    console.log(`[image-job:${jobId}] refunded ${row.credits_charged} credits to ${userId}`)
+    console.log(`[image-job:${jobId}] refunded ${amount} credits to ${userId}`)
+    return { ok: true, amount }
   } catch (e) {
     console.error(`[image-job:${jobId}] refundImageJobCredits failed:`, e.message)
     Sentry.captureException(e, { extra: { jobId, userId, projectId } })
+    return { ok: false, amount, error: e.message }
+  }
+}
+
+// Records a failed credit refund in payment_incidents for forensics.
+// Never throws — best-effort only. Requires migration 014_refund_incidents.sql.
+async function recordRefundIncident(jobId, userId, amount, jobType, errorMsg) {
+  try {
+    await sbPost('payment_incidents', {
+      payment_id:      null,
+      job_id:          jobId,
+      user_id:         userId,
+      kind:            jobType,
+      amount_expected: amount,
+      reason:          'refund_failed',
+      raw_payload:     { job_id: jobId, job_type: jobType, credits: amount, error: errorMsg },
+    })
+    console.log(`[refund-incident] recorded: job=${jobId.slice(0, 8)} type=${jobType} amount=${amount}`)
+  } catch (e) {
+    console.error('[refund-incident] insert failed:', e.message)
+  }
+  if (OWNER_ID) {
+    tgApi('sendMessage', {
+      chat_id: OWNER_ID,
+      text: `🔴 Возврат кредитов НЕ УДАЛСЯ\njob: ${jobId.slice(0, 8)} (${jobType})\nuser: ${userId}\nкредитов: ${amount}\nошибка: ${String(errorMsg).slice(0, 200)}`,
+    }).catch(() => {})
   }
 }
 
@@ -6337,7 +6381,10 @@ async function processImageJob(jobId, body) {
     console.error(`[image-job:${jobId}] failed:`, msg)
     Sentry.captureException(err, { extra: { jobId, project_id, user_id, engine } })
     await updateImageJob(jobId, { status: 'failed', error_message: msg })
-    await refundImageJobCredits(jobId, user_id, project_id)
+    const imageRefund = await refundImageJobCredits(jobId, user_id, project_id)
+    if (!imageRefund.ok && imageRefund.amount > 0) {
+      await recordRefundIncident(jobId, user_id, imageRefund.amount, 'image', imageRefund.error)
+    }
     if (project_id) {
       await sbPatch('projects', `id=eq.${project_id}&status=eq.generating_images`, { status: 'failed' })
         .catch(e => console.warn(`[image-job:${jobId}] project failure mark failed:`, e.message))
@@ -6775,7 +6822,10 @@ async function processAudioJob(job) {
     console.error(`[audio-job:${jobId}] FAILED:`, msg)
     Sentry.captureException(err, { extra: { jobId, engine: job.engine, project_id: job.project_id } })
     await updateAudioJob(jobId, { status: 'failed', error: msg })
-    await refundAudioJobCredits(jobId, job.user_id, job.project_id)
+    const audioRefund = await refundAudioJobCredits(jobId, job.user_id, job.project_id)
+    if (!audioRefund.ok && audioRefund.amount > 0) {
+      await recordRefundIncident(jobId, job.user_id, audioRefund.amount, 'audio', audioRefund.error)
+    }
     // Mark project as failed so client polling can detect it (otherwise status stays 'generating_audio' forever)
     if (job.project_id) {
       await sbPatch('projects', `id=eq.${job.project_id}&user_id=eq.${job.user_id}`, { status: 'failed' })
@@ -6836,11 +6886,14 @@ async function recoverOrphanedJobs() {
         await sbPatch('projects', `id=eq.${job.project_id}&status=eq.generating_video`, { status: 'failed' })
           .catch(e => console.warn('[startup/recovery] project patch:', e.message))
       }
-      await refundVideoJobCredits(job.id, job.user_id, job.project_id)
-        .catch(e => console.warn(`[startup/recovery] refund for ${job.id.slice(0, 8)}:`, e.message))
+      const startupVideoRefund = await refundVideoJobCredits(job.id, job.user_id, job.project_id)
+      if (!startupVideoRefund.ok && startupVideoRefund.amount > 0) {
+        await recordRefundIncident(job.id, job.user_id, startupVideoRefund.amount, 'video', startupVideoRefund.error)
+      }
       if (OWNER_ID) {
-        const credits = job.credits_charged ?? 0
-        const refundNote = (credits > 0 && !job.credits_refunded_at) ? `, ${credits} кр. возвращены` : ''
+        const refundNote = startupVideoRefund.amount > 0
+          ? (startupVideoRefund.ok ? `, ${startupVideoRefund.amount} кр. возвращены` : `, возврат ${startupVideoRefund.amount} кр. — СБОЙ`)
+          : ''
         await tgApi('sendMessage', {
           chat_id: OWNER_ID,
           text: `🔴 Startup recovery\njob ${job.id.slice(0, 8)}${phaseStr} → failed${refundNote}\nproject: ${(job.project_id ?? '?').slice(0, 8)}`,
@@ -6873,8 +6926,10 @@ async function recoverOrphanedAudioJobs() {
         await sbPatch('projects', `id=eq.${job.project_id}&user_id=eq.${job.user_id}`, { status: 'failed' })
           .catch(e => console.warn(`[startup/audio-recovery] project patch:`, e.message))
       }
-      await refundAudioJobCredits(job.id, job.user_id, job.project_id)
-        .catch(e => console.warn(`[startup/audio-recovery] refund:`, e.message))
+      const startupAudioRefund = await refundAudioJobCredits(job.id, job.user_id, job.project_id)
+      if (!startupAudioRefund.ok && startupAudioRefund.amount > 0) {
+        await recordRefundIncident(job.id, job.user_id, startupAudioRefund.amount, 'audio', startupAudioRefund.error)
+      }
     }
   } catch (e) {
     console.error('[startup/audio-recovery] failed:', e.message)
@@ -6899,8 +6954,10 @@ async function recoverOrphanedImageJobs() {
         await sbPatch('projects', `id=eq.${job.project_id}&status=eq.generating_images`, { status: 'failed' })
           .catch(e => console.warn(`[startup/image-recovery] project patch:`, e.message))
       }
-      await refundImageJobCredits(job.id, job.user_id, job.project_id)
-        .catch(e => console.warn(`[startup/image-recovery] refund:`, e.message))
+      const startupImageRefund = await refundImageJobCredits(job.id, job.user_id, job.project_id)
+      if (!startupImageRefund.ok && startupImageRefund.amount > 0) {
+        await recordRefundIncident(job.id, job.user_id, startupImageRefund.amount, 'image', startupImageRefund.error)
+      }
     }
   } catch (e) {
     console.error('[startup/image-recovery] failed:', e.message)
