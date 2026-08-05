@@ -7,7 +7,7 @@ import { trackEvent } from '@/lib/analytics'
 import { audioCost, ENGINE_DISPLAY } from '@/lib/types'
 import type { AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { env } from '@/lib/env'
-import { notifyError } from '@/lib/telegram'
+import { notifyError, notifyUserTelegram } from '@/lib/telegram'
 
 export const maxDuration = 300
 
@@ -533,6 +533,8 @@ async function uploadTextToStorage(text: string, userId: string, projectId: stri
 // ── Main route ───────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  const t0Request = Date.now()
+  let userId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -540,6 +542,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
+    userId = user.id
 
     const body: AudioRequest = await request.json()
     const {
@@ -885,6 +888,15 @@ export async function POST(request: NextRequest) {
     }
 
     void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id: project_id ?? toolRunId, chunks: chunks.length, tool_run })
+
+    if (Date.now() - t0Request > 90_000) {
+      const appUrl = env('NEXT_PUBLIC_APP_URL') || ''
+      await notifyUserTelegram(
+        user.id,
+        `🎙 Озвучка готова!\nАудио загружено — переходите к субтитрам.\n${appUrl}/studio`
+      ).catch(() => {})
+    }
+
     // DB stores the clean URL (publicUrl). The response adds ?v= so the browser
     // treats each generation as a distinct resource and doesn't replay cached audio.
     return NextResponse.json({
@@ -899,6 +911,13 @@ export async function POST(request: NextRequest) {
     console.error('[generate/audio] unexpected error:', msg)
     Sentry.captureException(error)
     await notifyError('/generate/audio', msg).catch(() => {})
+    if (userId && Date.now() - t0Request > 90_000) {
+      const appUrl = env('NEXT_PUBLIC_APP_URL') || ''
+      await notifyUserTelegram(
+        userId,
+        `⚠️ Синтез озвучки прервался. Попробуйте снова в студии: ${appUrl}/studio`
+      ).catch(() => {})
+    }
     return NextResponse.json({ ok: false, error: 'Ошибка генерации аудио' }, { status: 500 })
   }
 }

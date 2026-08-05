@@ -652,3 +652,31 @@ const params = { chat_id, text, ...rest }
 `key text PK, value text NOT NULL, updated_at timestamptz` (schema.sql:576–580). Плоское KV.
 `getSetting(key)` / `setSetting(key, value)` (index.js:384–397) — единственный интерфейс.
 Маппинг «тема → thread_id» при ≤3 фиксированных темах: добавить ключи `tg_group_id`, `thread_updates`, `thread_releases` и т.п. Если тем произвольно много — отдельная таблица.
+
+
+---
+
+## Пути завершения долгих операций (Telegram-уведомления)
+
+Карта всех путей, где долгая операция завершается, и покрытие уведомлениями.
+Обновлено: 2026-08-06.
+
+| # | Операция | Среда | Файл | Успех ≥90s | Ошибка ≥90s |
+|---|----------|-------|------|-----------|-------------|
+| 1 | Картинки sync — успех | Vercel SSE | `src/app/api/generate/images/route.ts:1208` | ✅ `notifyUserTelegram` | — |
+| 2 | Картинки sync — ошибка | Vercel SSE | `src/app/api/generate/images/route.ts:1227` | — | ✅ `notifyUserTelegram` |
+| 3 | Картинки async — успех | Railway | `video-server/index.js:6322` | ✅ `notifyUserJobDone('images')` | — |
+| 4 | Картинки async — ошибка | Railway | `video-server/index.js:6349` | — | ✅ `notifyUserJobDone('images_failed')` |
+| 5 | Рендер видео — успех | Railway | `video-server/index.js:5081` | ✅ `notifyUserJobDone('video')` | — |
+| 6 | Рендер видео — ошибка | Railway | `video-server/index.js:5121` | — | ✅ `notifyUserJobDone('video_failed')` |
+| 7 | Озвучка async — успех | Railway | `video-server/index.js:6741` | ✅ `notifyUserJobDone('audio')` | — |
+| 8 | Озвучка async — ошибка | Railway | `video-server/index.js:6793` | — | ✅ `notifyUserJobDone('audio_failed')` |
+| 9 | Озвучка sync — успех | Vercel JSON | `src/app/api/generate/audio/route.ts:892` | ✅ `notifyUserTelegram` | — |
+| 10 | Озвучка sync — ошибка | Vercel JSON | `src/app/api/generate/audio/route.ts:914` | — | ✅ `notifyUserTelegram` |
+| 11 | images-async relay | Vercel | `src/app/api/generate/images-async/route.ts` | N/A (только relay) | N/A |
+| 12 | Субтитры | Vercel | `src/app/api/generate/subtitles/route.ts` | Обычно <90s | Обычно <90s |
+| 13 | image-single | Vercel | `src/app/api/generate/image-single/route.ts` | Обычно <90s | Обычно <90s |
+
+**Функции уведомлений:**
+- `notifyUserTelegram(userId, text)` — `src/lib/telegram.ts`: читает `telegram_chat_id` из `profiles` по-живому, отправляет через Bot API. Используется в Vercel-маршрутах.
+- `notifyUserJobDone(userId, kind, payload?)` — `video-server/index.js:834`: аналог для Railway. Kinds: `video`, `images`, `audio`, `video_failed`, `images_failed`, `audio_failed`.

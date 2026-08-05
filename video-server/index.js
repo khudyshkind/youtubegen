@@ -859,6 +859,12 @@ async function notifyUserJobDone(userId, kind, payload = {}) {
     msg = `🖼 Иллюстрации готовы! (${count} шт.)\n${APP_URL}/studio`
   } else if (kind === 'audio') {
     msg = `🎙 Озвучка готова!\nАудио загружено — переходите к субтитрам.\n${APP_URL}/studio`
+  } else if (kind === 'video_failed') {
+    msg = `⚠️ Сборка видео не удалась. Кредиты возвращены.\nПопробуйте снова в студии: ${APP_URL}/studio`
+  } else if (kind === 'images_failed') {
+    msg = `⚠️ Генерация иллюстраций прервалась. Кредиты возвращены.\nПопробуйте снова в студии: ${APP_URL}/studio`
+  } else if (kind === 'audio_failed') {
+    msg = `⚠️ Синтез озвучки не удался. Кредиты возвращены.\nПопробуйте снова в студии: ${APP_URL}/studio`
   } else {
     return
   }
@@ -5112,6 +5118,9 @@ async function processVideoJob(jobId, body) {
       await sbPatch('projects', `id=eq.${body.project_id}&status=eq.generating_video`, { status: 'failed' })
         .catch(e => console.warn(`[job:${jobId}] project status reset failed:`, e.message))
     }
+    if (Date.now() - t0Job > 90_000) {
+      notifyUserJobDone(body.user_id, 'video_failed').catch(() => {})
+    }
   } finally {
     renderActiveJobs.delete(jobId)
     try {
@@ -6337,6 +6346,9 @@ async function processImageJob(jobId, body) {
       tgApi('sendMessage', { chat_id: OWNER_ID, text: `⚠️ image_job ${jobId.slice(0, 8)} failed: ${msg.slice(0, 200)}` })
         .catch(() => {})
     }
+    if (Date.now() - t0Request > 90_000) {
+      notifyUserJobDone(user_id, 'images_failed').catch(() => {})
+    }
   }
 }
 
@@ -6777,6 +6789,9 @@ async function processAudioJob(job) {
         const svcName = job.engine === 'secretvoicer' ? 'SecretVoicer' : 'Voicer'
         await notifyBillingErrorRailway(svcName, `/audio-job:${jobId}`).catch(() => {})
       }
+    }
+    if (Date.now() - t0Job > 90_000) {
+      notifyUserJobDone(job.user_id, 'audio_failed').catch(() => {})
     }
   }
 }
