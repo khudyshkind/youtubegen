@@ -2108,7 +2108,7 @@ app.post('/telegram/webhook', async (req, res) => {
       if (startArg.startsWith('link_')) {
         const token = startArg.slice(5)
         try {
-          const rows = await sbGet('tg_link_tokens', `token=eq.${encodeURIComponent(token)}&select=user_id,expires_at,used_at`)
+          const rows = await sbGet('tg_link_tokens', `token=eq.${encodeURIComponent(token)}&select=user_id,expires_at,used_at,created_at`)
           if (!rows || rows.length === 0) {
             await safeSendMessage(chatId, '❌ Ссылка недействительна. Получите новую в настройках сервиса: lefiro.co/settings')
             return
@@ -2135,10 +2135,11 @@ app.post('/telegram/webhook', async (req, res) => {
           )
 
           // Catch-up: job may have finished between "Подключить" click and pressing START in Telegram.
-          // If no job is currently running, check for recently completed ones and notify now.
+          // Only notify for jobs completed AFTER the token was created (= user clicked "Подключить").
+          // If no job is currently running, check for such completed jobs and notify now.
           try {
             const uid = row.user_id
-            const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+            const tokenCreatedAt = row.created_at
             const [actImg, actAud, actVid] = await Promise.all([
               sbGet('image_jobs', `user_id=eq.${uid}&status=in.(pending,processing)&select=id`),
               sbGet('audio_jobs', `user_id=eq.${uid}&status=in.(pending,processing)&select=id`),
@@ -2147,9 +2148,9 @@ app.post('/telegram/webhook', async (req, res) => {
             const hasActive = (actImg?.length || 0) + (actAud?.length || 0) + (actVid?.length || 0) > 0
             if (!hasActive) {
               const [doneImg, doneAud, doneVid] = await Promise.all([
-                sbGet('image_jobs', `user_id=eq.${uid}&status=eq.completed&completed_at=gte.${encodeURIComponent(tenMinAgo)}&order=completed_at.desc&limit=1&select=scene_images`),
-                sbGet('audio_jobs', `user_id=eq.${uid}&status=eq.completed&completed_at=gte.${encodeURIComponent(tenMinAgo)}&limit=1&select=id`),
-                sbGet('video_jobs', `user_id=eq.${uid}&status=eq.completed&completed_at=gte.${encodeURIComponent(tenMinAgo)}&limit=1&select=id`),
+                sbGet('image_jobs', `user_id=eq.${uid}&status=eq.completed&completed_at=gte.${encodeURIComponent(tokenCreatedAt)}&order=completed_at.desc&limit=1&select=scene_images`),
+                sbGet('audio_jobs', `user_id=eq.${uid}&status=eq.completed&completed_at=gte.${encodeURIComponent(tokenCreatedAt)}&limit=1&select=id`),
+                sbGet('video_jobs', `user_id=eq.${uid}&status=eq.completed&completed_at=gte.${encodeURIComponent(tokenCreatedAt)}&limit=1&select=id`),
               ])
               const parts = []
               if (doneImg?.length) {

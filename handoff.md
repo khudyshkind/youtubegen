@@ -2,53 +2,30 @@
 
 ## Что сделано
 
-**Починено уведомление при привязке Telegram посреди генерации + кнопка Step5.**
+Уточнено окно catch-up при привязке Telegram (`video-server/index.js`).
 
----
+**Было:** граница поиска завершённых задач — `Date.now() - 10 min`. Ловило всё,
+что завершилось за последние 10 минут, включая задачи, которые пользователь уже
+видел на экране до нажатия «Подключить».
 
-### Диагностика: точная причина
+**Стало:** граница — `tg_link_tokens.created_at` (момент создания токена = момент
+нажатия кнопки «Подключить» в баннере). Catch-up приходит только по задачам,
+завершившимся после того, как пользователь нажал «Подключить».
 
-Railway logs подтвердили:
-```
-[notify] skip: no chat_id user=68c32ff7-0e9c-44a6-a690-483e145dbc8d
-```
+Два изменения в `video-server/index.js`:
+1. `select=user_id,expires_at,used_at` → `select=user_id,expires_at,used_at,created_at` — добавлено поле в запрос токена.
+2. `tenMinAgo` (10-минутное окно) → `row.created_at` во всех трёх `sbGet` запросах catch-up.
 
-Это ветка `!chatId` в `notifyUserJobDone` — функция вызвалась (порог 90 с прошёл), но `telegram_chat_id` в БД был ещё `null`. 
+## Что не получилось
 
-Race condition: пользователь нажал «Подключить» → открылось окно Telegram → job завершился → `notifyUserJobDone` прочитала профиль (chat_id = null) → skip. Позже пользователь нажал START в боте → `telegram_chat_id` записался в БД. Привязка прошла успешно, но уведомление уже не отправилось.
+—
 
----
+## Изменения в файлах состояния
 
-### Фикс: catch-up в `/start link_` обработчике
+TASKS:    добавлена строка «Уточнено [2026-08-06]» к пункту баннера Telegram.
+CONTEXT:  без изменений.
+WORKFLOW: без изменений.
 
-**Файл:** `video-server/index.js`, в хендлере `/start link_<token>`, после `safeSendMessage` подтверждения.
+## Открытые вопросы владельцу
 
-Алгоритм:
-1. Проверяем активные задачи (`status=in.(pending,processing)`) для `image_jobs`, `audio_jobs`, `video_jobs`
-2. Если активных нет → значит, задача уже завершилась до привязки
-3. Ищем задачи, завершённые за последние 10 мин (`status=eq.completed&completed_at=gte.<tenMinAgo>`)
-4. Если найдены → отправляем catch-up уведомление в Telegram
-
-Если активные задачи есть → ничего не делаем, они сами уведомят при завершении (теперь chat_id в БД).
-
-Логирование: `[link] catch-up notify user=... chat_id=...` или `[link] catch-up: active job found` или `[link] catch-up: no recent completed jobs`.
-
----
-
-### Фикс: кнопка Step5 на ранней фазе
-
-Кнопка показывала `t('step5.generating')` = "Анализ сценария и генерация иллюстраций..." даже когда `progress = null` (ранняя фаза). Это тот же длинный текст, что и в статусных блоках.
-
-Добавлен ключ `step5.btn_loading` = "Генерация…" (RU) / "Generating…" (EN) в `src/lib/i18n.ts`. Кнопка теперь показывает только его во время всей загрузки.
-
----
-
-## Изменённые файлы
-
-- `video-server/index.js` — catch-up в хендлере `/start link_`
-- `src/lib/i18n.ts` — новый ключ `step5.btn_loading`
-- `src/components/studio/Step5Images.tsx` — используется новый ключ
-
-## Коммиты
-
-- `fca2530` на main — запушен в origin/main
+—
