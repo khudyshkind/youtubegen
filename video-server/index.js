@@ -416,6 +416,9 @@ async function loadSettingsFromDB() {
       if (key === 'pending_post_text')      ppText     = value
       if (key === 'pending_post_image_url') ppImageUrl = value
       if (key === 'pending_post_topic')     ppTopic    = value
+      if (key === 'tg_group_id')    { const n = Number(value); if (n) groupConfig.groupId      = n }
+      if (key === 'thread_updates') { const n = Number(value); if (n) groupConfig.threadUpdates = n }
+      if (key === 'thread_news')    { const n = Number(value); if (n) groupConfig.threadNews    = n }
     }
     if (ppText) {
       pendingPost = { text: ppText, imageUrl: ppImageUrl || null, topic: ppTopic }
@@ -438,6 +441,7 @@ let awaitingTime  = false         // true after plan_set_time callback
 const config        = { autoPublish: false }
 const monitorConfig = { interval: 'daily' } // 'daily' | 'twice' | 'weekly' | 'off'
 const planConfig    = { paused: false, postHour: 12, postsPerDay: 1 }
+const groupConfig   = { groupId: null, threadUpdates: null, threadNews: null }
 
 const POST_SCHEDULES = {
   1: [12],
@@ -581,11 +585,17 @@ const PUBLIC_KB = {
 
 function previewInline() {
   return {
-    inline_keyboard: [[
-      { text: '✅ Опубликовать',   callback_data: 'publish' },
-      { text: '❌ Отклонить',      callback_data: 'decline' },
-      { text: '🔄 Перегенерировать', callback_data: 'regen' },
-    ]],
+    inline_keyboard: [
+      [
+        { text: '📢 В канал',          callback_data: 'pub_ch'   },
+        { text: '💬 В группу',         callback_data: 'pub_gr'   },
+        { text: '🌐 Везде',            callback_data: 'pub_both' },
+      ],
+      [
+        { text: '❌ Отклонить',        callback_data: 'decline' },
+        { text: '🔄 Перегенерировать', callback_data: 'regen'   },
+      ],
+    ],
   }
 }
 
@@ -652,11 +662,13 @@ function monitorInline() {
   return {
     inline_keyboard: [
       [
-        { text: '✅ Опубликовать',    callback_data: 'mon_pub' },
-        { text: '❌ Пропустить',      callback_data: 'mon_skip' },
+        { text: '📢 В канал',          callback_data: 'mon_pub_ch'   },
+        { text: '💬 В группу',         callback_data: 'mon_pub_gr'   },
+        { text: '🌐 Везде',            callback_data: 'mon_pub_both' },
       ],
       [
-        { text: '✏️ Редактировать',   callback_data: 'mon_edit' },
+        { text: '❌ Пропустить',       callback_data: 'mon_skip' },
+        { text: '✏️ Редактировать',    callback_data: 'mon_edit' },
         { text: '🔄 Перегенерировать', callback_data: 'mon_regen' },
       ],
     ],
@@ -908,23 +920,62 @@ async function runConsultant(chatId, queryText) {
   }
 }
 
-async function publishToChannel(text, imageUrl = null) {
-  if (imageUrl) {
-    console.log('[tg] downloading image buffer...')
-    const buf = await fetchImageBuffer(imageUrl)
-    if (buf) {
-      console.log('[tg] sending photo to channel, size:', buf.length)
-      return tgSendPhoto(CHANNEL_ID, buf, text)
+// target: 'channel' | 'group' | 'both'
+// threadId: message_thread_id for group topics; ignored when target='channel'
+async function publishToChannel(text, imageUrl = null, target = 'channel', threadId = null) {
+  const sendOne = async (chatId, thread) => {
+    const extra = thread ? { message_thread_id: thread } : {}
+    if (imageUrl) {
+      console.log('[tg] downloading image buffer...')
+      const buf = await fetchImageBuffer(imageUrl)
+      if (buf) {
+        console.log('[tg] sending photo to', chatId, thread ? `thread=${thread}` : '', 'size:', buf.length)
+        return tgSendPhoto(chatId, buf, text, extra)
+      }
+      console.warn('[tg] image download failed for', chatId, '— sending text only')
     }
-    console.warn('[tg] image download failed, sending text only')
+    return tgApi('sendMessage', { chat_id: chatId, text, parse_mode: 'Markdown', ...extra })
   }
-  return tgApi('sendMessage', { chat_id: CHANNEL_ID, text, parse_mode: 'Markdown' })
+
+  if ((target === 'group' || target === 'both') && !groupConfig.groupId) {
+    console.warn('[publish] tg_group_id not configured — cannot publish to group')
+    if (target === 'group') return null
+  }
+
+  if (target === 'channel') return sendOne(CHANNEL_ID, null)
+  if (target === 'group')   return sendOne(groupConfig.groupId, threadId)
+
+  // target === 'both': failures are independent — one failing does not cancel the other
+  const [chRes, grRes] = await Promise.allSettled([
+    sendOne(CHANNEL_ID, null),
+    groupConfig.groupId ? sendOne(groupConfig.groupId, threadId) : Promise.resolve(null),
+  ])
+  return {
+    channel: chRes.status === 'fulfilled' ? chRes.value : null,
+    group:   grRes.status === 'fulfilled' ? grRes.value : null,
+  }
 }
 
-// Returns clickable post link when publish succeeded, null otherwise
+// Derive the positive numeric peer ID used in t.me/c/ links from a supergroup chat_id (-100XXXXXXXXX)
+function tmeNumericId(chatId) {
+  return String(Math.abs(chatId)).replace(/^100/, '')
+}
+
+// Returns clickable link for a channel post (channel has a public username)
 function channelPostLink(res) {
   const msgId = res?.result?.message_id
   return msgId ? `https://t.me/lefiro_channel/${msgId}` : null
+}
+
+// Returns clickable link for a group post; format: t.me/c/{id}/{threadId}/{msgId} for topics
+function groupPostLink(res, threadId = null) {
+  if (!groupConfig.groupId) return null
+  const msgId = res?.result?.message_id
+  if (!msgId) return null
+  const numId = tmeNumericId(groupConfig.groupId)
+  return threadId
+    ? `https://t.me/c/${numId}/${threadId}/${msgId}`
+    : `https://t.me/c/${numId}/${msgId}`
 }
 
 // ── Email helpers (Resend API, used by expiry notifications) ─────────────────
@@ -1232,10 +1283,16 @@ async function ensurePendingPost() {
 // ── Deploy post helpers ───────────────────────────────────────────────────────
 function deployInline() {
   return {
-    inline_keyboard: [[
-      { text: '✅ Опубликовать', callback_data: 'dep_pub' },
-      { text: '❌ Отклонить',   callback_data: 'dep_skip' },
-    ]],
+    inline_keyboard: [
+      [
+        { text: '📢 В канал',  callback_data: 'dep_pub_ch'   },
+        { text: '💬 В группу', callback_data: 'dep_pub_gr'   },
+        { text: '🌐 Везде',    callback_data: 'dep_pub_both' },
+      ],
+      [
+        { text: '❌ Отклонить', callback_data: 'dep_skip' },
+      ],
+    ],
   }
 }
 
@@ -1656,15 +1713,35 @@ async function handleCallback(cq) {
   const clearButtons = () =>
     tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } })
 
-  if (data === 'publish') {
+  if (data === 'pub_ch' || data === 'pub_gr' || data === 'pub_both') {
     const post = await ensurePendingPost()
     if (!post) { await sendTo(chatId, 'Нет поста на одобрении'); return }
-    const pubResPub = await publishToChannel(post.text, post.imageUrl)
-    await clearPendingPost()
     await clearButtons()
-    const pubLink = channelPostLink(pubResPub)
-    if (pubLink) await sendTo(chatId, `✅ Опубликовано в канал: ${pubLink}`)
-    else await sendTo(chatId, `❌ Не удалось опубликовать: ${pubResPub?.description ?? 'нет ответа от Telegram'}`)
+    if (data === 'pub_ch') {
+      const res = await publishToChannel(post.text, post.imageUrl)
+      await clearPendingPost()
+      const link = channelPostLink(res)
+      if (link) await sendTo(chatId, `✅ Опубликовано в канал: ${link}`)
+      else await sendTo(chatId, `❌ Ошибка: ${res?.description ?? 'нет ответа от Telegram'}`)
+    } else if (data === 'pub_gr') {
+      if (!groupConfig.groupId) { await sendTo(chatId, '❌ tg_group_id не настроен в bot_settings'); return }
+      const res = await publishToChannel(post.text, post.imageUrl, 'group', groupConfig.threadNews)
+      await clearPendingPost()
+      const link = groupPostLink(res, groupConfig.threadNews)
+      if (link) await sendTo(chatId, `✅ Опубликовано в группу: ${link}`)
+      else await sendTo(chatId, `❌ Ошибка публикации в группу: ${res?.description ?? 'нет ответа'}`)
+    } else {
+      if (!groupConfig.groupId) await sendTo(chatId, '⚠️ tg_group_id не настроен — только канал')
+      const res = await publishToChannel(post.text, post.imageUrl, 'both', groupConfig.threadNews)
+      await clearPendingPost()
+      const parts = []
+      if (channelPostLink(res.channel)) parts.push(`📢 ${channelPostLink(res.channel)}`)
+      else if (res.channel) parts.push('📢 ошибка канала')
+      const grLink = groupPostLink(res.group, groupConfig.threadNews)
+      if (grLink) parts.push(`💬 ${grLink}`)
+      else if (groupConfig.groupId) parts.push('💬 ошибка группы')
+      await sendTo(chatId, parts.length ? `✅ Опубликовано:\n${parts.join('\n')}` : '❌ Обе цели недоступны')
+    }
 
   } else if (data === 'decline') {
     await clearPendingPost()
@@ -1727,28 +1804,70 @@ async function handleCallback(cq) {
     await tgApi('editMessageReplyMarkup', { chat_id: chatId, message_id: msgId, reply_markup: postsPerDayInline() })
     await sendTo(chatId, `✅ Постов в день: *${planConfig.postsPerDay}*\n⏰ Публикации в: *${times} UTC*`)
 
-  } else if (data === 'dep_pub') {
+  } else if (data === 'dep_pub_ch' || data === 'dep_pub_gr' || data === 'dep_pub_both') {
     if (!pendingDeployPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
-    const pubResDep = await publishToChannel(pendingDeployPost.text)
-    pendingDeployPost = null
+    const deployText = pendingDeployPost.text
     await clearButtons()
-    const depLink = channelPostLink(pubResDep)
-    if (depLink) await sendTo(chatId, `✅ Пост об обновлении опубликован: ${depLink}`)
-    else await sendTo(chatId, `❌ Не удалось опубликовать: ${pubResDep?.description ?? 'нет ответа от Telegram'}`)
+    if (data === 'dep_pub_ch') {
+      const res = await publishToChannel(deployText)
+      pendingDeployPost = null
+      const link = channelPostLink(res)
+      if (link) await sendTo(chatId, `✅ Пост об обновлении опубликован: ${link}`)
+      else await sendTo(chatId, `❌ Ошибка: ${res?.description ?? 'нет ответа от Telegram'}`)
+    } else if (data === 'dep_pub_gr') {
+      if (!groupConfig.groupId) { await sendTo(chatId, '❌ tg_group_id не настроен в bot_settings'); return }
+      const res = await publishToChannel(deployText, null, 'group', groupConfig.threadUpdates)
+      pendingDeployPost = null
+      const link = groupPostLink(res, groupConfig.threadUpdates)
+      if (link) await sendTo(chatId, `✅ Пост об обновлении опубликован в группу: ${link}`)
+      else await sendTo(chatId, `❌ Ошибка публикации в группу: ${res?.description ?? 'нет ответа'}`)
+    } else {
+      if (!groupConfig.groupId) await sendTo(chatId, '⚠️ tg_group_id не настроен — только канал')
+      const res = await publishToChannel(deployText, null, 'both', groupConfig.threadUpdates)
+      pendingDeployPost = null
+      const parts = []
+      if (channelPostLink(res.channel)) parts.push(`📢 ${channelPostLink(res.channel)}`)
+      else if (res.channel) parts.push('📢 ошибка канала')
+      const grLink = groupPostLink(res.group, groupConfig.threadUpdates)
+      if (grLink) parts.push(`💬 ${grLink}`)
+      else if (groupConfig.groupId) parts.push('💬 ошибка группы')
+      await sendTo(chatId, parts.length ? `✅ Опубликовано:\n${parts.join('\n')}` : '❌ Обе цели недоступны')
+    }
 
   } else if (data === 'dep_skip') {
     pendingDeployPost = null
     await clearButtons()
     await sendTo(chatId, '⏭ Пост об обновлении пропущен')
 
-  } else if (data === 'mon_pub') {
+  } else if (data === 'mon_pub_ch' || data === 'mon_pub_gr' || data === 'mon_pub_both') {
     if (!pendingMonitorPost) { await sendTo(chatId, 'Нет поста на одобрении'); return }
-    const pubResMon = await publishToChannel(pendingMonitorPost.post)
-    pendingMonitorPost = null
+    const monText = pendingMonitorPost.post
     await clearButtons()
-    const monLink = channelPostLink(pubResMon)
-    if (monLink) await sendTo(chatId, `✅ Опубликовано в канал: ${monLink}`)
-    else await sendTo(chatId, `❌ Не удалось опубликовать: ${pubResMon?.description ?? 'нет ответа от Telegram'}`)
+    if (data === 'mon_pub_ch') {
+      const res = await publishToChannel(monText)
+      pendingMonitorPost = null
+      const link = channelPostLink(res)
+      if (link) await sendTo(chatId, `✅ Опубликовано в канал: ${link}`)
+      else await sendTo(chatId, `❌ Ошибка: ${res?.description ?? 'нет ответа от Telegram'}`)
+    } else if (data === 'mon_pub_gr') {
+      if (!groupConfig.groupId) { await sendTo(chatId, '❌ tg_group_id не настроен в bot_settings'); return }
+      const res = await publishToChannel(monText, null, 'group', groupConfig.threadNews)
+      pendingMonitorPost = null
+      const link = groupPostLink(res, groupConfig.threadNews)
+      if (link) await sendTo(chatId, `✅ Опубликовано в группу (новости): ${link}`)
+      else await sendTo(chatId, `❌ Ошибка публикации в группу: ${res?.description ?? 'нет ответа'}`)
+    } else {
+      if (!groupConfig.groupId) await sendTo(chatId, '⚠️ tg_group_id не настроен — только канал')
+      const res = await publishToChannel(monText, null, 'both', groupConfig.threadNews)
+      pendingMonitorPost = null
+      const parts = []
+      if (channelPostLink(res.channel)) parts.push(`📢 ${channelPostLink(res.channel)}`)
+      else if (res.channel) parts.push('📢 ошибка канала')
+      const grLink = groupPostLink(res.group, groupConfig.threadNews)
+      if (grLink) parts.push(`💬 ${grLink}`)
+      else if (groupConfig.groupId) parts.push('💬 ошибка группы')
+      await sendTo(chatId, parts.length ? `✅ Опубликовано:\n${parts.join('\n')}` : '❌ Обе цели недоступны')
+    }
 
   } else if (data === 'mon_skip') {
     pendingMonitorPost = null
@@ -2129,10 +2248,14 @@ app.post('/telegram/webhook', async (req, res) => {
         text: '✅ Текст обновлён. Публикуем?',
         parse_mode: 'Markdown',
         reply_markup: {
-          inline_keyboard: [[
-            { text: '✅ Опубликовать', callback_data: 'mon_pub' },
-            { text: '❌ Отмена',       callback_data: 'mon_skip' },
-          ]],
+          inline_keyboard: [
+            [
+              { text: '📢 В канал',  callback_data: 'mon_pub_ch'   },
+              { text: '💬 В группу', callback_data: 'mon_pub_gr'   },
+              { text: '🌐 Везде',    callback_data: 'mon_pub_both' },
+            ],
+            [{ text: '❌ Отмена', callback_data: 'mon_skip' }],
+          ],
         },
       })
     }
