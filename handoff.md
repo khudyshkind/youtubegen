@@ -2,30 +2,72 @@
 
 ## Что сделано
 
-Уточнено окно catch-up при привязке Telegram (`video-server/index.js`).
+### Задача: refund-функции глотают ошибки
 
-**Было:** граница поиска завершённых задач — `Date.now() - 10 min`. Ловило всё,
-что завершилось за последние 10 минут, включая задачи, которые пользователь уже
-видел на экране до нажатия «Подключить».
+Все три refund-функции (`refundVideoJobCredits`, `refundImageJobCredits`,
+`refundAudioJobCredits`) теперь возвращают `{ok: boolean, amount: number, error?: string}`
+вместо `void`.
 
-**Стало:** граница — `tg_link_tokens.created_at` (момент создания токена = момент
-нажатия кнопки «Подключить» в баннере). Catch-up приходит только по задачам,
-завершившимся после того, как пользователь нажал «Подключить».
+Все 9 call site проверяют результат и при `!ok && amount > 0` вызывают
+`recordRefundIncident(jobId, userId, amount, jobType, errorMsg)`.
 
-Два изменения в `video-server/index.js`:
-1. `select=user_id,expires_at,used_at` → `select=user_id,expires_at,used_at,created_at` — добавлено поле в запрос токена.
-2. `tenMinAgo` (10-минутное окно) → `row.created_at` во всех трёх `sbGet` запросах catch-up.
+`recordRefundIncident` (добавлена после refund-функций):
+- Вставляет запись в `payment_incidents` (`payment_id: null, job_id: jobId`)
+- Отправляет алерт владельцу в Telegram
+- Никогда не бросает исключений
 
-## Что не получилось
+Migration `014_refund_incidents.sql`:
+- `payment_id` стал nullable (был NOT NULL UNIQUE)
+- Добавлен столбец `job_id text` + индекс
 
-—
+### Watchdog alert text
 
-## Изменения в файлах состояния
+Текст алерта теперь отражает фактический результат возврата:
+- `refundResult.ok && refundResult.amount > 0` → "X кр. возвращены"
+- `refundResult.ok` (amount=0) → "refund не потребовался"
+- `!refundResult.ok` → "возврат X кр. — СБОЙ"
+- `refundResult === null` (dry run или нет кредитов) → соответствующая пометка
 
-TASKS:    добавлена строка «Уточнено [2026-08-06]» к пункту баннера Telegram.
-CONTEXT:  без изменений.
-WORKFLOW: без изменений.
+### Startup recovery
 
-## Открытые вопросы владельцу
+`recoverOrphanedJobs` (video), `recoverOrphanedAudioJobs`, `recoverOrphanedImageJobs`:
+- ложное "кр. возвращены" в алерте заменено на реальный результат
+- при сбое возврата вызывается `recordRefundIncident`
 
-—
+---
+
+## Аудит: места с той же проблемой (игнорируемый результат add_credits)
+
+| Файл | Строка | Статус |
+|------|--------|--------|
+| `src/lib/credits.ts` `addCredits()` | ~70 | **Игнорирует `{data, error}` от `supabase.rpc`** — та же болезнь. Используется в Paddle webhook. |
+| `src/app/api/generate/audio/status/route.ts` | ~82 | `await svc.rpc('add_credits', ...)` — результат проигнорирован |
+| `src/app/api/generate/video/status/route.ts` | ~142 | Правильно проверяет `rpcRes.error`, логирует в Sentry ✅ |
+
+Эти три файла не трогались в этой задаче (scope не включал Vercel-рефанды).
+
+---
+
+## Что не сделано
+
+- `src/lib/credits.ts:addCredits()` — по-прежнему игнорирует ошибку RPC (отдельная задача)
+- `audio/status/route.ts:82` — по-прежнему игнорирует результат (отдельная задача)
+
+---
+
+## Изменения файлов
+
+| Файл | Изменение |
+|------|-----------|
+| `video-server/index.js` | refund functions return `{ok,amount,error?}`; 9 callers updated; `recordRefundIncident` added; watchdog alert text fixed; startup refundNote fixed |
+| `supabase/migrations/014_refund_incidents.sql` | `payment_id` nullable + `job_id` column |
+
+Коммит: `5f22d29`
+
+---
+
+## Что применить в prod
+
+1. Запустить migration 014 в Supabase (уже в `supabase/migrations/`)
+2. Задеплоить Railway (video-server)
+3. Vercel деплоится автоматически из GitHub (нет изменений Vercel-файлов в этой задаче)
