@@ -416,9 +416,11 @@ async function loadSettingsFromDB() {
       if (key === 'pending_post_text')      ppText     = value
       if (key === 'pending_post_image_url') ppImageUrl = value
       if (key === 'pending_post_topic')     ppTopic    = value
-      if (key === 'tg_group_id')    { const n = Number(value); if (n) groupConfig.groupId      = n }
-      if (key === 'thread_updates') { const n = Number(value); if (n) groupConfig.threadUpdates = n }
-      if (key === 'thread_news')    { const n = Number(value); if (n) groupConfig.threadNews    = n }
+      if (key === 'tg_group_id')       { const n = Number(value); if (n) groupConfig.groupId      = n }
+      if (key === 'tg_group_username') { if (value) groupConfig.groupUsername = value.replace(/^@/, '') }
+      if (key === 'tg_channel_username') { if (value) channelConfig.username  = value.replace(/^@/, '') }
+      if (key === 'thread_updates')    { const n = Number(value); if (n) groupConfig.threadUpdates = n }
+      if (key === 'thread_news')       { const n = Number(value); if (n) groupConfig.threadNews    = n }
     }
     if (ppText) {
       pendingPost = { text: ppText, imageUrl: ppImageUrl || null, topic: ppTopic }
@@ -441,7 +443,8 @@ let awaitingTime  = false         // true after plan_set_time callback
 const config        = { autoPublish: false }
 const monitorConfig = { interval: 'daily' } // 'daily' | 'twice' | 'weekly' | 'off'
 const planConfig    = { paused: false, postHour: 12, postsPerDay: 1 }
-const groupConfig   = { groupId: null, threadUpdates: null, threadNews: null }
+const groupConfig   = { groupId: null, groupUsername: null, threadUpdates: null, threadNews: null }
+const channelConfig = { username: null }
 
 const POST_SCHEDULES = {
   1: [12],
@@ -961,21 +964,34 @@ function tmeNumericId(chatId) {
   return String(Math.abs(chatId)).replace(/^100/, '')
 }
 
-// Returns clickable link for a channel post (channel has a public username)
+// Returns clickable link for a channel post; reads username from bot_settings (tg_channel_username)
 function channelPostLink(res) {
   const msgId = res?.result?.message_id
-  return msgId ? `https://t.me/lefiro_channel/${msgId}` : null
+  if (!msgId) return null
+  const username = channelConfig.username
+  if (!username) return null
+  return `https://t.me/${username}/${msgId}`
 }
 
-// Returns clickable link for a group post; format: t.me/c/{id}/{threadId}/{msgId} for topics
+// Returns clickable link for a group topic post.
+// Public group (tg_group_username set): t.me/{username}/{threadId}/{msgId}
+// Private group (only tg_group_id):     t.me/c/{numId}/{threadId}/{msgId}
+// Neither configured:                   null (no link inserted)
 function groupPostLink(res, threadId = null) {
-  if (!groupConfig.groupId) return null
   const msgId = res?.result?.message_id
   if (!msgId) return null
-  const numId = tmeNumericId(groupConfig.groupId)
-  return threadId
-    ? `https://t.me/c/${numId}/${threadId}/${msgId}`
-    : `https://t.me/c/${numId}/${msgId}`
+  if (groupConfig.groupUsername) {
+    return threadId
+      ? `https://t.me/${groupConfig.groupUsername}/${threadId}/${msgId}`
+      : `https://t.me/${groupConfig.groupUsername}/${msgId}`
+  }
+  if (groupConfig.groupId) {
+    const numId = tmeNumericId(groupConfig.groupId)
+    return threadId
+      ? `https://t.me/c/${numId}/${threadId}/${msgId}`
+      : `https://t.me/c/${numId}/${msgId}`
+  }
+  return null
 }
 
 // ── Email helpers (Resend API, used by expiry notifications) ─────────────────
@@ -1150,7 +1166,8 @@ async function generatePost(topic) {
         '- Короткие абзацы\n' +
         `- В конце призыв: попробовать сервис со ссылкой ${APP_URL}\n` +
         '- Стиль: дружелюбный, живой, не рекламный\n' +
-        '- Можно использовать Markdown для форматирования',
+        '- Форматирование: только *жирный* и _курсив_ (Telegram Markdown v1)\n' +
+        '- ЗАПРЕЩЕНО: # заголовки, ## подзаголовки, --- разделители, списки через - или *, [ссылки](url) — Telegram их не рендерит, читатель увидит сырые символы',
     }],
   })
   return msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim()
