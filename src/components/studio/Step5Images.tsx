@@ -1110,7 +1110,7 @@ export default function Step5Images() {
         {loading ? (
           <>
             <SpinnerIcon className="w-4 h-4 animate-spin" />
-            {t('step5.generating')}
+            {t('step5.btn_loading')}
           </>
         ) : sceneImages.length > 0 ? (
           `↺ ${t('step2.regenerate')} (−${creditCost} ${t('nav.credits_suffix')})`
