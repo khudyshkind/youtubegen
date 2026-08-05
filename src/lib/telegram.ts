@@ -68,6 +68,33 @@ export async function notifyError(route: string, msg: string): Promise<void> {
   }
 }
 
+// Send a notification to a specific user's Telegram chat.
+// Reads telegram_chat_id from profiles at call time — safe to call after DB is updated.
+// Safe to call with .catch(() => {}) — never throws to the caller.
+export async function notifyUserTelegram(userId: string, text: string): Promise<void> {
+  const botToken = env('TELEGRAM_BOT_TOKEN')
+  if (!botToken) return
+  try {
+    const svc = createServiceClient()
+    const { data: profile } = await svc
+      .from('profiles')
+      .select('telegram_chat_id')
+      .eq('id', userId)
+      .single()
+    const chatId = (profile as { telegram_chat_id?: string | null } | null)?.telegram_chat_id
+    if (!chatId) return
+    console.log(`[telegram] notifyUser user=${userId} chat_id=${chatId}`)
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    })
+    if (!res.ok) console.warn('[telegram] notifyUser failed:', await res.text().catch(() => ''))
+  } catch (e) {
+    console.warn('[telegram] notifyUser error:', e instanceof Error ? e.message : String(e))
+  }
+}
+
 // Send a billing-exhaustion alert to Telegram with 1-hour dedup via bot_settings.
 // Uses atomic UPDATE-if-old + INSERT-if-missing to avoid sending N alerts under parallel load.
 // Safe to call with .catch(() => {}) — never throws to the caller.
