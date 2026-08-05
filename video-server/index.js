@@ -2104,6 +2104,42 @@ app.post('/telegram/webhook', async (req, res) => {
       const username  = message.from?.username
       const firstName = message.from?.first_name
 
+      // Deep link: link_<token> — Telegram binding from the web app
+      if (startArg.startsWith('link_')) {
+        const token = startArg.slice(5)
+        try {
+          const rows = await sbGet('tg_link_tokens', `token=eq.${encodeURIComponent(token)}&select=user_id,expires_at,used_at`)
+          if (!rows || rows.length === 0) {
+            await safeSendMessage(chatId, '❌ Ссылка недействительна. Получите новую в настройках сервиса: lefiro.co/settings')
+            return
+          }
+          const row = rows[0]
+          if (row.used_at) {
+            await safeSendMessage(chatId, '❌ Ссылка уже была использована. Получите новую в настройках сервиса: lefiro.co/settings')
+            return
+          }
+          if (new Date(row.expires_at) < new Date()) {
+            await safeSendMessage(chatId, '❌ Ссылка устарела — она действует 60 минут. Получите новую в настройках сервиса: lefiro.co/settings')
+            return
+          }
+          await sbPatch('profiles', `id=eq.${row.user_id}`, { telegram_chat_id: String(chatId) })
+          await sbPatch('tg_link_tokens', `token=eq.${encodeURIComponent(token)}`, { used_at: new Date().toISOString() })
+          await safeSendMessage(chatId,
+            '✅ *Telegram подключён!*\n\n' +
+            'Теперь вы будете получать уведомления:\n' +
+            '• Иллюстрации сгенерированы\n' +
+            '• Озвучка готова\n' +
+            '• Видео собрано\n\n' +
+            'Уведомление придёт сюда, как только задача завершится.',
+            { parse_mode: 'Markdown' }
+          )
+        } catch (e) {
+          console.error('[link] error:', e.message)
+          await safeSendMessage(chatId, '❌ Ошибка при привязке. Попробуйте позже.').catch(() => {})
+        }
+        return
+      }
+
       // Deep link: support
       if (startArg === 'support') {
         supportStates.set(String(chatId), { step: 'waiting_category', username, firstName })

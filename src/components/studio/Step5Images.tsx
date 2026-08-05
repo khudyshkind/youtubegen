@@ -10,6 +10,38 @@ import { refreshCredits } from '@/lib/refresh-credits'
 import { confirmRegenIfCompleted } from '@/lib/confirm-regen'
 import { useLang } from '@/hooks/useLang'
 
+function TelegramBanner() {
+  const [busy, setBusy] = useState(false)
+  async function connect() {
+    setBusy(true)
+    try {
+      const res = await fetch('/api/telegram/link', { method: 'POST' })
+      const json = await res.json() as { ok: boolean; link?: string }
+      if (json.ok && json.link) window.open(json.link, '_blank', 'noopener')
+    } catch {}
+    finally { setBusy(false) }
+  }
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 flex-wrap"
+      style={{ background: 'rgba(37,99,235,0.07)', border: '1px solid rgba(37,99,235,0.2)' }}
+    >
+      <p className="text-xs text-blue-300 leading-relaxed">
+        Это займёт несколько минут. Подключите Telegram — сообщим, когда будет готово.
+      </p>
+      <button
+        type="button"
+        onClick={() => void connect()}
+        disabled={busy}
+        className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+        style={{ background: 'rgba(37,99,235,0.2)', border: '1px solid rgba(37,99,235,0.4)', color: '#93c5fd' }}
+      >
+        {busy ? '…' : '✈️ Подключить'}
+      </button>
+    </div>
+  )
+}
+
 const INTERVAL_PRESETS = [5, 8, 10, 15, 20] as const
 const MAX_GPT_MINI_SAFE = 20
 // Engines hidden from UI cards but still accepted by the server (backward-compat reserve)
@@ -202,6 +234,8 @@ export default function Step5Images() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [customInterval, setCustomInterval] = useState('')
+  const [tgLinked, setTgLinked] = useState<boolean | null>(null)
+  const tgCheckedRef = useRef(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
@@ -260,6 +294,16 @@ export default function Step5Images() {
   const customN = parseInt(customInterval, 10)
   const isIntervalValid = customInterval !== '' && !isNaN(customN) && customN >= IMAGE_INTERVAL_MIN && customN <= IMAGE_INTERVAL_MAX
   const isIntervalInvalid = customInterval !== '' && !isIntervalValid
+
+  // Fetch once whether the user has Telegram linked (for the banner).
+  useEffect(() => {
+    if (tgCheckedRef.current) return
+    tgCheckedRef.current = true
+    fetch('/api/telegram/link')
+      .then((r) => r.json() as Promise<{ ok: boolean; linked?: boolean }>)
+      .then((d) => { if (d.ok) setTgLinked(d.linked ?? false) })
+      .catch(() => {})
+  }, [])
 
   // On mount: if the page was closed while a secretslider job was running, resume polling.
   // localStorage is the persistence layer — survives reload, scoped to origin, no extra deps.
@@ -1097,6 +1141,10 @@ export default function Step5Images() {
             {progress.completed} {t('step5.progress_of')} {progress.total} {t('step5.progress_images')}
           </p>
         </div>
+      )}
+
+      {loading && tgLinked === false && (
+        <TelegramBanner />
       )}
 
       {!loading && (
