@@ -610,3 +610,45 @@ SUMMARY: engine=flux_schnell ordered=8 created=8 total_sec=15.0s
 7. Amount check vs `PLAN_PRICES_RUB` / `TOPUP_PACKAGES` → `amount_mismatch` branch
 8. Idempotency claim → `already_activated` branch
 9. `activatePlan` / `add_credits_purchased` → `activation_failed` branch
+
+---
+
+## Архитектура публикации в Telegram-канал (video-server/index.js, Δ13)
+
+### Целевой канал
+`CHANNEL_ID = env('TELEGRAM_CHANNEL_ID')` (index.js:96) — задаётся переменной Railway.
+`publishToChannel(text, imageUrl)` (index.js:911) использует его жёстко, выбора цели нет.
+`channelPostLink(res)` формирует ссылку с захардкоженным именем: `https://t.me/lefiro_channel/${msgId}` (index.js:927).
+
+### Три потока публикации
+Все три заканчиваются вызовом `publishToChannel`:
+
+1. **Ручной пост** (`✍️ Написать пост` → тема → `generateAndHandle`) — index.js:2216–2219, 2173.
+   `generateAndHandle` (index.js:1523): генерирует текст + картинку, затем либо `publishToChannel` сразу
+   (если `config.autoPublish=true`), либо `showPreview` с inline-кнопками (Опубликовать/Перегенерировать/Отклонить).
+   Callback `publish` → `publishToChannel` (index.js:1662).
+
+2. **Мониторинг** (RSS + Claude): `pendingMonitorPost = { post, source, url, score, topic }` (index.js:1411).
+   Кнопки `mon_pub/mon_skip/mon_edit/mon_regen` (index.js:1413+).
+   Callback `mon_pub` → `publishToChannel(pendingMonitorPost.post)` (index.js:1746).
+
+3. **Деплой** (polling Vercel каждые 30 мин, cron index.js:3591):
+   `checkVercelDeploy()` (index.js:3524) → GET Vercel API v6, сравнивает `last_deployment_id` из `bot_settings`.
+   При новом деплое берёт `latest.meta?.githubCommitMessage`, генерирует пост через Haiku.
+   Если `autoPublish=false` → `pendingDeployPost = { text, commitMessage, deployUrl }` (index.js:3575),
+   callback `dep_pub` → `publishToChannel(pendingDeployPost.text)` (index.js:1732).
+   ⚠️ Задержка до 30 минут. Бот не знает о Railway-деплоях — только Vercel.
+
+### safeSendMessage и message_thread_id
+`safeSendMessage(chatId, text, options)` (index.js:793):
+```
+const { parse_mode, reply_markup, ...rest } = options
+const params = { chat_id, text, ...rest }
+```
+`message_thread_id` не деструктурируется, попадёт в `...rest` и уйдёт в `tgApi` без изменений кода.
+`tgSendPhoto(chatId, buf, caption, extra)` (index.js:743) тоже пробрасывает все поля `extra` в FormData.
+
+### bot_settings — структура
+`key text PK, value text NOT NULL, updated_at timestamptz` (schema.sql:576–580). Плоское KV.
+`getSetting(key)` / `setSetting(key, value)` (index.js:384–397) — единственный интерфейс.
+Маппинг «тема → thread_id» при ≤3 фиксированных темах: добавить ключи `tg_group_id`, `thread_updates`, `thread_releases` и т.п. Если тем произвольно много — отдельная таблица.
