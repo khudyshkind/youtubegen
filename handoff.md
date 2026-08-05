@@ -2,72 +2,70 @@
 
 ## Что сделано
 
-### Задача: refund-функции глотают ошибки
-
-Все три refund-функции (`refundVideoJobCredits`, `refundImageJobCredits`,
-`refundAudioJobCredits`) теперь возвращают `{ok: boolean, amount: number, error?: string}`
-вместо `void`.
-
-Все 9 call site проверяют результат и при `!ok && amount > 0` вызывают
-`recordRefundIncident(jobId, userId, amount, jobType, errorMsg)`.
-
-`recordRefundIncident` (добавлена после refund-функций):
-- Вставляет запись в `payment_incidents` (`payment_id: null, job_id: jobId`)
-- Отправляет алерт владельцу в Telegram
-- Никогда не бросает исключений
-
-Migration `014_refund_incidents.sql`:
-- `payment_id` стал nullable (был NOT NULL UNIQUE)
-- Добавлен столбец `job_id text` + индекс
-
-### Watchdog alert text
-
-Текст алерта теперь отражает фактический результат возврата:
-- `refundResult.ok && refundResult.amount > 0` → "X кр. возвращены"
-- `refundResult.ok` (amount=0) → "refund не потребовался"
-- `!refundResult.ok` → "возврат X кр. — СБОЙ"
-- `refundResult === null` (dry run или нет кредитов) → соответствующая пометка
-
-### Startup recovery
-
-`recoverOrphanedJobs` (video), `recoverOrphanedAudioJobs`, `recoverOrphanedImageJobs`:
-- ложное "кр. возвращены" в алерте заменено на реальный результат
-- при сбое возврата вызывается `recordRefundIncident`
+### Задача: addCredits игнорирует ошибку RPC — оплата без начисления
 
 ---
 
-## Аудит: места с той же проблемой (игнорируемый результат add_credits)
+## Изменения
 
-| Файл | Строка | Статус |
-|------|--------|--------|
-| `src/lib/credits.ts` `addCredits()` | ~70 | **Игнорирует `{data, error}` от `supabase.rpc`** — та же болезнь. Используется в Paddle webhook. |
-| `src/app/api/generate/audio/status/route.ts` | ~82 | `await svc.rpc('add_credits', ...)` — результат проигнорирован |
-| `src/app/api/generate/video/status/route.ts` | ~142 | Правильно проверяет `rpcRes.error`, логирует в Sentry ✅ |
+### 1. `src/lib/credits.ts` — `addCredits()`
 
-Эти три файла не трогались в этой задаче (scope не включал Vercel-рефанды).
+**Было:** `Promise<void>`, результат RPC игнорировался.
+
+**Стало:** `Promise<{ ok: boolean; error?: string }>`. При `error`:
+- `console.error` с user/op/amount/err
+- `sendTelegramAlert` владельцу
+- `return { ok: false, error: error.message }`
+
+Добавлен импорт `sendTelegramAlert` из `./telegram`.
+
+### 2. `src/app/api/paddle/webhook/route.ts` — `transaction.completed` / topup
+
+**Было:** `await addCredits(userId, credits, 'topup')` — результат игнорировался.
+
+**Стало:** проверяем `grantResult.ok`. При сбое:
+- `addCredits` уже отправил Telegram алерт
+- Вставляем строку в `payment_incidents` (`payment_id: null`, `reason: 'activation_failed'`, `raw_payload` содержит `paddle_tx_id`, `userId`, `credits`, `error`)
+- Возвращаем 200 — чтобы Paddle не повторял запрос (двойное начисление опаснее тишины)
+
+### 3. `src/app/api/generate/audio/status/route.ts` — возврат кредитов при failed job
+
+**Было:** `await svc.rpc('add_credits', ...)` — результат игнорировался.
+
+**Стало:** `const rpcRes = await svc.rpc(...)`. При `rpcRes.error`:
+- `console.error`
+- `Sentry.captureException`
+- `sendTelegramAlert` владельцу
+- аналитика `audio_refunded` НЕ записывается (правильно — кредиты не вернулись)
+
+Добавлен импорт `sendTelegramAlert` из `@/lib/telegram`.
 
 ---
 
-## Что не сделано
+## Полный аудит: все места работы с кредитами
 
-- `src/lib/credits.ts:addCredits()` — по-прежнему игнорирует ошибку RPC (отдельная задача)
-- `audio/status/route.ts:82` — по-прежнему игнорирует результат (отдельная задача)
+| Файл | Строка | Операция | Статус |
+|------|--------|----------|--------|
+| `src/lib/credits.ts:addCredits()` | 61 | `add_credits` RPC | ✅ **Исправлено** — возвращает `{ok,error?}`, алертит |
+| `src/app/api/paddle/webhook/route.ts` | ~110 | `addCredits` topup | ✅ **Исправлено** — проверяет результат, пишет инцидент |
+| `src/app/api/generate/audio/status/route.ts` | ~82 | `add_credits` refund RPC | ✅ **Исправлено** — Sentry + Telegram при сбое |
+| `src/app/api/generate/video/status/route.ts` | ~142 | `add_credits` refund RPC | ✅ Уже проверялось правильно (Sentry + log) |
+| `src/lib/activate-plan.ts` | ~81 | `add_plan_credits` RPC | ⚠️ **Открыто** — при сбое падает на legacy `add_credits`, но если и legacy упадёт, `activatePlan` возвращает `{ok: true}` (ложный успех). Алерта нет. |
+| `src/lib/activate-plan.ts` | ~91 | `add_credits` legacy fallback | ⚠️ **Открыто** — `if (legacyErr)` логирует `console.error` но не алертит и не меняет возвращаемое значение (`ok: true`) |
+| `src/app/api/paddle/webhook/route.ts` | ~58 | `activatePlan` subscription.activated | ⚠️ **Открыто** — результат не проверяется: plan активирован молча даже при сбое |
+| `src/app/api/paddle/webhook/route.ts` | ~123 | `activatePlan` subscription renewal | ⚠️ **Открыто** — то же самое |
+| `src/lib/credits.ts:spendCredits()` | ~30 | `deduct_credits` RPC | ✅ Проверяет `error`, возвращает `{ok: false}` |
+| Railway `refundAudioJobCredits` / `refundVideoJobCredits` / `refundImageJobCredits` | video-server | `add_credits` RPC | ✅ Исправлено в предыдущей задаче — все возвращают `{ok,amount,error?}`, записывают `payment_incidents` |
 
 ---
 
-## Изменения файлов
+## Что не сделано (за рамками задачи)
 
-| Файл | Изменение |
-|------|-----------|
-| `video-server/index.js` | refund functions return `{ok,amount,error?}`; 9 callers updated; `recordRefundIncident` added; watchdog alert text fixed; startup refundNote fixed |
-| `supabase/migrations/014_refund_incidents.sql` | `payment_id` nullable + `job_id` column |
-
-Коммит: `5f22d29`
+- `src/lib/activate-plan.ts`: при двойном сбое `add_plan_credits` + `add_credits` — функция возвращает `{ok: true}`. Это ложный успех: план активирован в `profiles`, но кредиты не начислены. Нужна отдельная задача.
+- Paddle webhook: `activatePlan` при `subscription.activated` и renewal — результат не проверяется.
 
 ---
 
-## Что применить в prod
+## Коммит
 
-1. Запустить migration 014 в Supabase (уже в `supabase/migrations/`)
-2. Задеплоить Railway (video-server)
-3. Vercel деплоится автоматически из GitHub (нет изменений Vercel-файлов в этой задаче)
+`a0b1115` — запушен в `origin/main`.
