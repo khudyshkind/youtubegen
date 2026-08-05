@@ -1994,9 +1994,19 @@ app.post('/telegram/webhook', async (req, res) => {
   const message = req.body?.message
   if (!message) return
 
-  const userId = String(message.from?.id ?? '')
-  const chatId = message.chat?.id
-  const text   = (message.text ?? '').trim()
+  const userId      = String(message.from?.id ?? '')
+  const chatId      = message.chat?.id
+  const text        = (message.text ?? '').trim()
+  const chatType    = message.chat?.type            // 'private' | 'group' | 'supergroup' | 'channel'
+  const msgThreadId = message.message_thread_id ?? null
+
+  // In group/supergroup chats: stay silent unless the message is a reply to the bot
+  // or a direct @-command (e.g. /help@Lefiro_bot). This prevents flooding community chats.
+  if (chatType === 'group' || chatType === 'supergroup') {
+    const isReplyToBot = message.reply_to_message?.from?.is_bot === true
+    const isMentionCmd = text.startsWith('/') && text.includes('@')
+    if (!isReplyToBot && !isMentionCmd) return
+  }
 
   // ── Public users ──────────────────────────────────────────────────────────
   if (userId !== OWNER_ID) {
@@ -2174,7 +2184,8 @@ app.post('/telegram/webhook', async (req, res) => {
       return
     }
 
-    await tgApi('sendMessage', { chat_id: chatId, text: 'Используй /start для оплаты или обращения в поддержку.' })
+    const threadOpt = msgThreadId ? { message_thread_id: msgThreadId } : {}
+    await tgApi('sendMessage', { chat_id: chatId, text: 'Используй /start для оплаты или обращения в поддержку.', ...threadOpt })
     return
   }
 
@@ -2401,12 +2412,15 @@ app.post('/telegram/webhook', async (req, res) => {
       }
 
       default:
-        if (!awaitingTopic && !awaitingPlan && !awaitingTime && !awaitingEdit)
-          await sendTo(chatId, 'Используй кнопки внизу или /help')
+        if (!awaitingTopic && !awaitingPlan && !awaitingTime && !awaitingEdit) {
+          const threadOpt = msgThreadId ? { message_thread_id: msgThreadId } : {}
+          await safeSendMessage(chatId, 'Используй кнопки внизу или /help', threadOpt)
+        }
     }
   } catch (err) {
     console.error('[tg/webhook]', err.message)
-    await sendTo(chatId, `❌ Ошибка: ${err.message.slice(0, 120)}`)
+    const threadOpt = msgThreadId ? { message_thread_id: msgThreadId } : {}
+    await safeSendMessage(chatId, `❌ Ошибка: ${err.message.slice(0, 120)}`, threadOpt)
   }
 })
 

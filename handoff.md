@@ -2,33 +2,52 @@
 
 ## Что сделано
 
-1. **`groupConfig` в памяти** (index.js после строки с `planConfig`):
-   `{ groupId, threadUpdates, threadNews }` — загружается из `bot_settings`
-   по ключам `tg_group_id`, `thread_updates`, `thread_news` (в `loadSettingsFromDB`).
+**Баг: бот засорял супергруппу -1003901518115 сообщением "Используй кнопки внизу или /help".**
 
-2. **`publishToChannel(text, imageUrl, target, threadId)`** — расширен:
-   - `target='channel'` (дефолт): поведение прежнее, возвращает один результат.
-   - `target='group'`: слать в `groupConfig.groupId` с `message_thread_id=threadId`.
-   - `target='both'`: оба, через `Promise.allSettled`, возвращает `{ channel, group }`.
-   - Если `tg_group_id` не задан — `console.warn` и `null`, бот не падает.
+Причина: webhook-обработчик не проверял `chat.type`. Когда OWNER_ID писал в группу,
+`userId === OWNER_ID` → owner-путь → switch default → `sendTo(chatId, ...)` → chatId = группа.
 
-3. **`tmeNumericId(chatId)` + `groupPostLink(res, threadId)`** — новые функции:
-   - `tmeNumericId`: убирает `-100` из ID супергруппы → числовой ID для `t.me/c/`.
-   - `groupPostLink`: строит `https://t.me/c/{numId}/{threadId}/{msgId}` для тем.
-   - `channelPostLink` не тронут.
+**Фикс — один guard** после строки извлечения полей (index.js, ~строка 2000):
 
-4. **Три клавиатуры заменены** с одной кнопки на три:
-   - `previewInline()`: `pub_ch / pub_gr / pub_both` + `decline / regen`.
-   - `monitorInline()`: `mon_pub_ch / mon_pub_gr / mon_pub_both` + остальные.
-   - `deployInline()`: `dep_pub_ch / dep_pub_gr / dep_pub_both` + `dep_skip`.
-   - Inline keyboard после ручного редактирования поста тоже обновлена.
+```js
+const chatType    = message.chat?.type
+const msgThreadId = message.message_thread_id ?? null
 
-5. **Три блока callback-обработчиков** заменены:
-   - Мониторинг (`mon_pub_gr`) использует `groupConfig.threadNews`.
-   - Деплой (`dep_pub_gr`) использует `groupConfig.threadUpdates`.
-   - Ручной пост (`pub_gr`) использует `groupConfig.threadNews` (нет отдельного ключа).
+if (chatType === 'group' || chatType === 'supergroup') {
+  const isReplyToBot = message.reply_to_message?.from?.is_bot === true
+  const isMentionCmd = text.startsWith('/') && text.includes('@')
+  if (!isReplyToBot && !isMentionCmd) return
+}
+```
 
-6. **TASKS.md**: добавлен пункт в 🤖 TELEGRAM-БОТ (Railway детектор), в ЗАКРЫТО — запись о фиче.
+Дополнительно: в двух fallback-ответах (owner default + public fallback) добавлен
+`message_thread_id` — если бот всё же отвечает в группе, ответ идёт в ту же тему.
+
+## Аудит обработчиков, которые могли срабатывать в группе
+
+**Публичный путь (`userId !== OWNER_ID`):**
+
+| Обработчик | Строка | Условие срабатывания | Опасность |
+|---|---|---|---|
+| Support state | ~2008 | любой текст в состоянии `waiting_description` | средняя |
+| Payment proof | ~2058 | media/текст в `awaiting_proof` | средняя |
+| `/start` / `/pay` / `/menu` | ~2067 | точный текст команды | низкая |
+| `🆘 Поддержка` | ~2144 | точный текст кнопки | низкая |
+| KB_QUERIES | ~2162 | точный текст кнопок | низкая |
+| **AI consultant** | **~2170** | **любой текст + `lefiroKB`** | **высокая** |
+| **Fallback** | **~2177** | **всё остальное** | **высокая** |
+
+**Путь владельца (`userId === OWNER_ID`):**
+
+| Обработчик | Строка | Условие срабатывания | Опасность |
+|---|---|---|---|
+| Support reply | ~2184 | любой текст в `awaitingSupportReply` | средняя |
+| Payment activation | ~2200 | любой текст в `awaitingActivate` | средняя |
+| awaitingTopic | ~2285 | любой текст → `generateAndHandle` в группе | высокая |
+| **switch default** | **~2404** | **любой неизвестный текст** | **высокая — ВИНОВНИК** |
+| switch error catch | ~2407 | ошибка в любом handler | высокая |
+
+**Все закрыты одним guard** на строке ~2000.
 
 ## Что не получилось
 
@@ -36,14 +55,10 @@
 
 ## Изменения в файлах состояния
 
-TASKS:    добавлен Railway-детектор в 🟡, закрыто в 📌 ЗАКРЫТО
-CONTEXT:  без изменений (архитектура уже записана в предыдущей сессии)
+TASKS:    добавлена ссылка groupPostLink в 🟡, закрыто в 📌 ЗАКРЫТО
+CONTEXT:  без изменений
 WORKFLOW: без изменений
 
 ## Открытые вопросы владельцу
 
-1. Прописать в `bot_settings` три ключа: `tg_group_id` (ID супергруппы),
-   `thread_updates` (thread_id темы «Обновления»), `thread_news` (тема «Новости»).
-   Без этого кнопка «В группу» выводит ошибку, не падает.
-2. Для ручного поста в группу используется `thread_news`. Если нужен отдельный
-   ключ `thread_manual` — уточнить, добавить за 5 минут.
+Нет. Guard работает немедленно после Railway-деплоя.
