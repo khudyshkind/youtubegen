@@ -2,52 +2,32 @@
 
 ## Что сделано
 
-**Баг: бот засорял супергруппу -1003901518115 сообщением "Используй кнопки внизу или /help".**
+**Баг: ссылка на пост в теме группы открывала лендинг lefiro.co вместо сообщения.**
 
-Причина: webhook-обработчик не проверял `chat.type`. Когда OWNER_ID писал в группу,
-`userId === OWNER_ID` → owner-путь → switch default → `sendTo(chatId, ...)` → chatId = группа.
+Причина: `groupPostLink` строил `t.me/c/{numId}/{threadId}/{msgId}` — формат для приватных групп.
+У группы `Lefiro_community` есть публичный username; правильный формат: `t.me/Lefiro_community/3/4`.
 
-**Фикс — один guard** после строки извлечения полей (index.js, ~строка 2000):
+**Фикс:**
 
-```js
-const chatType    = message.chat?.type
-const msgThreadId = message.message_thread_id ?? null
+1. `groupConfig` расширен полем `groupUsername` (читается из `tg_group_username` в `bot_settings`).
+2. `channelConfig = { username: null }` — читается из `tg_channel_username` (был хардкод `lefiro_channel`).
+3. `groupPostLink`:
+   - username есть → `t.me/{username}/{threadId}/{msgId}`
+   - только groupId → `t.me/c/{numId}/{threadId}/{msgId}` (приватная группа)
+   - ни того ни другого → `null` (ссылка не вставляется, не ведёт на лендинг)
+4. `channelPostLink`: убран хардкод, читает `channelConfig.username`; нет username → `null`.
+5. Промпт генерации поста: явный запрет `#`, `##`, `---`, списков `- / *`.
+   Telegram Markdown v1 рендерит только `*жирный*` и `_курсив_`.
 
-if (chatType === 'group' || chatType === 'supergroup') {
-  const isReplyToBot = message.reply_to_message?.from?.is_bot === true
-  const isMentionCmd = text.startsWith('/') && text.includes('@')
-  if (!isReplyToBot && !isMentionCmd) return
-}
-```
+Коммит: `f4b41b9` (main).
 
-Дополнительно: в двух fallback-ответах (owner default + public fallback) добавлен
-`message_thread_id` — если бот всё же отвечает в группе, ответ идёт в ту же тему.
+**Действие владельца (обязательно для активации фикса):**
+Добавить в таблицу `bot_settings` две строки:
+- `tg_group_username` = `Lefiro_community`
+- `tg_channel_username` = `lefiro_channel`
 
-## Аудит обработчиков, которые могли срабатывать в группе
-
-**Публичный путь (`userId !== OWNER_ID`):**
-
-| Обработчик | Строка | Условие срабатывания | Опасность |
-|---|---|---|---|
-| Support state | ~2008 | любой текст в состоянии `waiting_description` | средняя |
-| Payment proof | ~2058 | media/текст в `awaiting_proof` | средняя |
-| `/start` / `/pay` / `/menu` | ~2067 | точный текст команды | низкая |
-| `🆘 Поддержка` | ~2144 | точный текст кнопки | низкая |
-| KB_QUERIES | ~2162 | точный текст кнопок | низкая |
-| **AI consultant** | **~2170** | **любой текст + `lefiroKB`** | **высокая** |
-| **Fallback** | **~2177** | **всё остальное** | **высокая** |
-
-**Путь владельца (`userId === OWNER_ID`):**
-
-| Обработчик | Строка | Условие срабатывания | Опасность |
-|---|---|---|---|
-| Support reply | ~2184 | любой текст в `awaitingSupportReply` | средняя |
-| Payment activation | ~2200 | любой текст в `awaitingActivate` | средняя |
-| awaitingTopic | ~2285 | любой текст → `generateAndHandle` в группе | высокая |
-| **switch default** | **~2404** | **любой неизвестный текст** | **высокая — ВИНОВНИК** |
-| switch error catch | ~2407 | ошибка в любом handler | высокая |
-
-**Все закрыты одним guard** на строке ~2000.
+До этого: `channelPostLink` и `groupPostLink` вернут `null` → ссылки в подтверждениях
+просто не будут вставляться (лучше, чем вести на лендинг).
 
 ## Что не получилось
 
@@ -55,10 +35,12 @@ if (chatType === 'group' || chatType === 'supergroup') {
 
 ## Изменения в файлах состояния
 
-TASKS:    добавлена ссылка groupPostLink в 🟡, закрыто в 📌 ЗАКРЫТО
+TASKS:    закрыта «Ссылка на пост в теме группы» (строка 232 → `- [x]`);
+          добавлена в 📌 ЗАКРЫТО запись groupPostLink/channelPostLink [Δ13]
 CONTEXT:  без изменений
 WORKFLOW: без изменений
 
 ## Открытые вопросы владельцу
 
-Нет. Guard работает немедленно после Railway-деплоя.
+1. Внести два ключа в `bot_settings`: `tg_group_username = Lefiro_community` и `tg_channel_username = lefiro_channel`.
+   После Railway-деплоя ссылки заработают правильно.
