@@ -113,6 +113,38 @@ function toSrt(blocks: SubtitleBlock[]): string {
   return blocks.map((b, i) => `${i + 1}\n${srtTime(b.start)} --> ${srtTime(b.end)}\n${b.text}`).join('\n\n')
 }
 
+function TelegramBanner() {
+  const [busy, setBusy] = useState(false)
+  async function connect() {
+    setBusy(true)
+    try {
+      const res = await fetch('/api/telegram/link', { method: 'POST' })
+      const json = await res.json() as { ok: boolean; link?: string }
+      if (json.ok && json.link) window.open(json.link, '_blank', 'noopener')
+    } catch {}
+    finally { setBusy(false) }
+  }
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 flex-wrap"
+      style={{ background: 'rgba(37,99,235,0.07)', border: '1px solid rgba(37,99,235,0.2)' }}
+    >
+      <p className="text-xs text-blue-300 leading-relaxed">
+        Рендер займёт несколько минут. Подключите Telegram — сообщим, когда видео будет готово.
+      </p>
+      <button
+        type="button"
+        onClick={() => void connect()}
+        disabled={busy}
+        className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+        style={{ background: 'rgba(37,99,235,0.2)', border: '1px solid rgba(37,99,235,0.4)', color: '#93c5fd' }}
+      >
+        {busy ? '…' : '✈️ Подключить'}
+      </button>
+    </div>
+  )
+}
+
 export default function Step6Video() {
   const {
     audioUrl, sceneImages, subtitleBlocks, subtitleStyle,
@@ -124,6 +156,9 @@ export default function Step6Video() {
 
   const TRANSITIONS = TRANSITIONS_BASE.map((tr) => ({ ...tr, label: t(`trans.${tr.id}` as const) }))
   const EFFECTS = EFFECTS_BASE.map((ef) => ({ ...ef, label: t(`effect.${ef.id}` as const) }))
+
+  const [tgLinked, setTgLinked] = useState<boolean | null>(null)
+  const tgCheckedRef = useRef(false)
 
   const [downloadState, setDownloadState] = useState<DownloadState>('idle')
   const [downloadError, setDownloadError] = useState('')
@@ -174,6 +209,15 @@ export default function Step6Video() {
     }
     document.addEventListener('mousedown', onOutside)
     return () => document.removeEventListener('mousedown', onOutside)
+  }, [])
+
+  useEffect(() => {
+    if (tgCheckedRef.current) return
+    tgCheckedRef.current = true
+    fetch('/api/telegram/link')
+      .then((r) => r.json() as Promise<{ ok: boolean; linked?: boolean }>)
+      .then((d) => { if (d.ok) setTgLinked(d.linked ?? false) })
+      .catch(() => {})
   }, [])
 
   // Stop polling on unmount
@@ -838,6 +882,10 @@ export default function Step6Video() {
                 : t('step6.progress_upload')}
             </p>
           </div>
+        )}
+
+        {(renderState === 'queued' || renderState === 'processing') && tgLinked === false && (
+          <TelegramBanner />
         )}
 
         {renderState === 'done' && videoUrl && (

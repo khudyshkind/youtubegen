@@ -29,6 +29,10 @@ export default function SettingsClient({ profile }: Props) {
   const [ytKeyError, setYtKeyError] = useState('')
   const [ytKeyConnected, setYtKeyConnected] = useState(!!profile?.encrypted_yt_key)
 
+  const [tgLinked, setTgLinked] = useState(!!profile?.telegram_chat_id)
+  const [tgBusy, setTgBusy] = useState(false)
+  const [tgError, setTgError] = useState('')
+
   async function handleSaveProfile() {
     setSaving(true)
     setSaveError('')
@@ -99,6 +103,36 @@ export default function SettingsClient({ profile }: Props) {
     } catch {}
     finally {
       setYtKeyValidating(false)
+    }
+  }
+
+  async function handleConnectTelegram() {
+    setTgBusy(true)
+    setTgError('')
+    try {
+      const res = await fetch('/api/telegram/link', { method: 'POST' })
+      const json = await res.json() as { ok: boolean; link?: string; error?: string }
+      if (!json.ok) { setTgError(json.error ?? 'Error'); return }
+      window.open(json.link!, '_blank', 'noopener')
+    } catch {
+      setTgError('Network error')
+    } finally {
+      setTgBusy(false)
+    }
+  }
+
+  async function handleDisconnectTelegram() {
+    setTgBusy(true)
+    setTgError('')
+    try {
+      const res = await fetch('/api/telegram/link', { method: 'DELETE' })
+      const json = await res.json() as { ok: boolean; error?: string }
+      if (!json.ok) { setTgError(json.error ?? 'Error'); return }
+      setTgLinked(false)
+    } catch {
+      setTgError('Network error')
+    } finally {
+      setTgBusy(false)
     }
   }
 
@@ -311,7 +345,49 @@ export default function SettingsClient({ profile }: Props) {
           </a>
         </div>
 
-        {/* 4. Appearance */}
+        {/* 4. Telegram notifications */}
+        <div className="rounded-2xl p-6 flex flex-col gap-4" style={cardStyle}>
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">Telegram-уведомления</h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Бот пришлёт сообщение, когда иллюстрации, озвучка или видео будут готовы.
+            </p>
+          </div>
+
+          {tgLinked ? (
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <span className="text-sm font-medium" style={{ color: '#34d399' }}>✓ Подключено</span>
+              <button
+                type="button"
+                onClick={() => void handleDisconnectTelegram()}
+                disabled={tgBusy}
+                className="px-4 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-50"
+                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}
+              >
+                {tgBusy ? '…' : 'Отвязать'}
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={() => void handleConnectTelegram()}
+                disabled={tgBusy}
+                className="self-start flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+                style={{ background: 'rgba(124,58,237,0.25)', border: '1px solid rgba(124,58,237,0.4)', color: '#c4b5fd' }}
+              >
+                {tgBusy ? '…' : '✈️ Подключить Telegram'}
+              </button>
+              <p className="text-xs text-slate-600">
+                Откроется бот Lefiro — нажмите Start, и привязка завершится автоматически.
+              </p>
+            </div>
+          )}
+
+          {tgError && <p className="text-xs text-red-400">{tgError}</p>}
+        </div>
+
+        {/* 5. Appearance */}
         <div className="rounded-2xl p-6 flex flex-col gap-4" style={cardStyle}>
           <h2 className="text-base font-semibold text-slate-100">{t('settings.appearance')}</h2>
           <div className="flex items-center justify-between gap-4 flex-wrap">
