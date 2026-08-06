@@ -228,7 +228,9 @@ Lefiro (ранее YouTubeGen) — сервис генерации faceless-ви
   ⚠️ **В иллюстрациях референс работает только как текст:** `ref_url` удаляется сразу после анализа (`Step5Images.tsx`), image-to-image там не предусмотрен. Как изображение референс уходит только в превью (`nano-banana-2/edit`).
 - **Движки в студии (Δ11): четыре** — Vision Classic (`flux`, 780), Vision Fast (`flux_schnell`, 100), Vision Pro (`nano_banana`, 1170), **Vision Studio (`secretslider`, 200, асинхронный)**. Vision Ultra (`gpt_mini`, 1230) скрыт через `HIDDEN_ENGINES` — аварийный резерв, в диапазоны цен на витрине не входит.
 - **Render 1280×720** (MP4). Стоимость рендера 300 кр/мин.
-- **Retention медиа:** крон `0 4 * * *` UTC (`video-server/index.js:3357`), функция `cleanupExpiredMedia()`. Чистит: Supabase `audio`+`images`, B2 video+audio, R2 video (R2-хелперы реализованы — старый комментарий стр. 3853 об «отсутствии» устарел). Возраст — по `projects.updated_at`, дефолт 72ч (`RETENTION_MEDIA_HOURS=72`). Кандидаты: `media_purged_at=is.null`, `status not like generating_*`, нет активных `video_jobs`. В DB только выставляет `media_purged_at` (строку не удаляет). **⚠️ DRY_RUN по умолчанию:** строка 2823 `env('RETENTION_DRY_RUN') !== 'false'` — если переменная не выставлена в Railway, крон только логирует `[retention/dry]`, ничего не удаляет. Стале-лог строка 2826 печатает `free=undefinedh paid=undefinedh` (наследие старой двух-тарифной модели, не влияет на работу).
+- **Retention медиа:** крон `0 4 * * *` UTC (`video-server/index.js:3357`), функция `cleanupExpiredMedia()`. Чистит: Supabase `audio`+`images`, B2 video+audio, R2 video. DRY_RUN=false выставлен, крон работает, но удаляет 0 — две найденные причины:
+  ① **Planning loop** (строки 2844-2866): шаг 2B патчит `media_expires_at` у ВСЕХ живых проектов (нет фильтра `media_expires_at=is.null`). `on_projects_updated` trigger (`schema.sql:119-121`) при любом UPDATE сбрасывает `updated_at = now()`. Candidate-запрос (строка 2876) ищет `updated_at < now-72h` — но `updated_at` только что стал `now` → 0 кандидатов. Цикл: drift 24ч > 1ч → патчит → trigger → updated_at=now → 0 → repeat. `media_expires_at` у всех проектов всегда ≈ `now+72h`, бейджи на дашборде показывают одинаковый остаток независимо от даты создания.
+  ② **B2 delete 400** (строка 2767): `b2MediaDeleteObjects` не посылает `Content-MD5` в POST `/?delete`, который B2 S3-compatible API требует — 400, 16 orphan temp/ файлов не удаляются. Стале-лог строка 2826 печатает `free=undefinedh paid=undefinedh` (наследие двух-тарифной модели, не влияет).
 
 ### Консистентность персонажей между сценами (Δ12)
 
@@ -569,7 +571,7 @@ SUMMARY: engine=flux_schnell ordered=8 created=8 total_sec=15.0s
 - **Отмены запущенной генерации нет** — закрыто предупреждающим диалогом, но при больших партиях это ощутимо.
 - **Egress на Railway вырастет** после переноса заливки картинок (сейчас $0,36 из $1,42).
 - Панель `/admin/metrics` — после накопления данных.
-- Уборка медиа `cleanupExpiredMedia` в DRY_RUN — корень: `RETENTION_DRY_RUN` не выставлен в Railway → `env() !== 'false'` = true → крон работает каждые 04:00 UTC, но ничего не удаляет (подробный разбор — раздел «Retention медиа» выше). ⚠️ Δ10 усиливает: новый движок отдаёт файлы по 150–315 КБ, поток тяжелее.
+- Уборка медиа: DRY_RUN=false выставлен, крон работает, но 0 удалений — причины в разделе «Retention медиа» выше (planning loop + B2 delete 400). ⚠️ Δ10 усиливает: новый движок отдаёт файлы по 150–315 КБ, поток тяжелее.
 - Auto-recharge VGF отложен (риск ночных падений).
 - Кэш на роутах Opus не проверен.
 - Кап 30 в инструменте «Иллюстрации» для FAL-движков — по-прежнему без обоснования.

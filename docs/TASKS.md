@@ -184,7 +184,11 @@
 
 - [ ] **Аудит GRANT'ов по всем таблицам разом.** [база, Δ8] У `service_role` отсутствовал INSERT на `analytics_events`; у `anon`/`authenticated` висел лишний TRUNCATE. По функциям аудит сделан. Прогнать SELECT/INSERT/UPDATE/DELETE по всем public-таблицам.
 - [ ] **Мониторинг аномального расхода кредитов.** [база, Δ8] Алерт на: юзер сжёг >X за час, операция в цикле, скачок расхода.
-- [ ] **Уборка медиа выключена — корень заполнения Supabase.** [база] `cleanupExpiredMedia` (cron 0 4 * * *) в DRY_RUN. Перед `RETENTION_DRY_RUN=false` — запустить вручную в dry-run, посмотреть лог. Не включать вслепую.
+- [ ] **Уборка медиа — 0 кандидатов вечно, две причины.** [база] DRY_RUN=false выставлен, крон работает ежедневно 04:00 UTC, но удаляет 0. Обе причины найдены разведкой:
+  - **Причина 1 (planning loop):** шаг 2B патчит `media_expires_at` у всех проектов → `on_projects_updated` trigger (schema.sql:119) сбрасывает `updated_at = now()` → candidate-запрос (строка 2876) ищет `updated_at < now-72h`, но `updated_at` только что стал `now` → 0 кандидатов. Самовоспроизводящийся цикл: drift = 24ч > 1ч → следующий день патчит опять.
+  - **Причина 2 (B2 delete):** `b2MediaDeleteObjects` (строка 2767) отправляет POST `/?delete` без `Content-MD5` → B2 S3-compatible API возвращает 400. 16 orphan-файлов `temp/` не удаляются каждый прогон.
+  - **SQL для верификации:** `SELECT id, updated_at, media_expires_at, ROUND(EXTRACT(EPOCH FROM (media_expires_at-NOW()))/3600) AS expires_in_h, ROUND(EXTRACT(EPOCH FROM (NOW()-updated_at))/3600) AS updated_ago_h FROM projects WHERE media_purged_at IS NULL AND (audio_url IS NOT NULL OR video_url IS NOT NULL OR scene_images IS NOT NULL) ORDER BY created_at ASC;` — у всех проектов `updated_ago_h ≈ 20-28` (триггер) и `expires_in_h ≈ 38-70` (одинаковый для всех дат).
+  - **Fixing order:** сначала trigger/candidate-query, потом Content-MD5.
 - [ ] **B2 — слепое пятно retention:** cleanup ищет префикс `users/`, аудио в `audio/...`, прокси-картинки в `temp/...`. [база] ✅ Δ9: **одна из причин найдена и устранена** — удаление temp-картинок после рендера не выполнялось из-за ошибки скоупа (`tempImageB2Keys` объявлялась в `try`, проверялась в `finally` через `typeof`). Теперь работает. Проверить, сколько мусора накопилось за всё время и убрать разово.
 - [ ] **Auto-recharge VGF** — владелец отложил. [Δ7] Написать в VGF (please_help@verygoodffmpeg.com) — попросить эндпоинт баланса.
 - [ ] **Sentry-факт: доставленное событие в Issues не предъявлено** (нужен временный тест-роут). DSN video-server на Railway не проверен. [база]
