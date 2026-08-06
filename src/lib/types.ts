@@ -69,6 +69,7 @@ export const CREDIT_COSTS = {
   keywords_analysis: 10000,
   channels_compare:  2400,
   rising_stars:      3000,
+  sub_niche_finder:  5000,
 } as const
 
 export const IMAGE_INTERVAL_MIN = 3    // seconds — lower bound for scene duration

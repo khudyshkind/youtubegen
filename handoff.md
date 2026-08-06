@@ -266,3 +266,91 @@ WORKFLOW: без изменений
 2. Прогнать один раз с DRY_RUN=true — посмотреть список кандидатов в Railway Logs.
 3. 8 zombie-проектов (статус `generating_*` с июля): после очистки медиа они останутся в таблице с `media_purged_at` выставленным — решить, нужно ли переводить их в статус `failed`.
 4. B2 HTTP 400 (Content-MD5) — отдельная задача, не затронута в этом коммите.
+
+---
+
+---
+
+## Новый маршрут: /api/analytics/sub-niche-finder (2026-08-07)
+
+### Что сделано
+
+Написан маршрут `src/app/api/analytics/sub-niche-finder/route.ts`.
+Добавлена константа `CREDIT_COSTS.sub_niche_finder = 5000` в `src/lib/types.ts`.
+
+---
+
+### Алгоритм (6 шагов)
+
+1. **Auth + BYOK gate** — `resolveAnalyticsContext` → план+ключ. Если нет своего ключа — 403 `byok_required` с `settings_url='/settings'` и `quota_budget=2600`. Shared ключ не используется вообще.
+2. **Cache check** — `analytics_cache` WHERE `cache_type='sub_niche_finder'` AND `cache_key='{niche}|{country}|{content_lang}|v1'` AND `created_at > now-72h`. Hit → вернуть без Claude/YouTube.
+3. **Credits gate** — `requireCreditsAmount(cost(5000))`, стоимость с BYOK-скидкой 30% = 3500 кр.
+4. **Haiku** — генерирует 15–20 подниш + rpm_level/rpm_reason (оценка модели, `source:'estimate'`).
+5. **Parallel enrich** (все подниши одновременно):
+   - `search.list?publishedAfter=90d` → 100 юн./ниш; `pageInfo.totalResults` = `fresh_video_count`
+   - `videos.list?part=statistics` батч 50 → 1 юн./батч; viewCount[]
+   - `channels.list?part=statistics,snippet` батч 50 → 1 юн./батч; subscriberCount[], publishedAt[]
+   - Метрики: `median_views` = medianOf(views), `newcomer_share` = доля каналов < 12 мес., `top_subs_median` = medianOf(subs)
+6. **Top-5 growth** (по newcomer_share × median_views):
+   - `search.list?publishedAfter=365d` → 100 юн./ниш; фильтр `daysOld(publishedAt) >= 90` (исключить пересечение с fresh)
+   - `videos.list` batched → medianOf(oldViews)
+   - `growth_ratio = median_fresh / median_old` (если данных нет → null)
+7. **Sonnet вердикт** — получает числа из API, ранжирует top-5 + 2–3 «избегать», `overall_advice`. Всё `source:'estimate'`.
+
+---
+
+### Структура ответа
+
+```json
+{
+  "broad_niche": "финансы",
+  "quota_used": 2345,
+  "analyzed_at": "2026-08-07T...",
+  "sub_niches": [{
+    "name": "Кредитные карты с кэшбэком",
+    "metrics": {
+      "fresh_video_count":      {"value": 15420,  "source": "api"},
+      "median_views_per_video": {"value": 45000,  "source": "api"},
+      "newcomer_share":         {"value": 0.32,   "source": "api"},
+      "top_subs_median":        {"value": 85000,  "source": "api"},
+      "growth_ratio":           {"value": 1.3,    "source": "api"}
+    },
+    "rpm_estimate": {
+      "level":  {"value": "высокий", "source": "estimate"},
+      "reason": {"value": "Банки платят высокий CPC", "source": "estimate"}
+    }
+  }],
+  "verdict": {
+    "ranking": [{"name":"...","summary":"...","recommendation":"..."}],
+    "overall_advice": "...",
+    "source": "estimate"
+  }
+}
+```
+
+---
+
+### Ключевые решения
+
+| Решение | Почему |
+|---|---|
+| BYOK-only, без fallback на shared | ~2600 юнитов = 26% дневной квоты; один прогон на общем ключе выкашивал бы весь день |
+| 403 с объяснением квоты в тексте | Платный юзер без ключа не видел сообщения о «бесплатном плане» — нужен другой текст |
+| `source: 'api' \| 'estimate'` на каждом поле | Договорились разделять реальные данные и суждения модели явно, не неявно |
+| `medianOf` вместо среднего | Устойчив к аутлайерам (одно вирусное видео не искажает картину) |
+| growth_ratio = fresh/old (не overlapping cohorts) | old search `publishedAfter=365d`, затем фильтр `daysOld >= 90` на клиенте — исключает пересечение |
+| Top-5 growth только для лучших по newcomer_share | Экономия квоты: +100 юн. × 5 вместо × 20 |
+
+---
+
+### Что осталось
+
+- **UI-вкладка** в `src/app/(dashboard)/analytics/page.tsx` — форма с полем «широкая ниша», таблица подниш с метриками и source-бейджами, блок вердикта. Явно вынесено в отдельную задачу.
+- **Тестовый прогон** — фактический `quota_used` вернётся в поле ответа; сравнить с ~2600 оценкой.
+
+---
+
+## Изменения файлов состояния (2026-08-07)
+
+TASKS:   sub-niche finder помечен [x], добавлена детальная запись об алгоритме и том, что осталось (UI)
+CONTEXT: строка YouTube Data API дополнена /sub-niche-finder и пояснением об отсутствии fallback

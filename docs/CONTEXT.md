@@ -53,7 +53,7 @@ Lefiro (ранее YouTubeGen) — сервис генерации faceless-ви
 - **ElevenLabs** (официальный) — виден в UI, ручной выбор, не дефолт.
 - **apihost** — движок озвучки, реально используется (27 операций за 90 дней), в прошлых версиях файла не описан.
 - **Gemini** (NB2 Lite) — запаркован до запуска (аккаунт есть, ключ у владельца, нужен только Buy credits + ключ в env).
-- **YouTube Data API** — аналитика, квота 10 000 юнитов/день на общем ключе. Роуты и стоимость: `/niche` ~202 юн. (старый, BYOK нет), `/trends` ~101 юн., `/channel` 3–111 юн. (зависит от handle/текст-поиск + глубина), `/niche-finder` ~330 юн. (3 из 5 ниш). Все новые роуты (`trends`, `channel`, `rising-stars`, `niche-finder`, `keywords`) — BYOK через `resolveAnalyticsContext()`, 30% скидка при своём ключе. Ключ: AES-256-GCM в `profiles.encrypted_yt_key`, мастер-ключ `YT_KEY_ENCRYPT_SECRET`. 403→`YouTubeQuotaError` (`src/lib/youtube-quota.ts`), BYOK-fallback на shared ключ при квоте.
+- **YouTube Data API** — аналитика, квота 10 000 юнитов/день на общем ключе. Роуты и стоимость: `/niche` ~202 юн. (старый, BYOK нет), `/trends` ~101 юн., `/channel` 3–111 юн. (зависит от handle/текст-поиск + глубина), `/niche-finder` ~330 юн. (3 из 5 ниш), `/sub-niche-finder` ~2600 юн. (BYOK-only, без fallback). Все новые роуты — BYOK через `resolveAnalyticsContext()`, 30% скидка при своём ключе. Ключ: AES-256-GCM в `profiles.encrypted_yt_key`, мастер-ключ `YT_KEY_ENCRYPT_SECRET`. 403→`YouTubeQuotaError` (`src/lib/youtube-quota.ts`), BYOK-fallback на shared ключ при квоте (кроме sub-niche-finder — там fallback отсутствует намеренно).
 - ⚠️ **Серые сервисы — НЕ использовать:** Kie.ai, NanoBananaAPI.ai, fast-gen.ai (правило 16).
 
 ### Фактический прайс-лист прода (Δ9, из `credit_transactions` за 90 дней)
