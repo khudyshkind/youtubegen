@@ -263,7 +263,10 @@
 - [ ] **Заход 6 — замыкание на продукт** (кнопка «Создать видео» из любого отчёта). [RSS]
 - [ ] **Открытые вопросы владельцу по RSS:** снимать ли BYOK с канальных отчётов; «Пульс канала» бесплатно или за минимум; keywords до топ-3 или 10 ключей; сколько каналов на юзера в velocity. [RSS]
 - [ ] **Deep-linking аналитики `?tab=`.** [база]
-- [x] **Инструмент поиска растущих подниш с низкой конкуренцией.** [Δ13+, разведка 2026-08-06, маршрут 2026-08-07] ✅ **Маршрут написан**: `src/app/api/analytics/sub-niche-finder/route.ts`. Вход: `{broad_niche, country, content_lang, ui_lang}`. BYOK-only (без своего ключа — 403 с пояснением и `settings_url`). Алгоритм: Haiku → 15–20 подниш → parallel search(90d)+videos+channels → метрики из API (все `source:"api"`) → top-5 growth search(365d) → Sonnet вердикт (`source:"estimate"`). Кэш 72ч, cap 20 отчётов/юзер. `CREDIT_COSTS.sub_niche_finder=5000`, с BYOK-скидкой 30% = 3500 кр. **Осталось: UI-вкладка** в `/analytics/page.tsx` — отдельная задача.
+- [x] **Инструмент поиска растущих подниш с низкой конкуренцией.** [Δ13+, разведка 2026-08-06, маршрут 2026-08-07, live-test 2026-08-07] ✅ **Маршрут написан**: `src/app/api/analytics/sub-niche-finder/route.ts`. Вход: `{broad_niche, country, content_lang, ui_lang}`. BYOK-only (без своего ключа — 403 с пояснением и `settings_url`). Алгоритм: Haiku → 15–20 подниш → parallel search(90d)+videos+channels → метрики из API (все `source:"api"`) → top-5 growth search(365d) → Sonnet вердикт (`source:"estimate"`). Кэш 72ч, cap 20 отчётов/юзер. `CREDIT_COSTS.sub_niche_finder=5000`, с BYOK-скидкой 30% = 3500 кр.
+  ✅ **Live-test на двух нишах** — "музыка" и "личные финансы" — прогнаны через `scripts/test-sub-niche-finder.mjs`. Фактический quota_used: ~2030 (оценка была 2600, запас 22%).
+  ⚠️ **Найдены два критических изъяна до UI**: (1) топ-5 выбирается по newcomer_share без фильтра на размер выборки → 4-каналная ниша с ns=0.50 «лучше» 36-канальной с ns=0.08; (2) growth_ratio с `old_sample < 10` — шум, не сигнал (пример: ns=1.83 из 7 видео). Исправить в маршруте ДО UI.
+  **Осталось до UI:** (a) добавить `reliable: false` при `sample_channels < 5`, (b) перенести фильтр `sample_channels >= 5` в top-5 sort, (c) в growth_ratio: null при `oldViews.length < 10`. Потом: UI-вкладка в `/analytics/page.tsx`.
 
 ## 🎨 UX И СТУДИЯ
 
