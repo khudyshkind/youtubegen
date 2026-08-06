@@ -2838,42 +2838,37 @@ async function cleanupExpiredMedia() {
 
   const now = Date.now()
 
-  // 2B. Plan media_expires_at for all live projects with media (runs in DRY_RUN too — safe, writes only dates).
-  // Single threshold for all plans — no profiles join needed.
+  // 2B. Set media_expires_at ONCE for projects that don't have it yet (including stuck-generating ones).
+  // Uses created_at — not updated_at — to avoid triggering on_projects_updated → updated_at reset.
+  // Already-set values are never rewritten: no drift re-check, no daily overwrite cycle.
   let plannedCount = 0
   try {
     const liveRows = await sbGet('projects',
-      `select=id,updated_at,media_expires_at` +
+      `select=id,created_at` +
       `&media_purged_at=is.null` +
-      `&status=not.like.generating_*` +
+      `&media_expires_at=is.null` +
       `&or=(audio_url.not.is.null,video_url.not.is.null,scene_images.not.is.null,thumbnail_url.not.is.null)` +
       `&limit=2000`
     )
     for (const p of liveRows) {
-      const expectedIso = computeMediaExpiry(p.updated_at)
-      const currentMs   = p.media_expires_at ? new Date(p.media_expires_at).getTime() : 0
-      const expectedMs  = new Date(expectedIso).getTime()
-      // Update if missing or drift >1 h (updated_at changed or threshold env changed)
-      if (Math.abs(currentMs - expectedMs) > 3_600_000) {
-        await sbPatch('projects', `id=eq.${p.id}`, { media_expires_at: expectedIso })
-        plannedCount++
-      }
+      await sbPatch('projects', `id=eq.${p.id}`, { media_expires_at: computeMediaExpiry(p.created_at) })
+      plannedCount++
     }
-    console.log(`${tag} planned media_expires_at: updated ${plannedCount}/${liveRows.length} projects`)
+    console.log(`${tag} planned media_expires_at: set ${plannedCount} new projects`)
   } catch (e) {
     console.error(`${tag} planning step error (non-fatal):`, e.message)
     // Non-fatal: continue to deletion step
   }
 
-  // 2. Candidates: projects with media, not yet purged, not generating, updated_at older than unified threshold.
-  const isoThreshold = new Date(now - RETENTION_MEDIA_HOURS * 3600_000).toISOString()
+  // 2. Candidates: projects whose media_expires_at has passed (set once from created_at, never overwritten).
+  const isoNow = new Date(now).toISOString()
   let rawCandidates = []
   try {
     rawCandidates = await sbGet('projects',
-      `select=id,user_id,updated_at,status,audio_url,video_url,scene_images` +
+      `select=id,user_id,media_expires_at,status,audio_url,video_url,scene_images` +
       `&media_purged_at=is.null` +
       `&status=not.like.generating_*` +
-      `&updated_at=lt.${isoThreshold}` +
+      `&media_expires_at=lt.${isoNow}` +
       `&or=(audio_url.not.is.null,video_url.not.is.null,scene_images.not.is.null,thumbnail_url.not.is.null)` +
       `&limit=500`
     )
@@ -2883,8 +2878,8 @@ async function cleanupExpiredMedia() {
   const candidates = []
   for (const p of rawCandidates) {
     if (activeProjectIds.has(p.id)) continue
-    const ageHours = (now - new Date(p.updated_at).getTime()) / 3600_000
-    candidates.push({ ...p, _ageHours: ageHours.toFixed(1) })
+    const expiredHours = ((now - new Date(p.media_expires_at).getTime()) / 3_600_000).toFixed(1)
+    candidates.push({ ...p, _ageHours: expiredHours })
   }
   console.log(`${tag} ${rawCandidates.length} raw, ${candidates.length} after active-job filter`)
 
