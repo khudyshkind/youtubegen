@@ -312,10 +312,10 @@
 - [ ] **`control_job.tmp` и `scripts/*.mjs` в untracked** — разобрать, нужное закоммитить, мусор в `.gitignore`. [Δ8, Δ9] ✅ Δ10: частично закрыто — `scripts/ss-*` (тестовые картинки, JSON, probe-скрипт) и `control_job.tmp` внесены в `.gitignore`. Остаются `scripts/acceptance-language-fix.mjs`, `check-vault.mjs`, `test-byok-live.mjs`, `test-keywords-real-miss.mjs`, `test-quota-balance.mjs`, `test-titles-niche.mjs`. ⚠️ Δ11: добавился `eslint.undef-check.mjs` (временный flat-config для прогона `no-undef` по `video-server/index.js`) — он **полезен и воспроизводим**, разумнее закоммитить его в `scripts/` как рабочий инструмент, чем пересоздавать каждый раз (в Δ11 он уже терялся между заходами).
   ✅ **Разведка завершена [2026-08-06]:** полный инвентарь 19 untracked путей + 3 M-файла — см. handoff.md этой сессии и таблицу ниже.
   **Решение по каждому пути (требует действий владельца):**
-  - **Коммитить-тесты** (acceptance/unit, нужны при регрессии): `scripts/acceptance-language-fix.mjs`, `scripts/test-byok-live.mjs`, `scripts/test-inject-characters.mjs`, `scripts/test-keywords-real-miss.mjs`, `scripts/test-quota-balance.mjs`, `scripts/test-titles-niche.mjs`, `scripts/eslint.undef-check.mjs`, `scripts/fal-nb2-edit-probe.mjs`, `video-server/test-prompt-truncation.js`
-  - **Коммитить-лендинг** (вся landing-v2 работа, одним коммитом на `redesign-landing`): `design-system/lefiro/MASTER.md`, `public/showcase/` (8 PNG, ~6.4 МБ), `src/app/preview-landing/page.tsx`, `src/components/landing-v2/` (18 файлов), `src/lib/i18n-v2.ts`, `src/components/dev/ThemePreview.tsx` + незакоммиченные `package.json`/`globals.css`
-  - **Удалить** (одноразовые зонды, результат зафиксирован): `scripts/check-vault.mjs`, `scripts/fal-seed-probe.mjs`, `scripts/ss-ref-probe.mjs`, `eslint.undef-check.mjs` (корень — дубликат)
-  ⚠️ **Ветка `redesign-landing` существует только локально — в origin не запушена.** При потере рабочего дерева работа пропадёт.
+  ✅ **Закрыто [2026-08-06]:**
+  - Удалены зонды: `check-vault.mjs`, `fal-seed-probe.mjs`, `ss-ref-probe.mjs`, `eslint.undef-check.mjs` (корень)
+  - Закоммичены тесты (`341ac3b`): acceptance-language-fix, test-byok-live, test-inject-characters, test-keywords-real-miss, test-quota-balance, test-titles-niche, eslint.undef-check (scripts/), fal-nb2-edit-probe, test-prompt-truncation.js
+  - landing-v2 закоммичен на `redesign-landing` (`2428254`), ветка запушена в origin
 - [ ] **Заменить сентинель 'Свой текст' на колонку `projects.own_script boolean`.** [база] Δ9: сентинель уже используется как признак в разборах данных — при локализации студии инфер молча умрёт.
 - [ ] Два ffmpeg в Docker video-server. `TOOL_SLUG_REMAP` пластырь. `searchParams`-промис на tool-страницах. Глюк «—» в шапке баланса. [Δ5, Δ6, база]
 - [ ] Подавление алертов на тестовых job'ах. Race condition на лендинге (`getSession` ~100мс). Следить за тиром VGF. [Δ5, Δ6]
