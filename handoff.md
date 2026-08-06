@@ -2,70 +2,79 @@
 
 ## Что сделано
 
-### Задача: addCredits игнорирует ошибку RPC — оплата без начисления
+### Задача: activatePlan возвращает ложный успех при несостоявшемся начислении
 
 ---
 
 ## Изменения
 
-### 1. `src/lib/credits.ts` — `addCredits()`
+### 1. `src/lib/activate-plan.ts`
 
-**Было:** `Promise<void>`, результат RPC игнорировался.
+**Было:** при двойном сбое `add_plan_credits` + `add_credits` — `console.error` есть,
+но функция возвращает `{ ok: true, plan_credits: N }`. Вызывающий код обманут.
 
-**Стало:** `Promise<{ ok: boolean; error?: string }>`. При `error`:
-- `console.error` с user/op/amount/err
-- `sendTelegramAlert` владельцу
-- `return { ok: false, error: error.message }`
+**Стало:** возвращает `{ ok: boolean; creditsGranted: boolean; error?; plan_credits?; expires_at? }`.
 
-Добавлен импорт `sendTelegramAlert` из `./telegram`.
+Три честных исхода:
+| ok | creditsGranted | Смысл |
+|----|---------------|-------|
+| `true` | `true` | Полный успех: план + кредиты |
+| `true` | `false` | Даунгрейд на free, кредиты не нужны |
+| `false` | `false` | Сбой (план или кредиты) |
 
-### 2. `src/app/api/paddle/webhook/route.ts` — `transaction.completed` / topup
+При двойном сбое RPC (оба `add_plan_credits` и `add_credits` упали) **до** возврата:
+- `console.error` с деталями обеих ошибок
+- `sendTelegramAlert` с пометкой "требуется ручное вмешательство"
+- `insert` в `payment_incidents` (`payment_id: null, reason: 'activation_failed'`, обе ошибки в `raw_payload`)
+- возвращает `{ ok: false, creditsGranted: false, plan_credits: N, expires_at }` — план в profiles активен, но кредитов нет
 
-**Было:** `await addCredits(userId, credits, 'topup')` — результат игнорировался.
+Все ранние `return { ok: false }` дополнены `creditsGranted: false`.
 
-**Стало:** проверяем `grantResult.ok`. При сбое:
-- `addCredits` уже отправил Telegram алерт
-- Вставляем строку в `payment_incidents` (`payment_id: null`, `reason: 'activation_failed'`, `raw_payload` содержит `paddle_tx_id`, `userId`, `credits`, `error`)
-- Возвращаем 200 — чтобы Paddle не повторял запрос (двойное начисление опаснее тишины)
+### 2. `src/app/api/paddle/webhook/route.ts`
 
-### 3. `src/app/api/generate/audio/status/route.ts` — возврат кредитов при failed job
+**Было:** `await activatePlan(...)` — результат не проверялся в двух местах.
 
-**Было:** `await svc.rpc('add_credits', ...)` — результат игнорировался.
+**Стало:**
 
-**Стало:** `const rpcRes = await svc.rpc(...)`. При `rpcRes.error`:
-- `console.error`
-- `Sentry.captureException`
-- `sendTelegramAlert` владельцу
-- аналитика `audio_refunded` НЕ записывается (правильно — кредиты не вернулись)
+`subscription.activated`:
+- Проверяет `!activateResult.ok`
+- Вставляет `payment_incidents` с `paddle_sub_id` в `raw_payload`
+- Алертит только при сбое на уровне плана (`!plan_credits`) — при сбое кредитов `activatePlan` уже алертил
+- Возвращает 200 (не ретрай Paddle — двойная активация опаснее)
 
-Добавлен импорт `sendTelegramAlert` из `@/lib/telegram`.
+`transaction.completed` (renewal):
+- Аналогично, с `paddle_tx_id` в `raw_payload`
 
----
+### 3. YooKassa webhook — без изменений
 
-## Полный аудит: все места работы с кредитами
-
-| Файл | Строка | Операция | Статус |
-|------|--------|----------|--------|
-| `src/lib/credits.ts:addCredits()` | 61 | `add_credits` RPC | ✅ **Исправлено** — возвращает `{ok,error?}`, алертит |
-| `src/app/api/paddle/webhook/route.ts` | ~110 | `addCredits` topup | ✅ **Исправлено** — проверяет результат, пишет инцидент |
-| `src/app/api/generate/audio/status/route.ts` | ~82 | `add_credits` refund RPC | ✅ **Исправлено** — Sentry + Telegram при сбое |
-| `src/app/api/generate/video/status/route.ts` | ~142 | `add_credits` refund RPC | ✅ Уже проверялось правильно (Sentry + log) |
-| `src/lib/activate-plan.ts` | ~81 | `add_plan_credits` RPC | ⚠️ **Открыто** — при сбое падает на legacy `add_credits`, но если и legacy упадёт, `activatePlan` возвращает `{ok: true}` (ложный успех). Алерта нет. |
-| `src/lib/activate-plan.ts` | ~91 | `add_credits` legacy fallback | ⚠️ **Открыто** — `if (legacyErr)` логирует `console.error` но не алертит и не меняет возвращаемое значение (`ok: true`) |
-| `src/app/api/paddle/webhook/route.ts` | ~58 | `activatePlan` subscription.activated | ⚠️ **Открыто** — результат не проверяется: plan активирован молча даже при сбое |
-| `src/app/api/paddle/webhook/route.ts` | ~123 | `activatePlan` subscription renewal | ⚠️ **Открыто** — то же самое |
-| `src/lib/credits.ts:spendCredits()` | ~30 | `deduct_credits` RPC | ✅ Проверяет `error`, возвращает `{ok: false}` |
-| Railway `refundAudioJobCredits` / `refundVideoJobCredits` / `refundImageJobCredits` | video-server | `add_credits` RPC | ✅ Исправлено в предыдущей задаче — все возвращают `{ok,amount,error?}`, записывают `payment_incidents` |
+Существующий `if (!result.ok)` корректен. После исправления `activatePlan` он
+теперь автоматически отловит и сбой кредитов — раньше он был недостижим из-за
+ложного `ok: true`. Поведение: запись инцидента + алерт + ответ 500 (ретрай ЮKassa).
 
 ---
 
-## Что не сделано (за рамками задачи)
+## Полный аудит мест работы с кредитами (актуальный)
 
-- `src/lib/activate-plan.ts`: при двойном сбое `add_plan_credits` + `add_credits` — функция возвращает `{ok: true}`. Это ложный успех: план активирован в `profiles`, но кредиты не начислены. Нужна отдельная задача.
-- Paddle webhook: `activatePlan` при `subscription.activated` и renewal — результат не проверяется.
+| Файл | Операция | Статус |
+|------|----------|--------|
+| `src/lib/credits.ts:addCredits()` | `add_credits` RPC | ✅ Исправлено (пред. задача) |
+| `src/lib/activate-plan.ts` | `add_plan_credits` + `add_credits` fallback | ✅ **Исправлено** |
+| `src/app/api/paddle/webhook/route.ts:activatePlan` (×2) | plan activation | ✅ **Исправлено** |
+| `src/app/api/paddle/webhook/route.ts:addCredits` | topup | ✅ Исправлено (пред. задача) |
+| `src/app/api/webhooks/yookassa/route.ts:activatePlan` | plan activation | ✅ Работало, теперь ловит и кредиты |
+| `src/app/api/generate/audio/status/route.ts` | refund `add_credits` | ✅ Исправлено (пред. задача) |
+| `src/app/api/generate/video/status/route.ts` | refund `add_credits` | ✅ Было правильно |
+| `src/lib/credits.ts:spendCredits()` | `deduct_credits` | ✅ Было правильно |
+| Railway refund functions (×3) | `add_credits` | ✅ Исправлено (задача -2) |
+
+**Открытых пробелов в billing-путях больше не выявлено.**
 
 ---
 
-## Коммит
+## Коммиты
 
-`a0b1115` — запушен в `origin/main`.
+- `4993252` — fix: activatePlan / Paddle (эта задача)
+- `a0b1115` — fix: addCredits / audio/status (предыдущая задача)
+- `5f22d29` — fix: Railway refund incidents (задача -2)
+
+Все запушены в `origin/main`.
