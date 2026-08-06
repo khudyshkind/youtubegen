@@ -1,5 +1,6 @@
 import { createServiceClient } from './supabase-server'
 import { PLAN_CREDITS } from './types'
+import { sendTelegramAlert } from './telegram'
 import type { Plan } from './types'
 
 export type ActivationSource = 'paddle' | 'tg_manual' | 'admin' | 'yookassa'
@@ -11,11 +12,18 @@ export type ActivationSource = 'paddle' | 'tg_manual' | 'admin' | 'yookassa'
  * plan='free' → downgrade: clear expiry + activated_at, no credits added.
  * plan=paid   → set activated_at=now, expires_at=max(now,current)+30d, add plan_credits via RPC.
  */
+// Three distinct outcomes:
+//   ok: true,  creditsGranted: true  → plan activated + credits granted (full success)
+//   ok: true,  creditsGranted: false → free plan downgrade, no credits expected
+//   ok: false, creditsGranted: false → plan update failed (no credits attempted)
+//   ok: false, creditsGranted: false, plan_credits + expires_at set
+//                                    → plan activated in profiles but credits not granted
+//                                       (alert + payment_incidents already recorded internally)
 export async function activatePlan(
   userId: string,
   plan: Plan,
   source: ActivationSource,
-): Promise<{ ok: boolean; error?: string; plan_credits?: number; expires_at?: string }> {
+): Promise<{ ok: boolean; creditsGranted: boolean; error?: string; plan_credits?: number; expires_at?: string }> {
   const svc = createServiceClient()
 
   if (plan === 'free') {
@@ -32,11 +40,11 @@ export async function activatePlan(
         await svc.from('profiles').update({ plan }).eq('id', userId)
       } else {
         console.error('[activatePlan] free downgrade error:', error.message)
-        return { ok: false, error: error.message }
+        return { ok: false, creditsGranted: false, error: error.message }
       }
     }
     console.log(`[activatePlan] user=${userId} downgraded to free src=${source}`)
-    return { ok: true }
+    return { ok: true, creditsGranted: false }
   }
 
   // plan_expires_at column may not exist yet (pre-migration); treat missing column as null.
@@ -68,11 +76,11 @@ export async function activatePlan(
       const { error: planOnlyErr } = await svc.from('profiles').update({ plan }).eq('id', userId)
       if (planOnlyErr) {
         console.error('[activatePlan] plan-only update error:', planOnlyErr.message)
-        return { ok: false, error: planOnlyErr.message }
+        return { ok: false, creditsGranted: false, error: planOnlyErr.message }
       }
     } else {
       console.error('[activatePlan] plan update error:', planErr.message)
-      return { ok: false, error: planErr.message }
+      return { ok: false, creditsGranted: false, error: planErr.message }
     }
   }
 
@@ -95,7 +103,24 @@ export async function activatePlan(
         p_project_id: null,
       })
       if (legacyErr) {
-        console.error('[activatePlan] fallback add_credits also failed:', legacyErr.message)
+        // Both RPCs failed: plan is active in profiles but credits were NOT granted.
+        // This requires manual intervention — record and alert immediately.
+        const errMsg = `add_plan_credits: ${credErr.message}; add_credits: ${legacyErr.message}`
+        console.error(`[activatePlan] BOTH credit RPCs failed: user=${userId} plan=${plan} credits=${credits} src=${source}: ${errMsg}`)
+        await sendTelegramAlert(
+          `🔴 <b>activatePlan — кредиты НЕ начислены</b>\nПлан активирован в profiles, кредиты не выданы — требуется ручное вмешательство.\nuser: <code>${userId}</code>\nplan: ${plan} · ${credits} кр.\nsrc: ${source}\nerror: ${errMsg}`,
+        ).catch(() => {})
+        const { error: incErr } = await svc.from('payment_incidents').insert({
+          payment_id:      null,
+          user_id:         userId,
+          kind:            'plan',
+          plan_or_topup:   plan,
+          amount_expected: credits,
+          reason:          'activation_failed',
+          raw_payload:     { source, plan, credits, primaryError: credErr.message, legacyError: legacyErr.message },
+        })
+        if (incErr) console.error('[activatePlan] payment_incidents insert failed:', incErr.message)
+        return { ok: false, creditsGranted: false, error: errMsg, plan_credits: credits, expires_at: newExpires.toISOString() }
       }
     }
   }
@@ -104,5 +129,5 @@ export async function activatePlan(
     `[activatePlan] user=${userId} plan=${plan} src=${source} ` +
     `expires=${newExpires.toISOString()} plan_credits=${credits}`,
   )
-  return { ok: true, plan_credits: credits, expires_at: newExpires.toISOString() }
+  return { ok: true, creditsGranted: true, plan_credits: credits, expires_at: newExpires.toISOString() }
 }

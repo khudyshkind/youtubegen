@@ -4,6 +4,7 @@ import type { Subscription, Transaction } from '@paddle/paddle-node-sdk'
 import { createServiceClient } from '@/lib/supabase-server'
 import { addCredits } from '@/lib/credits'
 import { activatePlan } from '@/lib/activate-plan'
+import { sendTelegramAlert } from '@/lib/telegram'
 import { env } from '@/lib/env'
 import type { Plan } from '@/lib/types'
 
@@ -55,7 +56,27 @@ export async function POST(request: NextRequest) {
           })
           .eq('id', userId)
 
-        await activatePlan(userId, plan, 'paddle')
+        const activateResult = await activatePlan(userId, plan, 'paddle')
+        if (!activateResult.ok) {
+          // activatePlan alerts internally when credits fail; always record Paddle-specific incident.
+          const { error: incErr } = await supabase.from('payment_incidents').insert({
+            payment_id:      null,
+            user_id:         userId,
+            kind:            'plan',
+            plan_or_topup:   plan,
+            amount_expected: activateResult.plan_credits ?? null,
+            reason:          'activation_failed',
+            raw_payload:     { paddle_sub_id: sub.id, userId, plan, error: activateResult.error, creditsGranted: activateResult.creditsGranted },
+          })
+          if (incErr) console.error('[paddle/webhook] payment_incidents insert failed:', incErr.message)
+          // Alert only for plan-level failure (credits failure already alerted by activatePlan).
+          if (!activateResult.plan_credits) {
+            await sendTelegramAlert(
+              `🔴 <b>Paddle — activatePlan failed</b>\nsub: <code>${sub.id}</code>\nuser: <code>${userId}</code>\nplan: ${plan}\nerror: ${activateResult.error}`,
+            ).catch(() => {})
+          }
+          // Return 200 so Paddle doesn't retry — double-activation is worse than silence.
+        }
         break
       }
 
@@ -133,7 +154,24 @@ export async function POST(request: NextRequest) {
           .single()
 
         if (profile) {
-          await activatePlan(profile.id, profile.plan as Plan, 'paddle')
+          const renewResult = await activatePlan(profile.id, profile.plan as Plan, 'paddle')
+          if (!renewResult.ok) {
+            const { error: incErr } = await supabase.from('payment_incidents').insert({
+              payment_id:      null,
+              user_id:         profile.id,
+              kind:            'plan',
+              plan_or_topup:   profile.plan,
+              amount_expected: renewResult.plan_credits ?? null,
+              reason:          'activation_failed',
+              raw_payload:     { paddle_tx_id: tx.id, userId: profile.id, plan: profile.plan, error: renewResult.error, creditsGranted: renewResult.creditsGranted },
+            })
+            if (incErr) console.error('[paddle/webhook] payment_incidents insert failed (renewal):', incErr.message)
+            if (!renewResult.plan_credits) {
+              await sendTelegramAlert(
+                `🔴 <b>Paddle — renewal activatePlan failed</b>\ntx: <code>${tx.id}</code>\nuser: <code>${profile.id}</code>\nplan: ${profile.plan}\nerror: ${renewResult.error}`,
+              ).catch(() => {})
+            }
+          }
         }
         break
       }
