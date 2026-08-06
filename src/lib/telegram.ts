@@ -73,7 +73,10 @@ export async function notifyError(route: string, msg: string): Promise<void> {
 // Safe to call with .catch(() => {}) — never throws to the caller.
 export async function notifyUserTelegram(userId: string, text: string): Promise<void> {
   const botToken = env('TELEGRAM_BOT_TOKEN')
-  if (!botToken) return
+  if (!botToken) {
+    console.error('[telegram] notifyUserTelegram: TELEGRAM_BOT_TOKEN not set')
+    return
+  }
   try {
     const svc = createServiceClient()
     const { data: profile } = await svc
@@ -82,14 +85,20 @@ export async function notifyUserTelegram(userId: string, text: string): Promise<
       .eq('id', userId)
       .single()
     const chatId = (profile as { telegram_chat_id?: string | null } | null)?.telegram_chat_id
-    if (!chatId) return
-    console.log(`[telegram] notifyUser user=${userId} chat_id=${chatId}`)
+    if (!chatId) {
+      console.log(`[telegram] skip: no chat_id user=${userId}`)
+      return
+    }
     const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text }),
     })
-    if (!res.ok) console.warn('[telegram] notifyUser failed:', await res.text().catch(() => ''))
+    if (!res.ok) {
+      console.warn('[telegram] notifyUser failed:', await res.text().catch(() => ''))
+    } else {
+      console.log(`[telegram] sent user=${userId}`)
+    }
   } catch (e) {
     console.warn('[telegram] notifyUser error:', e instanceof Error ? e.message : String(e))
   }
