@@ -15,13 +15,14 @@ import { isBillingError, notifyBillingError } from '@/lib/telegram'
 
 export const maxDuration = 300
 
-const YT_BASE = 'https://www.googleapis.com/youtube/v3'
-
-// Approximate YouTube API quota this route consumes. Shown to user before they decide to run it.
+const YT_BASE    = 'https://www.googleapis.com/youtube/v3'
 const QUOTA_BUDGET = 2600
-// Window (days) for "fresh" vs "old" video cohorts
-const FRESH_DAYS = 90
-const OLD_DAYS   = 365
+const FRESH_DAYS   = 90
+const OLD_DAYS     = 365
+
+// Reliability thresholds — metrics below these are statistical noise, not market signals.
+const MIN_CHANNELS_RELIABLE = 5   // newcomer_share unreliable below this
+const MIN_OLD_SAMPLE_GROWTH = 10  // growth_ratio unreliable below this
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,12 +68,16 @@ function getSubNicheGenPrompt(lang: string): string {
 Подниши должны быть специфичными (не "личные финансы", а "кредитные карты с кэшбэком"),
 охватывать разные сегменты аудитории и форматы контента.
 
-Для каждой подниши дай ориентировочный RPM-уровень:
+Для каждой подниши дай:
+• name — полное название подниши для человека
+• search_query — КОРОТКИЙ поисковый запрос из 2-3 слов, как реально ищут на YouTube
+  (не описание, а то, что вводит пользователь в поиск)
+  Примеры: «гитара с нуля», «накопительный счёт сравнение», «ИП налоги 2024»
 • rpm_level: "низкий" | "средний" | "высокий"
 • rpm_reason: одна строка — почему именно так (это ОЦЕНКА модели, не данные API)
 
 ФОРМАТ — строго JSON без markdown:
-{"sub_niches":[{"name":"Кредитные карты с кэшбэком","rpm_level":"высокий","rpm_reason":"Банки платят высокий CPC за эту аудиторию"},{"name":"...","rpm_level":"средний","rpm_reason":"..."}]}
+{"sub_niches":[{"name":"Разбор гитарных аккордов для начинающих","search_query":"гитара с нуля","rpm_level":"низкий","rpm_reason":"Конкурентная ниша, низкий CPC"},{"name":"...","search_query":"...","rpm_level":"средний","rpm_reason":"..."}]}
 
 Верни ровно 15-20 подниш. Только JSON. Начни с {.`
     : `You are a YouTube analyst. Break a broad niche into 15-20 SPECIFIC sub-niches for a YouTube channel.
@@ -80,12 +85,16 @@ function getSubNicheGenPrompt(lang: string): string {
 Sub-niches must be specific (not "personal finance" but "cashback credit cards"),
 covering different audience segments and content formats.
 
-For each sub-niche, provide an estimated RPM level:
+For each sub-niche provide:
+• name — full sub-niche name for humans
+• search_query — SHORT 2-3 word YouTube search term, as users actually type it
+  (not a description, the actual search string)
+  Examples: "guitar for beginners", "best savings account", "LLC taxes 2024"
 • rpm_level: "low" | "medium" | "high"
-• rpm_reason: one line — why (this is a MODEL ESTIMATE, not API data)
+• rpm_reason: one line — why (MODEL ESTIMATE, not API data)
 
 FORMAT — strict JSON without markdown:
-{"sub_niches":[{"name":"Cashback credit cards","rpm_level":"high","rpm_reason":"Banks pay high CPC for this audience"},{"name":"...","rpm_level":"medium","rpm_reason":"..."}]}
+{"sub_niches":[{"name":"Guitar chords breakdown for beginners","search_query":"guitar for beginners","rpm_level":"low","rpm_reason":"Competitive niche, low CPC"},{"name":"...","search_query":"...","rpm_level":"medium","rpm_reason":"..."}]}
 
 Return exactly 15-20 sub-niches. JSON only. Start with {.`
 }
@@ -102,14 +111,18 @@ function getVerdictPrompt(lang: string): string {
 • newcomer_share — доля каналов в топе, созданных < 12 мес. → пробиваемость (0.0–1.0)
 • top_subs_median — медиана подписчиков топ-каналов → сила конкурентов
 • growth_ratio — медиана свежих просмотров / медиана старых: >1 растёт, <1 стагнирует, null = нет данных
+• reliable — true/false. Если false — выборка слишком мала (< 5 каналов или < 5 видео).
+  Такие подниши НЕЛЬЗЯ рекомендовать как рыночный факт — только упомянуть с оговоркой.
 
-Признак «пробиваемой растущей» ниши: newcomer_share > 0.3, growth_ratio > 1.0.
+Признак «пробиваемой растущей» ниши: newcomer_share > 0.3, growth_ratio > 1.0, reliable = true.
 Признак «закрытой» ниши: newcomer_share < 0.1, top_subs_median > 500 000.
 
 ФОРМАТ — строго JSON без markdown:
 {"ranking":[{"name":"Название","summary":"2-3 предложения с реальными числами: почему эта позиция в рейтинге","recommendation":"Конкретный совет: что снимать, как часто, на что акцент"}],"overall_advice":"2-3 предложения: общий вывод по рынку ниши"}
 
-Включи 5 лучших и 2-3 «избегать» (пометь их в summary: «Избегать: ...»). Только JSON. Начни с {.`
+Включи 5 лучших надёжных ниш и 2-3 «избегать» (пометь их в summary: «Избегать: ...»).
+Если все топ-5 кандидаты ненадёжны — напиши об этом в overall_advice.
+Только JSON. Начни с {.`
     : `You are a YouTube analyst. You'll receive sub-niche data with real YouTube API numbers.
 Task: rank and recommend BASED ON the numbers, not instead of them.
 
@@ -119,22 +132,27 @@ Metric meanings (all source: "api"):
 • newcomer_share — fraction of top channels created < 12 months → entry openness (0.0–1.0)
 • top_subs_median — median subscribers of top channels → competitor strength
 • growth_ratio — median fresh views / median old views: >1 growing, <1 stagnating, null = no data
+• reliable — true/false. If false — sample too small (< 5 channels or < 5 videos).
+  Such niches CANNOT be recommended as market facts — only mention with a caveat.
 
-"Open growing" niche signal: newcomer_share > 0.3, growth_ratio > 1.0.
+"Open growing" niche signal: newcomer_share > 0.3, growth_ratio > 1.0, reliable = true.
 "Closed" niche signal: newcomer_share < 0.1, top_subs_median > 500 000.
 
 FORMAT — strict JSON without markdown:
 {"ranking":[{"name":"Name","summary":"2-3 sentences with real numbers: why this ranking position","recommendation":"Specific advice: what to film, how often, where to focus"}],"overall_advice":"2-3 sentences: overall market takeaway for this niche"}
 
-Include top 5 and 2-3 "avoid" entries (mark them in summary: "Avoid: ..."). JSON only. Start with {.`
+Include top 5 reliable niches and 2-3 "avoid" entries (mark them in summary: "Avoid: ...").
+If all top-5 candidates are unreliable — state so in overall_advice.
+JSON only. Start with {.`
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface SubNicheInput {
-  name:       string
-  rpm_level:  string
-  rpm_reason: string
+  name:         string
+  search_query: string  // short 2-3 word YouTube search term (new in v2)
+  rpm_level:    string
+  rpm_reason:   string
 }
 
 type Source = 'api' | 'estimate'
@@ -142,7 +160,10 @@ type Source = 'api' | 'estimate'
 interface MetricValue<T> { value: T; source: Source }
 
 interface SubNicheResult {
-  name: string
+  name:         string
+  search_query: string
+  reliable:     boolean
+  sample_size:  { videos: number; channels: number }
   metrics: {
     fresh_video_count:      MetricValue<number>
     median_views_per_video: MetricValue<number>
@@ -159,10 +180,10 @@ interface SubNicheResult {
 // ─── Route ────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  let lang        = 'ru'
-  let userHasKey  = false
-  let plan        = 'free'
-  let quotaUsed   = 0
+  let lang       = 'ru'
+  let userHasKey = false
+  let plan       = 'free'
+  let quotaUsed  = 0
 
   try {
     const supabase = await createServerSupabase()
@@ -191,16 +212,15 @@ export async function POST(req: NextRequest) {
     plan       = ctx.plan
     if (gateRes) return gateRes
 
-    // BYOK-only gate — this route consumes ~QUOTA_BUDGET units per run;
-    // drawing that from the shared key would exhaust it for all users.
+    // BYOK-only gate: ~QUOTA_BUDGET units per run is too much to draw from the shared key.
     if (!userHasKey) {
       const isRu = lang !== 'en'
       return NextResponse.json({
-        ok:          false,
-        error:       isRu
+        ok:           false,
+        error:        isRu
           ? `Анализ подниш использует до ${QUOTA_BUDGET} единиц вашей дневной YouTube API-квоты и доступен только с вашим ключом. Добавьте ключ в Настройках — и получите скидку 30% на все аналитические отчёты.`
           : `Sub-niche analysis uses up to ${QUOTA_BUDGET} YouTube API units from your daily quota and requires your own key. Add your key in Settings — you'll also get a 30% discount on all analytics.`,
-        code:        'byok_required',
+        code:         'byok_required',
         settings_url: '/settings',
         quota_budget: QUOTA_BUDGET,
       }, { status: 403 })
@@ -212,7 +232,8 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Cache check ────────────────────────────────────────────────────────
-    const cacheKey = `${broad_niche.toLowerCase().trim()}|${country}|${content_lang}|v1`
+    // v2: cache key bumped because algorithm changed (search_query, reliable flag)
+    const cacheKey = `${broad_niche.toLowerCase().trim()}|${country}|${content_lang}|v2`
     try {
       const { data: cached } = await svc
         .from('analytics_cache')
@@ -250,7 +271,7 @@ export async function POST(req: NextRequest) {
     const uiLangFull = resolveUserLang(req, lang)
     const anthropic  = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
 
-    // ── Step 1: Haiku — broad niche → 15-20 sub-niches (no YouTube, estimates only) ──
+    // ── Step 1: Haiku — broad niche → 15-20 sub-niches with search_query ──
     console.log(`[sub-niche] step 1: haiku gen | broad="${broad_niche}" country=${country} lang=${content_lang}`)
     const msg1 = await anthropic.messages.create({
       model:      'claude-haiku-4-5-20251001',
@@ -268,11 +289,15 @@ export async function POST(req: NextRequest) {
       extractText(msg1.content), 'haiku-gen'
     )
     if (!rawNiches?.length) throw new Error('Haiku returned no sub-niches')
-    const sub_niches = rawNiches.slice(0, 20)
+    // Ensure search_query falls back to name if Haiku omitted it
+    const sub_niches: SubNicheInput[] = rawNiches.slice(0, 20).map(n => ({
+      ...n,
+      search_query: n.search_query?.trim() || n.name,
+    }))
     console.log(`[sub-niche] haiku: ${sub_niches.length} sub-niches generated`)
 
     // ── Steps 2 + 3: search.list + videos.list + channels.list (parallel per niche) ──
-    const nowMs             = Date.now()
+    const nowMs               = Date.now()
     const publishedAfterFresh = new Date(nowMs - FRESH_DAYS * 24 * 3600 * 1000).toISOString()
 
     const searchBase: Record<string, string> = {
@@ -285,31 +310,32 @@ export async function POST(req: NextRequest) {
     console.log(`[sub-niche] step 2+3: search+enrich ${sub_niches.length} niches in parallel`)
 
     interface RawEnriched {
-      name:               string
-      rpm_level:          string
-      rpm_reason:         string
-      fresh_video_count:  number
-      views:              number[]
+      name:                string
+      search_query:        string
+      rpm_level:           string
+      rpm_reason:          string
+      fresh_video_count:   number
+      views:               number[]
       channel_ages_months: number[]
-      subs:               number[]
+      subs:                number[]
     }
 
     const enriched: RawEnriched[] = await Promise.all(sub_niches.map(async (niche) => {
       const base: RawEnriched = {
-        name: niche.name, rpm_level: niche.rpm_level, rpm_reason: niche.rpm_reason,
+        name: niche.name, search_query: niche.search_query,
+        rpm_level: niche.rpm_level, rpm_reason: niche.rpm_reason,
         fresh_video_count: 0, views: [], channel_ages_months: [], subs: [],
       }
       try {
-        // Step 2: search.list — 100 units
-        const search = await ytf('/search', { ...searchBase, q: niche.name }) as {
+        // Step 2: search by search_query (short, user-like term) — 100 units
+        const search = await ytf('/search', { ...searchBase, q: niche.search_query }) as {
           items?:    Array<{ id: { videoId?: string }; snippet: { channelId?: string } }>
           pageInfo?: { totalResults: number }
         }
         quotaUsed += 100
         base.fresh_video_count = search.pageInfo?.totalResults ?? 0
 
-        const videoIds = (search.items ?? [])
-          .map(v => v.id?.videoId).filter((id): id is string => !!id)
+        const videoIds   = (search.items ?? []).map(v => v.id?.videoId).filter((id): id is string => !!id)
         const channelIds = [...new Set(
           (search.items ?? []).map(v => v.snippet?.channelId).filter((id): id is string => !!id)
         )]
@@ -336,9 +362,7 @@ export async function POST(req: NextRequest) {
           }
           quotaUsed += 1
           for (const c of cRes.items ?? []) {
-            if (c.snippet.publishedAt) {
-              base.channel_ages_months.push(daysOld(c.snippet.publishedAt) / 30)
-            }
+            if (c.snippet.publishedAt) base.channel_ages_months.push(daysOld(c.snippet.publishedAt) / 30)
             const sc = parseInt(c.statistics.subscriberCount ?? '0')
             if (sc > 0) base.subs.push(sc)
           }
@@ -354,42 +378,55 @@ export async function POST(req: NextRequest) {
 
     // ── Step 4: Compute API-sourced metrics (no model) ─────────────────────
     interface ComputedNiche {
-      name:              string
-      rpm_level:         string
-      rpm_reason:        string
+      name:             string
+      search_query:     string
+      rpm_level:        string
+      rpm_reason:       string
       fresh_video_count: number
-      median_views:      number
-      newcomer_share:    number
-      top_subs_median:   number
-      growth_ratio:      number | null
+      median_views:     number
+      newcomer_share:   number
+      top_subs_median:  number
+      growth_ratio:     number | null
+      sample_videos:    number
+      sample_channels:  number
+      reliable:         boolean
     }
 
-    const computed: ComputedNiche[] = enriched.map(n => ({
-      name:              n.name,
-      rpm_level:         n.rpm_level,
-      rpm_reason:        n.rpm_reason,
-      fresh_video_count: n.fresh_video_count,
-      median_views:      medianOf(n.views),
-      newcomer_share:    n.channel_ages_months.length
-        ? Math.round(n.channel_ages_months.filter(m => m < 12).length / n.channel_ages_months.length * 100) / 100
-        : 0,
-      top_subs_median:   medianOf(n.subs),
-      growth_ratio:      null,
-    }))
+    const computed: ComputedNiche[] = enriched.map(n => {
+      const sample_videos   = n.views.length
+      const sample_channels = n.channel_ages_months.length
+      const reliable        = sample_videos >= 5 && sample_channels >= MIN_CHANNELS_RELIABLE
+      return {
+        name:              n.name,
+        search_query:      n.search_query,
+        rpm_level:         n.rpm_level,
+        rpm_reason:        n.rpm_reason,
+        fresh_video_count: n.fresh_video_count,
+        median_views:      medianOf(n.views),
+        newcomer_share:    sample_channels > 0
+          ? Math.round(n.channel_ages_months.filter(m => m < 12).length / sample_channels * 100) / 100
+          : 0,
+        top_subs_median:   medianOf(n.subs),
+        growth_ratio:      null,
+        sample_videos,
+        sample_channels,
+        reliable,
+      }
+    })
 
-    // ── Step 5: Growth ratio for top 5 by newcomer_share ──────────────────
-    // Select top 5 niches with actual data, ranked by entry openness then views
+    const reliableCount = computed.filter(n => n.reliable).length
+    console.log(`[sub-niche] step 4: ${reliableCount}/${computed.length} reliable niches`)
+
+    // ── Step 5: Growth ratio for top 5 (reliable niches only, by newcomer_share) ──
+    // Exclude unreliable niches from growth analysis — their newcomer_share is noise.
     const top5 = [...computed]
-      .filter(n => n.fresh_video_count > 0 && n.median_views > 0)
+      .filter(n => n.reliable && n.fresh_video_count > 0 && n.median_views > 0)
       .sort((a, b) => b.newcomer_share - a.newcomer_share || b.median_views - a.median_views)
       .slice(0, 5)
     const top5Names = new Set(top5.map(n => n.name))
 
-    // For each top-5 niche: search with publishedAfter=OLD_DAYS, filter to 90+ days old,
-    // compute median old views → growth_ratio = median_fresh / median_old
     const publishedAfterOld = new Date(nowMs - OLD_DAYS * 24 * 3600 * 1000).toISOString()
-
-    console.log(`[sub-niche] step 5: growth ratio for ${top5Names.size} niches`)
+    console.log(`[sub-niche] step 5: growth ratio for ${top5Names.size} reliable top niches`)
 
     await Promise.all(
       computed
@@ -398,14 +435,13 @@ export async function POST(req: NextRequest) {
           try {
             const searchOld = await ytf('/search', {
               ...searchBase,
-              q:              niche.name,
+              q:              niche.search_query,
               publishedAfter: publishedAfterOld,
             }) as {
               items?: Array<{ id: { videoId?: string }; snippet: { publishedAt?: string } }>
             }
             quotaUsed += 100
 
-            // Keep only videos older than FRESH_DAYS to avoid overlap with fresh cohort
             const oldVideoIds = (searchOld.items ?? [])
               .filter(v => v.snippet?.publishedAt && daysOld(v.snippet.publishedAt) >= FRESH_DAYS)
               .map(v => v.id?.videoId)
@@ -424,7 +460,8 @@ export async function POST(req: NextRequest) {
             }
 
             const medianOld = medianOf(oldViews)
-            if (medianOld > 0) {
+            // Require minimum sample for growth_ratio to be meaningful
+            if (medianOld > 0 && oldViews.length >= MIN_OLD_SAMPLE_GROWTH) {
               niche.growth_ratio = Math.round((niche.median_views / medianOld) * 100) / 100
             }
           } catch (e) {
@@ -439,6 +476,8 @@ export async function POST(req: NextRequest) {
     // ── Step 6: Sonnet verdict — ranks based on computed numbers ──────────
     const dataForVerdict = computed.map(n => ({
       name:                   n.name,
+      reliable:               n.reliable,
+      sample_size:            { videos: n.sample_videos, channels: n.sample_channels },
       fresh_video_count:      n.fresh_video_count,
       median_views_per_video: n.median_views,
       newcomer_share:         n.newcomer_share,
@@ -461,13 +500,16 @@ export async function POST(req: NextRequest) {
     if (msg2.stop_reason === 'max_tokens') console.warn('[sub-niche] sonnet truncated')
 
     const { ranking, overall_advice } = parseClaudeJson<{
-      ranking:       Array<{ name: string; summary: string; recommendation: string }>
+      ranking:        Array<{ name: string; summary: string; recommendation: string }>
       overall_advice: string
     }>(extractText(msg2.content), 'sonnet-verdict')
 
     // ── Build result — every field tagged with source ──────────────────────
     const sub_niche_results: SubNicheResult[] = computed.map(n => ({
-      name: n.name,
+      name:         n.name,
+      search_query: n.search_query,
+      reliable:     n.reliable,
+      sample_size:  { videos: n.sample_videos, channels: n.sample_channels },
       metrics: {
         fresh_video_count:      { value: n.fresh_video_count, source: 'api'      as const },
         median_views_per_video: { value: n.median_views,      source: 'api'      as const },
@@ -483,13 +525,14 @@ export async function POST(req: NextRequest) {
 
     const result = {
       broad_niche,
-      quota_used:  quotaUsed,
-      analyzed_at: new Date().toISOString(),
-      sub_niches:  sub_niche_results,
+      quota_used:    quotaUsed,
+      analyzed_at:   new Date().toISOString(),
+      reliable_count: reliableCount,
+      sub_niches:    sub_niche_results,
       verdict: {
-        ranking:       ranking       ?? [],
+        ranking:        ranking        ?? [],
         overall_advice: overall_advice ?? '',
-        source:        'estimate' as const,
+        source:         'estimate'     as const,
       },
     }
 
@@ -535,7 +578,7 @@ export async function POST(req: NextRequest) {
         .lt('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
     } catch { /* ignore */ }
 
-    console.log(`[sub-niche] done. quota_used=${quotaUsed} cost=${actualCost}cr`)
+    console.log(`[sub-niche] done. quota_used=${quotaUsed} cost=${actualCost}cr reliable=${reliableCount}/${sub_niche_results.length}`)
     return NextResponse.json({ ok: true, data: result })
 
   } catch (error) {
