@@ -1,21 +1,162 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --surface-base:          #0A0A0F;
+  --text-primary:          #F8FAFC;
+
+  --accent:                #7C3AED;
+  --accent-secondary:      #2563EB;
+  --gradient-text-from:    #A78BFA;
+  --gradient-text-via:     #60A5FA;
+  --gradient-text-to:      #F472B6;
+  --text-secondary:        #CBD5E1;
+  --success:               #10B981;
+  --text-inverse:          #ffffff;
+  --text-muted:            rgba(148, 163, 184, 0.4);
+  --surface-disabled:      rgb(30 41 59);
+  --text-disabled:         rgb(100 116 139);
+  --surface-select:        #13131A;
+
+  --surface-raised:        rgba(255, 255, 255, 0.03);
+  --border-subtle:         rgba(255, 255, 255, 0.08);
+  --surface-raised-hover:  rgba(255, 255, 255, 0.06);
+  --border-strong:         rgba(255, 255, 255, 0.15);
+  --surface-input:         rgba(255, 255, 255, 0.05);
+  --border-input:          rgba(255, 255, 255, 0.10);
+
+  --accent-alpha-08:       rgba(124, 58, 237, 0.08);
+  --accent-alpha-15:       rgba(124, 58, 237, 0.15);
+  --accent-alpha-18:       rgba(124, 58, 237, 0.18);
+  --accent-alpha-20:       rgba(124, 58, 237, 0.20);
+  --accent-alpha-25:       rgba(124, 58, 237, 0.25);
+  --accent-alpha-35:       rgba(124, 58, 237, 0.35);
+  --accent-alpha-45:       rgba(124, 58, 237, 0.45);
+  --accent-alpha-50:       rgba(124, 58, 237, 0.50);
+  --accent-alpha-60:       rgba(124, 58, 237, 0.60);
+  --success-alpha-20:      rgba(16, 185, 129, 0.20);
 }
 
+/* ── TEMPORARY DESIGN PREVIEW — удалить после выбора темы ─────────────
+   Класс .theme-a / .theme-b / .theme-c добавляет <html>.
+   :root остаётся текущим (четвёртый вариант).
+   Каждый вариант содержит ровно 30 токенов — столько же, сколько :root.
+   ─────────────────────────────────────────────────────────────────── */
+
+/* A — тёплый янтарный. фон #0C0A07: чёрный с лёгким тёплым подмесом (r>g>b).
+        акцент #B45309 (Amber-700): WCAG 4.75 AA с ближайшим белым. */
+html.theme-a {
+  --surface-base:          #0C0A07;   /* near-black, r>g>b warm bias */
+  --text-primary:          #FDF8F0;   /* warm near-white, F=240 vs 255 */
+  --accent:                #B45309;   /* Amber-700, 4.75:1 AA */
+  --accent-secondary:      #CA8A04;   /* Amber-600-adjacent, golden shift */
+  --gradient-text-from:    #FDE68A;   /* Amber-200, light end same hue */
+  --gradient-text-via:     #FDE68A;   /* same — два оттенка одного тона */
+  --gradient-text-to:      #B45309;   /* accent, anchors gradient */
+  --text-secondary:        #D4C9B0;   /* warm beige-gray, 12.03:1 AAA */
+  --success:               #10B981;   /* semantic green, не меняем */
+  --text-inverse:          #FDF8F0;   /* warm near-white for hover text */
+  --text-muted:            rgba(180, 165, 145, 0.4); /* warm muted placeholder */
+  --surface-disabled:      rgb(36 28 18);  /* dark warm-brown disabled bg */
+  --text-disabled:         rgb(115 98 72); /* warm mid-tone disabled text */
+  --surface-select:        #1A1408;   /* warm dark for select option bg */
+  --surface-raised:        rgba(255, 255, 255, 0.03);
+  --border-subtle:         rgba(255, 255, 255, 0.08);
+  --surface-raised-hover:  rgba(255, 255, 255, 0.06);
+  --border-strong:         rgba(255, 255, 255, 0.15);
+  --surface-input:         rgba(255, 255, 255, 0.05);
+  --border-input:          rgba(255, 255, 255, 0.10);
+  --accent-alpha-08:       rgba(180, 83, 9, 0.08);  /* #B45309 RGB */
+  --accent-alpha-15:       rgba(180, 83, 9, 0.15);
+  --accent-alpha-18:       rgba(180, 83, 9, 0.18);
+  --accent-alpha-20:       rgba(180, 83, 9, 0.20);
+  --accent-alpha-25:       rgba(180, 83, 9, 0.25);
+  --accent-alpha-35:       rgba(180, 83, 9, 0.35);
+  --accent-alpha-45:       rgba(180, 83, 9, 0.45);
+  --accent-alpha-50:       rgba(180, 83, 9, 0.50);
+  --accent-alpha-60:       rgba(180, 83, 9, 0.60);
+  --success-alpha-20:      rgba(16, 185, 129, 0.20);
+}
+
+/* B — приглушённый циановый. фон #080D0D: чёрный с нейтрально-холодным подмесом (g=b>r).
+        акцент #0E7490 (Cyan-700): WCAG 4.89 AA, muted насыщенный циан. */
+html.theme-b {
+  --surface-base:          #080D0D;   /* near-black, g=b > r cool-neutral */
+  --text-primary:          #EEF6F7;   /* cool near-white, slight cyan tint */
+  --accent:                #0E7490;   /* Cyan-700, 4.89:1 AA */
+  --accent-secondary:      #0F766E;   /* Teal-700, adjacent cool hue */
+  --gradient-text-from:    #A5F3FC;   /* Cyan-200, light same family */
+  --gradient-text-via:     #A5F3FC;   /* same — два оттенка одного тона */
+  --gradient-text-to:      #0E7490;   /* accent, anchors gradient */
+  --text-secondary:        #B2CDD1;   /* cool gray with cyan undertone, 11.68:1 AAA */
+  --success:               #10B981;   /* semantic green, не меняем */
+  --text-inverse:          #EEF6F7;   /* cool near-white for hover text */
+  --text-muted:            rgba(145, 195, 205, 0.4); /* cyan-gray muted placeholder */
+  --surface-disabled:      rgb(18 28 32);  /* cold dark cyan-gray disabled bg */
+  --text-disabled:         rgb(85 108 115); /* cool mid-tone disabled text */
+  --surface-select:        #0C1518;   /* cool dark for select option bg */
+  --surface-raised:        rgba(255, 255, 255, 0.03);
+  --border-subtle:         rgba(255, 255, 255, 0.08);
+  --surface-raised-hover:  rgba(255, 255, 255, 0.06);
+  --border-strong:         rgba(255, 255, 255, 0.15);
+  --surface-input:         rgba(255, 255, 255, 0.05);
+  --border-input:          rgba(255, 255, 255, 0.10);
+  --accent-alpha-08:       rgba(14, 116, 144, 0.08);  /* #0E7490 RGB */
+  --accent-alpha-15:       rgba(14, 116, 144, 0.15);
+  --accent-alpha-18:       rgba(14, 116, 144, 0.18);
+  --accent-alpha-20:       rgba(14, 116, 144, 0.20);
+  --accent-alpha-25:       rgba(14, 116, 144, 0.25);
+  --accent-alpha-35:       rgba(14, 116, 144, 0.35);
+  --accent-alpha-45:       rgba(14, 116, 144, 0.45);
+  --accent-alpha-50:       rgba(14, 116, 144, 0.50);
+  --accent-alpha-60:       rgba(14, 116, 144, 0.60);
+  --success-alpha-20:      rgba(16, 185, 129, 0.20);
+}
+
+/* C — красно-оранжевый. фон #0D0907: чёрный с едва тёплым красноватым подмесом (r>g>b сильнее).
+        акцент #C2410C (Orange-700): WCAG 4.79 AA, выраженный красно-оранжевый. */
+html.theme-c {
+  --surface-base:          #0D0907;   /* near-black, r>g>b warm-red ember bias */
+  --text-primary:          #FBF5F0;   /* warm near-white with peachy tint */
+  --accent:                #C2410C;   /* Orange-700, 4.79:1 AA */
+  --accent-secondary:      #991B1B;   /* Red-800, crimson-dark for gradient depth */
+  --gradient-text-from:    #FCA5A5;   /* Red-300, light coral same warm family */
+  --gradient-text-via:     #FCA5A5;   /* same — два оттенка одного тона */
+  --gradient-text-to:      #C2410C;   /* accent, anchors gradient */
+  --text-secondary:        #D5C5BC;   /* warm rose-gray, 11.84:1 AAA */
+  --success:               #10B981;   /* semantic green, не меняем */
+  --text-inverse:          #FBF5F0;   /* warm near-white for hover text */
+  --text-muted:            rgba(205, 185, 178, 0.4); /* warm rose muted placeholder */
+  --surface-disabled:      rgb(36 22 18);  /* dark warm-red disabled bg */
+  --text-disabled:         rgb(115 88 78); /* warm-brown disabled text */
+  --surface-select:        #180C08;   /* deep warm-red for select option bg */
+  --surface-raised:        rgba(255, 255, 255, 0.03);
+  --border-subtle:         rgba(255, 255, 255, 0.08);
+  --surface-raised-hover:  rgba(255, 255, 255, 0.06);
+  --border-strong:         rgba(255, 255, 255, 0.15);
+  --surface-input:         rgba(255, 255, 255, 0.05);
+  --border-input:          rgba(255, 255, 255, 0.10);
+  --accent-alpha-08:       rgba(194, 65, 12, 0.08);  /* #C2410C RGB */
+  --accent-alpha-15:       rgba(194, 65, 12, 0.15);
+  --accent-alpha-18:       rgba(194, 65, 12, 0.18);
+  --accent-alpha-20:       rgba(194, 65, 12, 0.20);
+  --accent-alpha-25:       rgba(194, 65, 12, 0.25);
+  --accent-alpha-35:       rgba(194, 65, 12, 0.35);
+  --accent-alpha-45:       rgba(194, 65, 12, 0.45);
+  --accent-alpha-50:       rgba(194, 65, 12, 0.50);
+  --accent-alpha-60:       rgba(194, 65, 12, 0.60);
+  --success-alpha-20:      rgba(16, 185, 129, 0.20);
+}
+/* ── END TEMPORARY DESIGN PREVIEW ─────────────────────────────────── */
+
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--surface-base);
+  --color-foreground: var(--text-primary);
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--surface-base);
+  color: var(--text-primary);
 }
 
 /* ── Credits badge shake on deduct ───────────────────── */
@@ -53,30 +194,30 @@ body {
 
 /* ── Dark card (glassmorphism) ────────────────────────── */
 .card-dark {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
   transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 .card-dark:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(124, 58, 237, 0.45);
-  box-shadow: 0 0 30px rgba(124, 58, 237, 0.18);
+  background: var(--surface-raised-hover);
+  border-color: var(--accent-alpha-45);
+  box-shadow: 0 0 30px var(--accent-alpha-18);
   transform: translateY(-2px);
 }
 
 /* ── Gradient button ──────────────────────────────────── */
 .btn-gradient {
-  background: linear-gradient(135deg, #7C3AED, #2563EB);
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
   transition: box-shadow 0.3s ease, transform 0.3s ease, opacity 0.3s ease;
 }
 .btn-gradient:hover {
-  box-shadow: 0 0 32px rgba(124, 58, 237, 0.5);
+  box-shadow: 0 0 32px var(--accent-alpha-50);
   transform: scale(1.025);
   opacity: 0.92;
 }
 .btn-gradient:disabled {
-  background: rgb(30 41 59);
-  color: rgb(100 116 139);
+  background: var(--surface-disabled);
+  color: var(--text-disabled);
   opacity: 1;
   cursor: not-allowed;
   box-shadow: none;
@@ -85,7 +226,7 @@ body {
 
 /* ── Gradient text ────────────────────────────────────── */
 .gradient-text {
-  background: linear-gradient(135deg, #A78BFA, #60A5FA, #F472B6);
+  background: linear-gradient(135deg, var(--gradient-text-from), var(--gradient-text-via), var(--gradient-text-to));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -93,25 +234,25 @@ body {
 
 /* ── Ghost button ─────────────────────────────────────── */
 .btn-ghost-dark {
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #CBD5E1;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
   transition: border-color 0.3s ease, color 0.3s ease, background 0.3s ease;
 }
 .btn-ghost-dark:hover {
-  border-color: rgba(124, 58, 237, 0.5);
-  color: #fff;
-  background: rgba(124, 58, 237, 0.08);
+  border-color: var(--accent-alpha-50);
+  color: var(--text-inverse);
+  background: var(--accent-alpha-08);
 }
 
 /* ── Pro card glow ────────────────────────────────────── */
 .pro-card-glow {
-  border: 1px solid rgba(124, 58, 237, 0.6);
-  box-shadow: 0 0 60px rgba(124, 58, 237, 0.35), 0 0 0 1px rgba(124, 58, 237, 0.2) inset;
+  border: 1px solid var(--accent-alpha-60);
+  box-shadow: 0 0 60px var(--accent-alpha-35), 0 0 0 1px var(--accent-alpha-20) inset;
 }
 
 /* ── Step connector line ──────────────────────────────── */
 .step-line {
-  background: linear-gradient(to right, #7C3AED, #2563EB);
+  background: linear-gradient(to right, var(--accent), var(--accent-secondary));
   opacity: 0.4;
 }
 
@@ -151,39 +292,39 @@ body {
 /* ── Dark scrollbar ───────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.35); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.6); }
+::-webkit-scrollbar-thumb { background: var(--accent-alpha-35); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-alpha-60); }
 
 /* ── Dark UI wrapper (dashboard / studio / billing) ───── */
-.dark-ui { background: #0A0A0F; color: #F8FAFC; }
+.dark-ui { background: var(--surface-base); color: var(--text-primary); }
 
 .dark-ui input:not([type='range']):not([type='file']):not([type='checkbox']):not([type='radio']),
 .dark-ui textarea {
-  background: rgba(255,255,255,0.05) !important;
-  border-color: rgba(255,255,255,0.1) !important;
-  color: #F8FAFC !important;
+  background: var(--surface-input) !important;
+  border-color: var(--border-input) !important;
+  color: var(--text-primary) !important;
 }
 .dark-ui input::placeholder,
-.dark-ui textarea::placeholder { color: rgba(148,163,184,0.4) !important; }
+.dark-ui textarea::placeholder { color: var(--text-muted) !important; }
 .dark-ui input:focus,
 .dark-ui textarea:focus {
-  border-color: #7C3AED !important;
-  box-shadow: 0 0 0 3px rgba(124,58,237,0.15), 0 0 10px rgba(124,58,237,0.08) !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-alpha-15), 0 0 10px var(--accent-alpha-08) !important;
   outline: none !important;
 }
 .dark-ui select {
-  background: rgba(255,255,255,0.05) !important;
-  border-color: rgba(255,255,255,0.1) !important;
-  color: #F8FAFC !important;
+  background: var(--surface-input) !important;
+  border-color: var(--border-input) !important;
+  color: var(--text-primary) !important;
 }
-.dark-ui select option { background: #13131A; color: #F8FAFC; }
-.dark-ui input[type='range'] { accent-color: #7C3AED !important; }
+.dark-ui select option { background: var(--surface-select); color: var(--text-primary); }
+.dark-ui input[type='range'] { accent-color: var(--accent) !important; }
 .dark-ui audio { filter: invert(0.85) hue-rotate(180deg); border-radius: 8px; }
 
 /* ── Step indicator states ────────────────────────────── */
 .step-active {
-  background: #7C3AED;
-  box-shadow: 0 0 0 4px rgba(124,58,237,0.25), 0 0 16px rgba(124,58,237,0.5);
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-alpha-25), 0 0 16px var(--accent-alpha-50);
 }
-.step-done { background: #10B981; box-shadow: 0 0 0 3px rgba(16,185,129,0.2); }
-.step-future { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); }
+.step-done { background: var(--success); box-shadow: 0 0 0 3px var(--success-alpha-20); }
+.step-future { background: var(--surface-raised-hover); border: 1px solid var(--border-input); }
