@@ -53,7 +53,7 @@ Lefiro (ранее YouTubeGen) — сервис генерации faceless-ви
 - **ElevenLabs** (официальный) — виден в UI, ручной выбор, не дефолт.
 - **apihost** — движок озвучки, реально используется (27 операций за 90 дней), в прошлых версиях файла не описан.
 - **Gemini** (NB2 Lite) — запаркован до запуска (аккаунт есть, ключ у владельца, нужен только Buy credits + ключ в env).
-- **YouTube Data API** — аналитика, квота 10 000 юнитов/день на общем ключе. Канальные отчёты на RSS (0 юнитов) + channels.list (1 юнит). BYOK для discovery-отчётов.
+- **YouTube Data API** — аналитика, квота 10 000 юнитов/день на общем ключе. Роуты и стоимость: `/niche` ~202 юн. (старый, BYOK нет), `/trends` ~101 юн., `/channel` 3–111 юн. (зависит от handle/текст-поиск + глубина), `/niche-finder` ~330 юн. (3 из 5 ниш). Все новые роуты (`trends`, `channel`, `rising-stars`, `niche-finder`, `keywords`) — BYOK через `resolveAnalyticsContext()`, 30% скидка при своём ключе. Ключ: AES-256-GCM в `profiles.encrypted_yt_key`, мастер-ключ `YT_KEY_ENCRYPT_SECRET`. 403→`YouTubeQuotaError` (`src/lib/youtube-quota.ts`), BYOK-fallback на shared ключ при квоте.
 - ⚠️ **Серые сервисы — НЕ использовать:** Kie.ai, NanoBananaAPI.ai, fast-gen.ai (правило 16).
 
 ### Фактический прайс-лист прода (Δ9, из `credit_transactions` за 90 дней)
@@ -569,7 +569,7 @@ SUMMARY: engine=flux_schnell ordered=8 created=8 total_sec=15.0s
 - **Отмены запущенной генерации нет** — закрыто предупреждающим диалогом, но при больших партиях это ощутимо.
 - **Egress на Railway вырастет** после переноса заливки картинок (сейчас $0,36 из $1,42).
 - Панель `/admin/metrics` — после накопления данных.
-- Уборка медиа: DRY_RUN=false выставлен, крон работает, но 0 удалений — причины в разделе «Retention медиа» выше (planning loop + B2 delete 400). ⚠️ Δ10 усиливает: новый движок отдаёт файлы по 150–315 КБ, поток тяжелее.
+- ✅ **Уборка медиа — planning loop починен (Δ13+).** Код задеплоен: planning step добавляет фильтр `media_expires_at=is.null`, использует `created_at` вместо `updated_at`, candidate query переключён на `media_expires_at < NOW()`. Осталось: SQL-миграция (~48 проектов), DRY_RUN=true прогон, DRY_RUN=false. ⚠️ B2 HTTP 400 (`Content-MD5`) — отдельная задача, temp/-файлы не удаляются. ⚠️ Δ10: новый движок отдаёт файлы по 150–315 КБ, поток тяжелее.
 - Auto-recharge VGF отложен (риск ночных падений).
 - Кэш на роутах Opus не проверен.
 - Кап 30 в инструменте «Иллюстрации» для FAL-движков — по-прежнему без обоснования.

@@ -116,6 +116,96 @@ LIMIT 20;
 
 ---
 
+---
+
+## Разведка: аналитическая инфраструктура YouTube API (2026-08-06)
+
+### Q1. Маршруты — вызовы и квота
+
+| Маршрут | Гейт | YouTube вызовы | Квота (юнит) | Claude | Cache |
+|---|---|---|---|---|---|
+| `/api/analytics/niche` | план≠free (BYOK нет) | search×2 + channels + videos | ~202 | 2×Sonnet | `analytics_cache` 72ч |
+| `/api/analytics/trends` | `resolveAnalyticsContext` | search×1 + videos | ~101 | 2×Sonnet | `analytics_cache` 72ч |
+| `/api/analytics/channel` | `resolveAnalyticsContext` | channels(1) + playlistItems(1–4) + videos.list(1–4) | 3–111 | 2×Sonnet | `analytics_cache` 72ч |
+| `/api/analytics/niche-finder` | `resolveAnalyticsContext` | search×3 + videos×3 | ~330 | 3×Sonnet | нет (→`analytics_reports`) |
+| `/api/analytics/keywords` | `resolveAnalyticsContext` | search×1 + videos | ~101 | 2×Sonnet | `analytics_cache` 72ч |
+
+`/niche` — старый роут, использует глобальный `YOUTUBE_API_KEY` напрямую, BYOK не поддерживает.
+`/channel` с текст-поиском: 100 (search.list type=channel) + 1 (channels.list) + 1–4 (playlistItems, страницы) + 1–4 (videos.list, батчи по 50) = до ~111 юнитов.
+
+### Q2. BYOK — хранение и шифрование
+
+1. Пользователь вводит ключ → `POST /api/settings/save-yt-key` (`src/app/api/settings/save-yt-key/route.ts`):
+   - Валидация: формат `AIza...` (30–50 символов)
+   - Пробный вызов `channels?part=id&id=UC_x5XG1OV2P6uZZ5FSM9Ttw` — живой ключ
+   - Шифрование: `encryptKey(key)` → AES-256-GCM
+   - Формат в БД: `IV(12 bytes) || AuthTag(16 bytes) || Ciphertext` как hex → `profiles.encrypted_yt_key`
+2. Мастер-ключ: env `YT_KEY_ENCRYPT_SECRET` (64 hex = 32 байта). Файл: `src/lib/crypto.ts`.
+3. Авторизация на каждом запросе: `resolveAnalyticsContext()` (`src/lib/analytics-gate.ts`) — одно чтение из `profiles`, дешифровка, результат:
+
+| Ситуация | `apiKey` | `fallbackKey` | скидка |
+|---|---|---|---|
+| free plan | — | — | gate закрыт (`plan_required`) |
+| paid + encrypted_yt_key | расшифрованный ключ | `YOUTUBE_API_KEY` | −30% |
+| paid, ключа нет | `YOUTUBE_API_KEY` | — | 0% |
+
+### Q3. Управление квотой
+
+- **Внутреннего счётчика нет.** Ограничения — только со стороны YouTube.
+- `checkYouTubeQuota(status, body)` (`src/lib/youtube-quota.ts`) — бросает `YouTubeQuotaError` при status=403 + `reason` = `quotaExceeded` | `dailyLimitExceeded`.
+- Каждый маршрут ловит `YouTubeQuotaError`: BYOK → `byokQuotaResponse()`, иначе → `quotaExceededResponse()`.
+- BYOK-fallback: при `YouTubeQuotaError` с пользовательским ключом → retry на shared ключ (если `fallbackKey` есть).
+
+### Q4. Переиспользуемые паттерны
+
+| Что | Файл | Функция |
+|---|---|---|
+| Gate + BYOK + стоимость | `src/lib/analytics-gate.ts` | `resolveAnalyticsContext(userId, svc, lang)` |
+| 403 detection | `src/lib/youtube-quota.ts` | `checkYouTubeQuota(status, body)` |
+| Типизированная ошибка квоты | `src/lib/youtube-quota.ts` | `class YouTubeQuotaError` |
+| Стандартные ответы | `src/lib/youtube-quota.ts` | `byokQuotaResponse()`, `quotaExceededResponse()`, `youTubeKeyErrorResponse()` |
+| Шифрование | `src/lib/crypto.ts` | `encryptKey()` / `decryptKey()` |
+
+**Архитектурный паттерн Claude→API→Claude** (из `niche-finder/route.ts`):
+1. Claude генерирует N кандидатов (один запрос, дёшево)
+2. YouTube API верифицирует топ M параллельно (`Promise.all`)
+3. Claude финализирует ранжирование и рекомендации
+
+**Паттерн cache + report** (одинаков во всех маршрутах):
+```
+analytics_cache: upsert { cache_type, cache_key, result, created_at }
+                 select WHERE cache_type=X AND cache_key=K AND created_at > now-72h
+                 delete WHERE created_at < now-72h   ← cleanup non-fatal
+analytics_reports: insert { user_id, report_type, title, query, result }
+                   cap 20/юзер/тип — удалять самую старую при overflow
+```
+
+**`ytf()` с BYOK-fallback** (копируется в каждый маршрут):
+```ts
+async function ytf(path, params) {
+  try { return await ytFetch(path, params, apiKey) }
+  catch (e) { if (e instanceof YouTubeQuotaError && fallbackKey) return ytFetch(path, params, fallbackKey); throw e }
+}
+```
+
+### Оценка квоты: 20 подниш × 2 возрастных среза
+
+Для каждой подниши — 2 поиска с разными `publishedAfter` (например, 0–6 мес vs 6–24 мес):
+
+| Вызов | Units | Повторений |
+|---|---|---|
+| `search.list?type=video&q={niche}&publishedAfter={slice1}` | 100 | 20 |
+| `videos.list` stats slice 1 | 1 | 20 |
+| `search.list?type=video&q={niche}&publishedAfter={slice2}` | 100 | 20 |
+| `videos.list` stats slice 2 | 1 | 20 |
+| **Итого (только видео)** | **4 040** | — |
+
+С анализом конкурентов (`search.list?type=channel` × 20 подниш): +2 020 → **~6 060 units** всего.
+
+Дневная квота: 10 000 units. Один прогон = 40–60% квоты → **BYOK обязателен**.
+
+---
+
 ## Что не получилось
 
 Прочерк.
@@ -124,8 +214,8 @@ LIMIT 20;
 
 ## Изменения в файлах состояния
 
-TASKS:    задача retention обновлена — добавлен статус «починено», SQL оставлен как инструкция для владельца
-CONTEXT:  обновлён раздел Retention — фикс задокументирован
+TASKS:    задача retention обновлена — добавлен статус «починено», SQL оставлен как инструкция для владельца; добавлена задача sub-niche finder
+CONTEXT:  обновлён YouTube Data API (детальные квоты), обновлена строка retention (planning loop починен)
 WORKFLOW: без изменений
 
 ---
