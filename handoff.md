@@ -2,48 +2,40 @@
 
 ## Что сделано
 
-Прибраны неотслеживаемые файлы на main по итогам разведки.
+Разведка: почему retention-крон не удаляет медиа старше 72 часов. Ничего не менялось, только чтение.
 
-**Удалено** (одноразовые зонды, результаты зафиксированы в TASKS/CONTEXT):
-- `scripts/check-vault.mjs` — зонд vault/pgcrypto в Supabase
-- `scripts/fal-seed-probe.mjs` — зонд seed у nano-banana-2 (❌ не работает)
-- `scripts/ss-ref-probe.mjs` — зонд референса у Secret Slider (❌ игнорируется)
-- `eslint.undef-check.mjs` (корень) — дубликат `scripts/eslint.undef-check.mjs`
+**Ответы по 5 пунктам:**
 
-**Закоммичено** (`341ac3b`) — повторяемые тесты и инструменты:
-- `scripts/acceptance-language-fix.mjs` — acceptance SEO language fix
-- `scripts/eslint.undef-check.mjs` — ESLint flat-config для no-undef (связан с открытой задачей)
-- `scripts/fal-nb2-edit-probe.mjs` — зонд биллинга fal nano-banana-2/edit
-- `scripts/test-byok-live.mjs` — live acceptance BYOK gate
-- `scripts/test-inject-characters.mjs` — unit-тест imgInjectCharacterProfiles
-- `scripts/test-keywords-real-miss.mjs` — live acceptance keywords/route.ts
-- `scripts/test-quota-balance.mjs` — live acceptance quota-403
-- `scripts/test-titles-niche.mjs` — live тест niche/titles
-- `video-server/test-prompt-truncation.js` — synthetic unit-тест промпт-трюнкации
+1. **ГДЕ КРОН** — `video-server/index.js:3357`, `cron.schedule('0 4 * * *', ...)` UTC, ежедневно в 04:00 UTC. Функция `cleanupExpiredMedia()` (строка 2822).
 
-**Запушено** в origin/main (`341ac3b`).
+2. **ЧТО УДАЛЯЕТСЯ** — Supabase Storage `audio`+`images`, B2 video (`users/uid/pid/`) + audio (`audio/uid/pid/`), R2 video (`users/uid/pid/`). В базе: только выставляется `media_purged_at` (строка не удаляется). R2-хелперы реализованы (строки 129–214) — старый комментарий стр. 3853 об «отсутствии R2» устарел.
 
-**Ранее в этой сессии** (до этого коммита):
-- `redesign-landing` закоммичена и запушена (`2428254`): 35 файлов landing-v2
-- `feat/1080p-video` настроена на tracking origin/feat/1080p-video
+3. **КАК ОПРЕДЕЛЯЕТСЯ ВОЗРАСТ** — поле `projects.updated_at`, UTC. Порог: `now - RETENTION_MEDIA_HOURS * 3600_000` (строка 2869). Исключаются: `media_purged_at IS NOT NULL`, `status LIKE generating_*`, активные `video_jobs`.
+
+4. **СЛЕДЫ РАБОТЫ / DRY_RUN** — тег `[retention/dry]` или `[retention]` на каждой операции; итог + Telegram-алерт. **Корень проблемы — строка 2823:** `const DRY_RUN = env('RETENTION_DRY_RUN') !== 'false'`. Если `RETENTION_DRY_RUN` не выставлен в Railway → `'' !== 'false'` = `true` → крон работает, логирует, **ничего не удаляет**.
+
+5. **RETENTION_MEDIA_HOURS** — `parseInt(env('RETENTION_MEDIA_HOURS') || '72')` (строка 117). По умолчанию 72ч; пустое значение тоже даёт 72 (fallback `|| '72'`). Стале-лог строка 2826: `free=${RETENTION_MEDIA_HOURS.free}h` печатает `undefined` (число, а не объект) — наследие старой двух-тарифной модели, на работу не влияет.
+
+**Основная версия причины:** `RETENTION_DRY_RUN` не выставлен в Railway Variables — безопасный дефолт (комментарий стр. 2819), но именно он блокирует реальную уборку.
 
 ---
 
 ## Что не получилось
 
-Прочерк.
+Прочерк. Разведка полная.
 
 ---
 
 ## Изменения в файлах состояния
 
-TASKS:    задача «`control_job.tmp` и `scripts/*.mjs` в untracked» закрыта — добавлены хеши коммитов, старый список решений заменён итогом
-CONTEXT:  без изменений
-WORKFLOW: без изменений (кандидаты добавлены в предыдущей сессии)
+TASKS:    без изменений (задача «Уборка медиа выключена» уже была в списке, строка 187)
+CONTEXT:  обновлено: строка «Retention медиа» — добавлены механика DRY_RUN, стале-лог, R2 статус; строка про DRY_RUN в «Известные ограничения» — добавлен корень и ссылка на раздел
+WORKFLOW: без изменений (кандидатов нет)
 
 ---
 
 ## Открытые вопросы владельцу
 
-1. `scripts/fal-nb2-edit-probe.mjs` закоммичен как «повторяемый инструмент» — если фактически одноразовый, удалить в следующей итерации.
-2. Удалённые зонды (`check-vault`, `fal-seed-probe`, `ss-ref-probe`) воссоздаются из описания в CONTEXT/TASKS. Если нужно восстановить — скажите.
+1. **Перед включением:** зайти в Railway Logs, найти `[retention/dry]` около 04:00 UTC за любой день — убедиться, что кандидаты разумны (не случайные активные проекты).
+2. **Для включения:** выставить `RETENTION_DRY_RUN=false` в Railway Variables (сервис video-server). Первый прогон лучше контролировать по логам.
+3. **Стале-лог строка 2826** — можно убрать в следующем коммите в video-server (не срочно, не ломает).

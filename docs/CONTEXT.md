@@ -228,7 +228,7 @@ Lefiro (ранее YouTubeGen) — сервис генерации faceless-ви
   ⚠️ **В иллюстрациях референс работает только как текст:** `ref_url` удаляется сразу после анализа (`Step5Images.tsx`), image-to-image там не предусмотрен. Как изображение референс уходит только в превью (`nano-banana-2/edit`).
 - **Движки в студии (Δ11): четыре** — Vision Classic (`flux`, 780), Vision Fast (`flux_schnell`, 100), Vision Pro (`nano_banana`, 1170), **Vision Studio (`secretslider`, 200, асинхронный)**. Vision Ultra (`gpt_mini`, 1230) скрыт через `HIDDEN_ENGINES` — аварийный резерв, в диапазоны цен на витрине не входит.
 - **Render 1280×720** (MP4). Стоимость рендера 300 кр/мин.
-- **Retention медиа:** не менее 72ч (`RETENTION_MEDIA_HOURS=72`).
+- **Retention медиа:** крон `0 4 * * *` UTC (`video-server/index.js:3357`), функция `cleanupExpiredMedia()`. Чистит: Supabase `audio`+`images`, B2 video+audio, R2 video (R2-хелперы реализованы — старый комментарий стр. 3853 об «отсутствии» устарел). Возраст — по `projects.updated_at`, дефолт 72ч (`RETENTION_MEDIA_HOURS=72`). Кандидаты: `media_purged_at=is.null`, `status not like generating_*`, нет активных `video_jobs`. В DB только выставляет `media_purged_at` (строку не удаляет). **⚠️ DRY_RUN по умолчанию:** строка 2823 `env('RETENTION_DRY_RUN') !== 'false'` — если переменная не выставлена в Railway, крон только логирует `[retention/dry]`, ничего не удаляет. Стале-лог строка 2826 печатает `free=undefinedh paid=undefinedh` (наследие старой двух-тарифной модели, не влияет на работу).
 
 ### Консистентность персонажей между сценами (Δ12)
 
@@ -569,7 +569,7 @@ SUMMARY: engine=flux_schnell ordered=8 created=8 total_sec=15.0s
 - **Отмены запущенной генерации нет** — закрыто предупреждающим диалогом, но при больших партиях это ощутимо.
 - **Egress на Railway вырастет** после переноса заливки картинок (сейчас $0,36 из $1,42).
 - Панель `/admin/metrics` — после накопления данных.
-- Уборка медиа `cleanupExpiredMedia` всё ещё в DRY_RUN. ⚠️ Δ10 добавляет повод поторопиться: новый движок отдаёт файлы по 150–315 КБ, поток тяжелее прежнего.
+- Уборка медиа `cleanupExpiredMedia` в DRY_RUN — корень: `RETENTION_DRY_RUN` не выставлен в Railway → `env() !== 'false'` = true → крон работает каждые 04:00 UTC, но ничего не удаляет (подробный разбор — раздел «Retention медиа» выше). ⚠️ Δ10 усиливает: новый движок отдаёт файлы по 150–315 КБ, поток тяжелее.
 - Auto-recharge VGF отложен (риск ночных падений).
 - Кэш на роутах Opus не проверен.
 - Кап 30 в инструменте «Иллюстрации» для FAL-движков — по-прежнему без обоснования.
