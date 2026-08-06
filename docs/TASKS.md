@@ -288,6 +288,11 @@
 
 ## 📄 ЛЕНДИНГ И ДЕМО
 
+- [ ] **Landing v2 (редизайн) — накоплен в working tree, не закоммичен.** [2026-08-06]
+  19 untracked файлов составляют полноценный редизайн: `design-system/lefiro/MASTER.md` (токены/палитра), `public/showcase/` (8 PNG-витрин, ~6.4 МБ), `src/components/landing-v2/` (18 компонентов: Hero, Pricing, FAQ, Bento, ShowcaseReel…), `src/lib/i18n-v2.ts`, `src/app/preview-landing/page.tsx`, `src/components/dev/ThemePreview.tsx` (временный, удалить после выбора темы A/B/C).
+  Незакоммиченные M-файлы в рабочем дереве: `package.json`/`package-lock.json` (+gsap ^3.15.0) и `src/app/globals.css` (новая токен-система + временные .theme-a/.theme-b/.theme-c).
+  **Ветка `redesign-landing` есть локально, в origin НЕ запушена.** Рекомендация: переключиться на ветку и закоммитить весь блок одним PR.
+  Showcase-изображения (`gen_1622905`…`gen_1622957`) ссылаются из `landing-v2/data.ts` — без них preview-маршрут не откроется.
 - [ ] **Демо-видео для лендинга** (SHOW_DEMO_SECTION=false). [база] Витрина результата. Δ9: **никто из внешних юзеров не увидел готового видео** — ни одного рендера. Витрина закрывает часть проблемы до регистрации.
 - [ ] Отзывы и счётчики выдуманные — заменить на реальные. OG-карточка. Счётчики хиро в SSR = нули. 7→8 шагов. Обрезанный заголовок. [база]
 
@@ -305,6 +310,12 @@
 - [ ] **Убрать мёртвый дубль `spend_credits`** либо задокументировать. [Δ8]
 - [ ] **Pre-push hook `node --check`** в репо → scripts/ + core.hooksPath. [Δ3] ⚠️ Δ9: **`node --check` недостаточен** — он не поймал `ReferenceError: ownerId is not defined`, уронивший прод. В хук добавить `no-undef`.
 - [ ] **`control_job.tmp` и `scripts/*.mjs` в untracked** — разобрать, нужное закоммитить, мусор в `.gitignore`. [Δ8, Δ9] ✅ Δ10: частично закрыто — `scripts/ss-*` (тестовые картинки, JSON, probe-скрипт) и `control_job.tmp` внесены в `.gitignore`. Остаются `scripts/acceptance-language-fix.mjs`, `check-vault.mjs`, `test-byok-live.mjs`, `test-keywords-real-miss.mjs`, `test-quota-balance.mjs`, `test-titles-niche.mjs`. ⚠️ Δ11: добавился `eslint.undef-check.mjs` (временный flat-config для прогона `no-undef` по `video-server/index.js`) — он **полезен и воспроизводим**, разумнее закоммитить его в `scripts/` как рабочий инструмент, чем пересоздавать каждый раз (в Δ11 он уже терялся между заходами).
+  ✅ **Разведка завершена [2026-08-06]:** полный инвентарь 19 untracked путей + 3 M-файла — см. handoff.md этой сессии и таблицу ниже.
+  **Решение по каждому пути (требует действий владельца):**
+  - **Коммитить-тесты** (acceptance/unit, нужны при регрессии): `scripts/acceptance-language-fix.mjs`, `scripts/test-byok-live.mjs`, `scripts/test-inject-characters.mjs`, `scripts/test-keywords-real-miss.mjs`, `scripts/test-quota-balance.mjs`, `scripts/test-titles-niche.mjs`, `scripts/eslint.undef-check.mjs`, `scripts/fal-nb2-edit-probe.mjs`, `video-server/test-prompt-truncation.js`
+  - **Коммитить-лендинг** (вся landing-v2 работа, одним коммитом на `redesign-landing`): `design-system/lefiro/MASTER.md`, `public/showcase/` (8 PNG, ~6.4 МБ), `src/app/preview-landing/page.tsx`, `src/components/landing-v2/` (18 файлов), `src/lib/i18n-v2.ts`, `src/components/dev/ThemePreview.tsx` + незакоммиченные `package.json`/`globals.css`
+  - **Удалить** (одноразовые зонды, результат зафиксирован): `scripts/check-vault.mjs`, `scripts/fal-seed-probe.mjs`, `scripts/ss-ref-probe.mjs`, `eslint.undef-check.mjs` (корень — дубликат)
+  ⚠️ **Ветка `redesign-landing` существует только локально — в origin не запушена.** При потере рабочего дерева работа пропадёт.
 - [ ] **Заменить сентинель 'Свой текст' на колонку `projects.own_script boolean`.** [база] Δ9: сентинель уже используется как признак в разборах данных — при локализации студии инфер молча умрёт.
 - [ ] Два ffmpeg в Docker video-server. `TOOL_SLUG_REMAP` пластырь. `searchParams`-промис на tool-страницах. Глюк «—» в шапке баланса. [Δ5, Δ6, база]
 - [ ] Подавление алертов на тестовых job'ах. Race condition на лендинге (`getSession` ~100мс). Следить за тиром VGF. [Δ5, Δ6]
