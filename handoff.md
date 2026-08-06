@@ -206,6 +206,46 @@ async function ytf(path, params) {
 
 ---
 
+---
+
+## Разведка: что умеет niche-finder и чего не хватает (2026-08-06)
+
+### Что он делает
+
+Персональный советник — вход: `{interests, skills, time_per_week, goal, country, content_lang}`. Claude генерирует 5 ниш под профиль человека. YouTube API вызывается только для топ-3 ниш: `search?type=video&order=viewCount&maxResults=10` + `videos?part=statistics`. Данные из API: `pageInfo.totalResults` (video_count) и avg по топ-10 видео (avg_views). Полностью подключён к UI — вкладка «Поиск ниши» / «Find Niche» на `/analytics`.
+
+Структура ответа:
+```json
+{
+  "niches": [{ "name", "match_score", "reason", "monetization", "difficulty",
+               "time_required", "example_channels", "first_video_idea",
+               "youtube_data": { "video_count", "avg_views" } }],
+  "winner": { "name", "why_best", "action_plan", "realistic_timeline", "potential_income" },
+  "alternatives": [{ "name", "when_to_consider" }],
+  "avoid": [{ "name", "reason" }],
+  "user_profile": { "interests", "skills", "time_per_week", "goal" }
+}
+```
+
+### Чего нет по сравнению с замыслом
+
+| Фича | Статус | Причина |
+|---|---|---|
+| Разбивка широкой ниши на подниши | ❌ | Вход — профиль человека, не «музыка». Claude подбирает под личность |
+| Возрастные срезы (publishedAfter) | ❌ | publishedAfter нигде не используется. avg_views — топ-10 всех времён |
+| Подписчики каналов в топе (конкуренция) | ❌ | `videos?part=statistics` → только viewCount. subscriberCount не запрашивается |
+| Реальные цифры конкуренции | ⚠️ | video_count и avg_views реальные. Но `difficulty` («Средняя») — 100% Sonnet без данных |
+
+### Качество данных
+
+`video_count` и `avg_views` — реальные API-данные. `difficulty`, `monetization`, `example_channels` — чистые суждения/галлюцинации Sonnet. Поле `difficulty` в UI выглядит как вычисленная оценка, но ничем не подкреплено.
+
+### Вывод: доработать или новый маршрут?
+
+**Новый маршрут.** Существующий niche-finder рабочий, в UI подключён, своё назначение выполняет («какая ниша подходит мне лично»). Менять его вход сломает флоу. Замысел владельца — другой вопрос: «какие подниши рынка сейчас растут» — новый роут `/api/analytics/sub-niche-finder` с входом `{broad_niche}`, 2 age-slice, channel subscriber lookup. Переиспользует весь стек утилит (`resolveAnalyticsContext`, `ytf`, `analytics_cache` etc).
+
+---
+
 ## Что не получилось
 
 Прочерк.
