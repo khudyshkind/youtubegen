@@ -228,10 +228,10 @@ interface ChannelPlanResult {
 
 interface AnalyticsReport {
   id: string
-  report_type: 'niche' | 'niche_finder' | 'channel_plan' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars'
+  report_type: 'niche' | 'niche_finder' | 'channel_plan' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars' | 'sub_niche_finder'
   title: string
   query: string
-  result: NicheResult | NicheFinderResult | ChannelPlanResult | TrendResult | ChannelResult | RevenueResult | CommentsResult | KeywordsResult | CompareResult | RisingStarsResult
+  result: NicheResult | NicheFinderResult | ChannelPlanResult | TrendResult | ChannelResult | RevenueResult | CommentsResult | KeywordsResult | CompareResult | RisingStarsResult | SubNicheFinderData
   created_at: string
 }
 
@@ -4054,6 +4054,7 @@ const REPORT_ICONS: Record<string, string> = {
   keywords: '🔎',
   compare: '⚡',
   rising_stars: '🚀',
+  sub_niche_finder: '🧩',
 }
 
 function HistoryTab({ onOpen }: { onOpen: (report: AnalyticsReport) => void }) {
@@ -4446,7 +4447,10 @@ function SubNicheResultsView({
   )
 }
 
-function SubNicheTab() {
+function SubNicheTab({ externalResult, onClearExternal }: {
+  externalResult?: SubNicheFinderData | null
+  onClearExternal?: () => void
+}) {
   const { t, lang: uiLang } = useLang()
   const router = useRouter()
 
@@ -4466,6 +4470,7 @@ function SubNicheTab() {
   const [broadNiche,   setBroadNiche]   = useState('')
   const [country,      setCountry]      = useState('RU')
   const [contentLang,  setContentLang]  = useState('ru')
+  const [nicheCount,   setNicheCount]   = useState<20 | 30 | 40>(20)
   const [loadingDirs,  setLoadingDirs]  = useState(false)
   const [loadingNiches, setLoadingNiches] = useState(false)
   const [error,        setError]        = useState('')
@@ -4508,6 +4513,7 @@ function SubNicheTab() {
           country,
           content_lang: contentLang,
           ui_lang:      uiLang,
+          niche_count:  nicheCount,
         }),
       })
       const json = await res.json() as { ok: boolean; data?: SubNicheFinderData; error?: string; code?: string }
@@ -4530,6 +4536,18 @@ function SubNicheTab() {
 
   const selectStyle  = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }
   const inputStyle   = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }
+
+  // ── External result (opened from History) — show directly, no API call ──
+  if (externalResult) {
+    return (
+      <SubNicheResultsView
+        data={externalResult}
+        t={t}
+        lang={uiLang}
+        onBack={() => onClearExternal?.()}
+      />
+    )
+  }
 
   // ── Results ──
   if (nichesData) {
@@ -4576,6 +4594,24 @@ function SubNicheTab() {
               <p className="text-sm font-semibold text-amber-300 mb-1">{t('analytics.sn_quota_warn_title')}</p>
               <p className="text-sm text-slate-300 leading-relaxed">{t('analytics.sn_quota_warn_body')}</p>
             </div>
+          </div>
+          {/* Count selector */}
+          <div className="flex items-center gap-2 pl-8 flex-wrap">
+            <span className="text-xs text-slate-400">{uiLang === 'en' ? 'Sub-niches:' : 'Подниш:'}</span>
+            {([20, 30, 40] as const).map(n => (
+              <button key={n} onClick={() => setNicheCount(n)}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${nicheCount === n ? 'text-white' : 'text-slate-400 hover:text-white'}`}
+                style={nicheCount === n
+                  ? { background: 'rgba(124,58,237,0.3)', border: '1px solid rgba(124,58,237,0.5)' }
+                  : { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {n}
+              </button>
+            ))}
+            <span className="text-xs text-slate-500 ml-1">
+              {uiLang === 'en'
+                ? `~${nicheCount * 105} quota units`
+                : `~${(nicheCount * 105).toLocaleString('ru-RU')} ед. квоты`}
+            </span>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-400 pl-8">
             <span className="px-2 py-1 rounded"
@@ -4789,7 +4825,9 @@ export default function AnalyticsPage() {
 
   function handleOpenReport(report: AnalyticsReport) {
     setOpenedReport(report)
-    setTab(report.report_type)
+    // sub_niche_finder reports open in the sub_niche tab
+    const tabName: Tab = report.report_type === 'sub_niche_finder' ? 'sub_niche' : report.report_type
+    setTab(tabName)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -5063,7 +5101,12 @@ export default function AnalyticsPage() {
                 onResult={r => setRisingStarsResult(r)}
               />
             )}
-            {tab === 'sub_niche' && <SubNicheTab />}
+            {tab === 'sub_niche' && (
+              <SubNicheTab
+                externalResult={openedReport?.report_type === 'sub_niche_finder' ? openedReport.result as SubNicheFinderData : null}
+                onClearExternal={clearOpenedReport}
+              />
+            )}
             {tab === 'history' && <HistoryTab onOpen={handleOpenReport} />}
           </>
         )}

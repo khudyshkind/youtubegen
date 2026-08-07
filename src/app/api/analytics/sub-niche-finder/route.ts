@@ -75,10 +75,10 @@ function extractText(content: Anthropic.ContentBlock[]): string {
 
 // ─── Prompts ──────────────────────────────────────────────────────────────────
 
-function getSubNicheGenPrompt(lang: string): string {
+function getSubNicheGenPrompt(lang: string, count: number): string {
   const isRu = lang !== 'en'
   return isRu
-    ? `Ты YouTube-аналитик. Разбей нишу (или конкретное направление внутри неё) на 15-20 КОНКРЕТНЫХ подниш для YouTube-канала.
+    ? `Ты YouTube-аналитик. Разбей нишу (или конкретное направление внутри неё) на КОНКРЕТНЫЕ подниши для YouTube-канала.
 
 Если указано направление — генерируй подниши ТОЛЬКО внутри него, не выходи за его рамки.
 Без направления — разбивай всю широкую нишу.
@@ -99,8 +99,8 @@ function getSubNicheGenPrompt(lang: string): string {
 ФОРМАТ — строго JSON без markdown:
 {"sub_niches":[{"name":"Разбор гитарных аккордов для начинающих","search_query":"гитара с нуля","rpm_level":"низкий","rpm_range":"$0.5–1.5","rpm_reason":"Конкурентная ниша, низкий CPC"},{"name":"...","search_query":"...","rpm_level":"средний","rpm_range":"$2–5","rpm_reason":"..."}]}
 
-Верни ровно 15-20 подниш. Только JSON. Начни с {.`
-    : `You are a YouTube analyst. Break a niche (or a specific direction within it) into 15-20 SPECIFIC sub-niches for a YouTube channel.
+Верни ровно ${count} подниш. Только JSON. Начни с {.`
+    : `You are a YouTube analyst. Break a niche (or a specific direction within it) into SPECIFIC sub-niches for a YouTube channel.
 
 If a direction is given — generate sub-niches ONLY within that direction, do not go outside its scope.
 Without a direction — break down the entire broad niche.
@@ -121,7 +121,7 @@ For each sub-niche provide:
 FORMAT — strict JSON without markdown:
 {"sub_niches":[{"name":"Guitar chords breakdown for beginners","search_query":"guitar for beginners","rpm_level":"low","rpm_range":"$0.5–1.5","rpm_reason":"Competitive niche, low CPC"},{"name":"...","search_query":"...","rpm_level":"medium","rpm_range":"$2–5","rpm_reason":"..."}]}
 
-Return exactly 15-20 sub-niches. JSON only. Start with {.`
+Return exactly ${count} sub-niches. JSON only. Start with {.`
 }
 
 function getVerdictPrompt(lang: string): string {
@@ -230,13 +230,16 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
     const body = await req.json() as {
-      broad_niche?: string; country?: string; content_lang?: string; ui_lang?: string; direction?: string
+      broad_niche?: string; country?: string; content_lang?: string; ui_lang?: string; direction?: string; niche_count?: number
     }
     const broad_niche  = body.broad_niche?.trim() ?? ''
     lang               = body.ui_lang ?? 'ru'
     const country      = body.country      ?? 'RU'
     const content_lang = body.content_lang ?? 'ru'
     const direction    = body.direction?.trim() || undefined
+    const niche_count: 20 | 30 | 40 = ([20, 30, 40] as const).includes(body.niche_count as 20 | 30 | 40)
+      ? body.niche_count as 20 | 30 | 40
+      : 20
 
     if (!broad_niche) {
       return NextResponse.json(
@@ -252,17 +255,18 @@ export async function POST(req: NextRequest) {
     plan       = ctx.plan
     if (gateRes) return gateRes
 
-    // BYOK-only gate: ~QUOTA_BUDGET units per run is too much to draw from the shared key.
+    // BYOK-only gate: quota per run scales with niche_count, too much to draw from shared key.
     if (!userHasKey) {
       const isRu = lang !== 'en'
+      const quotaEst = niche_count * 105
       return NextResponse.json({
         ok:           false,
         error:        isRu
-          ? `Анализ подниш использует до ${QUOTA_BUDGET} единиц вашей дневной YouTube API-квоты и доступен только с вашим ключом. Добавьте ключ в Настройках — и получите скидку 30% на все аналитические отчёты.`
-          : `Sub-niche analysis uses up to ${QUOTA_BUDGET} YouTube API units from your daily quota and requires your own key. Add your key in Settings — you'll also get a 30% discount on all analytics.`,
+          ? `Анализ подниш использует до ${quotaEst} единиц вашей дневной YouTube API-квоты и доступен только с вашим ключом. Добавьте ключ в Настройках — и получите скидку 30% на все аналитические отчёты.`
+          : `Sub-niche analysis uses up to ${quotaEst} YouTube API units from your daily quota and requires your own key. Add your key in Settings — you'll also get a 30% discount on all analytics.`,
         code:         'byok_required',
         settings_url: '/settings',
-        quota_budget: QUOTA_BUDGET,
+        quota_budget: quotaEst,
       }, { status: 403 })
     }
 
@@ -285,9 +289,9 @@ export async function POST(req: NextRequest) {
 
     // ── Cache check ────────────────────────────────────────────────────────
     // v2: cache key bumped because algorithm changed (search_query, reliable flag)
-    // direction-scoped runs get their own cache entry
+    // direction-scoped and count-scoped runs get their own cache entry
     const dirPart  = direction ? `|dir:${direction.toLowerCase().trim()}` : ''
-    const cacheKey = `${broad_niche.toLowerCase().trim()}|${country}|${content_lang}${dirPart}|v2`
+    const cacheKey = `${broad_niche.toLowerCase().trim()}|${country}|${content_lang}${dirPart}|n:${niche_count}|v2`
     try {
       const { data: cached } = await svc
         .from('analytics_cache')
@@ -299,15 +303,28 @@ export async function POST(req: NextRequest) {
       if (cached) {
         console.log('[sub-niche] cache hit')
         try {
-          const { data: old } = await svc
-            .from('analytics_reports').select('id')
-            .eq('user_id', user.id).eq('report_type', 'sub_niche_finder')
-            .order('created_at', { ascending: true })
-          if ((old?.length ?? 0) >= 20) await svc.from('analytics_reports').delete().eq('id', old![0].id)
-          await svc.from('analytics_reports').insert({
-            user_id: user.id, report_type: 'sub_niche_finder',
-            title: `Подниши: ${broad_niche}`, query: broad_niche, result: cached.result,
-          })
+          const { data: existing } = await svc
+            .from('analytics_reports')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('report_type', 'sub_niche_finder')
+            .eq('query', broad_niche)
+            .gte('created_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
+            .maybeSingle()
+          if (!existing) {
+            const { data: old } = await svc
+              .from('analytics_reports').select('id')
+              .eq('user_id', user.id).eq('report_type', 'sub_niche_finder')
+              .order('created_at', { ascending: true })
+            if ((old?.length ?? 0) >= 20) await svc.from('analytics_reports').delete().eq('id', old![0].id)
+            await svc.from('analytics_reports').insert({
+              user_id: user.id, report_type: 'sub_niche_finder',
+              title: direction ? `Подниши: ${broad_niche} → ${direction}` : `Подниши: ${broad_niche}`,
+              query: broad_niche, result: cached.result,
+            })
+          } else {
+            console.log('[sub-niche] cache-hit: report already saved recently, skip')
+          }
         } catch (e) {
           console.warn('[sub-niche] cache-hit report save failed:', e instanceof Error ? e.message : String(e))
         }
@@ -325,15 +342,16 @@ export async function POST(req: NextRequest) {
     const uiLangFull = resolveUserLang(req, lang)
     const anthropic  = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
 
-    // ── Step 1: Haiku — broad niche (+ optional direction) → 15-20 sub-niches ──
-    console.log(`[sub-niche] step 1: haiku gen | broad="${broad_niche}" dir="${direction ?? ''}" country=${country} lang=${content_lang}`)
+    // ── Step 1: Haiku — broad niche (+ optional direction) → niche_count sub-niches ──
+    console.log(`[sub-niche] step 1: haiku gen | broad="${broad_niche}" dir="${direction ?? ''}" count=${niche_count} country=${country} lang=${content_lang}`)
     const directionHint = direction
       ? ` Направление: "${direction}". Генерируй подниши ТОЛЬКО внутри этого направления, не выходи за его рамки.`
       : ''
+    const haikuMaxTokens = niche_count >= 40 ? 4000 : niche_count >= 30 ? 3000 : 2500
     const msg1 = await anthropic.messages.create({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 2500,
-      system: [{ type: 'text', text: getSubNicheGenPrompt(lang), cache_control: { type: 'ephemeral' } }],
+      max_tokens: haikuMaxTokens,
+      system: [{ type: 'text', text: getSubNicheGenPrompt(lang, niche_count), cache_control: { type: 'ephemeral' } }],
       messages: [{
         role:    'user',
         content: `Ниша: "${broad_niche}".${directionHint} Рынок: ${country}. Язык контента: ${content_lang}.${langNote(uiLangFull)}`,
@@ -347,7 +365,7 @@ export async function POST(req: NextRequest) {
     )
     if (!rawNiches?.length) throw new Error('Haiku returned no sub-niches')
     // Ensure search_query falls back to name if Haiku omitted it
-    const sub_niches: SubNicheInput[] = rawNiches.slice(0, 20).map(n => ({
+    const sub_niches: SubNicheInput[] = rawNiches.slice(0, niche_count).map(n => ({
       ...n,
       search_query: n.search_query?.trim() || n.name,
     }))
