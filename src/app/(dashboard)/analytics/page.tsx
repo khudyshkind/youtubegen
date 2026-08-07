@@ -4476,7 +4476,7 @@ function SubNicheTab() {
 
   async function handleLoadNiches() {
     if (!dirsData || !selectedDir) return
-    setError(''); setLoadingNiches(true); setShowConfirm(false); setNichesData(null)
+    setError(''); setLoadingNiches(true); setNichesData(null)
     try {
       const res  = await fetch('/api/analytics/sub-niche-finder', {
         method: 'POST',
@@ -4495,8 +4495,13 @@ function SubNicheTab() {
         if (json.code === 'byok_required') { setError('__byok__'); return }
         setError(json.code === 'NO_CREDITS' ? t('analytics.err_credits') : (json.error ?? t('analytics.err_general')))
       } else {
-        setNichesData(json.data ?? null)
-        void refreshCredits()
+        if (!json.data) {
+          setError(t('analytics.err_general'))
+        } else {
+          setShowConfirm(false)
+          setNichesData(json.data)
+          void refreshCredits()
+        }
       }
     } catch { setError(t('analytics.err_general')) }
     finally { setLoadingNiches(false) }
@@ -4560,10 +4565,13 @@ function SubNicheTab() {
               {uiLang === 'en' ? 'Direction:' : 'Направление:'} <span className="text-slate-300">«{selectedDir}»</span>
             </span>
           </div>
-          {error && <p className="text-sm text-red-400 pl-8">{error}</p>}
+          {error === '__plan__' ? <div className="pl-8"><PlanRequiredBlock /></div>
+            : error === '__byok__' ? <div className="pl-8"><ByokBlock /></div>
+            : error ? <p className="text-sm text-red-400 pl-8">{error}</p>
+            : null}
           <div className="flex gap-3 pl-8">
-            <button onClick={() => void handleLoadNiches()}
-              className="btn-gradient px-5 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center gap-2">
+            <button onClick={() => void handleLoadNiches()} disabled={loadingNiches}
+              className="btn-gradient px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center gap-2">
               {t('analytics.sn_confirm_btn')}
             </button>
             <button onClick={() => setShowConfirm(false)}
