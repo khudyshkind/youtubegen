@@ -1,3 +1,66 @@
+# Отчёт: 2026-08-08 (задача 3 — newcomer_channel_ids + route channel-breakout)
+
+## Что сделано
+
+### 1. sub-niche-finder: сохранение ID новичковых каналов
+
+**`src/app/api/analytics/sub-niche-finder/route.ts`:**
+- `RawEnriched` — добавлено поле `newcomer_channel_ids: string[]`, инициализируется `[]`
+- Step 3b (`channels.list`): если `ageMonths < 12` — `base.newcomer_channel_ids.push(c.id)`
+- `ComputedNiche` — `newcomer_channel_ids: string[]`, маппинг: `newcomer_channel_ids: n.newcomer_channel_ids`
+- `SubNicheResult` — `newcomer_channel_ids: string[]`, сборка: `newcomer_channel_ids: n.newcomer_channel_ids`
+
+**`src/app/(dashboard)/analytics/page.tsx`:**
+- `SubNicheItem.newcomer_channel_ids: string[]` — добавлено в интерфейс
+
+### 2. Новый маршрут `/api/analytics/channel-breakout`
+
+**`src/app/api/analytics/channel-breakout/route.ts`** (новый файл):
+
+**Вход:** `{ channel_ids, sub_niche_name, niche_median_views?, limit: 20|50, ui_lang? }`
+
+**Ограничения:** BYOK обязателен (`resolveAnalyticsContext` → `byokRequiredResponse` если `!userHasKey`).
+
+**Шаг 1** — `channels.list?part=snippet,statistics,contentDetails` батчами по 50 → достаём возраст канала, subs, uploads_playlist ID.
+
+**Шаг 2** — `BATCH_SIZE=5` каналов параллельно, `BATCH_DELAY=600ms` между батчами:
+- `playlistItems.list?maxResults=50` → ID и даты публикации видео
+- `videos.list?part=snippet,statistics,contentDetails` → просмотры, duration, title
+- Retry до 3 раз при 429 с нарастающей паузой
+
+**Разделение:** `duration_s < 180` → Shorts; `>= 180` → горизонтальные
+
+**Метрики на канал:**
+| метрика | откуда |
+|---|---|
+| `months_to_1k` | возраст канала, если subs >= 1000; иначе null |
+| `views_per_video` | медиана просмотров горизонтальных |
+| `upload_frequency` | горизонтальных vids / sample_weeks |
+| `spread` | max / median горизонтальных |
+| `days_to_first_hit` | дней от создания до первого горизонтального > niche_median_views |
+| `shorts_share` | shorts / (horizontal + shorts) |
+
+**Сводка:** медианы по всей группе, `under_5mo_past_1k`.
+
+**Вердикт:** Sonnet 4.5, 1500 токенов, ЗАПРЕТ на обложки/хуки/подачу/монтаж, ЗАПРЕТ машинных имён полей, заголовки видео только как факт. JSON: `growth_speed / content_cadence / view_concentration / shorts_role / overall`, source:'estimate'.
+
+**Биллинг:** `CREDIT_COSTS.channel_breakout = 2000` (× 0.7 с BYOK = 1400). Сохраняется в `analytics_reports` (cap 20) с `report_type: 'channel_breakout'`.
+
+**`src/lib/types.ts`:** `channel_breakout: 2000` добавлено в `CREDIT_COSTS`.
+
+## Коммит
+
+`c8a85d8` — feat(analytics): task 3 — channel-breakout route + newcomer_channel_ids in sub-niche-finder
+
+## Что проверить владельцу
+
+1. Запустить sub-niche-finder → убедиться что `newcomer_channel_ids` есть в результате (DevTools → Network → response sub_niches[0].newcomer_channel_ids)
+2. Вызвать `POST /api/analytics/channel-breakout` с `{ channel_ids, sub_niche_name, limit: 20 }` — должен вернуть `ok: true` с `channels`, `summary`, `verdict`
+3. Без BYOK-ключа — должен вернуть 403 byok_required
+4. UI channel-breakout — **отдельная задача, ещё не реализована**
+
+---
+
 # Отчёт: 2026-08-07 (история, 20/30/40, кеш-дедупликация)
 
 ## Что сделано
