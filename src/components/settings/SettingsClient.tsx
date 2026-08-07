@@ -361,8 +361,17 @@ export default function SettingsClient({ profile }: Props) {
                     <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">3.</span><span>Left sidebar → <strong className="text-slate-300">APIs &amp; Services</strong> → <strong className="text-slate-300">Library</strong></span></li>
                     <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">4.</span><span>Search <strong className="text-slate-300">YouTube Data API v3</strong> → click it → <strong className="text-slate-300">Enable</strong></span></li>
                     <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">5.</span><span>Left sidebar → <strong className="text-slate-300">APIs &amp; Services</strong> → <strong className="text-slate-300">Credentials</strong></span></li>
-                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">6.</span><span>Click <strong className="text-slate-300">+ Create Credentials</strong> → <strong className="text-slate-300">API key</strong> → copy the key (starts with <code className="text-amber-300">AIza</code>)</span></li>
-                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">7.</span><span>Do <strong className="text-red-400">not</strong> set HTTP referrer or IP restrictions — our servers must be able to use the key without restrictions</span></li>
+                    <li className="flex gap-2">
+                      <span className="text-violet-400 font-bold shrink-0">6.</span>
+                      <span>Click <strong className="text-slate-300">+ Create Credentials</strong> at the top of the page.
+                        <ul className="flex flex-col gap-1.5 mt-1.5 ml-1 list-none">
+                          <li className="flex gap-1.5"><span className="shrink-0 text-slate-500">•</span><span>If a <strong className="text-slate-300">dropdown menu</strong> appears — choose <strong className="text-slate-300">API key</strong>. The key is created immediately.</span></li>
+                          <li className="flex gap-1.5"><span className="shrink-0 text-slate-500">•</span><span>If a <strong className="text-slate-300">wizard</strong> opens asking <em>"Which API are you using?"</em> — select <strong className="text-slate-300">YouTube Data API v3</strong>, then under <em>"What data will you be accessing?"</em> choose <strong className="text-slate-300">Public data</strong> and click <strong className="text-slate-300">Next</strong>. <span className="text-slate-500">(Public data creates an API key; User data creates an OAuth client, which won&apos;t work here.)</span></span></li>
+                        </ul>
+                      </span>
+                    </li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">7.</span><span>Copy the key — it starts with <code className="text-amber-300">AIza</code></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">8.</span><span>Do <strong className="text-red-400">not</strong> set HTTP referrer or IP restrictions — our servers must be able to use the key without restrictions</span></li>
                   </ol>
                   <div className="rounded-lg px-3 py-2 text-slate-400 mt-1" style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
                     <strong className="text-amber-300">Default quota:</strong> 10,000 units/day. Sub-niche search uses ~2,300 units per run (≈ 4 runs/day). If you need more, request a quota increase in Google Cloud Console.
@@ -377,8 +386,17 @@ export default function SettingsClient({ profile }: Props) {
                     <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">3.</span><span>Боковое меню → <strong className="text-slate-300">API и сервисы</strong> → <strong className="text-slate-300">Библиотека</strong></span></li>
                     <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">4.</span><span>Найдите <strong className="text-slate-300">YouTube Data API v3</strong> → нажмите → <strong className="text-slate-300">Включить</strong></span></li>
                     <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">5.</span><span>Боковое меню → <strong className="text-slate-300">API и сервисы</strong> → <strong className="text-slate-300">Учётные данные</strong></span></li>
-                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">6.</span><span>Нажмите <strong className="text-slate-300">+ Создать учётные данные</strong> → <strong className="text-slate-300">Ключ API</strong> → скопируйте ключ (начинается с <code className="text-amber-300">AIza</code>)</span></li>
-                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">7.</span><span><strong className="text-red-400">Не устанавливайте</strong> ограничения по IP-адресам или HTTP-реферерам — наши серверы должны использовать ключ без ограничений</span></li>
+                    <li className="flex gap-2">
+                      <span className="text-violet-400 font-bold shrink-0">6.</span>
+                      <span>Нажмите <strong className="text-slate-300">+ Создать учётные данные</strong> вверху страницы.
+                        <ul className="flex flex-col gap-1.5 mt-1.5 ml-1 list-none">
+                          <li className="flex gap-1.5"><span className="shrink-0 text-slate-500">•</span><span>Если открылось <strong className="text-slate-300">выпадающее меню</strong> — выберите <strong className="text-slate-300">Ключ API</strong>. Ключ создастся сразу.</span></li>
+                          <li className="flex gap-1.5"><span className="shrink-0 text-slate-500">•</span><span>Если открылся <strong className="text-slate-300">мастер</strong> с вопросом <em>«Which API are you using?»</em> — выберите <strong className="text-slate-300">YouTube Data API v3</strong>, затем в разделе <em>«What data will you be accessing?»</em> отметьте <strong className="text-slate-300">Public data</strong> и нажмите <strong className="text-slate-300">Next</strong>. <span className="text-slate-500">(Public data создаёт API-ключ; User data создаёт OAuth-клиент — он не подойдёт.)</span></span></li>
+                        </ul>
+                      </span>
+                    </li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">7.</span><span>Скопируйте ключ — он начинается с <code className="text-amber-300">AIza</code></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">8.</span><span><strong className="text-red-400">Не устанавливайте</strong> ограничения по IP-адресам или HTTP-реферерам — наши серверы должны использовать ключ без ограничений</span></li>
                   </ol>
                   <div className="rounded-lg px-3 py-2 text-slate-400 mt-1" style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
                     <strong className="text-amber-300">Квота по умолчанию:</strong> 10 000 единиц в день. Один прогон поиска подниш занимает ~2 300 единиц (≈ 4 прогона в день). Если нужно больше — запросите увеличение квоты в Google Cloud Console.
