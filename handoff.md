@@ -1,3 +1,51 @@
+# Отчёт: 2026-08-07 (три исправления вывода «Поиска подниш»)
+
+## Что сделано
+
+### 1. Колонка «Выборка» — человекочитаемый вид
+
+**`src/app/(dashboard)/analytics/page.tsx`:**
+- `SubNicheResultsView` принимает новый проп `lang: string` (передаётся из `SubNicheTab` как `lang={uiLang}`)
+- В `.map` таблицы вычисляется `sampleTitle`:
+  - ru: `"50 видео · 34 каналов · свежих ср. 40 дн · старых ср. 222 дн"`
+  - en: `"50 videos · 34 channels · fresh avg 40d · old avg 222d"`
+- TD ячейки «Выборка»: `title={sampleTitle}`, контент — `{videos} · {channels}` (убрана криптограмма `50v/34c · 40св/222ст`)
+
+### 2. Запрет машинных имён в вердикте
+
+**`src/app/api/analytics/sub-niche-finder/route.ts`** — `getVerdictPrompt`:
+- Добавлен блок ЗАПРЕТ/PROHIBITION после описания признаков «пробиваемой» и «закрытой» ниши
+- Запрещённые поля: `newcomer_share`, `median_views_per_video`, `top_subs_median`, `growth_ratio`, `fresh_video_count`
+- Глоссарий: «доля новых каналов», «медиана просмотров», «медиана подписчиков», «коэффициент роста», «видео за 90 дней»
+- Пример правильно: «Доля новых каналов — 88%, медиана просмотров — 2 463.»
+- Пример неправильно: «newcomer_share = 0.88, median_views = 2 463.»
+
+### 3. RPM с числовым диапазоном
+
+**`src/app/api/analytics/sub-niche-finder/route.ts`:**
+- `getSubNicheGenPrompt` — добавлен `rpm_range: "$X–Y"` (примеры: `$0.5–1.5`, `$2–5`, `$5–15`), обновлён JSON-пример
+- `SubNicheInput`: `rpm_range?: string`
+- `RawEnriched`: `rpm_range: string`, инициализация: `rpm_range: niche.rpm_range ?? ''`
+- `ComputedNiche`: `rpm_range: string`, маппинг: `rpm_range: n.rpm_range`
+- `SubNicheResult.rpm_estimate`: `range?: MetricValue<string>`
+- Сборка: `range: { value: n.rpm_range, source: 'estimate' }`
+
+**`src/app/(dashboard)/analytics/page.tsx`:**
+- `SubNicheItem.rpm_estimate`: `range?: SNMetric<string>`
+- RPM-ячейка: если `range.value` — `<slate-300 tabular-nums>$2–5</> <amber italic>средний</>`, иначе — только уровень (совместимость со старыми кэшами)
+
+## Коммит
+
+`131dd3d` — fix(sub-niche): readable sample column, verdict no machine names, RPM range
+
+## Что проверить владельцу после прогона
+
+1. **RPM с диапазоном**: в таблице должно быть `$2–5 средний` (серое + amber), а не просто «средний»
+2. **Выборка**: навести мышь на ячейку → tooltip `"50 видео · 34 каналов · свежих ср. X дн · старых ср. Y дн"`
+3. **Вердикт**: Sonnet не должен писать `newcomer_share = 0.88`, только «доля новых каналов — 88%»
+
+---
+
 # Отчёт: 2026-08-07 (инструкция: два пути в шаге 6)
 
 ## Что сделано
