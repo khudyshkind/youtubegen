@@ -1,3 +1,49 @@
+# Отчёт: 2026-08-07 (нормировка growth_ratio на возраст видео)
+
+## Что сделано
+
+Реализована vpd-нормировка `growth_ratio` в `sub-niche-finder`. Quota не изменилась.
+
+### Изменения в коде
+
+**`src/app/api/analytics/sub-niche-finder/route.ts`:**
+- `RawEnriched`: добавлено `views_vpd: number[]`, `fresh_ages: number[]`
+- `ComputedNiche`: добавлено `views_vpd`, `median_age_fresh`, `median_age_old`
+- `SubNicheResult.metrics`: добавлено `sample_age_days: { fresh, old }` — смещение когорты видно в ответе
+- Step 2: строим `freshPubMap<videoId, publishedAt>` из snippet (уже приходит), вычисляем `vpd = viewCount / max(1, age)` при обработке videos.list
+- Step 5: аналогично `oldPubMap`, `oldVpd[]`, `oldAges[]`; `growth_ratio = median(fresh_vpd) / median(old_vpd)`
+- Sonnet prompt: обновлено описание growth_ratio → "просм/день"
+
+**`scripts/test-sub-niche-finder.mjs`:**
+- Зеркалит те же изменения (JS)
+- Отслеживает `old_growth_ratio` (raw) и `growth_ratio` (vpd) параллельно
+- Добавлена "музыка для прослушивания" (18 ниш)
+- Таблица сравнения: `old_gr | new_gr | age_f(д) | age_o(д) | коррекция`
+
+### Live-test: "музыка для прослушивания" (2026-08-07)
+
+13 из 18 ниш упали в 429 (параллельные запросы исчерпали rate limit). Одна ниша с полными данными:
+
+| Подниша | old_gr | new_gr | age_f(д) | age_o(д) | коррекция |
+|---|---|---|---|---|---|
+| Рок-баллады для прослушивания | 0.04 | 0.28 | 57 | 260 | 7.0× |
+
+Теоретическая коррекция age_o/age_f = 260/57 ≈ 4.6×. Практическая 7× — из-за нелинейности: самые просматриваемые старые видео накопили несоразмерно много views, занижая vpd.
+
+Quota: 611 юн. (без изменения относительно предыдущих прогонов; 13 ниш провалились до videos.list).
+
+## Изменения в файлах состояния
+
+TASKS:    ✅ growth_ratio нормирован — закрыто, таблица live-test в записи
+CONTEXT:  пункт "age-bias НЕ исправлен" → "нормирован на возраст (2026-08-07)"
+WORKFLOW: обновлён Случай — добавлен факт исправления
+
+## Открытые вопросы владельцу
+
+Нет. Следующий: UI-вкладка в `/analytics/page.tsx`.
+
+---
+
 # Отчёт: 2026-08-07 (разведка growth_ratio + реальные заголовки)
 
 ## Что сделано

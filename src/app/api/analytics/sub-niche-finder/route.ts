@@ -116,7 +116,7 @@ function getVerdictPrompt(lang: string): string {
 • median_views_per_video — медиана просмотров свежих видео → потенциал охвата
 • newcomer_share — доля каналов в топе, созданных < 12 мес. → пробиваемость (0.0–1.0)
 • top_subs_median — медиана подписчиков топ-каналов → сила конкурентов
-• growth_ratio — медиана свежих просмотров / медиана старых: >1 растёт, <1 стагнирует, null = нет данных
+• growth_ratio — (медиана просм/день свежих) / (медиана просм/день старых): нормировано на возраст видео; >1 растёт, <1 стагнирует, null = нет данных
 • reliable — true/false. Если false — выборка слишком мала (< 5 каналов или < 5 видео).
   Такие подниши НЕЛЬЗЯ рекомендовать как рыночный факт — только упомянуть с оговоркой.
 
@@ -176,6 +176,7 @@ interface SubNicheResult {
     newcomer_share:         MetricValue<number>
     top_subs_median:        MetricValue<number>
     growth_ratio:           MetricValue<number | null>
+    sample_age_days:        { fresh: number | null; old: number | null }
   }
   rpm_estimate: {
     level:  MetricValue<string>
@@ -327,7 +328,9 @@ export async function POST(req: NextRequest) {
       rpm_level:           string
       rpm_reason:          string
       fresh_video_count:   number
-      views:               number[]
+      views:               number[]   // raw view counts for median_views_per_video
+      views_vpd:           number[]   // views/day per video (age-normalized, for growth_ratio)
+      fresh_ages:          number[]   // video age in days, parallel to views_vpd
       channel_ages_months: number[]
       subs:                number[]
     }
@@ -336,16 +339,24 @@ export async function POST(req: NextRequest) {
       const base: RawEnriched = {
         name: niche.name, search_query: niche.search_query,
         rpm_level: niche.rpm_level, rpm_reason: niche.rpm_reason,
-        fresh_video_count: 0, views: [], channel_ages_months: [], subs: [],
+        fresh_video_count: 0, views: [], views_vpd: [], fresh_ages: [], channel_ages_months: [], subs: [],
       }
       try {
         // Step 2: search by search_query (short, user-like term) — 100 units
         const search = await ytf('/search', { ...searchBase, q: niche.search_query }) as {
-          items?:    Array<{ id: { videoId?: string }; snippet: { channelId?: string } }>
+          items?:    Array<{ id: { videoId?: string }; snippet: { channelId?: string; publishedAt?: string } }>
           pageInfo?: { totalResults: number }
         }
         quotaUsed += 100
         base.fresh_video_count = search.pageInfo?.totalResults ?? 0
+
+        // Build publishedAt map for age-normalized views/day computation (zero extra API calls)
+        const freshPubMap = new Map<string, string>()
+        for (const item of search.items ?? []) {
+          if (item.id?.videoId && item.snippet?.publishedAt) {
+            freshPubMap.set(item.id.videoId, item.snippet.publishedAt)
+          }
+        }
 
         const videoIds   = (search.items ?? []).map(v => v.id?.videoId).filter((id): id is string => !!id)
         const channelIds = [...new Set(
@@ -355,12 +366,20 @@ export async function POST(req: NextRequest) {
         // Step 3a: videos.list — 1 unit per batch of 50
         for (const batch of chunks(videoIds, 50)) {
           const vRes = await ytf('/videos', { part: 'statistics', id: batch.join(',') }) as {
-            items?: Array<{ statistics: { viewCount?: string } }>
+            items?: Array<{ id: string; statistics: { viewCount?: string } }>
           }
           quotaUsed += 1
           for (const v of vRes.items ?? []) {
             const vc = parseInt(v.statistics.viewCount ?? '0')
-            if (vc > 0) base.views.push(vc)
+            if (vc > 0) {
+              base.views.push(vc)
+              const pub = freshPubMap.get(v.id)
+              if (pub) {
+                const age = Math.max(1, daysOld(pub))
+                base.views_vpd.push(vc / age)
+                base.fresh_ages.push(age)
+              }
+            }
           }
         }
 
@@ -399,6 +418,9 @@ export async function POST(req: NextRequest) {
       newcomer_share:   number
       top_subs_median:  number
       growth_ratio:     number | null
+      median_age_fresh: number | null  // median age of fresh cohort (days); visible in response to catch future bias
+      median_age_old:   number | null  // median age of old cohort (days); set in Step 5
+      views_vpd:        number[]       // views/day per fresh video; consumed by Step 5 growth ratio
       sample_videos:    number
       sample_channels:  number
       reliable:         boolean
@@ -420,6 +442,9 @@ export async function POST(req: NextRequest) {
           : 0,
         top_subs_median:   medianOf(n.subs),
         growth_ratio:      null,
+        median_age_fresh:  n.fresh_ages.length > 0 ? Math.round(medianOf(n.fresh_ages)) : null,
+        median_age_old:    null,
+        views_vpd:         n.views_vpd,
         sample_videos,
         sample_channels,
         reliable,
@@ -454,27 +479,47 @@ export async function POST(req: NextRequest) {
             }
             quotaUsed += 100
 
+            // Build old publishedAt map for age-normalized growth ratio (zero extra API calls)
+            const oldPubMap = new Map<string, string>()
             const oldVideoIds = (searchOld.items ?? [])
               .filter(v => v.snippet?.publishedAt && daysOld(v.snippet.publishedAt) >= FRESH_DAYS)
-              .map(v => v.id?.videoId)
+              .map(v => {
+                if (v.id?.videoId && v.snippet?.publishedAt) {
+                  oldPubMap.set(v.id.videoId, v.snippet.publishedAt)
+                }
+                return v.id?.videoId
+              })
               .filter((id): id is string => !!id)
 
-            const oldViews: number[] = []
+            const oldViews: number[] = []   // raw views — for MIN_OLD_SAMPLE_GROWTH guard
+            const oldVpd:   number[] = []   // views/day — for age-normalized growth_ratio
+            const oldAges:  number[] = []   // ages in days — for median_age_old
             for (const batch of chunks(oldVideoIds, 50)) {
               const vOld = await ytf('/videos', { part: 'statistics', id: batch.join(',') }) as {
-                items?: Array<{ statistics: { viewCount?: string } }>
+                items?: Array<{ id: string; statistics: { viewCount?: string } }>
               }
               quotaUsed += 1
               for (const v of vOld.items ?? []) {
                 const vc = parseInt(v.statistics.viewCount ?? '0')
-                if (vc > 0) oldViews.push(vc)
+                if (vc > 0) {
+                  oldViews.push(vc)
+                  const pub = oldPubMap.get(v.id)
+                  if (pub) {
+                    const age = Math.max(1, daysOld(pub))
+                    oldVpd.push(vc / age)
+                    oldAges.push(age)
+                  }
+                }
               }
             }
 
-            const medianOld = medianOf(oldViews)
+            // growth_ratio = median(fresh vpd) / median(old vpd): measures velocity not accumulation
+            const medianFreshVpd = medianOf(niche.views_vpd)
+            const medianOldVpd   = medianOf(oldVpd)
             // Require minimum sample for growth_ratio to be meaningful
-            if (medianOld > 0 && oldViews.length >= MIN_OLD_SAMPLE_GROWTH) {
-              niche.growth_ratio = Math.round((niche.median_views / medianOld) * 100) / 100
+            if (medianOldVpd > 0 && oldViews.length >= MIN_OLD_SAMPLE_GROWTH) {
+              niche.growth_ratio   = Math.round((medianFreshVpd / medianOldVpd) * 100) / 100
+              niche.median_age_old = Math.round(medianOf(oldAges))
             }
           } catch (e) {
             if (e instanceof YouTubeQuotaError) throw e
@@ -531,6 +576,7 @@ export async function POST(req: NextRequest) {
         newcomer_share:         { value: n.newcomer_share,    source: 'api'      as const },
         top_subs_median:        { value: n.top_subs_median,   source: 'api'      as const },
         growth_ratio:           { value: n.growth_ratio,      source: 'api'      as const },
+        sample_age_days:        { fresh: n.median_age_fresh,  old: n.median_age_old },
       },
       rpm_estimate: {
         level:  { value: n.rpm_level,  source: 'estimate' as const },

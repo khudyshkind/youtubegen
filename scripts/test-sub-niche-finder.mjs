@@ -142,6 +142,26 @@ const NICHES = {
     { name: 'Пенсия и государственные накопления',      search_query: 'пенсионные накопления',   rpm_level: 'средний', rpm_reason: 'Зрелая аудитория, умеренный CPC' },
     { name: 'Фриланс и налоги — не потерять деньги',    search_query: 'фриланс налоги',          rpm_level: 'средний', rpm_reason: 'Самозанятые — активная аудитория' },
   ],
+  'музыка для прослушивания': [
+    { name: 'Лаунж и чилл музыка',                    search_query: 'лаунж чилл',              rpm_level: 'низкий',  rpm_reason: 'Фоновый контент, низкий CPC' },
+    { name: 'Соул и R&B для слушания',                search_query: 'соул музыка',             rpm_level: 'низкий',  rpm_reason: 'Нишевая аудитория' },
+    { name: 'Ностальгические хиты 80-90х',            search_query: 'хиты 80 90',              rpm_level: 'низкий',  rpm_reason: 'Возрастная аудитория' },
+    { name: 'Инструментальная музыка без слов',       search_query: 'инструментальная музыка', rpm_level: 'низкий',  rpm_reason: 'Фоновый контент, низкий CPC' },
+    { name: 'Рок-баллады для прослушивания',          search_query: 'рок баллады',             rpm_level: 'низкий',  rpm_reason: 'Сентиментальная аудитория' },
+    { name: 'Джазовая музыка для отдыха',             search_query: 'джаз расслабление',       rpm_level: 'низкий',  rpm_reason: 'Хорошая аудитория, маленькая' },
+    { name: 'Классика для фонового слушания',         search_query: 'классическая музыка фон', rpm_level: 'низкий',  rpm_reason: 'Узкая аудитория' },
+    { name: 'Фортепианные мелодии и пьесы',           search_query: 'фортепиано мелодии',      rpm_level: 'низкий',  rpm_reason: 'Фоновый контент' },
+    { name: 'Медитативная и релакс музыка',           search_query: 'музыка медитация',        rpm_level: 'низкий',  rpm_reason: 'Конкурентная ниша' },
+    { name: 'Амбиент и пространственный звук',        search_query: 'амбиент музыка',          rpm_level: 'низкий',  rpm_reason: 'Нишевая' },
+    { name: 'Lo-fi для концентрации и учёбы',         search_query: 'lo fi музыка',            rpm_level: 'низкий',  rpm_reason: 'Конкурентная ниша' },
+    { name: 'Инди-поп для настроения',                search_query: 'инди поп',                rpm_level: 'низкий',  rpm_reason: 'Молодая аудитория' },
+    { name: 'Поп-хиты для фонового звука',            search_query: 'поп хиты фон',            rpm_level: 'низкий',  rpm_reason: 'Конкурентная' },
+    { name: 'Этническая и фольклорная музыка',        search_query: 'этническая музыка',       rpm_level: 'низкий',  rpm_reason: 'Нишевая' },
+    { name: 'Электронная музыка для слушания',        search_query: 'электронная музыка',      rpm_level: 'низкий',  rpm_reason: 'Молодая аудитория, низкий CPM' },
+    { name: 'Фоновая музыка для работы и офиса',      search_query: 'фоновая музыка работа',   rpm_level: 'низкий',  rpm_reason: 'Конкурентно' },
+    { name: 'Саундтреки и музыка из кино',            search_query: 'саундтреки кино',         rpm_level: 'низкий',  rpm_reason: 'Авторские права' },
+    { name: 'Хип-хоп и биты для фона',               search_query: 'хип хоп биты',            rpm_level: 'низкий',  rpm_reason: 'Авторские права' },
+  ],
 }
 
 // ─── Main algorithm ───────────────────────────────────────────────────────────
@@ -175,13 +195,20 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
     const r = {
       name: niche.name, search_query: niche.search_query,
       rpm_level: niche.rpm_level, rpm_reason: niche.rpm_reason,
-      fresh_video_count: 0, views: [], channel_ages_months: [], subs: [],
+      fresh_video_count: 0, views: [], views_vpd: [], fresh_ages: [], channel_ages_months: [], subs: [],
     }
     try {
-      // Fix 4: use search_query, not name
       const search = await ytFetch('/search', { ...searchBase, q: niche.search_query })
       quotaUsed += 100
       r.fresh_video_count = search.pageInfo?.totalResults ?? 0
+
+      // Build publishedAt map for age-normalized views/day (zero extra API calls)
+      const freshPubMap = new Map()
+      for (const item of search.items ?? []) {
+        if (item.id?.videoId && item.snippet?.publishedAt) {
+          freshPubMap.set(item.id.videoId, item.snippet.publishedAt)
+        }
+      }
 
       const videoIds   = (search.items ?? []).map(v => v.id?.videoId).filter(Boolean)
       const channelIds = [...new Set((search.items ?? []).map(v => v.snippet?.channelId).filter(Boolean))]
@@ -191,7 +218,15 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
         quotaUsed += 1
         for (const v of vRes.items ?? []) {
           const vc = parseInt(v.statistics.viewCount ?? '0')
-          if (vc > 0) r.views.push(vc)
+          if (vc > 0) {
+            r.views.push(vc)
+            const pub = freshPubMap.get(v.id)
+            if (pub) {
+              const age = Math.max(1, daysOld(pub))
+              r.views_vpd.push(vc / age)
+              r.fresh_ages.push(age)
+            }
+          }
         }
       }
 
@@ -229,10 +264,14 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
         ? Math.round(n.channel_ages_months.filter(m => m < 12).length / sample_channels * 100) / 100
         : 0,
       top_subs_median:   medianOf(n.subs),
+      views_vpd:         n.views_vpd,
+      median_age_fresh:  n.fresh_ages.length > 0 ? Math.round(medianOf(n.fresh_ages)) : null,
       sample_videos,
       sample_channels,
       reliable,
-      growth_ratio:      null,
+      growth_ratio:      null,   // vpd-normalized, set in Step 5
+      old_growth_ratio:  null,   // raw views ratio, set in Step 5 for comparison table
+      median_age_old:    null,   // set in Step 5
     }
   })
 
@@ -271,33 +310,53 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
         })
         quotaUsed += 100
 
+        // Build old publishedAt map for age-normalized growth ratio
+        const oldPubMap = new Map()
         const oldVideoIds = (searchOld.items ?? [])
           .filter(v => v.snippet?.publishedAt && daysOld(v.snippet.publishedAt) >= FRESH_DAYS)
-          .map(v => v.id?.videoId).filter(Boolean)
+          .map(v => {
+            if (v.id?.videoId && v.snippet?.publishedAt) oldPubMap.set(v.id.videoId, v.snippet.publishedAt)
+            return v.id?.videoId
+          }).filter(Boolean)
 
-        const oldViews = []
+        const oldViews = []   // raw views — for old_growth_ratio (legacy) + sample guard
+        const oldVpd   = []   // views/day — for new growth_ratio (vpd-normalized)
+        const oldAges  = []   // ages in days — for median_age_old
         for (const batch of chunks(oldVideoIds, 50)) {
           const vOld = await ytFetch('/videos', { part: 'statistics', id: batch.join(',') })
           quotaUsed += 1
           for (const v of vOld.items ?? []) {
             const vc = parseInt(v.statistics.viewCount ?? '0')
-            if (vc > 0) oldViews.push(vc)
+            if (vc > 0) {
+              oldViews.push(vc)
+              const pub = oldPubMap.get(v.id)
+              if (pub) {
+                const age = Math.max(1, daysOld(pub))
+                oldVpd.push(vc / age)
+                oldAges.push(age)
+              }
+            }
           }
         }
 
-        const medianOld = medianOf(oldViews)
-        // Fix 2: growth_ratio null when old_sample < MIN_OLD_SAMPLE_GROWTH (prevents noise from 3-7 videos)
-        if (medianOld > 0 && oldViews.length >= MIN_OLD_SAMPLE_GROWTH) {
-          niche.growth_ratio = Math.round((niche.median_views / medianOld) * 100) / 100
+        const medianOldRaw = medianOf(oldViews)
+        const medianOldVpd = medianOf(oldVpd)
+        if (oldViews.length >= MIN_OLD_SAMPLE_GROWTH) {
+          // old method: raw views ratio (biased by cohort age gap ~3.8×)
+          if (medianOldRaw > 0) {
+            niche.old_growth_ratio = Math.round((niche.median_views / medianOldRaw) * 100) / 100
+          }
+          // new method: views/day ratio (age-normalized velocity)
+          if (medianOldVpd > 0) {
+            niche.growth_ratio   = Math.round((medianOf(niche.views_vpd) / medianOldVpd) * 100) / 100
+            niche.median_age_old = Math.round(medianOf(oldAges))
+          }
         }
 
         const grNote = niche.growth_ratio !== null
-          ? `ratio=${niche.growth_ratio.toFixed(2)}`
-          : `null (old_sample=${oldViews.length} < ${MIN_OLD_SAMPLE_GROWTH})`
-        console.log(
-          `   "${niche.name}":  fresh_med=${fmtN(niche.median_views)}  old_med=${fmtN(medianOld)}  ` +
-          `old_sample=${oldViews.length}  ${grNote}`
-        )
+          ? `new_gr=${niche.growth_ratio.toFixed(2)}  old_gr=${niche.old_growth_ratio !== null ? niche.old_growth_ratio.toFixed(2) : '—'}  age_f=${niche.median_age_fresh ?? '?'}d  age_o=${niche.median_age_old ?? '?'}d`
+          : `gr=null (old_sample=${oldViews.length} < ${MIN_OLD_SAMPLE_GROWTH})`
+        console.log(`   "${niche.name.slice(0,30)}":  fresh_vpd=${medianOf(niche.views_vpd).toFixed(1)}  old_vpd=${medianOldVpd.toFixed(1)}  ${grNote}`)
       } catch (e) {
         console.warn(`   ! growth error "${niche.name}": ${e.message.slice(0, 120)}`)
       }
@@ -391,9 +450,35 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
   }
 
   console.log('\nЛегенда: ns=newcomer_share | med_v=median_views | fvc_90d=видео за 90д')
-  console.log(`         subs=top_subs_median | gr=growth_ratio | v_s=видео в выборке`)
+  console.log(`         subs=top_subs_median | gr=growth_ratio(vpd-норм) | v_s=видео в выборке`)
   console.log(`         c_s=каналов в выборке | ok=reliable(Y/N) | *=вошёл в топ-5`)
   console.log(`         ok=N → ниша ненадёжна, не участвует в топ-5`)
+
+  // Comparison table: old gr (raw views) vs new gr (vpd-normalized) for top-5
+  const top5computed = computed.filter(n => top5Names.has(n.name))
+    .sort((a, b) => b.newcomer_share - a.newcomer_share)
+  if (top5computed.length > 0) {
+    console.log(`\nСРАВНЕНИЕ growth_ratio (top-5): raw vs vpd-нормированный`)
+    const cH = ['Подниша', 'old_gr', 'new_gr', 'age_f(д)', 'age_o(д)', 'коррекция']
+    const cW = [38, 7, 7, 9, 9, 10]
+    let ch = cH[0].padEnd(cW[0])
+    for (let i = 1; i < cH.length; i++) ch += ' ' + cH[i].padStart(cW[i])
+    console.log('\n' + ch)
+    console.log('─'.repeat(ch.length))
+    for (const n of top5computed) {
+      const nm  = n.name.slice(0, cW[0]).padEnd(cW[0])
+      const og  = (n.old_growth_ratio !== null ? n.old_growth_ratio.toFixed(2) : '—').padStart(cW[1])
+      const ng  = (n.growth_ratio    !== null ? n.growth_ratio.toFixed(2)     : '—').padStart(cW[2])
+      const af  = (n.median_age_fresh !== null ? String(n.median_age_fresh)    : '—').padStart(cW[3])
+      const ao  = (n.median_age_old   !== null ? String(n.median_age_old)      : '—').padStart(cW[4])
+      // correction factor = new_gr / old_gr (how much vpd-normalization changes the ratio)
+      const corr = (n.old_growth_ratio && n.growth_ratio)
+        ? (n.growth_ratio / n.old_growth_ratio).toFixed(1) + 'x'
+        : '—'
+      console.log(`${nm} ${og} ${ng} ${af} ${ao} ${corr.padStart(cW[5])}`)
+    }
+    console.log('Коррекция = new_gr / old_gr; теоретически ≈ age_o / age_f (≈3–4× для order=viewCount)')
+  }
 
   if (verdict) {
     console.log(`\nВЕРДИКТ SONNET (source: estimate):`)
@@ -412,14 +497,14 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
 
 // ─── Run ──────────────────────────────────────────────────────────────────────
 console.log('\n' + '='.repeat(88))
-console.log('  SUB-NICHE FINDER v2 — LIVE METRICS TEST')
-console.log('  Fixes: search_query, reliable flag, growth_ratio min-10 sample, top-5 filter')
+console.log('  SUB-NICHE FINDER v3 — LIVE METRICS TEST (vpd-normalized growth_ratio)')
+console.log('  Fix: growth_ratio = median(fresh vpd) / median(old vpd) — age-normalized velocity')
 console.log(`  Date: ${new Date().toISOString()}`)
 console.log('='.repeat(88))
 
 const results = []
 
-for (const niche of ['музыка', 'личные финансы']) {
+for (const niche of ['музыка для прослушивания']) {
   try {
     results.push(await analyzeNiche(niche, 'RU', 'ru'))
   } catch (e) {
