@@ -23,11 +23,12 @@ interface NicheDirection {
 function getDirectionsPrompt(lang: string): string {
   const isRu = lang !== 'en'
   return isRu
-    ? `Ты эксперт по YouTube-стратегии. Разбей широкую нишу на 5–7 крупных РЫНОЧНЫХ СЕГМЕНТОВ.
+    ? `Ты эксперт по YouTube-стратегии. Разбей широкую нишу на 10–14 РЫНОЧНЫХ СЕГМЕНТОВ.
 
-Сегменты — это разные аудитории с разными мотивациями, а не подтемы.
-Для «музыки»: Слушатели и аудитория / Обучение и инструменты / Производство и оборудование / Индустрия и культура — НЕ «рок, поп, джаз».
-Для «личных финансов»: Начинающие инвесторы / Бизнес и самозанятость / Экономия и бюджет / Пассивный доход / Налоги и право.
+Сегменты — это разные аудитории с разными мотивациями и намерениями, а не подтемы.
+Дроби достаточно детально: «Музыка для ночных клубов» и «Музыка для тренировок» — РАЗНЫЕ сегменты с разными аудиториями, они НЕ должны попасть в один «Фитнес и активность».
+Для «музыки»: Музыка для сна и релаксации / Музыка для спорта и тренировок / Музыка для ночных клубов / Обучение игре на инструментах / Разборы и критика альбомов / Производство битов и треков / История музыки и культура / и т.д.
+Для «личных финансов»: Начинающие инвесторы / Трейдинг и биржа / Пассивный доход и дивиденды / Бизнес и самозанятые / ИП и налоги / Экономия и бюджетирование / Недвижимость / Крипта и Web3 / и т.д.
 
 По каждому сегменту:
 • name — короткое название (3–6 слов)
@@ -35,14 +36,15 @@ function getDirectionsPrompt(lang: string): string {
 • examples — 3–5 конкретных примеров подниш внутри (только перечисление, без метрик)
 
 ФОРМАТ — строго JSON без markdown:
-{"directions":[{"name":"Слушатели и аудитория","description":"Люди, которые слушают и открывают музыку, а не играют сами. Контент — плейлисты, разборы альбомов, подборки.","examples":["Музыка для сна и медитации","Плейлисты по настроению","Разборы альбомов","Классика для начинающих слушателей"]},...]}
+{"directions":[{"name":"Музыка для сна и релаксации","description":"Люди, которым нужна фоновая музыка для засыпания, медитации, концентрации. Контент — плейлисты, миксы, эмбиент.","examples":["Музыка для сна","Лоу-фай хип-хоп","Белый шум и звуки природы","Музыка для медитации"]},...]}
 
-Верни ровно 5–7 сегментов. Только JSON. Начни с {.`
-    : `You are a YouTube strategy expert. Break a broad niche into 5–7 major MARKET SEGMENTS.
+Верни ровно 10–14 сегментов. Только JSON. Начни с {.`
+    : `You are a YouTube strategy expert. Break a broad niche into 10–14 MARKET SEGMENTS.
 
-Segments are different audiences with different motivations, not sub-topics.
-For "music": Listeners & Fans / Learning & Instruments / Production & Gear / Industry & Culture — NOT "rock, pop, jazz".
-For "personal finance": Beginner Investors / Business & Self-Employment / Saving & Budgeting / Passive Income / Tax & Legal.
+Segments are different audiences with different motivations and intentions, not sub-topics.
+Be granular enough: "Music for nightclubs" and "Music for workouts" are DIFFERENT segments with different audiences — they must NOT be merged into "Fitness & Activity".
+For "music": Sleep & relaxation music / Workout & sports music / Club & party music / Learning instruments / Album reviews & criticism / Beat making & production / Music history & culture / etc.
+For "personal finance": Beginner investors / Trading & stocks / Passive income & dividends / Business & self-employment / Tax & accounting / Saving & budgeting / Real estate / Crypto & Web3 / etc.
 
 For each segment:
 • name — short label (3–6 words)
@@ -50,9 +52,9 @@ For each segment:
 • examples — 3–5 specific sub-niche examples (list only, no metrics)
 
 FORMAT — strict JSON without markdown:
-{"directions":[{"name":"Listeners & Fans","description":"People who want to listen and discover music, not play themselves. Content is playlists, album reviews, recommendations.","examples":["Sleep & meditation music","Mood playlists","Album breakdowns","Classical music for beginners"]},...]}
+{"directions":[{"name":"Sleep & Relaxation Music","description":"People who need background music for sleeping, meditation, or focus. Content is playlists, mixes, ambient.","examples":["Sleep music","Lo-fi hip-hop","White noise & nature sounds","Meditation music"]},...]}
 
-Return exactly 5–7 segments. JSON only. Start with {.`
+Return exactly 10–14 segments. JSON only. Start with {.`
 }
 
 // ─── Route ────────────────────────────────────────────────────────────────────
@@ -80,7 +82,7 @@ export async function POST(req: NextRequest) {
     if (ctx.gateRes) return ctx.gateRes
 
     // Cache check — 30 days (directions rarely change)
-    const cacheKey = `${broad_niche.toLowerCase().trim()}|${lang}|v1`
+    const cacheKey = `${broad_niche.toLowerCase().trim()}|${lang}|v2`
     try {
       const { data: cached } = await svc
         .from('analytics_cache')
@@ -102,7 +104,7 @@ export async function POST(req: NextRequest) {
     const anthropic  = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 60_000 })
     const msg = await anthropic.messages.create({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 1500,
+      max_tokens: 2500,
       system: [{ type: 'text', text: getDirectionsPrompt(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{
         role:    'user',
@@ -117,7 +119,7 @@ export async function POST(req: NextRequest) {
 
     const result = {
       broad_niche,
-      directions:  directions.slice(0, 7),
+      directions:  directions.slice(0, 14),
       quota_used:  0,
       analyzed_at: new Date().toISOString(),
     }

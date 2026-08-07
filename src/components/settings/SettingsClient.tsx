@@ -28,6 +28,7 @@ export default function SettingsClient({ profile }: Props) {
   const [ytKeyValidating, setYtKeyValidating] = useState(false)
   const [ytKeyError, setYtKeyError] = useState('')
   const [ytKeyConnected, setYtKeyConnected] = useState(!!profile?.encrypted_yt_key)
+  const [showYtGuide, setShowYtGuide] = useState(false)
 
   const [tgLinked, setTgLinked] = useState(!!profile?.telegram_chat_id)
   const [tgBusy, setTgBusy] = useState(false)
@@ -279,7 +280,7 @@ export default function SettingsClient({ profile }: Props) {
         </div>
 
         {/* 3. YouTube API Key (BYOK) */}
-        <div className="rounded-2xl p-6 flex flex-col gap-4" style={cardStyle}>
+        <div id="yt-key-guide" className="rounded-2xl p-6 flex flex-col gap-4" style={cardStyle}>
           <div>
             <h2 className="text-base font-semibold text-slate-100">{t('settings.yt_api_key')}</h2>
             <p className="text-xs text-slate-500 mt-1">{t('settings.yt_api_key_desc')}</p>
@@ -334,15 +335,58 @@ export default function SettingsClient({ profile }: Props) {
           )}
 
           <p className="text-xs text-slate-600">{t('settings.yt_api_key_warning')}</p>
-          <a
-            href="https://console.cloud.google.com/apis/library/youtube.googleapis.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs transition-colors self-start"
+
+          {/* Step-by-step guide */}
+          <button
+            type="button"
+            onClick={() => setShowYtGuide(v => !v)}
+            className="flex items-center gap-1.5 text-xs transition-colors self-start"
             style={{ color: '#7c3aed' }}
           >
-            {t('settings.yt_api_key_link')}
-          </a>
+            <svg className={`w-3 h-3 transition-transform ${showYtGuide ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            {lang === 'en' ? 'How to get a YouTube API key' : 'Как получить YouTube API-ключ'}
+          </button>
+
+          {showYtGuide && (
+            <div className="rounded-xl p-4 flex flex-col gap-3 text-xs"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+              {lang === 'en' ? (
+                <>
+                  <p className="text-slate-400 font-medium">Step-by-step: Google Cloud Console</p>
+                  <ol className="flex flex-col gap-2.5 text-slate-400 list-none">
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">1.</span><span>Open <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" className="text-violet-400 underline">console.cloud.google.com</a></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">2.</span><span>Click the project selector at the top (next to "Google Cloud") → <strong className="text-slate-300">New Project</strong> → enter a name → <strong className="text-slate-300">Create</strong></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">3.</span><span>Left sidebar → <strong className="text-slate-300">APIs &amp; Services</strong> → <strong className="text-slate-300">Library</strong></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">4.</span><span>Search <strong className="text-slate-300">YouTube Data API v3</strong> → click it → <strong className="text-slate-300">Enable</strong></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">5.</span><span>Left sidebar → <strong className="text-slate-300">APIs &amp; Services</strong> → <strong className="text-slate-300">Credentials</strong></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">6.</span><span>Click <strong className="text-slate-300">+ Create Credentials</strong> → <strong className="text-slate-300">API key</strong> → copy the key (starts with <code className="text-amber-300">AIza</code>)</span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">7.</span><span>Do <strong className="text-red-400">not</strong> set HTTP referrer or IP restrictions — our servers must be able to use the key without restrictions</span></li>
+                  </ol>
+                  <div className="rounded-lg px-3 py-2 text-slate-400 mt-1" style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                    <strong className="text-amber-300">Default quota:</strong> 10,000 units/day. Sub-niche search uses ~2,300 units per run (≈ 4 runs/day). If you need more, request a quota increase in Google Cloud Console.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-slate-400 font-medium">Пошаговая инструкция: Google Cloud Console</p>
+                  <ol className="flex flex-col gap-2.5 text-slate-400 list-none">
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">1.</span><span>Откройте <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" className="text-violet-400 underline">console.cloud.google.com</a></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">2.</span><span>Нажмите на выбор проекта вверху (рядом с «Google Cloud») → <strong className="text-slate-300">Новый проект</strong> → введите название → <strong className="text-slate-300">Создать</strong></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">3.</span><span>Боковое меню → <strong className="text-slate-300">API и сервисы</strong> → <strong className="text-slate-300">Библиотека</strong></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">4.</span><span>Найдите <strong className="text-slate-300">YouTube Data API v3</strong> → нажмите → <strong className="text-slate-300">Включить</strong></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">5.</span><span>Боковое меню → <strong className="text-slate-300">API и сервисы</strong> → <strong className="text-slate-300">Учётные данные</strong></span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">6.</span><span>Нажмите <strong className="text-slate-300">+ Создать учётные данные</strong> → <strong className="text-slate-300">Ключ API</strong> → скопируйте ключ (начинается с <code className="text-amber-300">AIza</code>)</span></li>
+                    <li className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">7.</span><span><strong className="text-red-400">Не устанавливайте</strong> ограничения по IP-адресам или HTTP-реферерам — наши серверы должны использовать ключ без ограничений</span></li>
+                  </ol>
+                  <div className="rounded-lg px-3 py-2 text-slate-400 mt-1" style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                    <strong className="text-amber-300">Квота по умолчанию:</strong> 10 000 единиц в день. Один прогон поиска подниш занимает ~2 300 единиц (≈ 4 прогона в день). Если нужно больше — запросите увеличение квоты в Google Cloud Console.
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 4. Telegram notifications */}

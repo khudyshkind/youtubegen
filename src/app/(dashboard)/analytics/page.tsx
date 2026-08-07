@@ -7,6 +7,7 @@ import { useStudioStore } from '@/lib/studio-store'
 import { refreshCredits } from '@/lib/refresh-credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { ANALYTICS_GROUPS } from '@/lib/content-config'
+import { createClient } from '@/lib/supabase'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -4441,6 +4442,20 @@ function SubNicheResultsView({
 
 function SubNicheTab() {
   const { t, lang: uiLang } = useLang()
+  const router = useRouter()
+
+  // Check if user has a YouTube API key (client-side read of own profile)
+  const [hasKey, setHasKey] = useState<boolean | null>(null)
+  useEffect(() => {
+    const supa = createClient()
+    async function checkKey() {
+      try {
+        const { data } = await supa.from('profiles').select('encrypted_yt_key').single()
+        setHasKey(!!(data as { encrypted_yt_key?: string | null } | null)?.encrypted_yt_key)
+      } catch { setHasKey(null) }
+    }
+    void checkKey()
+  }, [])
 
   const [broadNiche,   setBroadNiche]   = useState('')
   const [country,      setCountry]      = useState('RU')
@@ -4566,7 +4581,16 @@ function SubNicheTab() {
             </span>
           </div>
           {error === '__plan__' ? <div className="pl-8"><PlanRequiredBlock /></div>
-            : error === '__byok__' ? <div className="pl-8"><ByokBlock /></div>
+            : error === '__byok__'
+              ? <div className="pl-8 flex flex-col gap-2">
+                  <p className="text-sm font-semibold text-amber-300">{t('analytics.sn_no_key_title')}</p>
+                  <p className="text-xs text-slate-300 leading-relaxed">{t('analytics.sn_no_key_body')}</p>
+                  <button onClick={() => router.push('/settings')}
+                    className="self-start px-4 py-2 rounded-xl text-xs font-semibold text-white mt-1"
+                    style={{ background: 'rgba(124,58,237,0.3)', border: '1px solid rgba(124,58,237,0.5)' }}>
+                    {t('analytics.sn_no_key_btn')}
+                  </button>
+                </div>
             : error ? <p className="text-sm text-red-400 pl-8">{error}</p>
             : null}
           <div className="flex gap-3 pl-8">
@@ -4691,9 +4715,36 @@ function SubNicheTab() {
             {t('analytics.sn_free_note')}
           </div>
 
-          {error === '__plan__' ? <PlanRequiredBlock /> : error === '__byok__' ? <ByokBlock /> : error ? <p className="text-sm text-red-400">{error}</p> : null}
+          {error === '__plan__' ? <PlanRequiredBlock /> : error ? <p className="text-sm text-red-400">{error}</p> : null}
 
-          <button onClick={() => void handleLoadDirs()} disabled={loadingDirs}
+          {/* No-key block — shown when user has no YouTube API key (step 2 requires it) */}
+          {hasKey === false && (
+            <div className="rounded-2xl p-4 flex flex-col gap-3"
+              style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)' }}>
+              <div className="flex items-start gap-3">
+                <span className="text-lg shrink-0">🔑</span>
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm font-semibold text-amber-300">{t('analytics.sn_no_key_title')}</p>
+                  <p className="text-xs text-slate-300 leading-relaxed">{t('analytics.sn_no_key_body')}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap pl-8">
+                <button
+                  onClick={() => router.push('/settings')}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-white transition"
+                  style={{ background: 'rgba(124,58,237,0.3)', border: '1px solid rgba(124,58,237,0.5)' }}>
+                  {t('analytics.sn_no_key_btn')}
+                </button>
+                <a href="#yt-key-guide"
+                  onClick={(e) => { e.preventDefault(); router.push('/settings#yt-key-guide') }}
+                  className="text-xs text-violet-400 hover:text-violet-300 transition">
+                  {t('analytics.sn_no_key_how')}
+                </a>
+              </div>
+            </div>
+          )}
+
+          <button onClick={() => void handleLoadDirs()} disabled={loadingDirs || hasKey === false}
             className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
             {loadingDirs ? <Spinner /> : null}
             {t('analytics.sn_dirs_btn')}
