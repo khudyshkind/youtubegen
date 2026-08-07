@@ -214,6 +214,7 @@ interface SubNicheResult {
     range?: MetricValue<string>
     reason: MetricValue<string>
   }
+  newcomer_channel_ids: string[]
 }
 
 // ─── Route ────────────────────────────────────────────────────────────────────
@@ -383,18 +384,19 @@ export async function POST(req: NextRequest) {
     if (content_lang && content_lang !== 'auto') searchBase.relevanceLanguage = content_lang
 
     interface RawEnriched {
-      name:                string
-      search_query:        string
-      rpm_level:           string
-      rpm_range:           string
-      rpm_reason:          string
-      fresh_video_count:   number
-      views:               number[]   // raw view counts for median_views_per_video
-      views_vpd:           number[]   // views/day per video (age-normalized, for growth_ratio)
-      fresh_ages:          number[]   // video age in days, parallel to views_vpd
-      channel_ages_months: number[]
-      subs:                number[]
-      fetch_error:         string | null  // non-null when data collection failed after retries
+      name:                  string
+      search_query:          string
+      rpm_level:             string
+      rpm_range:             string
+      rpm_reason:            string
+      fresh_video_count:     number
+      views:                 number[]   // raw view counts for median_views_per_video
+      views_vpd:             number[]   // views/day per video (age-normalized, for growth_ratio)
+      fresh_ages:            number[]   // video age in days, parallel to views_vpd
+      channel_ages_months:   number[]
+      subs:                  number[]
+      newcomer_channel_ids:  string[]   // channel IDs created < 12 months ago (for level-4 breakout)
+      fetch_error:           string | null  // non-null when data collection failed after retries
     }
 
     console.log(`[sub-niche] step 2+3: enrich ${sub_niches.length} niches (concurrency=${ENRICH_CONCURRENCY})`)
@@ -406,6 +408,7 @@ export async function POST(req: NextRequest) {
         name: niche.name, search_query: niche.search_query,
         rpm_level: niche.rpm_level, rpm_range: niche.rpm_range ?? '', rpm_reason: niche.rpm_reason,
         fresh_video_count: 0, views: [], views_vpd: [], fresh_ages: [], channel_ages_months: [], subs: [],
+        newcomer_channel_ids: [],
         fetch_error: null,
       }
       try {
@@ -454,13 +457,18 @@ export async function POST(req: NextRequest) {
         for (const batch of chunks(channelIds, 50)) {
           const cRes = await ytf('/channels', { part: 'statistics,snippet', id: batch.join(',') }) as {
             items?: Array<{
+              id:         string
               snippet:    { publishedAt?: string }
               statistics: { subscriberCount?: string }
             }>
           }
           quotaUsed += 1
           for (const c of cRes.items ?? []) {
-            if (c.snippet.publishedAt) base.channel_ages_months.push(daysOld(c.snippet.publishedAt) / 30)
+            if (c.snippet.publishedAt) {
+              const ageMonths = daysOld(c.snippet.publishedAt) / 30
+              base.channel_ages_months.push(ageMonths)
+              if (ageMonths < 12) base.newcomer_channel_ids.push(c.id)
+            }
             const sc = parseInt(c.statistics.subscriberCount ?? '0')
             if (sc > 0) base.subs.push(sc)
           }
@@ -482,23 +490,24 @@ export async function POST(req: NextRequest) {
 
     // ── Step 4: Compute API-sourced metrics (no model) ─────────────────────
     interface ComputedNiche {
-      name:             string
-      search_query:     string
-      rpm_level:        string
-      rpm_range:        string
-      rpm_reason:       string
-      fresh_video_count: number
-      median_views:     number
-      newcomer_share:   number
-      top_subs_median:  number
-      growth_ratio:     number | null
-      median_age_fresh: number | null  // median age of fresh cohort (days); visible in response to catch future bias
-      median_age_old:   number | null  // median age of old cohort (days); set in Step 5
-      views_vpd:        number[]       // views/day per fresh video; consumed by Step 5 growth ratio
-      fetch_error:      string | null  // non-null if data collection failed
-      sample_videos:    number
-      sample_channels:  number
-      reliable:         boolean
+      name:                  string
+      search_query:          string
+      rpm_level:             string
+      rpm_range:             string
+      rpm_reason:            string
+      fresh_video_count:     number
+      median_views:          number
+      newcomer_share:        number
+      top_subs_median:       number
+      growth_ratio:          number | null
+      median_age_fresh:      number | null  // median age of fresh cohort (days)
+      median_age_old:        number | null  // median age of old cohort (days); set in Step 5
+      views_vpd:             number[]       // views/day per fresh video; consumed by Step 5 growth ratio
+      newcomer_channel_ids:  string[]       // channel IDs created < 12 months ago (for level-4 breakout)
+      fetch_error:           string | null  // non-null if data collection failed
+      sample_videos:         number
+      sample_channels:       number
+      reliable:              boolean
     }
 
     const computed: ComputedNiche[] = enriched.map(n => {
@@ -508,9 +517,10 @@ export async function POST(req: NextRequest) {
       return {
         name:              n.name,
         search_query:      n.search_query,
-        rpm_level:         n.rpm_level,
-        rpm_range:         n.rpm_range,
-        rpm_reason:        n.rpm_reason,
+        rpm_level:            n.rpm_level,
+        rpm_range:            n.rpm_range,
+        rpm_reason:           n.rpm_reason,
+        newcomer_channel_ids: n.newcomer_channel_ids,
         fresh_video_count: n.fresh_video_count,
         median_views:      medianOf(n.views),
         newcomer_share:    sample_channels > 0
@@ -663,6 +673,7 @@ export async function POST(req: NextRequest) {
         range:  { value: n.rpm_range,  source: 'estimate' as const },
         reason: { value: n.rpm_reason, source: 'estimate' as const },
       },
+      newcomer_channel_ids: n.newcomer_channel_ids,
     }))
 
     const result = {

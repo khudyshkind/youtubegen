@@ -4166,6 +4166,7 @@ interface SubNicheItem {
     sample_age_days:        { fresh: number | null; old: number | null }
   }
   rpm_estimate: { level: SNMetric<string>; range?: SNMetric<string>; reason: SNMetric<string> }
+  newcomer_channel_ids: string[]
 }
 
 interface SubNicheFinderData {

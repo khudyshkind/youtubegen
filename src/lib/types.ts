@@ -70,6 +70,7 @@ export const CREDIT_COSTS = {
   channels_compare:  2400,
   rising_stars:      3000,
   sub_niche_finder:  5000,
+  channel_breakout:  2000,
 } as const
 
 export const IMAGE_INTERVAL_MIN = 3    // seconds — lower bound for scene duration
