@@ -263,10 +263,12 @@
 - [ ] **Заход 6 — замыкание на продукт** (кнопка «Создать видео» из любого отчёта). [RSS]
 - [ ] **Открытые вопросы владельцу по RSS:** снимать ли BYOK с канальных отчётов; «Пульс канала» бесплатно или за минимум; keywords до топ-3 или 10 ключей; сколько каналов на юзера в velocity. [RSS]
 - [ ] **Deep-linking аналитики `?tab=`.** [база]
-- [ ] **Инструмент поиска растущих подниш с низкой конкуренцией — UI-вкладка.** [Δ13+, маршрут v2 2026-08-07] ✅ **Маршрут v2 написан и работает**: `src/app/api/analytics/sub-niche-finder/route.ts`. Вход: `{broad_niche, country, content_lang, ui_lang}`. BYOK-only. Кэш `v2` 72ч, cap 20 отчётов/юзер. `CREDIT_COSTS.sub_niche_finder=5000` (3500 с BYOK 30%).
+- [ ] **Инструмент поиска растущих подниш с низкой конкуренцией — UI-вкладка.** [Δ13+, маршрут v2 2026-08-07] ✅ **Маршрут v2 написан и работает**: `src/app/api/analytics/sub-niche-finder/route.ts`. Вход: `{broad_niche, country, content_lang, ui_lang, direction?}`. BYOK-only. Кэш `v2` 72ч, cap 20 отчётов/юзер. `CREDIT_COSTS.sub_niche_finder=5000` (3500 с BYOK 30%).
   ✅ **Live-test v2 [2026-08-07]** — "музыка" 14/15 reliable, "личные финансы" 15/15 reliable. Было ~9–11/15. Quota: 2035/ниша (оценка 2600).
   ✅ **Четыре алгоритмических исправления (v2):** (1) `search_query` — Haiku выдаёт короткий 2–3-словный запрос отдельно от названия; YouTube API использует его, а не длинное описание-название; (2) `reliable: false` при `sample_videos < 5 OR sample_channels < 5`; (3) top-5 — только `reliable` подниши; (4) `growth_ratio = null` при `old_sample < 10`. Cache key bumped to `v2`.
-  **Осталось:** UI-вкладка в `/analytics/page.tsx` (карточки подниш, вердикт Sonnet, колонки reliable/search_query).
+  ✅ **direction parameter [2026-08-07]** — необязательный параметр `direction` сужает Haiku-промпт до подниш внутри одного рыночного сегмента. Cache key: `|dir:<direction>|v2` при наличии, отдельный от полного прогона. Live-test: "музыка для прослушивания" → 18 подниш, 16/18 reliable, все строго о слушании (не о производстве/обучении). Quota ~2341.
+  **Осталось:** UI-вкладка в `/analytics/page.tsx` (карточки подниш, вердикт Sonnet, колонки reliable/search_query, выбор направления).
+- [x] **Разбивка ниши на направления (уровень 1, бесплатная).** [Δ13+, 2026-08-07] `src/app/api/analytics/niche-directions/route.ts`. Haiku-only, quota_used=0, кэш 30 дней. Возвращает 5–7 рыночных сегментов (аудитории с разными мотивациями, не подтемы). Live-test: "музыка" → 7 сегментов, "личные финансы" → 7 сегментов, quota=0 подтверждён.
 
 ## 🎨 UX И СТУДИЯ
 

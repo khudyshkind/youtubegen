@@ -63,10 +63,13 @@ function extractText(content: Anthropic.ContentBlock[]): string {
 function getSubNicheGenPrompt(lang: string): string {
   const isRu = lang !== 'en'
   return isRu
-    ? `Ты YouTube-аналитик. Разбей широкую нишу на 15-20 КОНКРЕТНЫХ подниш для YouTube-канала.
+    ? `Ты YouTube-аналитик. Разбей нишу (или конкретное направление внутри неё) на 15-20 КОНКРЕТНЫХ подниш для YouTube-канала.
+
+Если указано направление — генерируй подниши ТОЛЬКО внутри него, не выходи за его рамки.
+Без направления — разбивай всю широкую нишу.
 
 Подниши должны быть специфичными (не "личные финансы", а "кредитные карты с кэшбэком"),
-охватывать разные сегменты аудитории и форматы контента.
+охватывать разные форматы и угол зрения внутри заданного сегмента.
 
 Для каждой подниши дай:
 • name — полное название подниши для человека
@@ -80,10 +83,13 @@ function getSubNicheGenPrompt(lang: string): string {
 {"sub_niches":[{"name":"Разбор гитарных аккордов для начинающих","search_query":"гитара с нуля","rpm_level":"низкий","rpm_reason":"Конкурентная ниша, низкий CPC"},{"name":"...","search_query":"...","rpm_level":"средний","rpm_reason":"..."}]}
 
 Верни ровно 15-20 подниш. Только JSON. Начни с {.`
-    : `You are a YouTube analyst. Break a broad niche into 15-20 SPECIFIC sub-niches for a YouTube channel.
+    : `You are a YouTube analyst. Break a niche (or a specific direction within it) into 15-20 SPECIFIC sub-niches for a YouTube channel.
+
+If a direction is given — generate sub-niches ONLY within that direction, do not go outside its scope.
+Without a direction — break down the entire broad niche.
 
 Sub-niches must be specific (not "personal finance" but "cashback credit cards"),
-covering different audience segments and content formats.
+covering different formats and angles within the given segment.
 
 For each sub-niche provide:
 • name — full sub-niche name for humans
@@ -191,12 +197,13 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
 
     const body = await req.json() as {
-      broad_niche?: string; country?: string; content_lang?: string; ui_lang?: string
+      broad_niche?: string; country?: string; content_lang?: string; ui_lang?: string; direction?: string
     }
     const broad_niche  = body.broad_niche?.trim() ?? ''
     lang               = body.ui_lang ?? 'ru'
     const country      = body.country      ?? 'RU'
     const content_lang = body.content_lang ?? 'ru'
+    const direction    = body.direction?.trim() || undefined
 
     if (!broad_niche) {
       return NextResponse.json(
@@ -233,7 +240,9 @@ export async function POST(req: NextRequest) {
 
     // ── Cache check ────────────────────────────────────────────────────────
     // v2: cache key bumped because algorithm changed (search_query, reliable flag)
-    const cacheKey = `${broad_niche.toLowerCase().trim()}|${country}|${content_lang}|v2`
+    // direction-scoped runs get their own cache entry
+    const dirPart  = direction ? `|dir:${direction.toLowerCase().trim()}` : ''
+    const cacheKey = `${broad_niche.toLowerCase().trim()}|${country}|${content_lang}${dirPart}|v2`
     try {
       const { data: cached } = await svc
         .from('analytics_cache')
@@ -271,15 +280,18 @@ export async function POST(req: NextRequest) {
     const uiLangFull = resolveUserLang(req, lang)
     const anthropic  = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
 
-    // ── Step 1: Haiku — broad niche → 15-20 sub-niches with search_query ──
-    console.log(`[sub-niche] step 1: haiku gen | broad="${broad_niche}" country=${country} lang=${content_lang}`)
+    // ── Step 1: Haiku — broad niche (+ optional direction) → 15-20 sub-niches ──
+    console.log(`[sub-niche] step 1: haiku gen | broad="${broad_niche}" dir="${direction ?? ''}" country=${country} lang=${content_lang}`)
+    const directionHint = direction
+      ? ` Направление: "${direction}". Генерируй подниши ТОЛЬКО внутри этого направления, не выходи за его рамки.`
+      : ''
     const msg1 = await anthropic.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 2500,
       system: [{ type: 'text', text: getSubNicheGenPrompt(lang), cache_control: { type: 'ephemeral' } }],
       messages: [{
         role:    'user',
-        content: `Ниша: "${broad_niche}". Рынок: ${country}. Язык контента: ${content_lang}.${langNote(uiLangFull)}`,
+        content: `Ниша: "${broad_niche}".${directionHint} Рынок: ${country}. Язык контента: ${content_lang}.${langNote(uiLangFull)}`,
       }],
     })
     console.log('[sub-niche] haiku tokens in:', msg1.usage.input_tokens, 'out:', msg1.usage.output_tokens)
@@ -485,9 +497,12 @@ export async function POST(req: NextRequest) {
       growth_ratio:           n.growth_ratio,
     }))
 
+    const dirCtx = direction
+      ? (lang === 'en' ? `\nDirection: "${direction}"` : `\nНаправление: "${direction}"`)
+      : ''
     const dataCtx = lang === 'en'
-      ? `Broad niche: "${broad_niche}"\nMarket: ${country}\n\nSub-niche data (real YouTube API numbers):\n${JSON.stringify(dataForVerdict, null, 2)}`
-      : `Широкая ниша: "${broad_niche}"\nРынок: ${country}\n\nДанные подниш (реальные числа из YouTube API):\n${JSON.stringify(dataForVerdict, null, 2)}`
+      ? `Broad niche: "${broad_niche}"${dirCtx}\nMarket: ${country}\n\nSub-niche data (real YouTube API numbers):\n${JSON.stringify(dataForVerdict, null, 2)}`
+      : `Широкая ниша: "${broad_niche}"${dirCtx}\nРынок: ${country}\n\nДанные подниш (реальные числа из YouTube API):\n${JSON.stringify(dataForVerdict, null, 2)}`
 
     console.log('[sub-niche] step 6: sonnet verdict')
     const msg2 = await anthropic.messages.create({
@@ -525,6 +540,7 @@ export async function POST(req: NextRequest) {
 
     const result = {
       broad_niche,
+      direction:      direction ?? null,
       quota_used:    quotaUsed,
       analyzed_at:   new Date().toISOString(),
       reliable_count: reliableCount,
@@ -561,7 +577,7 @@ export async function POST(req: NextRequest) {
       const { error: saveErr } = await svc.from('analytics_reports').insert({
         user_id:     user.id,
         report_type: 'sub_niche_finder',
-        title:       `Подниши: ${broad_niche}`,
+        title:       direction ? `Подниши: ${broad_niche} → ${direction}` : `Подниши: ${broad_niche}`,
         query:       broad_niche,
         result,
       })
