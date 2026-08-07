@@ -92,10 +92,12 @@ function getSubNicheGenPrompt(lang: string): string {
   (не описание, а то, что вводит пользователь в поиск)
   Примеры: «гитара с нуля», «накопительный счёт сравнение», «ИП налоги 2024»
 • rpm_level: "низкий" | "средний" | "высокий"
+• rpm_range: диапазон RPM в долларах за 1 000 просмотров, формат "$X–Y"
+  Примеры: "$0.5–1.5" (низкий), "$2–5" (средний), "$5–15" (высокий)
 • rpm_reason: одна строка — почему именно так (это ОЦЕНКА модели, не данные API)
 
 ФОРМАТ — строго JSON без markdown:
-{"sub_niches":[{"name":"Разбор гитарных аккордов для начинающих","search_query":"гитара с нуля","rpm_level":"низкий","rpm_reason":"Конкурентная ниша, низкий CPC"},{"name":"...","search_query":"...","rpm_level":"средний","rpm_reason":"..."}]}
+{"sub_niches":[{"name":"Разбор гитарных аккордов для начинающих","search_query":"гитара с нуля","rpm_level":"низкий","rpm_range":"$0.5–1.5","rpm_reason":"Конкурентная ниша, низкий CPC"},{"name":"...","search_query":"...","rpm_level":"средний","rpm_range":"$2–5","rpm_reason":"..."}]}
 
 Верни ровно 15-20 подниш. Только JSON. Начни с {.`
     : `You are a YouTube analyst. Break a niche (or a specific direction within it) into 15-20 SPECIFIC sub-niches for a YouTube channel.
@@ -112,10 +114,12 @@ For each sub-niche provide:
   (not a description, the actual search string)
   Examples: "guitar for beginners", "best savings account", "LLC taxes 2024"
 • rpm_level: "low" | "medium" | "high"
+• rpm_range: estimated RPM range in dollars per 1,000 views, format "$X–Y"
+  Examples: "$0.5–1.5" (low), "$2–5" (medium), "$5–15" (high)
 • rpm_reason: one line — why (MODEL ESTIMATE, not API data)
 
 FORMAT — strict JSON without markdown:
-{"sub_niches":[{"name":"Guitar chords breakdown for beginners","search_query":"guitar for beginners","rpm_level":"low","rpm_reason":"Competitive niche, low CPC"},{"name":"...","search_query":"...","rpm_level":"medium","rpm_reason":"..."}]}
+{"sub_niches":[{"name":"Guitar chords breakdown for beginners","search_query":"guitar for beginners","rpm_level":"low","rpm_range":"$0.5–1.5","rpm_reason":"Competitive niche, low CPC"},{"name":"...","search_query":"...","rpm_level":"medium","rpm_range":"$2–5","rpm_reason":"..."}]}
 
 Return exactly 15-20 sub-niches. JSON only. Start with {.`
 }
@@ -138,6 +142,11 @@ function getVerdictPrompt(lang: string): string {
 Признак «пробиваемой растущей» ниши: newcomer_share > 0.3, growth_ratio > 1.0, reliable = true.
 Признак «закрытой» ниши: newcomer_share < 0.1, top_subs_median > 500 000.
 
+ЗАПРЕТ: Никогда не использовать машинные имена полей (newcomer_share, median_views_per_video, top_subs_median, growth_ratio, fresh_video_count) в тексте вывода.
+Пиши по-русски: «доля новых каналов», «медиана просмотров», «медиана подписчиков», «коэффициент роста», «видео за 90 дней».
+Правильно: «Доля новых каналов — 88%, медиана просмотров — 2 463.»
+Неправильно: «newcomer_share = 0.88, median_views = 2 463.»
+
 ФОРМАТ — строго JSON без markdown:
 {"ranking":[{"name":"Название","summary":"2-3 предложения с реальными числами: почему эта позиция в рейтинге","recommendation":"Конкретный совет: что снимать, как часто, на что акцент"}],"overall_advice":"2-3 предложения: общий вывод по рынку ниши"}
 
@@ -159,6 +168,11 @@ Metric meanings (all source: "api"):
 "Open growing" niche signal: newcomer_share > 0.3, growth_ratio > 1.0, reliable = true.
 "Closed" niche signal: newcomer_share < 0.1, top_subs_median > 500 000.
 
+PROHIBITION: Never use machine field names (newcomer_share, median_views_per_video, top_subs_median, growth_ratio, fresh_video_count) in output text.
+Use plain English: "newcomer share", "median views", "median subscribers", "growth ratio", "videos in 90 days".
+Correct: "Newcomer share is 88%, median views 2,463."
+Incorrect: "newcomer_share = 0.88, median_views = 2,463."
+
 FORMAT — strict JSON without markdown:
 {"ranking":[{"name":"Name","summary":"2-3 sentences with real numbers: why this ranking position","recommendation":"Specific advice: what to film, how often, where to focus"}],"overall_advice":"2-3 sentences: overall market takeaway for this niche"}
 
@@ -173,6 +187,7 @@ interface SubNicheInput {
   name:         string
   search_query: string  // short 2-3 word YouTube search term (new in v2)
   rpm_level:    string
+  rpm_range?:   string
   rpm_reason:   string
 }
 
@@ -196,6 +211,7 @@ interface SubNicheResult {
   }
   rpm_estimate: {
     level:  MetricValue<string>
+    range?: MetricValue<string>
     reason: MetricValue<string>
   }
 }
@@ -352,6 +368,7 @@ export async function POST(req: NextRequest) {
       name:                string
       search_query:        string
       rpm_level:           string
+      rpm_range:           string
       rpm_reason:          string
       fresh_video_count:   number
       views:               number[]   // raw view counts for median_views_per_video
@@ -369,7 +386,7 @@ export async function POST(req: NextRequest) {
       enriched.push(...await Promise.all(batchNiches.map(async (niche) => {
       const base: RawEnriched = {
         name: niche.name, search_query: niche.search_query,
-        rpm_level: niche.rpm_level, rpm_reason: niche.rpm_reason,
+        rpm_level: niche.rpm_level, rpm_range: niche.rpm_range ?? '', rpm_reason: niche.rpm_reason,
         fresh_video_count: 0, views: [], views_vpd: [], fresh_ages: [], channel_ages_months: [], subs: [],
         fetch_error: null,
       }
@@ -450,6 +467,7 @@ export async function POST(req: NextRequest) {
       name:             string
       search_query:     string
       rpm_level:        string
+      rpm_range:        string
       rpm_reason:       string
       fresh_video_count: number
       median_views:     number
@@ -473,6 +491,7 @@ export async function POST(req: NextRequest) {
         name:              n.name,
         search_query:      n.search_query,
         rpm_level:         n.rpm_level,
+        rpm_range:         n.rpm_range,
         rpm_reason:        n.rpm_reason,
         fresh_video_count: n.fresh_video_count,
         median_views:      medianOf(n.views),
@@ -623,6 +642,7 @@ export async function POST(req: NextRequest) {
       },
       rpm_estimate: {
         level:  { value: n.rpm_level,  source: 'estimate' as const },
+        range:  { value: n.rpm_range,  source: 'estimate' as const },
         reason: { value: n.rpm_reason, source: 'estimate' as const },
       },
     }))

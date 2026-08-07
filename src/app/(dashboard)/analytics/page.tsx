@@ -4164,7 +4164,7 @@ interface SubNicheItem {
     growth_ratio:           SNMetric<number | null>
     sample_age_days:        { fresh: number | null; old: number | null }
   }
-  rpm_estimate: { level: SNMetric<string>; reason: SNMetric<string> }
+  rpm_estimate: { level: SNMetric<string>; range?: SNMetric<string>; reason: SNMetric<string> }
 }
 
 interface SubNicheFinderData {
@@ -4209,8 +4209,8 @@ function TipIcon({ tip }: { tip: string }) {
 }
 
 function SubNicheResultsView({
-  data, t, onBack,
-}: { data: SubNicheFinderData; t: (k: string) => string; onBack: () => void }) {
+  data, t, lang, onBack,
+}: { data: SubNicheFinderData; t: (k: string) => string; lang: string; onBack: () => void }) {
   const [unreliableOpen, setUnreliableOpen] = useState(false)
 
   const reliable   = data.sub_niches.filter(n => n.reliable)
@@ -4345,9 +4345,9 @@ function SubNicheResultsView({
               <tbody>
                 {sortedReliable.map((n, i) => {
                   const m = n.metrics
-                  const ageNote = (m.sample_age_days.fresh !== null || m.sample_age_days.old !== null)
-                    ? `${m.sample_age_days.fresh ?? '?'}${t('analytics.sn_age_f')}/${m.sample_age_days.old ?? '?'}${t('analytics.sn_age_o')}`
-                    : null
+                  const sampleTitle = lang === 'en'
+                    ? `${n.sample_size.videos} videos · ${n.sample_size.channels} channels${m.sample_age_days.fresh != null ? ` · fresh avg ${m.sample_age_days.fresh}d` : ''}${m.sample_age_days.old != null ? ` · old avg ${m.sample_age_days.old}d` : ''}`
+                    : `${n.sample_size.videos} видео · ${n.sample_size.channels} каналов${m.sample_age_days.fresh != null ? ` · свежих ср. ${m.sample_age_days.fresh} дн` : ''}${m.sample_age_days.old != null ? ` · старых ср. ${m.sample_age_days.old} дн` : ''}`
                   return (
                     <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
                       className="hover:bg-white/[0.02] transition-colors">
@@ -4365,11 +4365,17 @@ function SubNicheResultsView({
                       <td className="px-3 py-2.5 text-right text-slate-300">{fmtNum(m.fresh_video_count.value)}</td>
                       <td className="px-3 py-2.5 text-right text-slate-300">{fmtNum(m.top_subs_median.value)}</td>
                       <td className="px-3 py-2.5 text-right">
-                        <span className="italic" style={{ color: '#fbbf24' }}>{n.rpm_estimate.level.value}</span>
+                        {n.rpm_estimate.range?.value
+                          ? <span>
+                              <span className="text-slate-300 tabular-nums">{n.rpm_estimate.range.value}</span>
+                              <span className="italic ml-1" style={{ color: '#fbbf24' }}>{n.rpm_estimate.level.value}</span>
+                            </span>
+                          : <span className="italic" style={{ color: '#fbbf24' }}>{n.rpm_estimate.level.value}</span>
+                        }
                       </td>
-                      <td className="px-3 py-2.5 text-right text-slate-500 whitespace-nowrap">
-                        {n.sample_size.videos}v/{n.sample_size.channels}c
-                        {ageNote && <span className="ml-1 text-slate-600">· {ageNote}</span>}
+                      <td className="px-3 py-2.5 text-right text-slate-500 whitespace-nowrap tabular-nums"
+                        title={sampleTitle}>
+                        {n.sample_size.videos} · {n.sample_size.channels}
                       </td>
                     </tr>
                   )
@@ -4531,6 +4537,7 @@ function SubNicheTab() {
       <SubNicheResultsView
         data={nichesData}
         t={t}
+        lang={uiLang}
         onBack={() => { setNichesData(null); setSelectedDir(null); setShowConfirm(false) }}
       />
     )
