@@ -4142,9 +4142,563 @@ function HistoryTab({ onOpen }: { onOpen: (report: AnalyticsReport) => void }) {
   )
 }
 
+// ─── Sub-Niche Finder Tab ─────────────────────────────────────────────────────
+
+type SNMetric<T> = { value: T; source: 'api' | 'estimate' }
+
+interface NicheDirection { name: string; description: string; examples: string[] }
+interface DirectionsData  { broad_niche: string; directions: NicheDirection[] }
+
+interface SubNicheItem {
+  name:         string
+  search_query: string
+  reliable:     boolean
+  fetch_error:  string | null
+  sample_size:  { videos: number; channels: number }
+  metrics: {
+    fresh_video_count:      SNMetric<number>
+    median_views_per_video: SNMetric<number>
+    newcomer_share:         SNMetric<number>
+    top_subs_median:        SNMetric<number>
+    growth_ratio:           SNMetric<number | null>
+    sample_age_days:        { fresh: number | null; old: number | null }
+  }
+  rpm_estimate: { level: SNMetric<string>; reason: SNMetric<string> }
+}
+
+interface SubNicheFinderData {
+  broad_niche:    string
+  direction:      string | null
+  quota_used:     number
+  reliable_count: number
+  sub_niches:     SubNicheItem[]
+  verdict: {
+    ranking:        Array<{ name: string; summary: string; recommendation: string }>
+    overall_advice: string
+    source:         'estimate'
+  }
+}
+
+function GrowthBadge({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-slate-600 text-xs">—</span>
+  const color = value > 1.05 ? '#4ade80' : value < 0.95 ? '#f87171' : '#facc15'
+  const arrow = value > 1.05 ? '↑' : value < 0.95 ? '↓' : '→'
+  return <span style={{ color }} className="font-mono text-xs whitespace-nowrap">{arrow} {value.toFixed(2)}×</span>
+}
+
+function PenetBadge({ value }: { value: number }) {
+  const pct   = Math.round(value * 100)
+  const color = pct >= 40 ? '#4ade80' : pct >= 20 ? '#facc15' : '#f87171'
+  return <span style={{ color }} className="font-mono text-xs">{pct}%</span>
+}
+
+function EstBadge({ label }: { label: string }) {
+  return (
+    <span className="text-xs px-1.5 py-0.5 rounded italic"
+      style={{ background: 'rgba(245,158,11,0.1)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.2)' }}>
+      {label}
+    </span>
+  )
+}
+
+function TipIcon({ tip }: { tip: string }) {
+  return (
+    <span title={tip} className="cursor-help text-slate-600 hover:text-slate-400 transition-colors ml-0.5 text-xs select-none">ⓘ</span>
+  )
+}
+
+function SubNicheResultsView({
+  data, t, onBack,
+}: { data: SubNicheFinderData; t: (k: string) => string; onBack: () => void }) {
+  const [unreliableOpen, setUnreliableOpen] = useState(false)
+
+  const reliable   = data.sub_niches.filter(n => n.reliable)
+  const unreliable = data.sub_niches.filter(n => !n.reliable)
+
+  // Verdict ranking: first non-avoid entries are top, rest are avoid
+  const topRanking  = data.verdict.ranking.filter(r => !r.summary.startsWith('Избегать') && !r.summary.startsWith('Avoid'))
+  const avoidRanked = data.verdict.ranking.filter(r =>  r.summary.startsWith('Избегать') || r.summary.startsWith('Avoid'))
+
+  // Reliable niches sorted by newcomer_share desc (matching API sort)
+  const sortedReliable = [...reliable].sort(
+    (a, b) => b.metrics.newcomer_share.value - a.metrics.newcomer_share.value
+  )
+
+  return (
+    <div className="analytics-result flex flex-col gap-5">
+      {/* Header */}
+      <div className="no-print flex flex-wrap items-center justify-between gap-3">
+        <button onClick={onBack}
+          className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          {t('analytics.sn_back_new')}
+        </button>
+        <div className="flex gap-4 text-xs text-slate-500">
+          <span>{t('analytics.sn_reliable_count')}: <span className="text-white font-semibold">{data.reliable_count}/{data.sub_niches.length}</span></span>
+          <span>{t('analytics.sn_quota_used')}: <span className="text-white font-semibold">{data.quota_used}</span></span>
+        </div>
+      </div>
+
+      {/* Top-5 cards */}
+      {topRanking.length > 0 && (
+        <div>
+          <SectionTitle>{t('analytics.sn_top5_title')}</SectionTitle>
+          <div className="flex flex-col gap-3">
+            {topRanking.slice(0, 5).map((r, i) => {
+              const niche = data.sub_niches.find(n => n.name === r.name)
+              const m     = niche?.metrics
+              return (
+                <div key={i} className="rounded-2xl p-5"
+                  style={{ background: i === 0 ? 'rgba(124,58,237,0.1)' : 'rgba(255,255,255,0.04)', border: i === 0 ? '1px solid rgba(124,58,237,0.3)' : '1px solid rgba(255,255,255,0.08)' }}>
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                          style={{ background: i === 0 ? 'rgba(124,58,237,0.3)' : 'rgba(255,255,255,0.08)', color: i === 0 ? '#c4b5fd' : '#64748b' }}>
+                          #{i + 1}
+                        </span>
+                        <p className="font-semibold text-white text-sm">{r.name}</p>
+                      </div>
+                      <p className="text-xs text-slate-400 leading-relaxed">{r.summary}</p>
+                    </div>
+                  </div>
+                  {m && (
+                    <div className="flex flex-wrap gap-3 text-xs mb-3">
+                      <span className="flex items-center gap-1 text-slate-400">
+                        <span className="text-slate-500">{t('analytics.sn_col_penet')}</span>
+                        <PenetBadge value={m.newcomer_share.value} />
+                      </span>
+                      <span className="flex items-center gap-1 text-slate-400">
+                        <span className="text-slate-500">{t('analytics.sn_col_growth')}</span>
+                        <GrowthBadge value={m.growth_ratio.value} />
+                      </span>
+                      <span className="flex items-center gap-1 text-slate-400">
+                        <span className="text-slate-500">{t('analytics.sn_col_views')}</span>
+                        <span className="text-slate-200">{fmtNum(m.median_views_per_video.value)}</span>
+                      </span>
+                      <span className="flex items-center gap-1 text-slate-400">
+                        <span className="text-slate-500">{t('analytics.sn_col_fresh')}</span>
+                        <span className="text-slate-200">{fmtNum(m.fresh_video_count.value)}</span>
+                      </span>
+                    </div>
+                  )}
+                  {r.recommendation && (
+                    <p className="text-xs text-slate-400">
+                      <span className="text-slate-500">{t('analytics.sn_rec')} </span>
+                      {r.recommendation}
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Full metrics table */}
+      {sortedReliable.length > 0 && (
+        <div>
+          <SectionTitle>{t('analytics.sn_all_title')}</SectionTitle>
+          <p className="text-xs text-slate-500 mb-3 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded"
+              style={{ background: 'rgba(34,197,94,0.1)', color: '#86efac', border: '1px solid rgba(34,197,94,0.2)' }}>
+              {t('analytics.sn_api')}
+            </span>
+            <span className="text-slate-600">—</span>
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded italic"
+              style={{ background: 'rgba(245,158,11,0.1)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.2)' }}>
+              {t('analytics.sn_est')}
+            </span>
+          </p>
+          <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+            <table className="w-full text-xs">
+              <thead>
+                <tr style={{ background: 'rgba(255,255,255,0.04)' }}>
+                  <th className="text-left px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">{t('analytics.sn_col_niche')}</th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.sn_col_penet')}<TipIcon tip={t('analytics.sn_tip_penet')} />
+                  </th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.sn_col_growth')}<TipIcon tip={t('analytics.sn_tip_growth')} />
+                  </th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.sn_col_views')}<TipIcon tip={t('analytics.sn_tip_views')} />
+                  </th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.sn_col_fresh')}<TipIcon tip={t('analytics.sn_tip_fresh')} />
+                  </th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.sn_col_subs')}<TipIcon tip={t('analytics.sn_tip_subs')} />
+                  </th>
+                  <th className="text-right px-3 py-2.5 font-medium whitespace-nowrap"
+                    style={{ color: '#fbbf24' }} title={t('analytics.sn_tip_rpm')}>
+                    {t('analytics.sn_col_rpm')} <span className="italic text-xs opacity-60">({t('analytics.sn_est')})</span>
+                  </th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.sn_col_sample')}<TipIcon tip={t('analytics.sn_tip_age')} />
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedReliable.map((n, i) => {
+                  const m = n.metrics
+                  const ageNote = (m.sample_age_days.fresh !== null || m.sample_age_days.old !== null)
+                    ? `${m.sample_age_days.fresh ?? '?'}${t('analytics.sn_age_f')}/${m.sample_age_days.old ?? '?'}${t('analytics.sn_age_o')}`
+                    : null
+                  return (
+                    <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
+                      className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-3 py-2.5 text-slate-200 max-w-[180px]">
+                        <span className="line-clamp-1">{n.name}</span>
+                        {n.fetch_error && (
+                          <span className="text-red-400 text-xs block mt-0.5" title={n.fetch_error}>
+                            ⚠ {t('analytics.sn_fetch_err')}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right"><PenetBadge value={m.newcomer_share.value} /></td>
+                      <td className="px-3 py-2.5 text-right"><GrowthBadge value={m.growth_ratio.value} /></td>
+                      <td className="px-3 py-2.5 text-right text-slate-300">{fmtNum(m.median_views_per_video.value)}</td>
+                      <td className="px-3 py-2.5 text-right text-slate-300">{fmtNum(m.fresh_video_count.value)}</td>
+                      <td className="px-3 py-2.5 text-right text-slate-300">{fmtNum(m.top_subs_median.value)}</td>
+                      <td className="px-3 py-2.5 text-right">
+                        <span className="italic" style={{ color: '#fbbf24' }}>{n.rpm_estimate.level.value}</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-slate-500 whitespace-nowrap">
+                        {n.sample_size.videos}v/{n.sample_size.channels}c
+                        {ageNote && <span className="ml-1 text-slate-600">· {ageNote}</span>}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-slate-600 mt-2 italic" title={t('analytics.sn_rpm_note')}>
+            * RPM — {t('analytics.sn_rpm_note')}
+          </p>
+        </div>
+      )}
+
+      {/* Unreliable (collapsed) */}
+      {unreliable.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+          <button
+            onClick={() => setUnreliableOpen(o => !o)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left text-sm text-slate-400 hover:text-slate-200 transition-colors"
+            style={{ background: 'rgba(255,255,255,0.03)' }}>
+            <span>{t('analytics.sn_unreliable_title')} ({unreliable.length})</span>
+            <span className="text-slate-600 text-xs">{unreliableOpen ? '▲' : '▼'}</span>
+          </button>
+          {unreliableOpen && (
+            <div className="px-4 pb-3 flex flex-col gap-2">
+              {unreliable.map((n, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 py-2"
+                  style={{ borderTop: i > 0 ? '1px solid rgba(255,255,255,0.05)' : undefined }}>
+                  <span className="text-sm text-slate-400">{n.name}</span>
+                  <span className="text-xs text-slate-600 shrink-0">
+                    {n.fetch_error
+                      ? `⚠ ${t('analytics.sn_fetch_err')}`
+                      : `${n.sample_size.videos}v / ${n.sample_size.channels}c`
+                    }
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Verdict */}
+      <Card>
+        <div className="flex items-center justify-between mb-3">
+          <SectionTitle>{t('analytics.sn_verdict_title')}</SectionTitle>
+          <EstBadge label={t('analytics.sn_est')} />
+        </div>
+        <p className="text-xs text-slate-500 mb-4 italic">{t('analytics.sn_verdict_note')}</p>
+        {data.verdict.overall_advice && (
+          <p className="text-sm text-slate-300 leading-relaxed mb-4">{data.verdict.overall_advice}</p>
+        )}
+        {avoidRanked.length > 0 && (
+          <div className="flex flex-col gap-2 mt-2">
+            {avoidRanked.map((r, i) => (
+              <div key={i} className="flex gap-3 items-start">
+                <span className="text-red-400 shrink-0 mt-0.5 text-xs">✕</span>
+                <div>
+                  <p className="text-xs font-medium text-slate-300">{r.name}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{r.summary}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+function SubNicheTab() {
+  const { t, lang: uiLang } = useLang()
+
+  const [broadNiche,   setBroadNiche]   = useState('')
+  const [country,      setCountry]      = useState('RU')
+  const [contentLang,  setContentLang]  = useState('ru')
+  const [loadingDirs,  setLoadingDirs]  = useState(false)
+  const [loadingNiches, setLoadingNiches] = useState(false)
+  const [error,        setError]        = useState('')
+  const [dirsData,     setDirsData]     = useState<DirectionsData | null>(null)
+  const [selectedDir,  setSelectedDir]  = useState<string | null>(null)
+  const [showConfirm,  setShowConfirm]  = useState(false)
+  const [nichesData,   setNichesData]   = useState<SubNicheFinderData | null>(null)
+
+  async function handleLoadDirs() {
+    if (!broadNiche.trim()) { setError(t('analytics.err_topic')); return }
+    setError(''); setLoadingDirs(true); setDirsData(null); setSelectedDir(null); setNichesData(null)
+    try {
+      const res  = await fetch('/api/analytics/niche-directions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ broad_niche: broadNiche.trim(), ui_lang: uiLang }),
+      })
+      const json = await res.json() as { ok: boolean; data?: DirectionsData; error?: string; code?: string }
+      if (!json.ok) {
+        if (json.code === 'plan_required') { setError('__plan__'); return }
+        if (json.code === 'byok_required') { setError('__byok__'); return }
+        setError(json.error ?? t('analytics.err_general'))
+      } else {
+        setDirsData(json.data ?? null)
+      }
+    } catch { setError(t('analytics.err_general')) }
+    finally { setLoadingDirs(false) }
+  }
+
+  async function handleLoadNiches() {
+    if (!dirsData || !selectedDir) return
+    setError(''); setLoadingNiches(true); setShowConfirm(false); setNichesData(null)
+    try {
+      const res  = await fetch('/api/analytics/sub-niche-finder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          broad_niche:  broadNiche.trim(),
+          direction:    selectedDir,
+          country,
+          content_lang: contentLang,
+          ui_lang:      uiLang,
+        }),
+      })
+      const json = await res.json() as { ok: boolean; data?: SubNicheFinderData; error?: string; code?: string }
+      if (!json.ok) {
+        if (json.code === 'plan_required') { setError('__plan__'); return }
+        if (json.code === 'byok_required') { setError('__byok__'); return }
+        setError(json.code === 'NO_CREDITS' ? t('analytics.err_credits') : (json.error ?? t('analytics.err_general')))
+      } else {
+        setNichesData(json.data ?? null)
+        void refreshCredits()
+      }
+    } catch { setError(t('analytics.err_general')) }
+    finally { setLoadingNiches(false) }
+  }
+
+  const selectStyle  = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }
+  const inputStyle   = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }
+
+  // ── Results ──
+  if (nichesData) {
+    return (
+      <SubNicheResultsView
+        data={nichesData}
+        t={t}
+        onBack={() => { setNichesData(null); setSelectedDir(null); setShowConfirm(false) }}
+      />
+    )
+  }
+
+  // ── Loading niches ──
+  if (loadingNiches) {
+    return (
+      <Card>
+        <div className="flex flex-col items-center gap-3 py-6 text-center">
+          <Spinner />
+          <p className="text-sm text-slate-300">{t('analytics.sn_loading')}</p>
+          <p className="text-xs text-slate-500">{t('analytics.sn_loading_note')}</p>
+        </div>
+      </Card>
+    )
+  }
+
+  // ── Confirm quota usage ──
+  if (showConfirm && selectedDir) {
+    return (
+      <div className="flex flex-col gap-5">
+        <button onClick={() => setShowConfirm(false)}
+          className="no-print flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors self-start">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          {t('analytics.sn_back_dirs')}
+        </button>
+
+        <div className="rounded-2xl p-5 flex flex-col gap-4"
+          style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)' }}>
+          <div className="flex items-start gap-3">
+            <span className="text-xl shrink-0">⚠️</span>
+            <div>
+              <p className="text-sm font-semibold text-amber-300 mb-1">{t('analytics.sn_quota_warn_title')}</p>
+              <p className="text-sm text-slate-300 leading-relaxed">{t('analytics.sn_quota_warn_body')}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-slate-400 pl-8">
+            <span className="px-2 py-1 rounded"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              −{CREDIT_COSTS.sub_niche_finder} {t('analytics.credits_short')}
+            </span>
+            <span className="text-slate-600">·</span>
+            <span className="text-slate-500">
+              {uiLang === 'en' ? 'Direction:' : 'Направление:'} <span className="text-slate-300">«{selectedDir}»</span>
+            </span>
+          </div>
+          {error && <p className="text-sm text-red-400 pl-8">{error}</p>}
+          <div className="flex gap-3 pl-8">
+            <button onClick={() => void handleLoadNiches()}
+              className="btn-gradient px-5 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center gap-2">
+              {t('analytics.sn_confirm_btn')}
+            </button>
+            <button onClick={() => setShowConfirm(false)}
+              className="px-4 py-2.5 rounded-xl text-sm text-slate-400 hover:text-white transition-colors"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              {t('analytics.sn_cancel')}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Directions grid ──
+  if (dirsData) {
+    return (
+      <div className="flex flex-col gap-5">
+        <button onClick={() => { setDirsData(null); setSelectedDir(null) }}
+          className="no-print flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors self-start">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          {t('analytics.sn_back_new')}
+        </button>
+
+        <div>
+          <p className="text-sm font-medium text-slate-300 mb-3">{t('analytics.sn_dirs_title')}</p>
+          <div className="flex flex-col gap-3">
+            {dirsData.directions.map((dir, i) => (
+              <button key={i}
+                onClick={() => { setSelectedDir(dir.name); setShowConfirm(true); setError('') }}
+                className="text-left rounded-xl p-4 transition-all hover:border-violet-500/50 group"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <p className="font-semibold text-white text-sm group-hover:text-violet-200 transition-colors">{dir.name}</p>
+                  <svg className="w-4 h-4 text-slate-600 group-hover:text-violet-400 transition-colors shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed mb-2">{dir.description}</p>
+                {dir.examples.length > 0 && (
+                  <p className="text-xs text-slate-600">
+                    <span className="text-slate-500">{t('analytics.sn_examples')} </span>
+                    {dir.examples.join(' · ')}
+                  </p>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Input form (Step 1) ──
+  return (
+    <div className="flex flex-col gap-5">
+      <Card className="no-print">
+        <div className="flex flex-col gap-4">
+          {/* Broad niche input */}
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">{t('analytics.sn_broad_label')}</label>
+            <input
+              value={broadNiche} onChange={e => setBroadNiche(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !loadingDirs && void handleLoadDirs()}
+              placeholder={t('analytics.sn_broad_ph')}
+              className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-violet-500/50"
+              style={inputStyle}
+            />
+          </div>
+
+          {/* Country + Lang */}
+          <div className="flex gap-3 flex-wrap">
+            <div className="flex-1 min-w-36">
+              <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.country_label')}</label>
+              <select value={country} onChange={e => setCountry(e.target.value)}
+                className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none" style={selectStyle}>
+                <option value="worldwide">🌍 {uiLang === 'en' ? 'Worldwide' : 'Весь мир'}</option>
+                <option value="US">🇺🇸 USA</option>
+                <option value="GB">🇬🇧 UK</option>
+                <option value="CA">🇨🇦 Canada</option>
+                <option value="AU">🇦🇺 Australia</option>
+                <option value="DE">🇩🇪 Germany</option>
+                <option value="FR">🇫🇷 France</option>
+                <option value="ES">🇪🇸 Spain</option>
+                <option value="RU">🇷🇺 {uiLang === 'en' ? 'Russia' : 'Россия'}</option>
+                <option value="UA">🇺🇦 {uiLang === 'en' ? 'Ukraine' : 'Украина'}</option>
+                <option value="KZ">🇰🇿 {uiLang === 'en' ? 'Kazakhstan' : 'Казахстан'}</option>
+                <option value="PL">🇵🇱 Poland</option>
+                <option value="TR">🇹🇷 Turkey</option>
+                <option value="BR">🇧🇷 Brazil</option>
+                <option value="IN">🇮🇳 India</option>
+              </select>
+            </div>
+            <div className="flex-1 min-w-36">
+              <label className="block text-xs text-slate-400 mb-1.5">{t('analytics.lang_label')}</label>
+              <select value={contentLang} onChange={e => setContentLang(e.target.value)}
+                className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none" style={selectStyle}>
+                <option value="ru">{t('analytics.lang_ru')}</option>
+                <option value="en">{t('analytics.lang_en')}</option>
+                <option value="de">Deutsch</option>
+                <option value="fr">Français</option>
+                <option value="es">Español</option>
+                <option value="pt">Português</option>
+                <option value="tr">Türkçe</option>
+                <option value="uk">Українська</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Free note */}
+          <div className="flex items-center gap-2 text-xs text-green-400/80"
+            style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.15)', borderRadius: '0.75rem', padding: '0.625rem 0.875rem' }}>
+            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            {t('analytics.sn_free_note')}
+          </div>
+
+          {error === '__plan__' ? <PlanRequiredBlock /> : error === '__byok__' ? <ByokBlock /> : error ? <p className="text-sm text-red-400">{error}</p> : null}
+
+          <button onClick={() => void handleLoadDirs()} disabled={loadingDirs}
+            className="btn-gradient px-5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2">
+            {loadingDirs ? <Spinner /> : null}
+            {t('analytics.sn_dirs_btn')}
+          </button>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type Tab = 'niche' | 'niche_finder' | 'channel_plan' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars' | 'history'
+type Tab = 'niche' | 'niche_finder' | 'channel_plan' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars' | 'history' | 'sub_niche'
 
 export default function AnalyticsPage() {
   const { t } = useLang()
@@ -4245,6 +4799,7 @@ export default function AnalyticsPage() {
     keywords:     CREDIT_COSTS.keywords_analysis,
     compare:      CREDIT_COSTS.channels_compare,
     rising_stars: CREDIT_COSTS.rising_stars,
+    sub_niche:    CREDIT_COSTS.sub_niche_finder,
     history:      0,
   }
 
@@ -4442,6 +4997,7 @@ export default function AnalyticsPage() {
                 onResult={r => setRisingStarsResult(r)}
               />
             )}
+            {tab === 'sub_niche' && <SubNicheTab />}
             {tab === 'history' && <HistoryTab onOpen={handleOpenReport} />}
           </>
         )}

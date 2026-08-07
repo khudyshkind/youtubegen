@@ -94,7 +94,8 @@ export const ANALYTICS_GROUPS: AnalyticsGroupConfig[] = [
     groupKey: 'analytics.group_competitors',
     tabs: [
       { id: 'niche',        labelKey: 'analytics.tab_niche',        icon: '🧭', descKey: 'analytics.desc_niche',        showInDashboard: true },
-      { id: 'channel',      labelKey: 'analytics.tab_channel',      icon: '📊', descKey: 'analytics.desc_channel',      showInDashboard: true },
+      { id: 'sub_niche',   labelKey: 'analytics.tab_sub_niche',   icon: '🔍', descKey: 'analytics.desc_sub_niche',   showInDashboard: true },
+      { id: 'channel',     labelKey: 'analytics.tab_channel',      icon: '📊', descKey: 'analytics.desc_channel',      showInDashboard: true },
       { id: 'compare',      labelKey: 'analytics.tab_compare',      icon: '⚖️', descKey: 'analytics.desc_compare',      showInDashboard: true },
       { id: 'rising_stars', labelKey: 'analytics.tab_rising_stars', icon: '⭐', descKey: 'analytics.desc_rising_stars', showInDashboard: true },
       { id: 'comments',     labelKey: 'analytics.tab_comments',     icon: '💬', descKey: 'analytics.desc_comments',     showInDashboard: true },
