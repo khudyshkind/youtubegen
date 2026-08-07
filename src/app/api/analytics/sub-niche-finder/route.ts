@@ -24,13 +24,28 @@ const OLD_DAYS     = 365
 const MIN_CHANNELS_RELIABLE = 5   // newcomer_share unreliable below this
 const MIN_OLD_SAMPLE_GROWTH = 10  // growth_ratio unreliable below this
 
+// Concurrency limits to avoid YouTube 429 rate-limit (edge-rejected; no quota consumed on 429).
+const ENRICH_CONCURRENCY = 4    // niches enriched in parallel in Step 2+3
+const ENRICH_BATCH_DELAY = 400  // ms between Step 2+3 batches
+const GROWTH_CONCURRENCY = 3    // niches in parallel in Step 5 growth-ratio
+const GROWTH_BATCH_DELAY = 500  // ms between Step 5 batches
+const RATE_LIMIT_DELAYS  = [2000, 4000] as const  // back-off delays for 429 retries
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+class YouTubeRateLimitError extends Error {
+  constructor(path: string) {
+    super(`YouTube rate-limit (429) on ${path}`)
+    this.name = 'YouTubeRateLimitError'
+  }
+}
 
 async function ytFetch(path: string, params: Record<string, string>, apiKey: string): Promise<unknown> {
   const qs  = new URLSearchParams({ ...params, key: apiKey }).toString()
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
   if (!res.ok) {
+    if (res.status === 429) throw new YouTubeRateLimitError(path)
     checkYouTubeQuota(res.status, text)
     throw new Error(`YouTube API ${res.status} on ${path}: ${text.slice(0, 200)}`)
   }
@@ -169,6 +184,7 @@ interface SubNicheResult {
   name:         string
   search_query: string
   reliable:     boolean
+  fetch_error:  string | null
   sample_size:  { videos: number; channels: number }
   metrics: {
     fresh_video_count:      MetricValue<number>
@@ -234,9 +250,21 @@ export async function POST(req: NextRequest) {
       }, { status: 403 })
     }
 
-    // ytf: BYOK key only — no fallback to shared key (this route is BYOK-exclusive)
+    // ytf: BYOK key only, with exponential back-off on 429 rate-limit.
+    // 429 = edge-rejected (no quota consumed); 403 = quota exhausted → do not retry.
     async function ytf(path: string, params: Record<string, string>): Promise<unknown> {
-      return ytFetch(path, params, apiKey)
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await ytFetch(path, params, apiKey)
+        } catch (e) {
+          if (e instanceof YouTubeRateLimitError && attempt < RATE_LIMIT_DELAYS.length) {
+            console.warn(`[sub-niche] 429 on ${path}, retry ${attempt + 1} after ${RATE_LIMIT_DELAYS[attempt]}ms`)
+            await new Promise(r => setTimeout(r, RATE_LIMIT_DELAYS[attempt]))
+            continue
+          }
+          throw e
+        }
+      }
     }
 
     // ── Cache check ────────────────────────────────────────────────────────
@@ -320,8 +348,6 @@ export async function POST(req: NextRequest) {
     if (country !== 'worldwide') searchBase.regionCode = country
     if (content_lang && content_lang !== 'auto') searchBase.relevanceLanguage = content_lang
 
-    console.log(`[sub-niche] step 2+3: search+enrich ${sub_niches.length} niches in parallel`)
-
     interface RawEnriched {
       name:                string
       search_query:        string
@@ -333,13 +359,19 @@ export async function POST(req: NextRequest) {
       fresh_ages:          number[]   // video age in days, parallel to views_vpd
       channel_ages_months: number[]
       subs:                number[]
+      fetch_error:         string | null  // non-null when data collection failed after retries
     }
 
-    const enriched: RawEnriched[] = await Promise.all(sub_niches.map(async (niche) => {
+    console.log(`[sub-niche] step 2+3: enrich ${sub_niches.length} niches (concurrency=${ENRICH_CONCURRENCY})`)
+    const enriched: RawEnriched[] = []
+    for (let eBatch = 0; eBatch < sub_niches.length; eBatch += ENRICH_CONCURRENCY) {
+      const batchNiches = sub_niches.slice(eBatch, eBatch + ENRICH_CONCURRENCY)
+      enriched.push(...await Promise.all(batchNiches.map(async (niche) => {
       const base: RawEnriched = {
         name: niche.name, search_query: niche.search_query,
         rpm_level: niche.rpm_level, rpm_reason: niche.rpm_reason,
         fresh_video_count: 0, views: [], views_vpd: [], fresh_ages: [], channel_ages_months: [], subs: [],
+        fetch_error: null,
       }
       try {
         // Step 2: search by search_query (short, user-like term) — 100 units
@@ -400,10 +432,16 @@ export async function POST(req: NextRequest) {
         }
       } catch (e) {
         if (e instanceof YouTubeQuotaError) throw e
-        console.warn(`[sub-niche] enrich failed for "${niche.name}":`, e instanceof Error ? e.message : String(e))
+        const msg = e instanceof Error ? e.message : String(e)
+        base.fetch_error = msg.slice(0, 120)
+        console.warn(`[sub-niche] enrich failed for "${niche.name}":`, msg.slice(0, 120))
       }
       return base
-    }))
+    })))
+      if (eBatch + ENRICH_CONCURRENCY < sub_niches.length) {
+        await new Promise(r => setTimeout(r, ENRICH_BATCH_DELAY))
+      }
+    }
 
     console.log(`[sub-niche] after step 3: quota_used=${quotaUsed}`)
 
@@ -421,6 +459,7 @@ export async function POST(req: NextRequest) {
       median_age_fresh: number | null  // median age of fresh cohort (days); visible in response to catch future bias
       median_age_old:   number | null  // median age of old cohort (days); set in Step 5
       views_vpd:        number[]       // views/day per fresh video; consumed by Step 5 growth ratio
+      fetch_error:      string | null  // non-null if data collection failed
       sample_videos:    number
       sample_channels:  number
       reliable:         boolean
@@ -445,6 +484,7 @@ export async function POST(req: NextRequest) {
         median_age_fresh:  n.fresh_ages.length > 0 ? Math.round(medianOf(n.fresh_ages)) : null,
         median_age_old:    null,
         views_vpd:         n.views_vpd,
+        fetch_error:       n.fetch_error,
         sample_videos,
         sample_channels,
         reliable,
@@ -465,10 +505,9 @@ export async function POST(req: NextRequest) {
     const publishedAfterOld = new Date(nowMs - OLD_DAYS * 24 * 3600 * 1000).toISOString()
     console.log(`[sub-niche] step 5: growth ratio for ${top5Names.size} reliable top niches`)
 
-    await Promise.all(
-      computed
-        .filter(n => top5Names.has(n.name))
-        .map(async (niche) => {
+    const top5Niches = computed.filter(n => top5Names.has(n.name))
+    for (let gBatch = 0; gBatch < top5Niches.length; gBatch += GROWTH_CONCURRENCY) {
+      await Promise.all(top5Niches.slice(gBatch, gBatch + GROWTH_CONCURRENCY).map(async (niche) => {
           try {
             const searchOld = await ytf('/search', {
               ...searchBase,
@@ -525,8 +564,11 @@ export async function POST(req: NextRequest) {
             if (e instanceof YouTubeQuotaError) throw e
             console.warn(`[sub-niche] growth failed for "${niche.name}":`, e instanceof Error ? e.message : String(e))
           }
-        })
-    )
+      }))
+      if (gBatch + GROWTH_CONCURRENCY < top5Niches.length) {
+        await new Promise(r => setTimeout(r, GROWTH_BATCH_DELAY))
+      }
+    }
 
     console.log(`[sub-niche] after step 5: quota_used=${quotaUsed}`)
 
@@ -569,6 +611,7 @@ export async function POST(req: NextRequest) {
       name:         n.name,
       search_query: n.search_query,
       reliable:     n.reliable,
+      fetch_error:  n.fetch_error,
       sample_size:  { videos: n.sample_videos, channels: n.sample_channels },
       metrics: {
         fresh_video_count:      { value: n.fresh_video_count, source: 'api'      as const },

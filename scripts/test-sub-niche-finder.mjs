@@ -54,6 +54,11 @@ const FRESH_DAYS            = 90
 const OLD_DAYS              = 365
 const MIN_CHANNELS_RELIABLE = 5   // newcomer_share unreliable below this
 const MIN_OLD_SAMPLE_GROWTH = 10  // growth_ratio unreliable below this
+const ENRICH_CONCURRENCY    = 4
+const ENRICH_BATCH_DELAY    = 400
+const GROWTH_CONCURRENCY    = 3
+const GROWTH_BATCH_DELAY    = 500
+const RATE_LIMIT_DELAYS     = [2000, 4000]
 
 // ─── Helpers (identical to route.ts) ─────────────────────────────────────────
 function medianOf(arr) {
@@ -73,12 +78,37 @@ function chunks(arr, n) {
   return out
 }
 
+class YouTubeRateLimitError extends Error {
+  constructor(path) {
+    super(`YouTube rate-limit (429) on ${path}`)
+    this.name = 'YouTubeRateLimitError'
+  }
+}
+
 async function ytFetch(path, params) {
   const qs  = new URLSearchParams({ ...params, key: YT_KEY }).toString()
   const res = await fetch(`${YT_BASE}${path}?${qs}`)
   const text = await res.text()
-  if (!res.ok) throw new Error(`YouTube ${res.status} on ${path}: ${text.slice(0, 300)}`)
+  if (!res.ok) {
+    if (res.status === 429) throw new YouTubeRateLimitError(path)
+    throw new Error(`YouTube ${res.status} on ${path}: ${text.slice(0, 300)}`)
+  }
   return JSON.parse(text)
+}
+
+async function ytf(path, params) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await ytFetch(path, params)
+    } catch (e) {
+      if (e instanceof YouTubeRateLimitError && attempt < RATE_LIMIT_DELAYS.length) {
+        console.warn(`[sub-niche] 429 on ${path}, retry ${attempt + 1} after ${RATE_LIMIT_DELAYS[attempt]}ms`)
+        await new Promise(r => setTimeout(r, RATE_LIMIT_DELAYS[attempt]))
+        continue
+      }
+      throw e
+    }
+  }
 }
 
 function parseJson(text, label) {
@@ -191,14 +221,18 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
     regionCode: country, relevanceLanguage: contentLang,
   }
 
-  const enriched = await Promise.all(subNiches.map(async (niche) => {
+  const enriched = []
+  for (let eBatch = 0; eBatch < subNiches.length; eBatch += ENRICH_CONCURRENCY) {
+    const batchNiches = subNiches.slice(eBatch, eBatch + ENRICH_CONCURRENCY)
+    enriched.push(...await Promise.all(batchNiches.map(async (niche) => {
     const r = {
       name: niche.name, search_query: niche.search_query,
       rpm_level: niche.rpm_level, rpm_reason: niche.rpm_reason,
       fresh_video_count: 0, views: [], views_vpd: [], fresh_ages: [], channel_ages_months: [], subs: [],
+      fetch_error: null,
     }
     try {
-      const search = await ytFetch('/search', { ...searchBase, q: niche.search_query })
+      const search = await ytf('/search', { ...searchBase, q: niche.search_query })
       quotaUsed += 100
       r.fresh_video_count = search.pageInfo?.totalResults ?? 0
 
@@ -214,7 +248,7 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
       const channelIds = [...new Set((search.items ?? []).map(v => v.snippet?.channelId).filter(Boolean))]
 
       for (const batch of chunks(videoIds, 50)) {
-        const vRes = await ytFetch('/videos', { part: 'statistics', id: batch.join(',') })
+        const vRes = await ytf('/videos', { part: 'statistics', id: batch.join(',') })
         quotaUsed += 1
         for (const v of vRes.items ?? []) {
           const vc = parseInt(v.statistics.viewCount ?? '0')
@@ -231,7 +265,7 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
       }
 
       for (const batch of chunks(channelIds, 50)) {
-        const cRes = await ytFetch('/channels', { part: 'statistics,snippet', id: batch.join(',') })
+        const cRes = await ytf('/channels', { part: 'statistics,snippet', id: batch.join(',') })
         quotaUsed += 1
         for (const c of cRes.items ?? []) {
           if (c.snippet?.publishedAt) r.channel_ages_months.push(daysOld(c.snippet.publishedAt) / 30)
@@ -240,10 +274,15 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
         }
       }
     } catch (e) {
+      r.fetch_error = e.message.slice(0, 120)
       console.warn(`   ! enrich error "${niche.name}" (sq:"${niche.search_query}"): ${e.message.slice(0, 120)}`)
     }
     return r
-  }))
+    })))
+    if (eBatch + ENRICH_CONCURRENCY < subNiches.length) {
+      await new Promise(r => setTimeout(r, ENRICH_BATCH_DELAY))
+    }
+  }
 
   console.log(`   -> ${((Date.now() - t23) / 1000).toFixed(1)}s | quota after step 3: ${quotaUsed}`)
 
@@ -272,6 +311,7 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
       growth_ratio:      null,   // vpd-normalized, set in Step 5
       old_growth_ratio:  null,   // raw views ratio, set in Step 5 for comparison table
       median_age_old:    null,   // set in Step 5
+      fetch_error:       n.fetch_error ?? null,
     }
   })
 
@@ -301,11 +341,12 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
   const t5 = Date.now()
   const publishedAfterOld = new Date(nowMs - OLD_DAYS * 24 * 3600 * 1000).toISOString()
 
-  await Promise.all(
-    computed.filter(n => top5Names.has(n.name)).map(async (niche) => {
+  const top5Niches = computed.filter(n => top5Names.has(n.name))
+  for (let gBatch = 0; gBatch < top5Niches.length; gBatch += GROWTH_CONCURRENCY) {
+    await Promise.all(top5Niches.slice(gBatch, gBatch + GROWTH_CONCURRENCY).map(async (niche) => {
       try {
         // Fix 4: use search_query for old search too
-        const searchOld = await ytFetch('/search', {
+        const searchOld = await ytf('/search', {
           ...searchBase, q: niche.search_query, publishedAfter: publishedAfterOld,
         })
         quotaUsed += 100
@@ -323,7 +364,7 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
         const oldVpd   = []   // views/day — for new growth_ratio (vpd-normalized)
         const oldAges  = []   // ages in days — for median_age_old
         for (const batch of chunks(oldVideoIds, 50)) {
-          const vOld = await ytFetch('/videos', { part: 'statistics', id: batch.join(',') })
+          const vOld = await ytf('/videos', { part: 'statistics', id: batch.join(',') })
           quotaUsed += 1
           for (const v of vOld.items ?? []) {
             const vc = parseInt(v.statistics.viewCount ?? '0')
@@ -360,8 +401,11 @@ async function analyzeNiche(broadNiche, country = 'RU', contentLang = 'ru') {
       } catch (e) {
         console.warn(`   ! growth error "${niche.name}": ${e.message.slice(0, 120)}`)
       }
-    })
-  )
+    }))
+    if (gBatch + GROWTH_CONCURRENCY < top5Niches.length) {
+      await new Promise(r => setTimeout(r, GROWTH_BATCH_DELAY))
+    }
+  }
   console.log(`   -> ${((Date.now() - t5) / 1000).toFixed(1)}s | quota after step 5: ${quotaUsed}`)
 
   // ── Step 6: Sonnet verdict (optional) ────────────────────────────────────
