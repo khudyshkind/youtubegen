@@ -228,10 +228,10 @@ interface ChannelPlanResult {
 
 interface AnalyticsReport {
   id: string
-  report_type: 'niche' | 'niche_finder' | 'channel_plan' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars' | 'sub_niche_finder'
+  report_type: 'niche' | 'niche_finder' | 'channel_plan' | 'trends' | 'channel' | 'revenue' | 'comments' | 'keywords' | 'compare' | 'rising_stars' | 'sub_niche_finder' | 'channel_breakout'
   title: string
   query: string
-  result: NicheResult | NicheFinderResult | ChannelPlanResult | TrendResult | ChannelResult | RevenueResult | CommentsResult | KeywordsResult | CompareResult | RisingStarsResult | SubNicheFinderData
+  result: NicheResult | NicheFinderResult | ChannelPlanResult | TrendResult | ChannelResult | RevenueResult | CommentsResult | KeywordsResult | CompareResult | RisingStarsResult | SubNicheFinderData | ChannelBreakoutData
   created_at: string
 }
 
@@ -4055,6 +4055,7 @@ const REPORT_ICONS: Record<string, string> = {
   compare: '⚡',
   rising_stars: '🚀',
   sub_niche_finder: '🧩',
+  channel_breakout: '🔬',
 }
 
 function HistoryTab({ onOpen }: { onOpen: (report: AnalyticsReport) => void }) {
@@ -4182,6 +4183,45 @@ interface SubNicheFinderData {
   }
 }
 
+interface ChannelMetricsItem {
+  id:               string
+  title:            string
+  age_months:       number
+  subs:             number
+  months_to_1k:     number | null
+  views_per_video:  number | null
+  upload_frequency: number | null
+  spread:           number | null
+  days_to_first_hit: number | null
+  shorts_share:     number
+  horizontal_count: number
+  shorts_count:     number
+  top_videos:       Array<{ title: string; views: number; days_from_start: number }>
+}
+
+interface ChannelBreakoutData {
+  sub_niche_name: string
+  limit:          20 | 50
+  analyzed_at:    string
+  summary: {
+    newcomer_count:          number
+    under_5mo_past_1k:       number
+    median_months_to_1k:     number | null
+    median_views_per_video:  number | null
+    median_upload_frequency: number | null
+    median_shorts_share:     number
+  }
+  channels: ChannelMetricsItem[]
+  verdict: {
+    growth_speed:       string
+    content_cadence:    string
+    view_concentration: string
+    shorts_role:        string
+    overall:            string
+    source:             'estimate'
+  }
+}
+
 function GrowthBadge({ value }: { value: number | null }) {
   if (value === null) return <span className="text-slate-600 text-xs">—</span>
   const color = value > 1.05 ? '#4ade80' : value < 0.95 ? '#f87171' : '#facc15'
@@ -4211,8 +4251,14 @@ function TipIcon({ tip }: { tip: string }) {
 }
 
 function SubNicheResultsView({
-  data, t, lang, onBack,
-}: { data: SubNicheFinderData; t: (k: string) => string; lang: string; onBack: () => void }) {
+  data, t, lang, onBack, onBreakout,
+}: {
+  data: SubNicheFinderData
+  t: (k: string) => string
+  lang: string
+  onBack: () => void
+  onBreakout?: (niche: SubNicheItem) => void
+}) {
   const [unreliableOpen, setUnreliableOpen] = useState(false)
 
   const reliable   = data.sub_niches.filter(n => n.reliable)
@@ -4293,6 +4339,25 @@ function SubNicheResultsView({
                       {r.recommendation}
                     </p>
                   )}
+                  {onBreakout && niche && (() => {
+                    const ids = niche.newcomer_channel_ids ?? []
+                    const hasIds = ids.length > 0
+                    const enough = ids.length >= 3
+                    const tip = !hasIds ? t('analytics.cb_btn_old_tip') : !enough ? t('analytics.cb_btn_few_tip') : undefined
+                    return (
+                      <button
+                        onClick={() => enough && onBreakout(niche)}
+                        disabled={!enough}
+                        title={tip}
+                        className={`mt-3 self-start px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${enough ? 'hover:opacity-90' : 'opacity-40 cursor-not-allowed'}`}
+                        style={enough
+                          ? { background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.3)', color: '#22d3ee' }
+                          : { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#64748b' }}>
+                        🔬 {t('analytics.cb_btn')}
+                        {!enough && <span className="ml-1 opacity-60">{ids.length > 0 ? `(${ids.length})` : '?'}</span>}
+                      </button>
+                    )
+                  })()}
                 </div>
               )
             })}
@@ -4342,6 +4407,7 @@ function SubNicheResultsView({
                   <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
                     {t('analytics.sn_col_sample')}<TipIcon tip={t('analytics.sn_tip_age')} />
                   </th>
+                  {onBreakout && <th className="px-3 py-2.5" />}
                 </tr>
               </thead>
               <tbody>
@@ -4379,6 +4445,25 @@ function SubNicheResultsView({
                         title={sampleTitle}>
                         {n.sample_size.videos} · {n.sample_size.channels}
                       </td>
+                      {onBreakout && (() => {
+                        const ids = n.newcomer_channel_ids ?? []
+                        const enough = ids.length >= 3
+                        const tip = ids.length === 0 ? t('analytics.cb_btn_old_tip') : !enough ? t('analytics.cb_btn_few_tip') : t('analytics.cb_btn')
+                        return (
+                          <td className="px-3 py-2.5 text-right">
+                            <button
+                              onClick={() => enough && onBreakout(n)}
+                              disabled={!enough}
+                              title={tip}
+                              className={`px-2 py-1 rounded-md text-xs font-medium transition-all whitespace-nowrap ${enough ? 'hover:opacity-90' : 'opacity-35 cursor-not-allowed'}`}
+                              style={enough
+                                ? { background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.25)', color: '#22d3ee' }
+                                : { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#475569' }}>
+                              🔬 {t('analytics.cb_btn')}
+                            </button>
+                          </td>
+                        )
+                      })()}
                     </tr>
                   )
                 })}
@@ -4448,9 +4533,186 @@ function SubNicheResultsView({
   )
 }
 
-function SubNicheTab({ externalResult, onClearExternal }: {
+function ChannelBreakoutResultsView({
+  data, t, lang, onBack,
+}: { data: ChannelBreakoutData; t: (k: string) => string; lang: string; onBack: () => void }) {
+  const isRu = lang !== 'en'
+  const s = data.summary
+
+  function fmtMonths(v: number | null): string {
+    if (v === null) return t('analytics.cb_no_data')
+    return `${v.toFixed(1)} ${t('analytics.cb_months')}`
+  }
+  function fmtFreq(v: number | null): string {
+    if (v === null) return t('analytics.cb_no_data')
+    return `${v.toFixed(2)} ${t('analytics.cb_vids_week')}`
+  }
+  function fmtPct(v: number): string { return `${Math.round(v * 100)}%` }
+
+  return (
+    <div className="analytics-result flex flex-col gap-5">
+      {/* Header */}
+      <div className="no-print flex flex-wrap items-center justify-between gap-3">
+        <button onClick={onBack}
+          className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          {t('analytics.cb_back')}
+        </button>
+        <div className="flex gap-4 text-xs text-slate-500">
+          <span>🔬 {data.sub_niche_name}</span>
+          <span>{t('analytics.cb_newcomer_count')}: <span className="text-white font-semibold">{s.newcomer_count}</span></span>
+        </div>
+      </div>
+
+      {/* No-newcomers state */}
+      {s.newcomer_count === 0 && (
+        <div className="rounded-2xl p-8 text-center flex flex-col items-center gap-3"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <span className="text-4xl">🕳️</span>
+          <p className="text-lg font-semibold text-white">{t('analytics.cb_no_newcomers')}</p>
+          <p className="text-sm text-slate-400 max-w-sm">{t('analytics.cb_no_newcomers_note')}</p>
+        </div>
+      )}
+
+      {/* Summary card */}
+      {s.newcomer_count > 0 && (
+        <div className="rounded-2xl p-5"
+          style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.2)' }}>
+          <p className="text-sm font-semibold text-cyan-300 mb-4">{t('analytics.cb_summary_title')}</p>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            {[
+              { label: t('analytics.cb_newcomer_count'),  value: String(s.newcomer_count) },
+              { label: t('analytics.cb_under_5mo'),       value: String(s.under_5mo_past_1k) },
+              { label: t('analytics.cb_median_speed'),    value: fmtMonths(s.median_months_to_1k) },
+              { label: t('analytics.cb_median_vpv'),      value: s.median_views_per_video !== null ? fmtNum(Math.round(s.median_views_per_video)) : t('analytics.cb_no_data') },
+              { label: t('analytics.cb_median_freq'),     value: fmtFreq(s.median_upload_frequency) },
+              { label: t('analytics.cb_median_shorts'),   value: fmtPct(s.median_shorts_share) },
+            ].map(({ label, value }) => (
+              <div key={label} className="flex flex-col gap-1">
+                <p className="text-xs text-slate-500 leading-snug">{label}</p>
+                <p className="text-lg font-bold text-white tabular-nums">{value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Channels table */}
+      {data.channels.length > 0 && (
+        <div>
+          <p className="text-sm font-semibold text-slate-300 mb-3">{t('analytics.cb_table_title')} ({data.channels.length})</p>
+          <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+            <table className="w-full text-xs">
+              <thead>
+                <tr style={{ background: 'rgba(255,255,255,0.04)' }}>
+                  <th className="text-left px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">{t('analytics.cb_col_channel')}</th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">{t('analytics.cb_col_age')}</th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">{t('analytics.cb_col_subs')}</th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.cb_col_vpv')}<TipIcon tip={t('analytics.cb_tip_vpv')} />
+                  </th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.cb_col_freq')}<TipIcon tip={t('analytics.cb_tip_freq')} />
+                  </th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.cb_col_spread')}<TipIcon tip={t('analytics.cb_tip_spread')} />
+                  </th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">{t('analytics.cb_col_shorts')}</th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.cb_col_speed')}<TipIcon tip={t('analytics.cb_tip_speed')} />
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.channels.map((ch, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
+                    className="hover:bg-white/[0.02] transition-colors">
+                    <td className="px-3 py-2.5 max-w-[160px]">
+                      <a href={`https://youtube.com/channel/${ch.id}`} target="_blank" rel="noreferrer"
+                        className="text-slate-200 hover:text-cyan-300 transition-colors line-clamp-1"
+                        title={ch.title}>
+                        {ch.title}
+                      </a>
+                      {ch.top_videos.length > 0 && (
+                        <div className="text-slate-600 text-xs mt-0.5 line-clamp-1" title={ch.top_videos.map(v => v.title).join(' · ')}>
+                          {t('analytics.cb_top_videos')}: {ch.top_videos[0].title}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-400 whitespace-nowrap tabular-nums">
+                      {ch.age_months.toFixed(1)} {t('analytics.cb_months')}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-300 tabular-nums">{fmtNum(ch.subs)}</td>
+                    <td className="px-3 py-2.5 text-right text-slate-300 tabular-nums">
+                      {ch.views_per_video !== null ? fmtNum(Math.round(ch.views_per_video)) : <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-300 whitespace-nowrap tabular-nums">
+                      {ch.upload_frequency !== null ? `${ch.upload_frequency.toFixed(1)} ${isRu ? 'вид/нед' : 'vids/wk'}` : <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {ch.spread !== null
+                        ? <span className={ch.spread > 10 ? 'text-amber-400' : ch.spread > 3 ? 'text-slate-300' : 'text-slate-500'}>
+                            {ch.spread.toFixed(1)}×
+                          </span>
+                        : <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-400 tabular-nums">
+                      {fmtPct(ch.shorts_share)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums">
+                      {ch.months_to_1k !== null
+                        ? <span className={ch.months_to_1k <= 5 ? 'text-green-400 font-semibold' : ch.months_to_1k <= 9 ? 'text-yellow-400' : 'text-slate-400'}>
+                            ≤{ch.months_to_1k.toFixed(1)} {t('analytics.cb_months')}
+                          </span>
+                        : <span className="text-slate-600">{t('analytics.cb_no_speed')}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-slate-600 mt-2 italic">{t('analytics.cb_speed_note')}</p>
+        </div>
+      )}
+
+      {/* Verdict */}
+      <Card>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-semibold text-slate-200">{t('analytics.cb_verdict_title')}</p>
+          <EstBadge label={t('analytics.sn_est')} />
+        </div>
+        <p className="text-xs text-slate-500 mb-4 italic">{t('analytics.sn_verdict_note')}</p>
+        <div className="flex flex-col gap-3">
+          {[
+            { key: 'growth_speed',       value: data.verdict.growth_speed },
+            { key: 'content_cadence',    value: data.verdict.content_cadence },
+            { key: 'view_concentration', value: data.verdict.view_concentration },
+            { key: 'shorts_role',        value: data.verdict.shorts_role },
+          ].filter(({ value }) => value).map(({ key, value }) => (
+            <div key={key} className="flex flex-col gap-0.5">
+              <p className="text-xs text-slate-500 capitalize">{key.replace(/_/g, ' ')}</p>
+              <p className="text-sm text-slate-300 leading-relaxed">{value}</p>
+            </div>
+          ))}
+          {data.verdict.overall && (
+            <div className="rounded-xl px-4 py-3 mt-1"
+              style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.15)' }}>
+              <p className="text-sm text-slate-200 leading-relaxed">{data.verdict.overall}</p>
+            </div>
+          )}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+function SubNicheTab({ externalResult, onClearExternal, externalBreakout, onClearExternalBreakout }: {
   externalResult?: SubNicheFinderData | null
   onClearExternal?: () => void
+  externalBreakout?: ChannelBreakoutData | null
+  onClearExternalBreakout?: () => void
 }) {
   const { t, lang: uiLang } = useLang()
   const router = useRouter()
@@ -4468,17 +4730,51 @@ function SubNicheTab({ externalResult, onClearExternal }: {
     void checkKey()
   }, [])
 
-  const [broadNiche,   setBroadNiche]   = useState('')
-  const [country,      setCountry]      = useState('RU')
-  const [contentLang,  setContentLang]  = useState('ru')
-  const [nicheCount,   setNicheCount]   = useState<20 | 30 | 40>(20)
-  const [loadingDirs,  setLoadingDirs]  = useState(false)
+  const [broadNiche,    setBroadNiche]    = useState('')
+  const [country,       setCountry]       = useState('RU')
+  const [contentLang,   setContentLang]   = useState('ru')
+  const [nicheCount,    setNicheCount]    = useState<20 | 30 | 40>(20)
+  const [loadingDirs,   setLoadingDirs]   = useState(false)
   const [loadingNiches, setLoadingNiches] = useState(false)
-  const [error,        setError]        = useState('')
-  const [dirsData,     setDirsData]     = useState<DirectionsData | null>(null)
-  const [selectedDir,  setSelectedDir]  = useState<string | null>(null)
-  const [showConfirm,  setShowConfirm]  = useState(false)
-  const [nichesData,   setNichesData]   = useState<SubNicheFinderData | null>(null)
+  const [error,         setError]         = useState('')
+  const [dirsData,      setDirsData]      = useState<DirectionsData | null>(null)
+  const [selectedDir,   setSelectedDir]   = useState<string | null>(null)
+  const [showConfirm,   setShowConfirm]   = useState(false)
+  const [nichesData,    setNichesData]    = useState<SubNicheFinderData | null>(null)
+
+  // Channel-breakout state
+  const [breakoutNiche,   setBreakoutNiche]   = useState<SubNicheItem | null>(null)
+  const [breakoutLimit,   setBreakoutLimit]   = useState<20 | 50>(20)
+  const [loadingBreakout, setLoadingBreakout] = useState(false)
+  const [breakoutError,   setBreakoutError]   = useState('')
+  const [breakoutData,    setBreakoutData]    = useState<ChannelBreakoutData | null>(null)
+
+  async function handleRunBreakout() {
+    if (!breakoutNiche) return
+    setBreakoutError(''); setLoadingBreakout(true); setBreakoutData(null)
+    try {
+      const res  = await fetch('/api/analytics/channel-breakout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel_ids:    breakoutNiche.newcomer_channel_ids,
+          sub_niche_name: breakoutNiche.name,
+          niche_median_views: nichesData?.sub_niches.find(n => n.name === breakoutNiche.name)?.metrics.median_views_per_video.value ?? 0,
+          limit:          breakoutLimit,
+          ui_lang:        uiLang,
+        }),
+      })
+      const json = await res.json() as { ok: boolean; data?: ChannelBreakoutData; error?: string; code?: string }
+      if (!json.ok) {
+        setBreakoutError(json.code === 'NO_CREDITS' ? t('analytics.err_credits') : (json.error ?? t('analytics.err_general')))
+      } else if (json.data) {
+        setBreakoutNiche(null)
+        setBreakoutData(json.data)
+        void refreshCredits()
+      }
+    } catch { setBreakoutError(t('analytics.err_general')) }
+    finally { setLoadingBreakout(false) }
+  }
 
   async function handleLoadDirs() {
     if (!broadNiche.trim()) { setError(t('analytics.err_topic')); return }
@@ -4538,7 +4834,19 @@ function SubNicheTab({ externalResult, onClearExternal }: {
   const selectStyle  = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }
   const inputStyle   = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }
 
-  // ── External result (opened from History) — show directly, no API call ──
+  // ── External channel_breakout result (opened from History) ──
+  if (externalBreakout) {
+    return (
+      <ChannelBreakoutResultsView
+        data={externalBreakout}
+        t={t}
+        lang={uiLang}
+        onBack={() => onClearExternalBreakout?.()}
+      />
+    )
+  }
+
+  // ── External sub_niche_finder result (opened from History) ──
   if (externalResult) {
     return (
       <SubNicheResultsView
@@ -4550,6 +4858,103 @@ function SubNicheTab({ externalResult, onClearExternal }: {
     )
   }
 
+  // ── Breakout result ──
+  if (breakoutData) {
+    return (
+      <ChannelBreakoutResultsView
+        data={breakoutData}
+        t={t}
+        lang={uiLang}
+        onBack={() => { setBreakoutData(null) }}
+      />
+    )
+  }
+
+  // ── Loading breakout ──
+  if (loadingBreakout) {
+    return (
+      <Card>
+        <div className="flex flex-col items-center gap-3 py-6 text-center">
+          <Spinner />
+          <p className="text-sm text-slate-300">{t('analytics.cb_loading')}</p>
+          <p className="text-xs text-slate-500">{t('analytics.cb_loading_note')}</p>
+        </div>
+      </Card>
+    )
+  }
+
+  // ── Breakout confirm ──
+  if (breakoutNiche) {
+    const ids = breakoutNiche.newcomer_channel_ids ?? []
+    const available = Math.min(ids.length, 50)
+    return (
+      <div className="flex flex-col gap-5">
+        <button onClick={() => setBreakoutNiche(null)}
+          className="no-print flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors self-start">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          {t('analytics.cb_back')}
+        </button>
+
+        <div className="rounded-2xl p-5 flex flex-col gap-4"
+          style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.25)' }}>
+          <div className="flex items-start gap-3">
+            <span className="text-xl shrink-0">🔬</span>
+            <div>
+              <p className="text-sm font-semibold text-cyan-300 mb-1">
+                {t('analytics.cb_confirm_title')}: «{breakoutNiche.name}»
+              </p>
+              <p className="text-sm text-slate-300 leading-relaxed">{t('analytics.cb_confirm_body')}</p>
+            </div>
+          </div>
+
+          {/* Limit selector */}
+          <div className="flex items-center gap-2 pl-8 flex-wrap">
+            <span className="text-xs text-slate-400">{t('analytics.cb_limit_label')}</span>
+            {([20, 50] as const).filter(n => n <= available).map(n => (
+              <button key={n} onClick={() => setBreakoutLimit(n)}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${breakoutLimit === n ? 'text-white' : 'text-slate-400 hover:text-white'}`}
+                style={breakoutLimit === n
+                  ? { background: 'rgba(6,182,212,0.25)', border: '1px solid rgba(6,182,212,0.5)' }
+                  : { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {n}
+              </button>
+            ))}
+            <span className="text-xs text-slate-500 ml-1">
+              {breakoutLimit === 20 ? t('analytics.cb_limit_20_quota') : t('analytics.cb_limit_50_quota')}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs text-slate-400 pl-8">
+            <span className="px-2 py-1 rounded"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              −{CREDIT_COSTS.channel_breakout} {t('analytics.credits_short')}
+            </span>
+            <span className="text-slate-600">·</span>
+            <span className="text-slate-500">
+              {uiLang === 'en' ? `${available} newcomer channels available` : `Доступно ${available} новичковых каналов`}
+            </span>
+          </div>
+
+          {breakoutError && <p className="text-sm text-red-400 pl-8">{breakoutError}</p>}
+
+          <div className="flex gap-3 pl-8">
+            <button onClick={() => void handleRunBreakout()} disabled={loadingBreakout}
+              className="btn-gradient px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center gap-2">
+              {t('analytics.cb_confirm_btn')}
+            </button>
+            <button onClick={() => setBreakoutNiche(null)}
+              className="px-4 py-2.5 rounded-xl text-sm text-slate-400 hover:text-white transition-colors"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              {t('analytics.sn_cancel')}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // ── Results ──
   if (nichesData) {
     return (
@@ -4558,6 +4963,7 @@ function SubNicheTab({ externalResult, onClearExternal }: {
         t={t}
         lang={uiLang}
         onBack={() => { setNichesData(null); setSelectedDir(null); setShowConfirm(false) }}
+        onBreakout={niche => { setBreakoutNiche(niche); setBreakoutLimit(20); setBreakoutError('') }}
       />
     )
   }
@@ -4826,8 +5232,11 @@ export default function AnalyticsPage() {
 
   function handleOpenReport(report: AnalyticsReport) {
     setOpenedReport(report)
-    // sub_niche_finder reports open in the sub_niche tab
-    const tabName: Tab = report.report_type === 'sub_niche_finder' ? 'sub_niche' : report.report_type
+    // sub_niche_finder and channel_breakout reports open in the sub_niche tab
+    const tabName: Tab =
+      report.report_type === 'sub_niche_finder' || report.report_type === 'channel_breakout'
+        ? 'sub_niche'
+        : report.report_type
     setTab(tabName)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -5106,6 +5515,8 @@ export default function AnalyticsPage() {
               <SubNicheTab
                 externalResult={openedReport?.report_type === 'sub_niche_finder' ? openedReport.result as SubNicheFinderData : null}
                 onClearExternal={clearOpenedReport}
+                externalBreakout={openedReport?.report_type === 'channel_breakout' ? openedReport.result as ChannelBreakoutData : null}
+                onClearExternalBreakout={clearOpenedReport}
               />
             )}
             {tab === 'history' && <HistoryTab onOpen={handleOpenReport} />}
