@@ -1,3 +1,64 @@
+# Отчёт: 2026-08-07 (история, 20/30/40, кеш-дедупликация)
+
+## Что сделано
+
+### 1. История отчётов
+
+**`src/app/(dashboard)/analytics\page.tsx`:**
+- `AnalyticsReport.report_type` расширен: добавлен `'sub_niche_finder'`
+- `AnalyticsReport.result` расширен: добавлен `SubNicheFinderData`
+- `REPORT_ICONS['sub_niche_finder'] = '🧩'`
+- `handleOpenReport`: `sub_niche_finder` → маппится в `'sub_niche'` как целевую вкладку
+- `SubNicheTab` теперь принимает `{ externalResult?: SubNicheFinderData | null; onClearExternal?: () => void }`. Если `externalResult` задан — немедленно рендерит `SubNicheResultsView` с «Назад» → `onClearExternal()`. Никакого API-запроса, никакой квоты.
+- В main page: `<SubNicheTab externalResult={openedReport?.report_type === 'sub_niche_finder' ? openedReport.result as SubNicheFinderData : null} onClearExternal={clearOpenedReport} />`
+
+**`src/app/api/analytics/sub-niche-finder/route.ts`:**
+- Исправлена дедупликация кэш-хита: добавлен запрос `existing` (72 ч, по `query = broad_niche`). Если запись уже есть — новая не вставляется. Тайтл на кэш-хите теперь включает `direction` так же, как свежий прогон.
+
+### 2. Выбор количества подниш (20 / 30 / 40)
+
+**route.ts:**
+- Тело запроса: `niche_count?: number` → валидируется до `20 | 30 | 40` (дефолт 20)
+- `getSubNicheGenPrompt(lang, count)`: переменная "ровно N подниш" вместо "15-20"
+- Haiku `max_tokens` масштабируется: 2500 / 3000 / 4000
+- `rawNiches.slice(0, niche_count)` вместо `.slice(0, 20)`
+- Кэш-ключ: `|n:${niche_count}|` — у каждого размера своя запись
+- BYOK-сообщение: `quotaEst = niche_count * 105` вместо константы `QUOTA_BUDGET`
+
+**page.tsx:**
+- `nicheCount` state: `useState<20 | 30 | 40>(20)`
+- Confirm-view: пилюли [20] [30] [40] с `~N × 105 ед. квоты` рядом
+- `handleLoadNiches` передаёт `niche_count: nicheCount` в тело запроса
+
+**i18n.ts:**
+- `sn_quota_warn_body` убрала жёстко вшитые "~2 300 ед." — теперь просто "расходует единицы дневной квоты (лимит 10 000)". Точная оценка показывается динамически.
+
+### 3. Кеш 72 ч — ответ
+
+**Кеш работает и квота не тратится при повторном запросе.**
+
+- Ключ: `${broad_niche}|${country}|${content_lang}|dir:${direction}|n:${niche_count}|v2`
+- При кэш-хите: route сразу возвращает `cached.result`, до `requireCreditsAmount` и `spendCredits` не доходит — **кредиты тоже не списываются**
+- Единственный расход при кэш-хите: вставка записи в `analytics_reports` (Supabase write, 0 квоты, 0 кредитов)
+
+### 4. Стоимость в кредитах — ответ
+
+**Плоская: 5000 кр (3500 с BYOK), не зависит от N.**
+
+Обоснование: шаги с фиксированной стоимостью (Haiku step1 + Sonnet step6) — не масштабируются. Дополнительные ниши расходуют только YouTube-квоту пользователя (его личный ключ, не наши деньги). Менять биллинг нецелесообразно.
+
+## Коммит
+
+`c126bee` — feat(sub-niche): history, niche count 20/30/40, cache dedup
+
+## Что проверить владельцу
+
+1. Запустить прогон → открыть «История» → найти отчёт 🧩 → «Открыть» → результаты без расхода квоты
+2. В confirm-view: пилюли [20] [30] [40]; рядом меняется оценка квоты
+3. Повторить тот же запрос → в консоли Railway `[sub-niche] cache hit` → квота = 0
+
+---
+
 # Отчёт: 2026-08-07 (три исправления вывода «Поиска подниш»)
 
 ## Что сделано
