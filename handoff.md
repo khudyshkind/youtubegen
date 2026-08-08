@@ -1,3 +1,108 @@
+# Отчёт: 2026-08-08 (задача 5 — 7 исправлений channel-breakout)
+
+## Что сделано
+
+### Исправление №1: Выбросы разброса исключены из медиан
+
+**`src/app/api/analytics/channel-breakout/route.ts`:**
+- Константа `SPREAD_OUTLIER_THRESHOLD = 100`
+- `ChannelMetrics`: добавлено `is_spread_outlier: boolean` — `true` если `spread > 100`
+- Summary-медианы (`m2ks`, `vpvs`, `freqs`, `sshs`, `vtfhs`) считаются только по `base` = каналы без `is_shorts_only` и `is_spread_outlier`
+- `summary` получил поля `spread_outlier_count` и `shorts_only_count`
+
+**`src/app/(dashboard)/analytics/page.tsx`:**
+- `ChannelMetricsItem`: добавлено `is_spread_outlier: boolean`
+- `ChannelBreakoutData.summary`: добавлено `spread_outlier_count`, `shorts_only_count`
+- В таблице: строки выбросов — оранжевый фон, badge «Выброс»; разброс оранжевый и bold
+- В сводке: `cb_excluded_note` под метриками («Исключено из медиан: N вирусных, M Shorts-каналов»)
+
+### Исправление №2: Shorts-каналы в отдельный блок
+
+**route.ts:**
+- `ChannelMetrics`: добавлено `is_shorts_only: boolean` — `true` если `horizontal_count === 0 && shorts_count > 0`
+- Исключены из всех медианных расчётов
+
+**page.tsx:**
+- `ChannelBreakoutResultsView` разделяет `data.channels` на `mainChannels` и `shortsOnlyChannels`
+- Shorts-only рендерятся отдельным блоком под основной таблицей (только сабы и возраст)
+- Заголовок блока — `cb_shorts_only_title`
+
+### Исправление №3: Метрика `videos_to_first_hit`
+
+**route.ts:**
+- `ChannelMetrics`: добавлено `videos_to_first_hit: number | null`
+- Вычисляется: горизонтальные видео сортируются по `publishedAt` asc; `findIndex` где `views > niche_median_views` → число видео ДО первого хита (0 = первое видео и было хитом)
+- `summary.median_videos_to_first_hit` — медиана по `base`
+
+**page.tsx:**
+- `ChannelMetricsItem`: добавлено `videos_to_first_hit: number | null`
+- `summary`: добавлено `median_videos_to_first_hit: number | null`
+- Колонка «Вид. до хита» в основной таблице: зелёная ≤5, жёлтая ≤15, серая иначе
+- В сводке: показывается медиана при наличии данных
+
+### Исправление №4: Полные заголовки видео
+
+**page.tsx:**
+- Убраны `line-clamp-1` и `max-w-[160px]` из ячейки канала
+- Каждое из `top_videos` — отдельная строка, `break-words`, без усечения
+
+### Исправление №5: Локализованные подзаголовки вывода
+
+**page.tsx:**
+- `verdictLabels` — объект `{ key: t('analytics.cb_verdict_*') }`
+- В рендере: `verdictLabels[key] ?? key` вместо `key.replace(/_/g, ' ')`
+- `overall` тоже получил локализованный заголовок через `cb_verdict_overall`
+
+### Исправление №6: Контекст ниши L2 сверху
+
+**route.ts:**
+- Принимает `niche_context?: { newcomer_share, median_views, growth_ratio }` в теле запроса
+- Передаёт в verdict prompt и включает в `result.niche_context`
+
+**page.tsx:**
+- `ChannelBreakoutData`: добавлено `niche_context?`
+- `handleRunBreakout`: передаёт `niche_context` из `breakoutNiche.metrics`
+- `ChannelBreakoutResultsView`: indigo-баннер вверху с тремя метриками (пробиваемость, медиана просмотров, рост ниши)
+
+### Исправление №7: Disclaimer об ограничении выборки
+
+**page.tsx:**
+- Amber-карточка ⚠ сразу после header, до сводки (заметно, не мелким шрифтом)
+- Текст: `cb_sampling_note` — «Данные охватывают только каналы из топа по релевантности — не случайную выборку. Возможен эффект выжившего.»
+
+### i18n (+22 ключа)
+
+`cb_verdict_growth_speed`, `cb_verdict_cadence`, `cb_verdict_spread`, `cb_verdict_shorts`, `cb_verdict_overall`,
+`cb_col_vtfh`, `cb_tip_vtfh`,
+`cb_shorts_only_title`, `cb_outlier_label`, `cb_excluded_note`, `cb_sampling_note`,
+`cb_niche_context`, `cb_niche_penetration`, `cb_niche_median_views`, `cb_niche_growth`,
+`cb_median_vtfh`
+(ru + en)
+
+## Коммит
+
+`43075f6` — fix(channel-breakout): 7 fixes from live run
+
+## НЕ СЛОМАНО
+
+- `source: 'api' | 'estimate'` — без изменений
+- BYOK-гейт и `byokRequiredResponse` — без изменений
+- Запрет Sonnet на speculaton о причинах успеха — сохранён в prompt
+- `newcomer_channel_ids` в sub-niche-finder — без изменений
+- Батчинг по 5 каналов, BATCH_DELAY=600ms — без изменений
+
+## Что проверить владельцу
+
+1. Прогнать channel-breakout на реальной нише → медианы в сводке должны соответствовать «основным» каналам (без выбросов и Shorts-only)
+2. Если есть Shorts-only канал → он должен быть в отдельном блоке, не в основной таблице
+3. Подзаголовки вывода — на языке UI (не `growth_speed`, а «Скорость роста»)
+4. Индиго-баннер с контекстом ниши — показывается вверху (данные приходят из `breakoutNiche.metrics`)
+5. Заголовки видео — читаемы целиком (не обрезаны)
+6. Amber-disclaimer — виден и не мелкий
+7. Если `spread_outlier_count > 0` → в сводке «Исключено из медиан: N вирусных, M Shorts-каналов»
+
+---
+
 # Отчёт: 2026-08-08 (задача 4 — UI channel-breakout)
 
 ## Что сделано
