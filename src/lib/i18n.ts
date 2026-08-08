@@ -1357,6 +1357,9 @@ export const translations = {
     // Channel-breakout: extra summary field
     'analytics.cb_median_vtfh':        'Медиана видео до хита',
 
+    // Channel-breakout: legacy report notice
+    'analytics.cb_legacy_notice': 'Отчёт создан до изменения методики: медианы посчитаны без исключения выбросов разброса и Shorts-каналов, метрика «Видео до хита» отсутствует. Запустите новый анализ для получения актуальных данных.',
+
     // Niche tab
     'analytics.niche_topic_label': 'Тема или ниша',
     'analytics.niche_topic_ph':    'Например: Личные финансы, Автомобили...',
@@ -2839,6 +2842,9 @@ export const translations = {
 
     // Channel-breakout: extra summary field
     'analytics.cb_median_vtfh':        'Median videos to hit',
+
+    // Channel-breakout: legacy report notice
+    'analytics.cb_legacy_notice': 'This report was created before the methodology update: medians include all channels (no outlier/Shorts exclusion) and the "Videos to hit" metric is unavailable. Run a new analysis to get updated data.',
 
     'analytics.niche_topic_label': 'Topic or niche',
     'analytics.niche_topic_ph':    'e.g., Personal Finance, Cars...',

@@ -401,9 +401,12 @@ export async function POST(req: NextRequest) {
             }
           }
 
+          // Deduplicate by video ID (uploads playlist can list the same video twice)
+          const videos = Array.from(new Map(videosRaw.map(v => [v.id, v])).values())
+
           // Separate Shorts (<180s) vs horizontal
-          const horizontal = videosRaw.filter(v => v.duration_s >= 180)
-          const shorts      = videosRaw.filter(v => v.duration_s > 0 && v.duration_s < 180)
+          const horizontal = videos.filter(v => v.duration_s >= 180)
+          const shorts      = videos.filter(v => v.duration_s > 0 && v.duration_s < 180)
           const hViews      = horizontal.map(v => v.views)
           const medH        = median(hViews)
           const maxH        = hViews.length ? Math.max(...hViews) : null
