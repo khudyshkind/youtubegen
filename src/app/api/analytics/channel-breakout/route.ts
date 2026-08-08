@@ -14,9 +14,10 @@ import { isBillingError, notifyBillingError } from '@/lib/telegram'
 
 export const maxDuration = 120
 
-const YT_BASE     = 'https://www.googleapis.com/youtube/v3'
-const BATCH_SIZE  = 5
-const BATCH_DELAY = 600  // ms
+const YT_BASE               = 'https://www.googleapis.com/youtube/v3'
+const BATCH_SIZE            = 5
+const BATCH_DELAY           = 600  // ms
+const SPREAD_OUTLIER_THRESHOLD = 100  // spread above this = single viral outlier, unreproducible
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,19 +38,22 @@ interface VideoRaw {
 }
 
 interface ChannelMetrics {
-  id:               string
-  title:            string
-  age_months:       number
-  subs:             number
-  months_to_1k:     number | null
-  views_per_video:  number | null
-  upload_frequency: number | null
-  spread:           number | null
-  days_to_first_hit: number | null
-  shorts_share:     number
-  horizontal_count: number
-  shorts_count:     number
-  top_videos:       Array<{ title: string; views: number; days_from_start: number }>
+  id:                  string
+  title:               string
+  age_months:          number
+  subs:                number
+  months_to_1k:        number | null
+  views_per_video:     number | null
+  upload_frequency:    number | null
+  spread:              number | null
+  days_to_first_hit:   number | null
+  videos_to_first_hit: number | null  // horizontal vids published before first hit
+  shorts_share:        number
+  horizontal_count:    number
+  shorts_count:        number
+  is_shorts_only:      boolean        // 100% Shorts, no horizontal content
+  is_spread_outlier:   boolean        // spread > SPREAD_OUTLIER_THRESHOLD
+  top_videos:          Array<{ title: string; views: number; days_from_start: number }>
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -99,55 +103,87 @@ function getBreakoutVerdictPrompt(
   sub_niche_name: string,
   channelMetrics: ChannelMetrics[],
   summary: {
-    newcomer_count:          number
-    under_5mo_past_1k:       number
-    median_months_to_1k:     number | null
-    median_views_per_video:  number | null
-    median_upload_frequency: number | null
-    median_shorts_share:     number
+    newcomer_count:             number
+    under_5mo_past_1k:          number
+    median_months_to_1k:        number | null
+    median_views_per_video:     number | null
+    median_upload_frequency:    number | null
+    median_shorts_share:        number
+    median_videos_to_first_hit: number | null
+    shorts_only_count:          number
+    spread_outlier_count:       number
+  },
+  niche_context?: {
+    newcomer_share: number
+    median_views:   number
+    growth_ratio:   number | null
   }
 ): string {
   const isRu = lang !== 'en'
 
-  const channelsList = channelMetrics.map(c => {
+  // Main channels (not Shorts-only, not outliers) — reliable for patterns
+  const mainChannels  = channelMetrics.filter(c => !c.is_shorts_only && !c.is_spread_outlier)
+  const shortsOnly    = channelMetrics.filter(c => c.is_shorts_only)
+  const outliers      = channelMetrics.filter(c => c.is_spread_outlier)
+
+  const formatChannel = (c: ChannelMetrics) => {
     const lines: string[] = [
-      `• ${c.title} (${c.age_months.toFixed(1)} мес., ${c.subs.toLocaleString()} подписчиков)`,
+      `• ${c.title} (${c.age_months.toFixed(1)} мес., ${c.subs.toLocaleString()} подп.)`,
     ]
-    if (c.months_to_1k !== null) lines.push(`  до 1 000 подп.: ${c.months_to_1k.toFixed(1)} мес.`)
-    if (c.views_per_video !== null) lines.push(`  просм./видео (медиана): ${Math.round(c.views_per_video).toLocaleString()}`)
-    if (c.upload_frequency !== null) lines.push(`  публикации: ${c.upload_frequency.toFixed(2)} вид/нед`)
-    if (c.spread !== null) lines.push(`  разброс (макс/медиана): ${c.spread.toFixed(1)}`)
-    if (c.days_to_first_hit !== null) lines.push(`  дней до первого хита: ${c.days_to_first_hit}`)
-    lines.push(`  доля Shorts: ${(c.shorts_share * 100).toFixed(0)}%`)
-    lines.push(`  горизонтальных: ${c.horizontal_count}, Shorts: ${c.shorts_count}`)
+    if (c.months_to_1k !== null)        lines.push(`  до 1 000 подп.: ${c.months_to_1k.toFixed(1)} мес.`)
+    if (c.views_per_video !== null)     lines.push(`  просм./видео (медиана горизонт.): ${Math.round(c.views_per_video).toLocaleString()}`)
+    if (c.upload_frequency !== null)    lines.push(`  частота: ${c.upload_frequency.toFixed(2)} вид/нед`)
+    if (c.spread !== null)              lines.push(`  разброс (макс/медиана): ${c.spread.toFixed(1)}×`)
+    if (c.videos_to_first_hit !== null) lines.push(`  горизонт. видео до первого хита: ${c.videos_to_first_hit}`)
+    if (c.days_to_first_hit !== null)   lines.push(`  дней до первого хита: ${c.days_to_first_hit}`)
+    lines.push(`  Shorts: ${(c.shorts_share * 100).toFixed(0)}%`)
     if (c.top_videos.length) {
       lines.push(`  топ видео:`)
       c.top_videos.forEach(v => lines.push(`    - "${v.title}" — ${v.views.toLocaleString()} просм. (+${v.days_from_start} дн.)`))
     }
     return lines.join('\n')
-  }).join('\n\n')
+  }
+
+  const mainList    = mainChannels.map(formatChannel).join('\n\n')
+  const outlierList = outliers.map(c =>
+    `• ${c.title} (${c.age_months.toFixed(1)} мес.) — разброс ${c.spread?.toFixed(0)}×, исключён из сводки`
+  ).join('\n')
+  const shortsList  = shortsOnly.map(c =>
+    `• ${c.title} (${c.age_months.toFixed(1)} мес., ${c.subs.toLocaleString()} подп.) — только Shorts`
+  ).join('\n')
+
+  const nicheCtxLine = niche_context
+    ? isRu
+      ? `Обещанное поднишей (L2): пробиваемость ${Math.round(niche_context.newcomer_share * 100)}%, медиана просмотров ${Math.round(niche_context.median_views).toLocaleString()}, рост ${niche_context.growth_ratio !== null ? niche_context.growth_ratio.toFixed(2) + '×' : 'нет данных'}`
+      : `Sub-niche (L2) promise: penetration ${Math.round(niche_context.newcomer_share * 100)}%, median views ${Math.round(niche_context.median_views).toLocaleString()}, growth ${niche_context.growth_ratio !== null ? niche_context.growth_ratio.toFixed(2) + '×' : 'no data'}`
+    : ''
 
   if (isRu) {
     return `Ты аналитик YouTube. Дай аналитический вывод по новичковым каналам в нише «${sub_niche_name}».
 
-ДАННЫЕ СВОДКИ:
+${nicheCtxLine ? 'КОНТЕКСТ НИШИ:\n' + nicheCtxLine + '\n' : ''}
+ДАННЫЕ СВОДКИ (медианы — только по основным каналам, без Shorts-only и без выбросов разброса):
 - Всего новичков (< 12 мес.): ${summary.newcomer_count}
-- Набрали 1 000 подп. до 5 месяцев: ${summary.under_5mo_past_1k}
+- Из них только Shorts: ${summary.shorts_only_count}; вирусных выбросов (разброс > ${SPREAD_OUTLIER_THRESHOLD}×): ${summary.spread_outlier_count}
+- Набрали 1 000 подп. до 5 мес.: ${summary.under_5mo_past_1k}
 - Медиана времени до 1 000 подп.: ${summary.median_months_to_1k !== null ? summary.median_months_to_1k.toFixed(1) + ' мес.' : 'нет данных'}
 - Медиана просмотров/видео: ${summary.median_views_per_video !== null ? Math.round(summary.median_views_per_video).toLocaleString() : 'нет данных'}
 - Медиана частоты публикаций: ${summary.median_upload_frequency !== null ? summary.median_upload_frequency.toFixed(2) + ' вид/нед' : 'нет данных'}
-- Медиана доли Shorts: ${(summary.median_shorts_share * 100).toFixed(0)}%
+- Медиана видео до первого хита: ${summary.median_videos_to_first_hit !== null ? String(Math.round(summary.median_videos_to_first_hit)) : 'нет данных'}
 
-ДАННЫЕ КАНАЛОВ:
-${channelsList}
+ОСНОВНЫЕ КАНАЛЫ (${mainChannels.length}):
+${mainList || 'нет'}
 
+${outliers.length > 0 ? `ВИРУСНЫЕ ВЫБРОСЫ (исключены из сводки, ${outliers.length}):\n${outlierList}\n` : ''}
+${shortsOnly.length > 0 ? `ТОЛЬКО SHORTS (исключены из сводки, ${shortsOnly.length}):\n${shortsList}\n` : ''}
 ТРЕБОВАНИЯ:
 1. Опирайся только на числа выше. Упомяни конкретные каналы и их числа там, где это подкрепляет вывод.
 2. Заголовки видео указывай только как факт (жанр, тема) — без интерпретации, почему они сработали.
-3. ЗАПРЕЩЕНО рассуждать о причинах успеха: ни обложки, ни хуки, ни подача, ни стиль монтажа — если этого нет в числах, не упоминай.
-4. ЗАПРЕЩЕНО использовать машинные имена полей: months_to_1k, views_per_video, upload_frequency, spread, days_to_first_hit, shorts_share. Переводи в естественный русский.
+3. ЗАПРЕЩЕНО рассуждать о причинах успеха: ни обложки, ни хуки, ни подача, ни монтаж — если этого нет в числах, не упоминай.
+4. ЗАПРЕЩЕНО использовать машинные имена полей. Переводи в естественный русский.
 5. Если данных недостаточно — скажи об этом явно.
-6. Ответ — только JSON без markdown:
+6. Подзаголовки в JSON пиши на РУССКОМ языке.
+7. Ответ — только JSON без markdown:
 {
   "growth_speed": "...",
   "content_cadence": "...",
@@ -159,24 +195,29 @@ ${channelsList}
 
   return `You are a YouTube analyst. Provide an analytical verdict on newcomer channels in the niche "${sub_niche_name}".
 
-SUMMARY DATA:
+${nicheCtxLine ? 'NICHE CONTEXT:\n' + nicheCtxLine + '\n' : ''}
+SUMMARY DATA (medians exclude Shorts-only and spread-outlier channels):
 - Total newcomers (< 12 months): ${summary.newcomer_count}
+- Of which Shorts-only: ${summary.shorts_only_count}; viral outliers (spread > ${SPREAD_OUTLIER_THRESHOLD}×): ${summary.spread_outlier_count}
 - Reached 1,000 subs within 5 months: ${summary.under_5mo_past_1k}
 - Median time to 1,000 subs: ${summary.median_months_to_1k !== null ? summary.median_months_to_1k.toFixed(1) + ' months' : 'no data'}
 - Median views/video: ${summary.median_views_per_video !== null ? Math.round(summary.median_views_per_video).toLocaleString() : 'no data'}
 - Median upload frequency: ${summary.median_upload_frequency !== null ? summary.median_upload_frequency.toFixed(2) + ' vids/week' : 'no data'}
-- Median Shorts share: ${(summary.median_shorts_share * 100).toFixed(0)}%
+- Median videos before first hit: ${summary.median_videos_to_first_hit !== null ? String(Math.round(summary.median_videos_to_first_hit)) : 'no data'}
 
-CHANNEL DATA:
-${channelsList}
+MAIN CHANNELS (${mainChannels.length}):
+${mainList || 'none'}
 
+${outliers.length > 0 ? `VIRAL OUTLIERS (excluded from summary, ${outliers.length}):\n${outlierList}\n` : ''}
+${shortsOnly.length > 0 ? `SHORTS-ONLY (excluded from summary, ${shortsOnly.length}):\n${shortsList}\n` : ''}
 REQUIREMENTS:
 1. Rely only on the numbers above. Cite specific channels when they support a claim.
 2. Video titles are facts only (genre, topic) — no interpretation of why they worked.
 3. PROHIBITED: speculation about success causes — thumbnails, hooks, presentation, editing style. Not in numbers = not mentioned.
-4. PROHIBITED: machine field names — months_to_1k, views_per_video, upload_frequency, spread, days_to_first_hit, shorts_share. Use natural language.
+4. PROHIBITED: machine field names. Use natural language.
 5. If data is insufficient on some aspect, say so explicitly.
-6. Return only JSON, no markdown:
+6. Write section labels in ENGLISH.
+7. Return only JSON, no markdown:
 {
   "growth_speed": "...",
   "content_cadence": "...",
@@ -200,6 +241,7 @@ export async function POST(req: NextRequest) {
       channel_ids?:        string[]
       sub_niche_name?:     string
       niche_median_views?: number
+      niche_context?:      { newcomer_share: number; median_views: number; growth_ratio: number | null }
       limit?:              20 | 50
       ui_lang?:            string
     }
@@ -207,6 +249,7 @@ export async function POST(req: NextRequest) {
     const channel_ids        = Array.isArray(body.channel_ids) ? body.channel_ids.slice(0, 50) : []
     const sub_niche_name     = body.sub_niche_name?.trim() ?? ''
     const niche_median_views = typeof body.niche_median_views === 'number' ? body.niche_median_views : 0
+    const niche_context      = body.niche_context ?? undefined
     const limit: 20 | 50    = body.limit === 50 ? 50 : 20
     lang                     = body.ui_lang ?? 'ru'
 
@@ -230,7 +273,7 @@ export async function POST(req: NextRequest) {
     if (ctx.gateRes) return ctx.gateRes
     if (!ctx.userHasKey) return byokRequiredResponse(lang)
 
-    const apiKey    = ctx.apiKey
+    const apiKey     = ctx.apiKey
     const actualCost = ctx.cost(CREDIT_COSTS.channel_breakout)
 
     const creditCheck = await requireCreditsAmount(user.id, actualCost, svc)
@@ -241,7 +284,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Step 1: channels.list — batch fetch channel metadata ──────────────
+    // ── Step 1: channels.list ─────────────────────────────────────────────
     const idsToFetch = channel_ids.slice(0, limit)
     const channelRaws: ChannelRaw[] = []
 
@@ -322,9 +365,9 @@ export async function POST(req: NextRequest) {
           // 2b: videos.list
           const videosRaw: VideoRaw[] = []
           for (let vi = 0; vi < videoItems.length; vi += 50) {
-            const vbatch  = videoItems.slice(vi, vi + 50)
-            const vids    = vbatch.map(v => v.videoId).join(',')
-            const pubMap  = new Map(vbatch.map(v => [v.videoId, v.published]))
+            const vbatch = videoItems.slice(vi, vi + 50)
+            const vids   = vbatch.map(v => v.videoId).join(',')
+            const pubMap = new Map(vbatch.map(v => [v.videoId, v.published]))
 
             let vData: { items?: Array<{
               id: string
@@ -365,8 +408,9 @@ export async function POST(req: NextRequest) {
           const medH        = median(hViews)
           const maxH        = hViews.length ? Math.max(...hViews) : null
           const sampleWeeks = Math.max(1, ch.age_months * 4.33)
+          const spread      = medH && maxH ? maxH / medH : null
 
-          // days_to_first_hit
+          // days_to_first_hit — earliest horizontal video exceeding niche median
           let days_to_first_hit: number | null = null
           if (niche_median_views > 0) {
             const hits = horizontal
@@ -377,7 +421,17 @@ export async function POST(req: NextRequest) {
             if (hits.length) days_to_first_hit = Math.round(hits[0])
           }
 
-          const top_videos = horizontal
+          // videos_to_first_hit — count of horizontal videos published BEFORE the first hit
+          let videos_to_first_hit: number | null = null
+          if (niche_median_views > 0) {
+            const sortedHoriz = horizontal
+              .filter(v => v.published)
+              .sort((a, b) => new Date(a.published).getTime() - new Date(b.published).getTime())
+            const firstHitIdx = sortedHoriz.findIndex(v => v.views > niche_median_views)
+            if (firstHitIdx >= 0) videos_to_first_hit = firstHitIdx
+          }
+
+          const top_videos = [...horizontal]
             .sort((a, b) => b.views - a.views)
             .slice(0, 3)
             .map(v => ({
@@ -388,20 +442,26 @@ export async function POST(req: NextRequest) {
                 : 0,
             }))
 
-          const totalVids = horizontal.length + shorts.length
+          const totalVids      = horizontal.length + shorts.length
+          const is_shorts_only = horizontal.length === 0 && shorts.length > 0
+          const is_spread_outlier = spread !== null && spread > SPREAD_OUTLIER_THRESHOLD
+
           channelMetricsAll.push({
-            id:               ch.id,
-            title:            ch.title,
-            age_months:       ch.age_months,
-            subs:             ch.subs,
-            months_to_1k:     ch.subs >= 1000 ? ch.age_months : null,
-            views_per_video:  medH,
-            upload_frequency: horizontal.length ? horizontal.length / sampleWeeks : null,
-            spread:           medH && maxH ? maxH / medH : null,
+            id:                  ch.id,
+            title:               ch.title,
+            age_months:          ch.age_months,
+            subs:                ch.subs,
+            months_to_1k:        ch.subs >= 1000 ? ch.age_months : null,
+            views_per_video:     medH,
+            upload_frequency:    horizontal.length ? horizontal.length / sampleWeeks : null,
+            spread,
             days_to_first_hit,
-            shorts_share:     totalVids > 0 ? shorts.length / totalVids : 0,
-            horizontal_count: horizontal.length,
-            shorts_count:     shorts.length,
+            videos_to_first_hit,
+            shorts_share:        totalVids > 0 ? shorts.length / totalVids : 0,
+            horizontal_count:    horizontal.length,
+            shorts_count:        shorts.length,
+            is_shorts_only,
+            is_spread_outlier,
             top_videos,
           })
         } catch (err) {
@@ -419,29 +479,38 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Step 3: Summary ────────────────────────────────────────────────────
-    const m2ks  = channelMetricsAll.map(c => c.months_to_1k).filter((x): x is number => x !== null)
-    const vpvs  = channelMetricsAll.map(c => c.views_per_video).filter((x): x is number => x !== null)
-    const freqs = channelMetricsAll.map(c => c.upload_frequency).filter((x): x is number => x !== null)
-    const sshs  = channelMetricsAll.map(c => c.shorts_share)
+    // Base = channels without Shorts-only and without spread outliers → used for all medians
+    const base = channelMetricsAll.filter(c => !c.is_shorts_only && !c.is_spread_outlier)
+
+    const m2ks  = base.map(c => c.months_to_1k).filter((x): x is number => x !== null)
+    const vpvs  = base.map(c => c.views_per_video).filter((x): x is number => x !== null)
+    const freqs = base.map(c => c.upload_frequency).filter((x): x is number => x !== null)
+    const sshs  = base.map(c => c.shorts_share)
+    const vtfhs = base.map(c => c.videos_to_first_hit).filter((x): x is number => x !== null)
+
+    const allM2ks = channelMetricsAll.map(c => c.months_to_1k).filter((x): x is number => x !== null)
 
     const summary = {
-      newcomer_count:          channelMetricsAll.length,
-      under_5mo_past_1k:       m2ks.filter(x => x <= 5).length,
-      median_months_to_1k:     median(m2ks),
-      median_views_per_video:  median(vpvs),
-      median_upload_frequency: median(freqs),
-      median_shorts_share:     median(sshs) ?? 0,
+      newcomer_count:             channelMetricsAll.length,
+      under_5mo_past_1k:          allM2ks.filter(x => x <= 5).length,
+      median_months_to_1k:        median(m2ks),
+      median_views_per_video:     median(vpvs),
+      median_upload_frequency:    median(freqs),
+      median_shorts_share:        median(sshs) ?? 0,
+      median_videos_to_first_hit: median(vtfhs),
+      shorts_only_count:          channelMetricsAll.filter(c => c.is_shorts_only).length,
+      spread_outlier_count:       channelMetricsAll.filter(c => c.is_spread_outlier).length,
     }
 
     // ── Step 4: Sonnet verdict ─────────────────────────────────────────────
     const anthropicApiKey = env('ANTHROPIC_API_KEY')
     const claude = new Anthropic({ apiKey: anthropicApiKey })
 
-    const verdictPrompt = getBreakoutVerdictPrompt(lang, sub_niche_name, channelMetricsAll, summary)
+    const verdictPrompt = getBreakoutVerdictPrompt(lang, sub_niche_name, channelMetricsAll, summary, niche_context)
 
     const msg = await claude.messages.create({
       model:      'claude-sonnet-4-5',
-      max_tokens: 1500,
+      max_tokens: 1800,
       messages:   [{ role: 'user', content: verdictPrompt }],
     })
 
@@ -467,9 +536,10 @@ export async function POST(req: NextRequest) {
     const result = {
       sub_niche_name,
       limit,
-      analyzed_at: new Date().toISOString(),
+      analyzed_at:   new Date().toISOString(),
+      niche_context: niche_context ?? null,
       summary,
-      channels:    channelMetricsAll,
+      channels:      channelMetricsAll,
       verdict,
     }
 

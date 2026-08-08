@@ -4184,32 +4184,39 @@ interface SubNicheFinderData {
 }
 
 interface ChannelMetricsItem {
-  id:               string
-  title:            string
-  age_months:       number
-  subs:             number
-  months_to_1k:     number | null
-  views_per_video:  number | null
-  upload_frequency: number | null
-  spread:           number | null
-  days_to_first_hit: number | null
-  shorts_share:     number
-  horizontal_count: number
-  shorts_count:     number
-  top_videos:       Array<{ title: string; views: number; days_from_start: number }>
+  id:                  string
+  title:               string
+  age_months:          number
+  subs:                number
+  months_to_1k:        number | null
+  views_per_video:     number | null
+  upload_frequency:    number | null
+  spread:              number | null
+  days_to_first_hit:   number | null
+  videos_to_first_hit: number | null
+  shorts_share:        number
+  horizontal_count:    number
+  shorts_count:        number
+  is_shorts_only:      boolean
+  is_spread_outlier:   boolean
+  top_videos:          Array<{ title: string; views: number; days_from_start: number }>
 }
 
 interface ChannelBreakoutData {
   sub_niche_name: string
   limit:          20 | 50
   analyzed_at:    string
+  niche_context?: { newcomer_share: number; median_views: number; growth_ratio: number | null } | null
   summary: {
-    newcomer_count:          number
-    under_5mo_past_1k:       number
-    median_months_to_1k:     number | null
-    median_views_per_video:  number | null
-    median_upload_frequency: number | null
-    median_shorts_share:     number
+    newcomer_count:             number
+    under_5mo_past_1k:          number
+    median_months_to_1k:        number | null
+    median_views_per_video:     number | null
+    median_upload_frequency:    number | null
+    median_shorts_share:        number
+    median_videos_to_first_hit: number | null
+    shorts_only_count:          number
+    spread_outlier_count:       number
   }
   channels: ChannelMetricsItem[]
   verdict: {
@@ -4549,6 +4556,25 @@ function ChannelBreakoutResultsView({
   }
   function fmtPct(v: number): string { return `${Math.round(v * 100)}%` }
 
+  // Split channels into regular and Shorts-only
+  const mainChannels  = data.channels.filter(c => !c.is_shorts_only)
+  const shortsOnlyChannels = data.channels.filter(c => c.is_shorts_only)
+
+  // Verdict section labels mapped to i18n
+  const verdictLabels: Record<string, string> = {
+    growth_speed:       t('analytics.cb_verdict_growth_speed'),
+    content_cadence:    t('analytics.cb_verdict_cadence'),
+    view_concentration: t('analytics.cb_verdict_spread'),
+    shorts_role:        t('analytics.cb_verdict_shorts'),
+  }
+
+  const hasExcluded = (s.spread_outlier_count ?? 0) > 0 || (s.shorts_only_count ?? 0) > 0
+  const excludedNote = hasExcluded
+    ? t('analytics.cb_excluded_note')
+        .replace('{outliers}', String(s.spread_outlier_count ?? 0))
+        .replace('{shorts}', String(s.shorts_only_count ?? 0))
+    : null
+
   return (
     <div className="analytics-result flex flex-col gap-5">
       {/* Header */}
@@ -4566,6 +4592,30 @@ function ChannelBreakoutResultsView({
         </div>
       </div>
 
+      {/* Niche context banner (fix #6) */}
+      {data.niche_context && (
+        <div className="rounded-xl px-4 py-3 flex flex-wrap gap-4"
+          style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.2)' }}>
+          <p className="text-xs font-semibold text-indigo-300 w-full mb-1">{t('analytics.cb_niche_context')}: {data.sub_niche_name}</p>
+          <div className="flex gap-6 flex-wrap">
+            <div>
+              <p className="text-xs text-slate-500">{t('analytics.cb_niche_penetration')}</p>
+              <p className="text-sm font-bold text-white tabular-nums">{Math.round(data.niche_context.newcomer_share * 100)}%</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">{t('analytics.cb_niche_median_views')}</p>
+              <p className="text-sm font-bold text-white tabular-nums">{fmtNum(Math.round(data.niche_context.median_views))}</p>
+            </div>
+            {data.niche_context.growth_ratio !== null && (
+              <div>
+                <p className="text-xs text-slate-500">{t('analytics.cb_niche_growth')}</p>
+                <p className="text-sm font-bold text-white tabular-nums">{data.niche_context.growth_ratio.toFixed(2)}×</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* No-newcomers state */}
       {s.newcomer_count === 0 && (
         <div className="rounded-2xl p-8 text-center flex flex-col items-center gap-3"
@@ -4573,6 +4623,15 @@ function ChannelBreakoutResultsView({
           <span className="text-4xl">🕳️</span>
           <p className="text-lg font-semibold text-white">{t('analytics.cb_no_newcomers')}</p>
           <p className="text-sm text-slate-400 max-w-sm">{t('analytics.cb_no_newcomers_note')}</p>
+        </div>
+      )}
+
+      {/* Sampling disclaimer (fix #7) — prominent, near the top */}
+      {s.newcomer_count > 0 && (
+        <div className="rounded-xl px-4 py-3 flex items-start gap-2"
+          style={{ background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.2)' }}>
+          <span className="text-amber-400 text-sm mt-0.5 flex-shrink-0">⚠</span>
+          <p className="text-xs text-amber-200/80 leading-relaxed">{t('analytics.cb_sampling_note')}</p>
         </div>
       )}
 
@@ -4589,6 +4648,9 @@ function ChannelBreakoutResultsView({
               { label: t('analytics.cb_median_vpv'),      value: s.median_views_per_video !== null ? fmtNum(Math.round(s.median_views_per_video)) : t('analytics.cb_no_data') },
               { label: t('analytics.cb_median_freq'),     value: fmtFreq(s.median_upload_frequency) },
               { label: t('analytics.cb_median_shorts'),   value: fmtPct(s.median_shorts_share) },
+              ...(s.median_videos_to_first_hit !== null && s.median_videos_to_first_hit !== undefined
+                ? [{ label: t('analytics.cb_median_vtfh'), value: String(Math.round(s.median_videos_to_first_hit)) }]
+                : []),
             ].map(({ label, value }) => (
               <div key={label} className="flex flex-col gap-1">
                 <p className="text-xs text-slate-500 leading-snug">{label}</p>
@@ -4596,13 +4658,17 @@ function ChannelBreakoutResultsView({
               </div>
             ))}
           </div>
+          {/* Excluded note (fix #1+#2) */}
+          {excludedNote && (
+            <p className="text-xs text-slate-500 mt-3 pt-3 border-t border-white/5 italic">{excludedNote}</p>
+          )}
         </div>
       )}
 
-      {/* Channels table */}
-      {data.channels.length > 0 && (
+      {/* Main channels table (non-Shorts-only) */}
+      {mainChannels.length > 0 && (
         <div>
-          <p className="text-sm font-semibold text-slate-300 mb-3">{t('analytics.cb_table_title')} ({data.channels.length})</p>
+          <p className="text-sm font-semibold text-slate-300 mb-3">{t('analytics.cb_table_title')} ({mainChannels.length})</p>
           <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
             <table className="w-full text-xs">
               <thead>
@@ -4621,23 +4687,42 @@ function ChannelBreakoutResultsView({
                   </th>
                   <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">{t('analytics.cb_col_shorts')}</th>
                   <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
+                    {t('analytics.cb_col_vtfh')}<TipIcon tip={t('analytics.cb_tip_vtfh')} />
+                  </th>
+                  <th className="text-right px-3 py-2.5 text-slate-500 font-medium whitespace-nowrap">
                     {t('analytics.cb_col_speed')}<TipIcon tip={t('analytics.cb_tip_speed')} />
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {data.channels.map((ch, i) => (
-                  <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
+                {mainChannels.map((ch, i) => (
+                  <tr key={i}
+                    style={{
+                      borderTop: '1px solid rgba(255,255,255,0.05)',
+                      background: ch.is_spread_outlier ? 'rgba(251,146,60,0.04)' : undefined,
+                    }}
                     className="hover:bg-white/[0.02] transition-colors">
-                    <td className="px-3 py-2.5 max-w-[160px]">
-                      <a href={`https://youtube.com/channel/${ch.id}`} target="_blank" rel="noreferrer"
-                        className="text-slate-200 hover:text-cyan-300 transition-colors line-clamp-1"
-                        title={ch.title}>
-                        {ch.title}
-                      </a>
+                    <td className="px-3 py-2.5" style={{ minWidth: 180, maxWidth: 260 }}>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <a href={`https://youtube.com/channel/${ch.id}`} target="_blank" rel="noreferrer"
+                          className="text-slate-200 hover:text-cyan-300 transition-colors break-words leading-snug">
+                          {ch.title}
+                        </a>
+                        {ch.is_spread_outlier && (
+                          <span className="text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0"
+                            style={{ background: 'rgba(251,146,60,0.15)', color: '#fb923c', border: '1px solid rgba(251,146,60,0.3)' }}>
+                            {t('analytics.cb_outlier_label')}
+                          </span>
+                        )}
+                      </div>
+                      {/* Top videos: full titles, each on own line (fix #4) */}
                       {ch.top_videos.length > 0 && (
-                        <div className="text-slate-600 text-xs mt-0.5 line-clamp-1" title={ch.top_videos.map(v => v.title).join(' · ')}>
-                          {t('analytics.cb_top_videos')}: {ch.top_videos[0].title}
+                        <div className="mt-1.5 flex flex-col gap-0.5">
+                          {ch.top_videos.map((v, vi) => (
+                            <p key={vi} className="text-slate-600 text-xs leading-snug break-words">
+                              {vi === 0 ? `${t('analytics.cb_top_videos')}: ` : ''}{v.title}
+                            </p>
+                          ))}
                         </div>
                       )}
                     </td>
@@ -4653,13 +4738,20 @@ function ChannelBreakoutResultsView({
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
                       {ch.spread !== null
-                        ? <span className={ch.spread > 10 ? 'text-amber-400' : ch.spread > 3 ? 'text-slate-300' : 'text-slate-500'}>
+                        ? <span className={ch.is_spread_outlier ? 'text-orange-400 font-semibold' : ch.spread > 10 ? 'text-amber-400' : ch.spread > 3 ? 'text-slate-300' : 'text-slate-500'}>
                             {ch.spread.toFixed(1)}×
                           </span>
                         : <span className="text-slate-600">—</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-400 tabular-nums">
                       {fmtPct(ch.shorts_share)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {ch.videos_to_first_hit !== null
+                        ? <span className={ch.videos_to_first_hit <= 5 ? 'text-green-400 font-semibold' : ch.videos_to_first_hit <= 15 ? 'text-yellow-400' : 'text-slate-400'}>
+                            {ch.videos_to_first_hit}
+                          </span>
+                        : <span className="text-slate-600">—</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums">
                       {ch.months_to_1k !== null
@@ -4674,6 +4766,40 @@ function ChannelBreakoutResultsView({
             </table>
           </div>
           <p className="text-xs text-slate-600 mt-2 italic">{t('analytics.cb_speed_note')}</p>
+        </div>
+      )}
+
+      {/* Shorts-only channels block (fix #2) */}
+      {shortsOnlyChannels.length > 0 && (
+        <div>
+          <p className="text-sm font-semibold text-slate-400 mb-3">{t('analytics.cb_shorts_only_title')} ({shortsOnlyChannels.length})</p>
+          <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+            <table className="w-full text-xs">
+              <thead>
+                <tr style={{ background: 'rgba(255,255,255,0.03)' }}>
+                  <th className="text-left px-3 py-2 text-slate-600 font-medium">{t('analytics.cb_col_channel')}</th>
+                  <th className="text-right px-3 py-2 text-slate-600 font-medium">{t('analytics.cb_col_age')}</th>
+                  <th className="text-right px-3 py-2 text-slate-600 font-medium">{t('analytics.cb_col_subs')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shortsOnlyChannels.map((ch, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                    <td className="px-3 py-2">
+                      <a href={`https://youtube.com/channel/${ch.id}`} target="_blank" rel="noreferrer"
+                        className="text-slate-500 hover:text-slate-300 transition-colors">
+                        {ch.title}
+                      </a>
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-600 whitespace-nowrap tabular-nums">
+                      {ch.age_months.toFixed(1)} {t('analytics.cb_months')}
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-600 tabular-nums">{fmtNum(ch.subs)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -4692,13 +4818,15 @@ function ChannelBreakoutResultsView({
             { key: 'shorts_role',        value: data.verdict.shorts_role },
           ].filter(({ value }) => value).map(({ key, value }) => (
             <div key={key} className="flex flex-col gap-0.5">
-              <p className="text-xs text-slate-500 capitalize">{key.replace(/_/g, ' ')}</p>
+              {/* Localized label from i18n (fix #5) */}
+              <p className="text-xs text-slate-500">{verdictLabels[key] ?? key}</p>
               <p className="text-sm text-slate-300 leading-relaxed">{value}</p>
             </div>
           ))}
           {data.verdict.overall && (
             <div className="rounded-xl px-4 py-3 mt-1"
               style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.15)' }}>
+              <p className="text-xs text-slate-500 mb-1">{t('analytics.cb_verdict_overall')}</p>
               <p className="text-sm text-slate-200 leading-relaxed">{data.verdict.overall}</p>
             </div>
           )}
@@ -4759,7 +4887,12 @@ function SubNicheTab({ externalResult, onClearExternal, externalBreakout, onClea
         body: JSON.stringify({
           channel_ids:    breakoutNiche.newcomer_channel_ids,
           sub_niche_name: breakoutNiche.name,
-          niche_median_views: nichesData?.sub_niches.find(n => n.name === breakoutNiche.name)?.metrics.median_views_per_video.value ?? 0,
+          niche_median_views: breakoutNiche.metrics.median_views_per_video.value ?? 0,
+          niche_context: {
+            newcomer_share: breakoutNiche.metrics.newcomer_share.value,
+            median_views:   breakoutNiche.metrics.median_views_per_video.value ?? 0,
+            growth_ratio:   breakoutNiche.metrics.growth_ratio.value ?? null,
+          },
           limit:          breakoutLimit,
           ui_lang:        uiLang,
         }),

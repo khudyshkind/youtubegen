@@ -1331,6 +1331,32 @@ export const translations = {
     'analytics.cb_top_videos':       'Топ видео',
     'analytics.cb_no_data':          'нет данных',
 
+    // Channel-breakout: verdict label keys
+    'analytics.cb_verdict_growth_speed':   'Скорость роста',
+    'analytics.cb_verdict_cadence':        'Частота и стиль',
+    'analytics.cb_verdict_spread':         'Концентрация просмотров',
+    'analytics.cb_verdict_shorts':         'Роль Shorts',
+    'analytics.cb_verdict_overall':        'Общий вывод',
+
+    // Channel-breakout: new table column and tooltip
+    'analytics.cb_col_vtfh':    'Вид. до хита',
+    'analytics.cb_tip_vtfh':    'Горизонтальных видео опубликовано до первого, превысившего медиану ниши',
+
+    // Channel-breakout: outlier / shorts-only / disclaimer
+    'analytics.cb_shorts_only_title':  'Каналы только с Shorts',
+    'analytics.cb_outlier_label':      'Выброс',
+    'analytics.cb_excluded_note':      'Исключено из медиан: {outliers} вирусных выбросов, {shorts} Shorts-каналов',
+    'analytics.cb_sampling_note':      'Данные охватывают только каналы из топа по релевантности — не случайную выборку. Возможен эффект выжившего.',
+
+    // Channel-breakout: niche context banner
+    'analytics.cb_niche_context':      'Контекст ниши',
+    'analytics.cb_niche_penetration':  'Пробиваемость',
+    'analytics.cb_niche_median_views': 'Медиана просмотров (L2)',
+    'analytics.cb_niche_growth':       'Рост ниши',
+
+    // Channel-breakout: extra summary field
+    'analytics.cb_median_vtfh':        'Медиана видео до хита',
+
     // Niche tab
     'analytics.niche_topic_label': 'Тема или ниша',
     'analytics.niche_topic_ph':    'Например: Личные финансы, Автомобили...',
@@ -2787,6 +2813,32 @@ export const translations = {
     'analytics.cb_no_speed':         '< 1,000 subs',
     'analytics.cb_top_videos':       'Top videos',
     'analytics.cb_no_data':          'no data',
+
+    // Channel-breakout: verdict label keys
+    'analytics.cb_verdict_growth_speed':   'Growth speed',
+    'analytics.cb_verdict_cadence':        'Cadence & style',
+    'analytics.cb_verdict_spread':         'View concentration',
+    'analytics.cb_verdict_shorts':         'Shorts role',
+    'analytics.cb_verdict_overall':        'Overall verdict',
+
+    // Channel-breakout: new table column and tooltip
+    'analytics.cb_col_vtfh':    'Vids to hit',
+    'analytics.cb_tip_vtfh':    'Horizontal videos published before the first one to exceed the niche median',
+
+    // Channel-breakout: outlier / shorts-only / disclaimer
+    'analytics.cb_shorts_only_title':  'Shorts-only channels',
+    'analytics.cb_outlier_label':      'Outlier',
+    'analytics.cb_excluded_note':      'Excluded from medians: {outliers} viral outliers, {shorts} Shorts-only',
+    'analytics.cb_sampling_note':      'Data covers only top-ranked channels by relevance — not a random sample. Survivorship bias may apply.',
+
+    // Channel-breakout: niche context banner
+    'analytics.cb_niche_context':      'Niche context',
+    'analytics.cb_niche_penetration':  'Penetration',
+    'analytics.cb_niche_median_views': 'Median views (L2)',
+    'analytics.cb_niche_growth':       'Niche growth',
+
+    // Channel-breakout: extra summary field
+    'analytics.cb_median_vtfh':        'Median videos to hit',
 
     'analytics.niche_topic_label': 'Topic or niche',
     'analytics.niche_topic_ph':    'e.g., Personal Finance, Cars...',
