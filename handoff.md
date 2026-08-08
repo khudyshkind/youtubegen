@@ -1,3 +1,55 @@
+# Отчёт: 2026-08-08 (задача 6 — дублирование заголовков + легаси-отчёты)
+
+## Что сделано
+
+### 1. Дублирование заголовков топ-видео
+
+**Причина:** YouTube uploads playlist может содержать один и тот же video ID дважды (канал удалял и перезаливал видео). `videosRaw.push` срабатывал для каждой копии → `top_videos.slice(0, 3)` содержал три одинаковые записи. С `line-clamp-1` это было скрыто (всегда показывался `[0].title`), после снятия ограничения стало видно.
+
+**`src/app/api/analytics/channel-breakout/route.ts`:**
+- После заполнения `videosRaw` — дедупликация по ID:
+  ```typescript
+  const videos = Array.from(new Map(videosRaw.map(v => [v.id, v])).values())
+  ```
+- `horizontal` и `shorts` вычисляются из `videos`, а не `videosRaw`
+
+**`src/app/(dashboard)/analytics/page.tsx`:**
+- Рендер топ-видео возвращён к одной строке с `line-clamp-1`; полный текст в `title=` при наведении:
+  ```tsx
+  <p className="text-slate-600 text-xs mt-1 leading-snug line-clamp-1"
+    title={ch.top_videos.map(v => v.title).join(' · ')}>
+    {t('analytics.cb_top_videos')}: {ch.top_videos[0].title}
+  </p>
+  ```
+
+### 2. Легаси-отчёты из истории
+
+**Причина:** Старые отчёты сохранены в JSON без полей `is_shorts_only`, `is_spread_outlier`, `videos_to_first_hit`, `shorts_only_count`, `spread_outlier_count`, `median_videos_to_first_hit`. При открытии из истории данные частично недостоверны (медианы посчитаны со всеми каналами, не прошедшими фильтрацию).
+
+**`src/app/(dashboard)/analytics/page.tsx`:**
+- Новые поля в типах помечены optional (`?`): `is_shorts_only?`, `is_spread_outlier?`, `videos_to_first_hit?` в `ChannelMetricsItem`; аналогично в `summary`
+- `isLegacy = s.shorts_only_count === undefined` — детект старого формата
+- Жёлтый баннер в `ChannelBreakoutResultsView` если `isLegacy`: «Отчёт создан до изменения методики...»
+- `niche_context`-баннер скрыт для легаси (`!isLegacy && data.niche_context`)
+- `excludedNote` не показывается для легаси
+- `shortsOnlyChannels = data.channels.filter(c => c.is_shorts_only === true)` — `undefined` не попадает в блок
+- Все обращения к optional boolean-полям через `=== true` / `?? null`
+
+**`src/lib/i18n.ts`:**
+- `analytics.cb_legacy_notice` (ru + en)
+
+## Коммит
+
+`1ff13ae` — fix(channel-breakout): dedup video titles, legacy report notice
+
+## Что проверить владельцу
+
+1. Открыть свежий отчёт channel-breakout (если есть) → заголовки не должны повторяться; при наведении на строку — полный заголовок в tooltip
+2. Открыть старый отчёт из истории → жёлтый баннер «Отчёт создан до изменения методики»; баннер ниши L2 не показывается; таблица без оранжевых выбросов (старые данные не имели флагов)
+3. Новый прогон → нет баннера, нормальный вид с разделением
+
+---
+
 # Отчёт: 2026-08-08 (задача 5 — 7 исправлений channel-breakout)
 
 ## Что сделано
