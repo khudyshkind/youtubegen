@@ -4058,7 +4058,7 @@ const REPORT_ICONS: Record<string, string> = {
   channel_breakout: '🔬',
 }
 
-function HistoryTab({ onOpen }: { onOpen: (report: AnalyticsReport) => void }) {
+function HistoryTab({ onOpen }: { onOpen: (report: AnalyticsReport, parent?: AnalyticsReport) => void }) {
   const [reports, setReports] = useState<AnalyticsReport[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -4126,7 +4126,19 @@ function HistoryTab({ onOpen }: { onOpen: (report: AnalyticsReport) => void }) {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => onOpen(report)}
+              onClick={() => {
+                if (report.report_type === 'channel_breakout') {
+                  const cbResult = report.result as ChannelBreakoutData
+                  const parent = reports.find(r =>
+                    r.report_type === 'sub_niche_finder' &&
+                    Array.isArray((r.result as SubNicheFinderData).sub_niches) &&
+                    (r.result as SubNicheFinderData).sub_niches.some(n => n.name === cbResult.sub_niche_name)
+                  )
+                  onOpen(report, parent)
+                } else {
+                  onOpen(report)
+                }
+              }}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold text-violet-300 transition-all hover:text-white"
               style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}>
               Открыть
@@ -4283,18 +4295,25 @@ function SubNicheResultsView({
   return (
     <div className="analytics-result flex flex-col gap-5">
       {/* Header */}
-      <div className="no-print flex flex-wrap items-center justify-between gap-3">
-        <button onClick={onBack}
-          className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          {t('analytics.sn_back_new')}
-        </button>
-        <div className="flex gap-4 text-xs text-slate-500">
-          <span>{t('analytics.sn_reliable_count')}: <span className="text-white font-semibold">{data.reliable_count}/{data.sub_niches.length}</span></span>
-          <span>{t('analytics.sn_quota_used')}: <span className="text-white font-semibold">{data.quota_used}</span></span>
+      <div className="no-print flex flex-col gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <button onClick={onBack}
+            className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            {t('analytics.sn_back_new')}
+          </button>
+          <div className="flex gap-4 text-xs text-slate-500">
+            <span>{t('analytics.sn_reliable_count')}: <span className="text-white font-semibold">{data.reliable_count}/{data.sub_niches.length}</span></span>
+            <span>{t('analytics.sn_quota_used')}: <span className="text-white font-semibold">{data.quota_used}</span></span>
+          </div>
         </div>
+        {(data.broad_niche || data.direction) && (
+          <p className="text-sm font-semibold text-white leading-snug">
+            {data.broad_niche}{data.direction ? <><span className="text-slate-400 font-normal"> → </span>{data.direction}</> : null}
+          </p>
+        )}
       </div>
 
       {/* Top-5 cards */}
@@ -4581,18 +4600,18 @@ function ChannelBreakoutResultsView({
   return (
     <div className="analytics-result flex flex-col gap-5">
       {/* Header */}
-      <div className="no-print flex flex-wrap items-center justify-between gap-3">
-        <button onClick={onBack}
-          className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          {t('analytics.cb_back')}
-        </button>
-        <div className="flex gap-4 text-xs text-slate-500">
-          <span>🔬 {data.sub_niche_name}</span>
-          <span>{t('analytics.cb_newcomer_count')}: <span className="text-white font-semibold">{s.newcomer_count}</span></span>
+      <div className="no-print flex flex-col gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <button onClick={onBack}
+            className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            {t('analytics.cb_back')}
+          </button>
+          <span className="text-xs text-slate-500">{t('analytics.cb_newcomer_count')}: <span className="text-white font-semibold">{s.newcomer_count}</span></span>
         </div>
+        <p className="text-sm font-semibold text-cyan-300 leading-snug">🔬 {data.sub_niche_name}</p>
       </div>
 
       {/* Legacy methodology notice */}
@@ -4845,11 +4864,12 @@ function ChannelBreakoutResultsView({
   )
 }
 
-function SubNicheTab({ externalResult, onClearExternal, externalBreakout, onClearExternalBreakout }: {
+function SubNicheTab({ externalResult, onClearExternal, externalBreakout, onClearExternalBreakout, externalParentResult }: {
   externalResult?: SubNicheFinderData | null
   onClearExternal?: () => void
   externalBreakout?: ChannelBreakoutData | null
   onClearExternalBreakout?: () => void
+  externalParentResult?: SubNicheFinderData | null
 }) {
   const { t, lang: uiLang } = useLang()
   const router = useRouter()
@@ -4885,6 +4905,9 @@ function SubNicheTab({ externalResult, onClearExternal, externalBreakout, onClea
   const [loadingBreakout, setLoadingBreakout] = useState(false)
   const [breakoutError,   setBreakoutError]   = useState('')
   const [breakoutData,    setBreakoutData]    = useState<ChannelBreakoutData | null>(null)
+
+  const [showingParentFromHistory, setShowingParentFromHistory] = useState(false)
+  useEffect(() => { setShowingParentFromHistory(false) }, [externalBreakout])
 
   async function handleRunBreakout() {
     if (!breakoutNiche) return
@@ -4978,12 +5001,22 @@ function SubNicheTab({ externalResult, onClearExternal, externalBreakout, onClea
 
   // ── External channel_breakout result (opened from History) ──
   if (externalBreakout) {
+    if (showingParentFromHistory && externalParentResult) {
+      return (
+        <SubNicheResultsView
+          data={externalParentResult}
+          t={t}
+          lang={uiLang}
+          onBack={() => setShowingParentFromHistory(false)}
+        />
+      )
+    }
     return (
       <ChannelBreakoutResultsView
         data={externalBreakout}
         t={t}
         lang={uiLang}
-        onBack={() => onClearExternalBreakout?.()}
+        onBack={() => externalParentResult ? setShowingParentFromHistory(true) : onClearExternalBreakout?.()}
       />
     )
   }
@@ -5355,6 +5388,7 @@ export default function AnalyticsPage() {
   const { t } = useLang()
   const [tab, setTab] = useState<Tab | null>(null)
   const [openedReport, setOpenedReport] = useState<AnalyticsReport | null>(null)
+  const [openedParentReport, setOpenedParentReport] = useState<AnalyticsReport | null>(null)
   const [pendingChannelQuery, setPendingChannelQuery] = useState<string | null>(null)
   const [risingStarsResult, setRisingStarsResult] = useState<RisingStarsResult | null>(null)
   const [cameFromRisingStars, setCameFromRisingStars] = useState(false)
@@ -5372,9 +5406,9 @@ export default function AnalyticsPage() {
     return () => document.removeEventListener('mousedown', onOutside)
   }, [])
 
-  function handleOpenReport(report: AnalyticsReport) {
+  function handleOpenReport(report: AnalyticsReport, parent?: AnalyticsReport) {
     setOpenedReport(report)
-    // sub_niche_finder and channel_breakout reports open in the sub_niche tab
+    setOpenedParentReport(parent ?? null)
     const tabName: Tab =
       report.report_type === 'sub_niche_finder' || report.report_type === 'channel_breakout'
         ? 'sub_niche'
@@ -5385,6 +5419,7 @@ export default function AnalyticsPage() {
 
   function clearOpenedReport() {
     setOpenedReport(null)
+    setOpenedParentReport(null)
   }
 
   function handleGoToChannel(channelUrl: string) {
@@ -5659,6 +5694,7 @@ export default function AnalyticsPage() {
                 onClearExternal={clearOpenedReport}
                 externalBreakout={openedReport?.report_type === 'channel_breakout' ? openedReport.result as ChannelBreakoutData : null}
                 onClearExternalBreakout={clearOpenedReport}
+                externalParentResult={openedParentReport?.report_type === 'sub_niche_finder' ? openedParentReport.result as SubNicheFinderData : null}
               />
             )}
             {tab === 'history' && <HistoryTab onOpen={handleOpenReport} />}
