@@ -24,6 +24,12 @@ const OLD_DAYS     = 365
 const MIN_CHANNELS_RELIABLE = 5   // newcomer_share unreliable below this
 const MIN_OLD_SAMPLE_GROWTH = 10  // growth_ratio unreliable below this
 
+// Newcomer qualification thresholds — a channel must clear both to count in newcomer_share.
+// Rationale: 0–99 subs = no real audience; <500 total views = no real content published.
+// These eliminate ghost accounts and YouTube's auto-created Topic channels from the metric.
+const NEWCOMER_MIN_SUBS  = 100   // minimum subscriber count
+const NEWCOMER_MIN_VIEWS = 500   // minimum total channel view count
+
 // Concurrency limits to avoid YouTube 429 rate-limit (edge-rejected; no quota consumed on 429).
 const ENRICH_CONCURRENCY = 4    // niches enriched in parallel in Step 2+3
 const ENRICH_BATCH_DELAY = 400  // ms between Step 2+3 batches
@@ -204,7 +210,7 @@ interface SubNicheResult {
   metrics: {
     fresh_video_count:      MetricValue<number>
     median_views_per_video: MetricValue<number>
-    newcomer_share:         MetricValue<number>
+    newcomer_share:         MetricValue<number | null>
     top_subs_median:        MetricValue<number>
     growth_ratio:           MetricValue<number | null>
     sample_age_days:        { fresh: number | null; old: number | null }
@@ -289,10 +295,10 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Cache check ────────────────────────────────────────────────────────
-    // v2: cache key bumped because algorithm changed (search_query, reliable flag)
-    // direction-scoped and count-scoped runs get their own cache entry
+    // v3: cache key bumped — newcomer_share now excludes Topic channels and ghost accounts
+    // (subs>=100, totalViews>=500); null replaces 0 when no qualifying channels remain
     const dirPart  = direction ? `|dir:${direction.toLowerCase().trim()}` : ''
-    const cacheKey = `${broad_niche.toLowerCase().trim()}|${country}|${content_lang}${dirPart}|n:${niche_count}|v2`
+    const cacheKey = `${broad_niche.toLowerCase().trim()}|${country}|${content_lang}${dirPart}|n:${niche_count}|v3`
     try {
       const { data: cached } = await svc
         .from('analytics_cache')
@@ -395,7 +401,8 @@ export async function POST(req: NextRequest) {
       fresh_ages:            number[]   // video age in days, parallel to views_vpd
       channel_ages_months:   number[]
       subs:                  number[]
-      newcomer_channel_ids:  string[]   // channel IDs created < 12 months ago (for level-4 breakout)
+      newcomer_channel_ids:  string[]   // qualifying newcomers: !topic, age<12mo, subs>=NEWCOMER_MIN_SUBS, views>=NEWCOMER_MIN_VIEWS
+      qualifying_channels:   number    // non-Topic channels with subs>=NEWCOMER_MIN_SUBS && views>=NEWCOMER_MIN_VIEWS (denominator for newcomer_share)
       fetch_error:           string | null  // non-null when data collection failed after retries
     }
 
@@ -409,6 +416,7 @@ export async function POST(req: NextRequest) {
         rpm_level: niche.rpm_level, rpm_range: niche.rpm_range ?? '', rpm_reason: niche.rpm_reason,
         fresh_video_count: 0, views: [], views_vpd: [], fresh_ages: [], channel_ages_months: [], subs: [],
         newcomer_channel_ids: [],
+        qualifying_channels: 0,
         fetch_error: null,
       }
       try {
@@ -458,19 +466,36 @@ export async function POST(req: NextRequest) {
           const cRes = await ytf('/channels', { part: 'statistics,snippet', id: batch.join(',') }) as {
             items?: Array<{
               id:         string
-              snippet:    { publishedAt?: string }
-              statistics: { subscriberCount?: string }
+              snippet:    { publishedAt?: string; title?: string }
+              statistics: { subscriberCount?: string; viewCount?: string }
             }>
           }
           quotaUsed += 1
           for (const c of cRes.items ?? []) {
+            // Skip YouTube auto-generated Topic channels (e.g. "Artist Name - Topic").
+            // They are created by YouTube for music streaming and are not real competitors.
+            const title   = (c.snippet.title ?? '').trim()
+            const isTopic = title.endsWith(' - Topic')
+            if (isTopic) continue
+
+            const sc = parseInt(c.statistics.subscriberCount ?? '0')
+            const vc = parseInt(c.statistics.viewCount       ?? '0')
+
             if (c.snippet.publishedAt) {
               const ageMonths = daysOld(c.snippet.publishedAt) / 30
               base.channel_ages_months.push(ageMonths)
-              if (ageMonths < 12) base.newcomer_channel_ids.push(c.id)
             }
-            const sc = parseInt(c.statistics.subscriberCount ?? '0')
             if (sc > 0) base.subs.push(sc)
+
+            // Gate newcomer_share on real-channel thresholds to eliminate ghost accounts.
+            const isQualifying = sc >= NEWCOMER_MIN_SUBS && vc >= NEWCOMER_MIN_VIEWS
+            if (isQualifying) {
+              base.qualifying_channels++
+              if (c.snippet.publishedAt) {
+                const ageMonths = daysOld(c.snippet.publishedAt) / 30
+                if (ageMonths < 12) base.newcomer_channel_ids.push(c.id)
+              }
+            }
           }
         }
       } catch (e) {
@@ -497,13 +522,13 @@ export async function POST(req: NextRequest) {
       rpm_reason:            string
       fresh_video_count:     number
       median_views:          number
-      newcomer_share:        number
+      newcomer_share:        number | null  // null when no qualifying channels (Topic-filtered, subs>=100, views>=500)
       top_subs_median:       number
       growth_ratio:          number | null
       median_age_fresh:      number | null  // median age of fresh cohort (days)
       median_age_old:        number | null  // median age of old cohort (days); set in Step 5
       views_vpd:             number[]       // views/day per fresh video; consumed by Step 5 growth ratio
-      newcomer_channel_ids:  string[]       // channel IDs created < 12 months ago (for level-4 breakout)
+      newcomer_channel_ids:  string[]       // qualifying newcomers for level-4 breakout
       fetch_error:           string | null  // non-null if data collection failed
       sample_videos:         number
       sample_channels:       number
@@ -523,9 +548,10 @@ export async function POST(req: NextRequest) {
         newcomer_channel_ids: n.newcomer_channel_ids,
         fresh_video_count: n.fresh_video_count,
         median_views:      medianOf(n.views),
-        newcomer_share:    sample_channels > 0
-          ? Math.round(n.channel_ages_months.filter(m => m < 12).length / sample_channels * 100) / 100
-          : 0,
+        // null = no qualifying channels (all were Topic or ghost) — different from 0 (no newcomers found)
+        newcomer_share: n.qualifying_channels > 0
+          ? Math.round(n.newcomer_channel_ids.length / n.qualifying_channels * 100) / 100
+          : null,
         top_subs_median:   medianOf(n.subs),
         growth_ratio:      null,
         median_age_fresh:  n.fresh_ages.length > 0 ? Math.round(medianOf(n.fresh_ages)) : null,
@@ -545,7 +571,7 @@ export async function POST(req: NextRequest) {
     // Exclude unreliable niches from growth analysis — their newcomer_share is noise.
     const top5 = [...computed]
       .filter(n => n.reliable && n.fresh_video_count > 0 && n.median_views > 0)
-      .sort((a, b) => b.newcomer_share - a.newcomer_share || b.median_views - a.median_views)
+      .sort((a, b) => (b.newcomer_share ?? -1) - (a.newcomer_share ?? -1) || b.median_views - a.median_views)
       .slice(0, 5)
     const top5Names = new Set(top5.map(n => n.name))
 

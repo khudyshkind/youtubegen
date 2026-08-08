@@ -4173,7 +4173,7 @@ interface SubNicheItem {
   metrics: {
     fresh_video_count:      SNMetric<number>
     median_views_per_video: SNMetric<number>
-    newcomer_share:         SNMetric<number>
+    newcomer_share:         SNMetric<number | null>
     top_subs_median:        SNMetric<number>
     growth_ratio:           SNMetric<number | null>
     sample_age_days:        { fresh: number | null; old: number | null }
@@ -4218,7 +4218,7 @@ interface ChannelBreakoutData {
   sub_niche_name: string
   limit:          20 | 50
   analyzed_at:    string
-  niche_context?: { newcomer_share: number; median_views: number; growth_ratio: number | null } | null
+  niche_context?: { newcomer_share: number | null; median_views: number; growth_ratio: number | null } | null
   summary: {
     newcomer_count:              number
     under_5mo_past_1k:           number
@@ -4248,7 +4248,8 @@ function GrowthBadge({ value }: { value: number | null }) {
   return <span style={{ color }} className="font-mono text-xs whitespace-nowrap">{arrow} {value.toFixed(2)}×</span>
 }
 
-function PenetBadge({ value }: { value: number }) {
+function PenetBadge({ value }: { value: number | null }) {
+  if (value === null) return <span className="font-mono text-xs text-slate-500">—</span>
   const pct   = Math.round(value * 100)
   const color = pct >= 40 ? '#4ade80' : pct >= 20 ? '#facc15' : '#f87171'
   return <span style={{ color }} className="font-mono text-xs">{pct}%</span>
@@ -4289,7 +4290,7 @@ function SubNicheResultsView({
 
   // Reliable niches sorted by newcomer_share desc (matching API sort)
   const sortedReliable = [...reliable].sort(
-    (a, b) => b.metrics.newcomer_share.value - a.metrics.newcomer_share.value
+    (a, b) => (b.metrics.newcomer_share.value ?? -1) - (a.metrics.newcomer_share.value ?? -1)
   )
 
   return (
@@ -4631,7 +4632,9 @@ function ChannelBreakoutResultsView({
           <div className="flex gap-6 flex-wrap">
             <div>
               <p className="text-xs text-slate-500">{t('analytics.cb_niche_penetration')}</p>
-              <p className="text-sm font-bold text-white tabular-nums">{Math.round(data.niche_context.newcomer_share * 100)}%</p>
+              <p className="text-sm font-bold text-white tabular-nums">
+                {data.niche_context.newcomer_share !== null ? `${Math.round(data.niche_context.newcomer_share * 100)}%` : '—'}
+              </p>
             </div>
             <div>
               <p className="text-xs text-slate-500">{t('analytics.cb_niche_median_views')}</p>

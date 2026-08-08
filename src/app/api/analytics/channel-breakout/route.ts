@@ -114,7 +114,7 @@ function getBreakoutVerdictPrompt(
     spread_outlier_count:       number
   },
   niche_context?: {
-    newcomer_share: number
+    newcomer_share: number | null
     median_views:   number
     growth_ratio:   number | null
   }
@@ -152,10 +152,14 @@ function getBreakoutVerdictPrompt(
     `• ${c.title} (${c.age_months.toFixed(1)} мес., ${c.subs.toLocaleString()} подп.) — только Shorts`
   ).join('\n')
 
+  const shareStr = (nc: { newcomer_share: number | null }, isRu: boolean): string =>
+    nc.newcomer_share !== null
+      ? (isRu ? `пробиваемость ${Math.round(nc.newcomer_share * 100)}%` : `penetration ${Math.round(nc.newcomer_share * 100)}%`)
+      : (isRu ? 'пробиваемость: нет данных' : 'penetration: no data')
   const nicheCtxLine = niche_context
     ? isRu
-      ? `Обещанное поднишей (L2): пробиваемость ${Math.round(niche_context.newcomer_share * 100)}%, медиана просмотров ${Math.round(niche_context.median_views).toLocaleString()}, рост ${niche_context.growth_ratio !== null ? niche_context.growth_ratio.toFixed(2) + '×' : 'нет данных'}`
-      : `Sub-niche (L2) promise: penetration ${Math.round(niche_context.newcomer_share * 100)}%, median views ${Math.round(niche_context.median_views).toLocaleString()}, growth ${niche_context.growth_ratio !== null ? niche_context.growth_ratio.toFixed(2) + '×' : 'no data'}`
+      ? `Обещанное поднишей (L2): ${shareStr(niche_context, true)}, медиана просмотров ${Math.round(niche_context.median_views).toLocaleString()}, рост ${niche_context.growth_ratio !== null ? niche_context.growth_ratio.toFixed(2) + '×' : 'нет данных'}`
+      : `Sub-niche (L2) promise: ${shareStr(niche_context, false)}, median views ${Math.round(niche_context.median_views).toLocaleString()}, growth ${niche_context.growth_ratio !== null ? niche_context.growth_ratio.toFixed(2) + '×' : 'no data'}`
     : ''
 
   if (isRu) {
@@ -241,7 +245,7 @@ export async function POST(req: NextRequest) {
       channel_ids?:        string[]
       sub_niche_name?:     string
       niche_median_views?: number
-      niche_context?:      { newcomer_share: number; median_views: number; growth_ratio: number | null }
+      niche_context?:      { newcomer_share: number | null; median_views: number; growth_ratio: number | null }
       limit?:              20 | 50
       ui_lang?:            string
     }
