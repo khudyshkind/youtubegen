@@ -6417,8 +6417,10 @@ const TTS_CHUNK_LIMITS = {
   voicer:       { maxChars: 195000, measureBytes: false },
 }
 
-const SV_CHUNK_TIMEOUT_MS     = parseInt(env('SV_CHUNK_TIMEOUT_MS')     || '600000',  10) // 10 min default
-const VOICER_CHUNK_TIMEOUT_MS = parseInt(env('VOICER_CHUNK_TIMEOUT_MS') || '1800000', 10) // 30 min default
+const SV_CHUNK_TIMEOUT_MS     = parseInt(env('SV_CHUNK_TIMEOUT_MS')     || '600000', 10) // 10 min default
+// 550 s: 2 attempts × 550 s + ~60 s overhead = ~1160 s < WATCHDOG_AUDIO_TIMEOUT_MIN (1200 s).
+// Keeps retry within the watchdog window. Raise with WATCHDOG if Voicer genuinely needs more.
+const VOICER_CHUNK_TIMEOUT_MS = parseInt(env('VOICER_CHUNK_TIMEOUT_MS') || '550000', 10) // 550 s default
 
 // Strip ID3v2 tag from start of MP3 buffer.
 // Applied to all non-first chunks before Buffer.concat to prevent PTS-reset drift
@@ -6556,6 +6558,7 @@ async function synthesizeSecretVoicerChunk(text, voiceId, settings, jobId) {
     try {
       const pollRes = await fetch(`${SV_BASE}/task/${taskId}`, {
         headers: { 'X-API-Key': apiKey },
+        signal: AbortSignal.timeout(15_000),
       })
       if (!pollRes.ok) continue
       status = await pollRes.json()
@@ -6622,6 +6625,7 @@ async function synthesizeVoicerChunk(text, voiceId, settings, jobId) {
     try {
       const pollRes = await fetch(`${VOICER_BASE}/voice/status/${taskId}`, {
         headers: { Authorization: authHeader },
+        signal: AbortSignal.timeout(15_000),
       })
       if (!pollRes.ok) continue
       status = await pollRes.json()
@@ -6728,12 +6732,25 @@ async function processAudioJob(job) {
         }
       }
     } else if (job.engine === 'voicer') {
-      synthesizeFn = (chunk) => synthesizeVoicerChunk(chunk, job.voice_id, settings, jobId)
+      synthesizeFn = async (chunk) => {
+        for (let attempt = 0; attempt <= 1; attempt++) {
+          try {
+            return await synthesizeVoicerChunk(chunk, job.voice_id, settings, jobId)
+          } catch (e) {
+            if (attempt === 1) throw e
+            console.warn(`[audio-job:${jobId}] Voicer retry:`, e.message)
+          }
+        }
+      }
     } else {
       throw new Error(`engine '${job.engine}' is sync-only and must run on Vercel Lambda, not the async worker`)
     }
 
-    // 7. Synthesize all chunks in parallel (max 4 concurrent), order preserved by runLimited
+    // 7. Synthesize chunks sequentially (concurrency=1).
+    //    SecretVoicer queues requests server-side regardless of how many we send in
+    //    parallel — a burst of 4 simultaneous POSTs produced a 167→208→251→305 s
+    //    staircase in logs, identical total time to sequential but with a larger
+    //    provider-side queue that caused downstream timeout failures.
     let doneChunks = 0
     const tasks = chunks.map((chunk, idx) => async () => {
       console.log(`[audio-job:${jobId}] chunk ${idx + 1}/${chunks.length} start`)
@@ -6747,7 +6764,7 @@ async function processAudioJob(job) {
       }
       return buf
     })
-    const buffers = await runLimited(tasks, 4)
+    const buffers = await runLimited(tasks, 1)
 
     // 8. Concat in memory — first chunk keeps ID3 header, rest stripped to prevent PTS drift
     let finalBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))
