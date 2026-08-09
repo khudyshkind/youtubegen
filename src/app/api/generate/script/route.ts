@@ -171,15 +171,16 @@ function calcMaxTokens(durationMinutes: number, model: ScriptModel): number {
   return Math.min(cap, raw)
 }
 
-// Dynamic SDK timeout: 12 ms/token ≈ 83 tok/s — conservative below the ~100 tok/s observed average.
-// Cap at 130 s so two attempts + 16 s delay = 276 s < maxDuration=300 s.
-// Reference (single-call path):
-//   5 min → 2 458 tok →  30 000 ms (floor)
-//  15 min → 7 373 tok →  88 476 ms
-//  25 min → 12 285 tok → 130 000 ms (cap)
-//  29 min → 14 251 tok → 130 000 ms (cap)
+// Dynamic SDK timeout: 15 ms/token ≈ 67 tok/s.
+// Measured on 2026-08-09: 20-min video timed out at 12ms/tok (83 tok/s floor proved too optimistic).
+// Cap at 130 s: two attempts + 16 s delay = 276 s < maxDuration=300 s.
+// Reference (single-call path, CHUNKED_THRESHOLD=18 so max single-call is ~17 min):
+//   5 min → 2 458 tok →  36 870 ms
+//  10 min → 4 914 tok →  73 710 ms
+//  15 min → 7 373 tok → 110 595 ms
+//  17 min → 8 334 tok → 125 010 ms  ← max single-call (< 18 min threshold)
 function calcTimeout(maxTokens: number): number {
-  return Math.min(130_000, Math.max(30_000, maxTokens * 12))
+  return Math.min(130_000, Math.max(30_000, maxTokens * 15))
 }
 
 type GenResult = { text: string; stopReason: string | null }
@@ -214,7 +215,7 @@ async function generateWithGpt4o(prompt: string, maxTokens: number): Promise<Gen
 
 // ── Constants for chunked generation ─────────────────────────────────────────
 
-const CHUNKED_THRESHOLD = 24  // duration_minutes >= this → parallel section generation
+const CHUNKED_THRESHOLD = 18  // duration_minutes >= this → parallel section generation
 
 // English language names for the internal plan prompt (mirrors plan/route.ts convention)
 const PLAN_LANG_NAMES: Record<string, string> = {

@@ -14,7 +14,8 @@ export function isAnthropicOverload(error: unknown): boolean {
 export function isAnthropicTimeout(error: unknown): boolean {
   if (error instanceof Anthropic.APIError && error.status === 408) return true
   const msg = error instanceof Error ? error.message : String(error)
-  return /timeout|TimeoutError|ETIMEDOUT/i.test(msg)
+  // "timed out" (two words) is the actual Anthropic SDK message; "timeout" catches other variants.
+  return /timeout|timed\s+out|TimeoutError|ETIMEDOUT/i.test(msg)
 }
 
 /**
