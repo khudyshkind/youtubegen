@@ -10,6 +10,13 @@ export function isAnthropicOverload(error: unknown): boolean {
   return /529|overloaded_error|overloaded/i.test(msg)
 }
 
+/** True for SDK-level request timeout (configured client timeout exceeded). */
+export function isAnthropicTimeout(error: unknown): boolean {
+  if (error instanceof Anthropic.APIError && error.status === 408) return true
+  const msg = error instanceof Error ? error.message : String(error)
+  return /timeout|TimeoutError|ETIMEDOUT/i.test(msg)
+}
+
 /**
  * Calls fn(); on 529/503 waits 16 ± 4 s and retries once.
  * All other errors propagate immediately (no retry).

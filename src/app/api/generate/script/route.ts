@@ -11,7 +11,7 @@ import type { ScriptParams, PlanSection, ScriptModel } from '@/lib/types'
 import { CREDIT_COSTS } from '@/lib/types'
 import { isGuardOk, countWords, runParallelGuarded, MIN_TOKENS, MIN_OUTPUT_RATIO } from '@/lib/enhance-guard'
 import { parseClaudeJsonArray } from '@/lib/parse-claude-json'
-import { isAnthropicOverload } from '@/lib/anthropic-retry'
+import { isAnthropicOverload, isAnthropicTimeout } from '@/lib/anthropic-retry'
 
 export const maxDuration = 300
 
@@ -171,13 +171,24 @@ function calcMaxTokens(durationMinutes: number, model: ScriptModel): number {
   return Math.min(cap, raw)
 }
 
+// Dynamic SDK timeout: 12 ms/token ≈ 83 tok/s — conservative below the ~100 tok/s observed average.
+// Cap at 130 s so two attempts + 16 s delay = 276 s < maxDuration=300 s.
+// Reference (single-call path):
+//   5 min → 2 458 tok →  30 000 ms (floor)
+//  15 min → 7 373 tok →  88 476 ms
+//  25 min → 12 285 tok → 130 000 ms (cap)
+//  29 min → 14 251 tok → 130 000 ms (cap)
+function calcTimeout(maxTokens: number): number {
+  return Math.min(130_000, Math.max(30_000, maxTokens * 12))
+}
+
 type GenResult = { text: string; stopReason: string | null }
 
 const scriptSleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
-async function generateWithClaude(prompt: string, opus: boolean, maxTokens: number): Promise<GenResult> {
-  // maxRetries:0 — we handle overload retries ourselves with a proper 16s delay
-  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000, maxRetries: 0 })
+async function generateWithClaude(prompt: string, opus: boolean, maxTokens: number, timeoutMs: number): Promise<GenResult> {
+  // maxRetries:0 — we handle overload/timeout retries ourselves with a proper 16s delay
+  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: timeoutMs, maxRetries: 0 })
   const modelId = opus ? 'claude-opus-4-5' : 'claude-sonnet-4-6'
   const message = await anthropic.messages.create({
     model: modelId,
@@ -367,12 +378,13 @@ function buildSectionUserMessage(
 }
 
 async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): Promise<string | null> {
-  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 240_000 })
   const opus = p.model === 'claude-opus'
   const modelId = opus ? 'claude-opus-4-5' : 'claude-sonnet-4-6'
   const systemPrompt = buildSystemPrompt(p)
   const wordsPerSection = Math.round((p.duration_minutes * 130) / sections.length)
   const sectionMaxTokens = Math.max(MIN_TOKENS, Math.ceil(wordsPerSection * 2.9 * 1.3))
+  // maxRetries:0 — SDK default (2) would silently retry on 529, burning 240s × 3 attempts > maxDuration=300s.
+  const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: calcTimeout(sectionMaxTokens), maxRetries: 0 })
 
   console.log(`[generate/script] chunked model=${modelId} sections=${sections.length} wordsPerSec=${wordsPerSection}`)
 
@@ -446,7 +458,9 @@ export async function POST(request: NextRequest) {
 
     if (scriptParams.duration_minutes >= CHUNKED_THRESHOLD) {
       // ── Chunked path: parallel section generation ─────────────────────────
-      const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 240_000 })
+      // This client is used only for generateInternalPlan (plan JSON, small output).
+      // maxRetries:0 — consistent with single-call path; sections handled by generateChunkedScript's own client.
+      const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 60_000, maxRetries: 0 })
       let usedSections: PlanSection[]
 
       if (plan_sections && plan_sections.length > 0) {
@@ -492,30 +506,33 @@ export async function POST(request: NextRequest) {
     // ── Single-call path (duration < CHUNKED_THRESHOLD) ──────────────────────
     const prompt = buildPrompt(scriptParams, plan_sections)
     const maxTokens = calcMaxTokens(scriptParams.duration_minutes, model)
+    const timeoutMs = calcTimeout(maxTokens)
     const targetWords = scriptParams.duration_minutes * 130
-    console.log(`[generate/script] duration=${scriptParams.duration_minutes}min max_tokens=${maxTokens} target_words=${targetWords}`)
+    console.log(`[generate/script] duration=${scriptParams.duration_minutes}min max_tokens=${maxTokens} timeout=${timeoutMs}ms target_words=${targetWords}`)
 
     const callGenerate = (): Promise<GenResult> =>
       model === 'gpt-4o'
         ? generateWithGpt4o(prompt, maxTokens)
-        : generateWithClaude(prompt, model === 'claude-opus', maxTokens)
+        : generateWithClaude(prompt, model === 'claude-opus', maxTokens, timeoutMs)
 
     // GPT-4o uses 'length' for the same concept as Claude's 'max_tokens'
     const normaliseStop = (r: string | null) => r === 'length' ? 'max_tokens' : r
 
-    // API-level retry: on 529/503 (Anthropic overload) wait 16s and retry once.
-    // Non-overload errors (invalid key, 400, timeout) propagate immediately — no retry.
-    // Math: 120s attempt1 + 16-20s sleep + 120s attempt2 = 256-260s < maxDuration=300s.
+    // API-level retry: on 529/503 (overload) or timeout, wait 16s and retry once.
+    // Math: 130s attempt1 + 16–20s sleep + 130s attempt2 = 276–280s < maxDuration=300s.
+    // didRetry flag: skip two-pass expand when retry happened to stay within the 300s budget.
     let gen: GenResult
+    let didRetry = false
     try {
       gen = await callGenerate()
     } catch (apiErr1) {
-      if (!isAnthropicOverload(apiErr1)) throw apiErr1  // fail fast for non-overload errors
+      if (!isAnthropicOverload(apiErr1) && !isAnthropicTimeout(apiErr1)) throw apiErr1
       const delay = 16_000 + Math.floor(Math.random() * 4_000)
       const e1 = apiErr1 instanceof Error ? apiErr1.message.slice(0, 120) : String(apiErr1)
-      console.warn(`[generate/script] overload attempt=1: ${e1} — retrying in ${Math.round(delay / 1000)}s`)
+      console.warn(`[generate/script] overload/timeout attempt=1: ${e1} — retrying in ${Math.round(delay / 1000)}s`)
       await scriptSleep(delay)
       gen = await callGenerate()  // throws on attempt 2 failure → outer catch
+      didRetry = true
     }
     let normStop = normaliseStop(gen.stopReason)
 
@@ -526,15 +543,16 @@ export async function POST(request: NextRequest) {
     // Two-pass expansion: if draft ended naturally but is < 95 % of target,
     // ask the model to expand it rather than blindly retry the full generation.
     // Skipped when stop_reason=max_tokens (truncated output — expansion unreliable).
+    // Skipped when didRetry=true: retry already consumed ~260s of the 300s budget.
     const EXPAND_THRESHOLD = 0.95
-    if (normStop !== 'max_tokens' && countWords(gen.text) < targetWords * EXPAND_THRESHOLD) {
+    if (!didRetry && normStop !== 'max_tokens' && countWords(gen.text) < targetWords * EXPAND_THRESHOLD) {
       const draftWords = countWords(gen.text)
       console.log(`[generate/script] two-pass expand: draft=${draftWords} target=${targetWords} stop=${normStop}`)
       const expandPrompt = buildExpandPrompt(scriptParams, gen.text, draftWords, targetWords)
       try {
         const expanded = model === 'gpt-4o'
           ? await generateWithGpt4o(expandPrompt, maxTokens)
-          : await generateWithClaude(expandPrompt, model === 'claude-opus', maxTokens)
+          : await generateWithClaude(expandPrompt, model === 'claude-opus', maxTokens, timeoutMs)
         const expandedWords = countWords(expanded.text)
         console.log(`[generate/script] expand result: words=${expandedWords} stop=${expanded.stopReason}`)
         if (expanded.text && expandedWords > draftWords) {
@@ -610,9 +628,13 @@ export async function POST(request: NextRequest) {
     if (isAnthropicOverload(error)) {
       return NextResponse.json({ ok: false, error: 'Нейросеть перегружена — попробуйте через минуту', code: 'OVERLOADED' }, { status: 503 })
     }
-    const userMsg = /timeout|TimeoutError|ETIMEDOUT/i.test(msg)
-      ? 'Модель не ответила вовремя — попробуйте ещё раз.'
-      : 'Ошибка генерации сценария'
-    return NextResponse.json({ ok: false, error: userMsg }, { status: 500 })
+    if (isAnthropicTimeout(error)) {
+      return NextResponse.json({
+        ok: false,
+        error: 'Anthropic не успел сгенерировать сценарий в отведённое время. Кредиты не списаны. Попробуйте ещё раз или уменьшите длительность видео.',
+        code: 'TIMEOUT',
+      }, { status: 504 })
+    }
+    return NextResponse.json({ ok: false, error: 'Ошибка генерации сценария' }, { status: 500 })
   }
 }
