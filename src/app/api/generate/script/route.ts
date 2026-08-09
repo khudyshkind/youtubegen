@@ -214,7 +214,7 @@ async function generateWithGpt4o(prompt: string, maxTokens: number): Promise<Gen
 
 // ── Constants for chunked generation ─────────────────────────────────────────
 
-const CHUNKED_THRESHOLD = 30  // duration_minutes >= this → parallel section generation
+const CHUNKED_THRESHOLD = 24  // duration_minutes >= this → parallel section generation
 
 // English language names for the internal plan prompt (mirrors plan/route.ts convention)
 const PLAN_LANG_NAMES: Record<string, string> = {

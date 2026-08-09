@@ -65,7 +65,7 @@
 
 ## 🟡 ЗАПЛАНИРОВАНО (ближайшее)
 
-- [x] **Починить retry при таймауте /generate/script.** [2026-08-09, Sentry #139627127] Реализованы C+A: `calcTimeout` (динамический SDK-таймаут 30–130 с), `isAnthropicTimeout`, retry на таймаут, `didRetry` флаг, `maxRetries: 0` в chunked path. Подробности: handoff.md [2026-08-09], ERROR_LOG.
+- [x] **Починить retry при таймауте /generate/script.** [2026-08-09, Sentry #139627127] Реализованы C+A+порог: `calcTimeout` (динамический SDK-таймаут 30–130 с), `isAnthropicTimeout`, retry на таймаут, `didRetry` флаг, `maxRetries: 0` в chunked path, `CHUNKED_THRESHOLD` снижен 30→24. Подробности: handoff.md [2026-08-09], ERROR_LOG.
 
 - [x] **Привязка Telegram через deep link — предложение в момент долгой генерации.** [Δ13] Сейчас `telegram_chat_id` заполняется только у оплативших через бота (`admin/users/activate` строки 148-157), у остальных null — уведомления до них не доходят. Механизм: генерировать одноразовый токен со сроком жизни, показывать кнопку со ссылкой `t.me/<bot>?start=<токен>`, бот по `/start <токен>` находит `user_id` и пишет `chat_id` в профиль. Ник вводить нельзя — Bot API не умеет слать по `@username`, только по `chat_id`.
   ⚠️ Токен обязан быть одноразовым и короткоживущим: иначе чужой Telegram привяжется к чужому аккаунту.
