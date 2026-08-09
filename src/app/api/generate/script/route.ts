@@ -338,6 +338,8 @@ function buildSystemPrompt(p: ScriptParams, factsCard?: string): string {
       '',
       'CANONICAL FACTS — follow exactly, never contradict:',
       factsCard,
+      '',
+      'TIMELINE RULE: do NOT introduce any new date, duration, or time interval not listed in TIMELINE above.',
     )
   }
 
@@ -401,37 +403,54 @@ function buildSectionUserMessage(
 }
 
 // One Haiku call before parallel sections: fixes cross-section inconsistencies (names, dates,
-// locations, season, motif assignment) without sacrificing parallelism (~2-3s overhead).
+// locations, season, motif assignment, objects) without sacrificing parallelism (~2-3s overhead).
 // If the plan omits a fact, Haiku invents a concrete one — never leaves a field vague.
+// max_tokens 500: storytelling TIMELINE expands to month-by-month (~200 tok); other styles ~100 tok.
 async function buildFactsCard(p: ScriptParams, sections: PlanSection[]): Promise<string> {
   const langName = PLAN_LANG_NAMES[p.language] ?? p.language
   const sectionList = sections.map((s, i) => `${i + 1}. ${s.title}: ${s.description}`).join('\n')
   const haiku = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 20_000, maxRetries: 0 })
+  const isStorytelling = p.narrative_style === 'storytelling'
+
+  const promptLines = [
+    `You are preparing canonical facts for a YouTube script written entirely in ${langName}.`,
+    `Topic: "${p.topic}"`,
+    `Style: ${p.narrative_style}`,
+    '',
+    'Video plan:',
+    sectionList,
+    '',
+    `Extract or INVENT specific canonical facts. Write ALL values in ${langName}.`,
+    'If a fact is absent from the plan — invent a concrete specific one; never leave a field vague or blank.',
+  ]
+
+  if (isStorytelling) {
+    promptLines.push(
+      'For TIMELINE: list ALL story events in chronological order with explicit months/years',
+      '(e.g. "Янв 2023 — свадьба; Апр — переезд; Авг — изгнание; Дек 2023 — финал").',
+      'Cover from the very first event to the very last, so sections have no gaps to fill themselves.',
+    )
+  }
+
+  promptLines.push(
+    'For OBJECTS: name any emotionally significant prop that recurs across multiple scenes',
+    '(toy, letter, key, photo). Give exact visual description (color, size, damage). Write "none" if no such prop.',
+    '',
+    'Reply in this exact format (one line per field):',
+    'CHARACTERS: [name — role; name — role]',
+    isStorytelling
+      ? 'TIMELINE: [month year — event; month — event; ... all events in order]'
+      : 'TIMELINE: [key durations, ages, or dates]',
+    'LOCATIONS: [key places where events happen]',
+    'SEASON/TIME: [season or time period when story takes place]',
+    'MOTIFS: [unique phrase or image → section N only; phrases that must NOT repeat across sections]',
+    'OBJECTS: [prop with exact visual detail — first appears section N; or "none"]',
+  )
 
   const message = await haiku.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 300,
-    messages: [{
-      role: 'user',
-      content: [
-        `You are preparing canonical facts for a YouTube script written entirely in ${langName}.`,
-        `Topic: "${p.topic}"`,
-        `Style: ${p.narrative_style}`,
-        '',
-        'Video plan:',
-        sectionList,
-        '',
-        `Extract or INVENT specific canonical facts. Write ALL values in ${langName}.`,
-        'If a fact is absent from the plan — invent a concrete specific one; never leave a field vague or blank.',
-        '',
-        'Reply in this exact format:',
-        'CHARACTERS: [name — role; name — role]',
-        'TIMELINE: [key durations, ages, or dates]',
-        'LOCATIONS: [key places where events happen]',
-        'SEASON/TIME: [season or time period when story takes place]',
-        'MOTIFS: [unique phrase or image → section N only; list phrases that must NOT repeat across sections]',
-      ].join('\n'),
-    }],
+    max_tokens: 500,
+    messages: [{ role: 'user', content: promptLines.join('\n') }],
   })
 
   const block = message.content[0]
@@ -476,8 +495,8 @@ async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): 
 
   const guardSection = (result: GenResult) => isGuardOk(result.stopReason, result.text, wordsPerSection, 0.75)
 
-  // prompt caching: system ~220 tok + план ~500-650 tok ≈ 720-870 < 1024 (минимум Sonnet) → не активируется.
-  // Вернуть cache_control + прогрев, если system+план вырастут ≥1024 ток.
+  // prompt caching: system ~220 tok + plan ~500-650 tok + facts card ~100-200 tok ≈ 820-1070.
+  // May cross the 1024-token Sonnet minimum for longer videos with storytelling cards — cache can activate.
   const results = await runParallelGuarded(sections, callSection, guardSection, 'generate/script-chunked')
   if (results === null) return null
 
