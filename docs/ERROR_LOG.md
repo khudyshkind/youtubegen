@@ -20,6 +20,15 @@
 
 ---
 
+### [2026-08-09] Повторная «Ошибка генерации сценария» после деплоя динамического таймаута — ⏳ РАЗВЕДКА, ПРИЧИНА НЕ УСТАНОВЛЕНА
+**Симптом:** Сразу после деплоя коммитов `5071e83` (динамический таймаут) и `d5837f5` (CHUNKED_THRESHOLD 30→24) владелец получил «Ошибка генерации сценария».
+**Что известно по коду:** Строка «Ошибка генерации сценария» — последний fallback outer catch (status 500). Это NOT timeout, NOT overload (оба перехватываются выше и дают другой текст). Возможные источники: нетаймаутная API-ошибка Anthropic (400/500/сетевая) либо ошибка в `generateInternalPlan` (нет try-catch вокруг API-вызова) для chunked path ≥ 24 мин без pre-generated plan.
+**Кредиты:** НЕ списаны при любом сценарии ошибки (spendCredits — после успеха).
+**Что нужно установить:** (1) Был ли d5837f5 уже задеплоен в момент ошибки (Vercel → Deployments → timestamp); (2) Duration видео — какой путь (single/chunked) отработал; (3) Sentry — точный error class и stack trace.
+**Файлы:** `src/app/api/generate/script/route.ts`
+
+---
+
 ### [2026-08-09] Таймаут при генерации сценария — `Request timed out` (Sentry #139627127) ✅ ЗАКРЫТО
 
 **Симптом:** 09.08.2026 01:01 UTC — «Ошибка генерации сценария» у пользователя. Алерт retention-style + Sentry: `Error: Request timed out` внутри SDK Anthropic (`rP.makeRequest`), `/generate/script`.
