@@ -33,9 +33,12 @@
 
 **Решение (Часть 1, коммит `cab915a`):** `buildFactsCard` — Haiku-вызов (~2-3 с) перед `generateChunkedScript`. Результат вставляется в system-промпт всех секций как блок «CANONICAL FACTS». Graceful fallback если Haiku упал.
 
-**Решение (Часть 2 — план):** ⏳ Согласован анализ, правка промпта ожидает одобрения. Проблема: промпт плана просит «описание содержания», а не «что происходит нового». Для storytelling нужна явная нарративная дуга + запрет повторять одно событие в двух секциях. Файлы: `src/app/api/generate/plan/route.ts:36` и `src/app/api/generate/script/route.ts:242` (синхронно).
+**Решение (Часть 2 — план, коммит `f3d0deb`):** ✅ ЗАКРЫТО. `buildPrompt` и `generateInternalPlan` обновлены синхронно:
+- Для всех стилей: «Each section description must state WHAT HAPPENS or WHAT IS REVEALED» + «Every section must introduce events... that appear in NO other section»
+- Для storytelling: явная нарративная дуга (введение → осложнение → эскалация → поворот → развязка), «одно событие = одна секция», «история движется вперёд».
+- Тест: старый промпт на теме «свекровь выгнала меня» давал изгнание в секциях 4 и 8; новый — только в секции 4 с полной дугой из 10 секций.
 
-**Файлы:** `src/app/api/generate/script/route.ts`
+**Файлы:** `src/app/api/generate/plan/route.ts`, `src/app/api/generate/script/route.ts`
 
 ---
 

@@ -1,3 +1,43 @@
+# Отчёт: 2026-08-09 — улучшение промпта плана (нарративная дуга)
+
+## Что сделано
+
+**Задача:** промпт плана просил «описание содержания», что давало темы вместо событий. Для storytelling это порождало два изгнания в двух секциях.
+
+**Изменения (коммит `f3d0deb`):**
+
+Оба файла изменены синхронно — `src/app/api/generate/plan/route.ts` (`buildPrompt`) и `src/app/api/generate/script/route.ts` (`generateInternalPlan`).
+
+Вместо `'Each section needs a short title and a 1-2 sentence description of its content.'`:
+
+```
+Each section description must state WHAT HAPPENS or WHAT IS REVEALED in that section — not just its theme.
+Every section must introduce events, revelations, or information that appear in NO other section.
+```
+
+Для `narrative_style === 'storytelling'` добавляется блок:
+```
+For STORYTELLING style — additional requirements:
+• Sections must follow a narrative arc: introduction → complication → escalation → turning point → resolution.
+• Each description must state WHAT HAPPENS and WHAT CHANGES, not just name the theme.
+• A story event (e.g. a separation, confrontation, or turning point) must appear in EXACTLY ONE section — never split the same event across two sections.
+• The story must move FORWARD: each section takes the narrative past where the previous one ended.
+```
+
+**Что НЕ изменено:** карточка фактов (`buildFactsCard`, `cab915a`) не затронута. Другие стили (обучающий, обзорный и т.д.) получают только универсальное требование «вводи что-то новое» — нарративная дуга не навязывается.
+
+## Тест-сравнение
+
+Тема «свекровь выгнала меня из дома», 20 мин, storytelling, 10 секций:
+- **Старый промпт:** секции 4 и 8 — оба про изгнание/ультиматум свекрови (событие раздвоено)
+- **Новый промпт:** изгнание только в секции 4; чёткая дуга 1-2 завязка → 3 первый конфликт → 4 кульминация → 5-6 внутренний перелом → 7-8 развязка → 9-10 финал
+
+## Открытые вопросы
+
+Нет. После следующего живого прогона проверить, что план больше не задваивает сюжетные события.
+
+---
+
 # Отчёт: 2026-08-09 — карточка фактов + разведка промпта плана
 
 ## Что сделано
