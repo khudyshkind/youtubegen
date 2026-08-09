@@ -33,7 +33,7 @@ function buildPrompt(
   const n = calcSectionCount(duration_minutes)
   const minsPerSection = (duration_minutes / n).toFixed(1)
   const langName = LANGUAGE_NAMES[language] ?? language
-  return [
+  const lines = [
     `Generate a structural plan for a YouTube video. Write all titles and descriptions in ${langName}.`,
     '',
     `Topic: "${topic}"`,
@@ -42,14 +42,28 @@ function buildPrompt(
     `Tone: ${tone}`,
     '',
     `Create exactly ${n} sections (~${minsPerSection} min each).`,
-    'Each section needs a short title and a 1-2 sentence description of its content.',
+    'Each section description must state WHAT HAPPENS or WHAT IS REVEALED in that section — not just its theme.',
+    'Every section must introduce events, revelations, or information that appear in NO other section.',
+  ]
+  if (narrative_style === 'storytelling') {
+    lines.push(
+      '',
+      'For STORYTELLING style — additional requirements:',
+      '• Sections must follow a narrative arc: introduction → complication → escalation → turning point → resolution.',
+      '• Each description must state WHAT HAPPENS and WHAT CHANGES, not just name the theme.',
+      '• A story event (e.g. a separation, confrontation, or turning point) must appear in EXACTLY ONE section — never split the same event across two sections.',
+      '• The story must move FORWARD: each section takes the narrative past where the previous one ended.',
+    )
+  }
+  lines.push(
     '',
     'Return ONLY a JSON array, no markdown, no extra text:',
     '[',
     '  {"title": "...", "description": "..."},',
     '  ...',
     ']',
-  ].join('\n')
+  )
+  return lines.join('\n')
 }
 
 function parseSections(raw: string): PlanSection[] {

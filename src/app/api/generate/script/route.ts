@@ -239,7 +239,7 @@ async function generateInternalPlan(anthropic: Anthropic, p: ScriptParams): Prom
   const langName = PLAN_LANG_NAMES[p.language] ?? p.language
   const minsPerSection = (p.duration_minutes / n).toFixed(1)
 
-  const prompt = [
+  const promptLines = [
     `Generate a structural plan for a YouTube video. Write all titles and descriptions in ${langName}.`,
     '',
     `Topic: "${p.topic}"`,
@@ -248,14 +248,28 @@ async function generateInternalPlan(anthropic: Anthropic, p: ScriptParams): Prom
     `Tone: ${p.tone}`,
     '',
     `Create exactly ${n} sections (~${minsPerSection} min each).`,
-    'Each section needs a short title and a 1-2 sentence description of its content.',
+    'Each section description must state WHAT HAPPENS or WHAT IS REVEALED in that section — not just its theme.',
+    'Every section must introduce events, revelations, or information that appear in NO other section.',
+  ]
+  if (p.narrative_style === 'storytelling') {
+    promptLines.push(
+      '',
+      'For STORYTELLING style — additional requirements:',
+      '• Sections must follow a narrative arc: introduction → complication → escalation → turning point → resolution.',
+      '• Each description must state WHAT HAPPENS and WHAT CHANGES, not just name the theme.',
+      '• A story event (e.g. a separation, confrontation, or turning point) must appear in EXACTLY ONE section — never split the same event across two sections.',
+      '• The story must move FORWARD: each section takes the narrative past where the previous one ended.',
+    )
+  }
+  promptLines.push(
     '',
     'Return ONLY a JSON array, no markdown, no extra text:',
     '[',
     '  {"title": "...", "description": "..."},',
     '  ...',
     ']',
-  ].join('\n')
+  )
+  const prompt = promptLines.join('\n')
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
