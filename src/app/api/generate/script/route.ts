@@ -281,7 +281,7 @@ async function generateInternalPlan(anthropic: Anthropic, p: ScriptParams): Prom
 }
 
 // System prompt shared by all section calls (cached via cache_control: ephemeral)
-function buildSystemPrompt(p: ScriptParams): string {
+function buildSystemPrompt(p: ScriptParams, factsCard?: string): string {
   const langName = PLAN_LANG_NAMES[p.language] ?? p.language
 
   const lines: string[] = [
@@ -318,6 +318,14 @@ function buildSystemPrompt(p: ScriptParams): string {
     'Numbers as words. Expand all abbreviations. Symbols as words.',
     'Decode acronyms on first use. Keep sentences natural and speakable.',
   )
+
+  if (factsCard) {
+    lines.push(
+      '',
+      'CANONICAL FACTS — follow exactly, never contradict:',
+      factsCard,
+    )
+  }
 
   return lines.join('\n')
 }
@@ -378,15 +386,62 @@ function buildSectionUserMessage(
   return lines.join('\n')
 }
 
+// One Haiku call before parallel sections: fixes cross-section inconsistencies (names, dates,
+// locations, season, motif assignment) without sacrificing parallelism (~2-3s overhead).
+// If the plan omits a fact, Haiku invents a concrete one — never leaves a field vague.
+async function buildFactsCard(p: ScriptParams, sections: PlanSection[]): Promise<string> {
+  const langName = PLAN_LANG_NAMES[p.language] ?? p.language
+  const sectionList = sections.map((s, i) => `${i + 1}. ${s.title}: ${s.description}`).join('\n')
+  const haiku = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 20_000, maxRetries: 0 })
+
+  const message = await haiku.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 300,
+    messages: [{
+      role: 'user',
+      content: [
+        `You are preparing canonical facts for a YouTube script written entirely in ${langName}.`,
+        `Topic: "${p.topic}"`,
+        `Style: ${p.narrative_style}`,
+        '',
+        'Video plan:',
+        sectionList,
+        '',
+        `Extract or INVENT specific canonical facts. Write ALL values in ${langName}.`,
+        'If a fact is absent from the plan — invent a concrete specific one; never leave a field vague or blank.',
+        '',
+        'Reply in this exact format:',
+        'CHARACTERS: [name — role; name — role]',
+        'TIMELINE: [key durations, ages, or dates]',
+        'LOCATIONS: [key places where events happen]',
+        'SEASON/TIME: [season or time period when story takes place]',
+        'MOTIFS: [unique phrase or image → section N only; list phrases that must NOT repeat across sections]',
+      ].join('\n'),
+    }],
+  })
+
+  const block = message.content[0]
+  return block.type === 'text' ? block.text.trim() : ''
+}
+
 async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): Promise<string | null> {
   const opus = p.model === 'claude-opus'
   const modelId = opus ? 'claude-opus-4-5' : 'claude-sonnet-4-6'
-  const systemPrompt = buildSystemPrompt(p)
   const wordsPerSection = Math.round((p.duration_minutes * 130) / sections.length)
   const sectionMaxTokens = Math.max(MIN_TOKENS, Math.ceil(wordsPerSection * 2.9 * 1.3))
   // maxRetries:0 — SDK default (2) would silently retry on 529, burning 240s × 3 attempts > maxDuration=300s.
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: calcTimeout(sectionMaxTokens), maxRetries: 0 })
 
+  // Facts card: one Haiku call (~2-3s) before parallel sections fixes names/dates/season/motifs globally.
+  let factsCard = ''
+  try {
+    factsCard = await buildFactsCard(p, sections)
+    console.log(`[generate/script] facts-card: ${factsCard.slice(0, 120).replace(/\n/g, ' ')}`)
+  } catch (err) {
+    console.warn('[generate/script] facts-card failed, proceeding without it:', err instanceof Error ? err.message.slice(0, 80) : String(err))
+  }
+
+  const systemPrompt = buildSystemPrompt(p, factsCard || undefined)
   console.log(`[generate/script] chunked model=${modelId} sections=${sections.length} wordsPerSec=${wordsPerSection}`)
 
   const callSection = async (section: PlanSection, idx: number): Promise<GenResult> => {
