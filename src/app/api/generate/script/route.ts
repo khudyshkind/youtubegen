@@ -339,7 +339,7 @@ function buildSystemPrompt(p: ScriptParams, factsCard?: string): string {
       'CANONICAL FACTS — follow exactly, never contradict:',
       factsCard,
       '',
-      'TIMELINE RULE: do NOT introduce any new date, duration, or time interval not listed in TIMELINE above.',
+      'TIMELINE RULE: when naming a duration or time span, copy the exact phrase from TIMELINE (e.g. "11 мес. брака"). Never compute, estimate, or rephrase a duration — if it is not pre-written in TIMELINE, do not mention it.',
     )
   }
 
@@ -426,25 +426,36 @@ async function buildFactsCard(p: ScriptParams, sections: PlanSection[]): Promise
 
   if (isStorytelling) {
     promptLines.push(
-      'For TIMELINE: list ALL story events in chronological order with explicit months/years',
-      '(e.g. "Янв 2023 — свадьба; Апр — переезд; Авг — изгнание; Дек 2023 — финал").',
-      'Cover from the very first event to the very last, so sections have no gaps to fill themselves.',
+      'For TIMELINE: list ALL story events in chronological order with explicit months/years.',
+      'After each event, embed the elapsed duration so sections can copy it verbatim — sections must NOT compute durations themselves.',
+      'Example: "Сен 2021 — свадьба; Авг 2022 (11 мес. брака) — изгнание; Дек 2022 (4 мес. спустя) — переезд; Авг 2023 (ровно год) — финал".',
+      'Cover every event from the very first to the very last.',
+    )
+    promptLines.push(
+      'For OBJECTS: name or INVENT an emotionally significant prop that recurs across multiple scenes',
+      '(toy, letter, key, photo). Always provide one for storytelling — a physical object anchors emotion.',
+      'Give exact visual description (color, size, damage) and which sections it appears in.',
+    )
+  } else {
+    promptLines.push(
+      'For OBJECTS: name any emotionally significant prop that recurs across multiple scenes',
+      '(toy, letter, key, photo). Give exact visual description (color, size, damage). Write "none" if no such prop.',
     )
   }
 
   promptLines.push(
-    'For OBJECTS: name any emotionally significant prop that recurs across multiple scenes',
-    '(toy, letter, key, photo). Give exact visual description (color, size, damage). Write "none" if no such prop.',
     '',
     'Reply in this exact format (one line per field):',
     'CHARACTERS: [name — role; name — role]',
     isStorytelling
-      ? 'TIMELINE: [month year — event; month — event; ... all events in order]'
+      ? 'TIMELINE: [Мес Год — событие (N мес./лет) — ... all events with embedded durations]'
       : 'TIMELINE: [key durations, ages, or dates]',
     'LOCATIONS: [key places where events happen]',
     'SEASON/TIME: [season or time period when story takes place]',
     'MOTIFS: [unique phrase or image → section N only; phrases that must NOT repeat across sections]',
-    'OBJECTS: [prop with exact visual detail — first appears section N; or "none"]',
+    isStorytelling
+      ? 'OBJECTS: [prop with exact visual detail — sections N,M where it appears; INVENT if none in plan]'
+      : 'OBJECTS: [prop with exact visual detail — first appears section N; or "none"]',
   )
 
   const message = await haiku.messages.create({
