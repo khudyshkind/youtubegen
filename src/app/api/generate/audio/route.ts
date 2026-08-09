@@ -8,6 +8,7 @@ import { audioCost, ENGINE_DISPLAY } from '@/lib/types'
 import type { AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { env } from '@/lib/env'
 import { notifyError, notifyUserTelegram } from '@/lib/telegram'
+import { mediaExpiryFromNow } from '@/lib/media-expiry'
 
 export const maxDuration = 300
 
@@ -885,6 +886,20 @@ export async function POST(request: NextRequest) {
         .update({ audio_url: publicUrl })
         .eq('id', toolRunId)
         .eq('user_id', user.id)
+    }
+
+    // Extend media_expires_at: fresh audio must outlive old expiry; skip if a later
+    // date was set manually (manual override has a higher value → GREATEST guard no-ops).
+    const audioPid = project_id ?? toolRunId
+    if (audioPid) {
+      const newExpiry = mediaExpiryFromNow()
+      await supabase
+        .from('projects')
+        .update({ media_expires_at: newExpiry })
+        .eq('id', audioPid)
+        .eq('user_id', user.id)
+        .or(`media_expires_at.is.null,media_expires_at.lt.${newExpiry}`)
+        .catch(() => {})
     }
 
     void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id: project_id ?? toolRunId, chunks: chunks.length, tool_run })

@@ -13,6 +13,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import type { ThumbnailTextMode, TextOverlayParams } from '@/lib/thumbnail-text-presets'
 import { getStyleConfig } from '@/lib/image-style-configs'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
+import { mediaExpiryFromNow } from '@/lib/media-expiry'
 
 const MONTSERRAT_BLACK = readFileSync(
   join(process.cwd(), 'public', 'fonts', 'Montserrat-Black.ttf'),
@@ -735,6 +736,18 @@ export async function POST(request: NextRequest) {
         .update({ thumbnail_url: thumbUrl })
         .eq('id', toolRunId)
         .eq('user_id', user.id)
+    }
+
+    const thumbPid = project_id ?? toolRunId
+    if (thumbPid) {
+      const newExpiry = mediaExpiryFromNow()
+      await supabase
+        .from('projects')
+        .update({ media_expires_at: newExpiry })
+        .eq('id', thumbPid)
+        .eq('user_id', user.id)
+        .or(`media_expires_at.is.null,media_expires_at.lt.${newExpiry}`)
+        .catch(() => {})
     }
 
     await spendCredits(user.id, CREDIT_COSTS.thumbnail, 'thumbnail', project_id ?? toolRunId ?? undefined)

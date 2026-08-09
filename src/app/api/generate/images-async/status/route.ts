@@ -3,6 +3,7 @@ import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { env } from '@/lib/env'
 import type { SceneImage } from '@/lib/types'
+import { mediaExpiryFromNow } from '@/lib/media-expiry'
 
 export const maxDuration = 15
 
@@ -68,6 +69,15 @@ export async function GET(request: NextRequest) {
         Sentry.captureException(new Error(`images-async status project save: ${saveErr.message}`), {
           extra: { jobId, projectId },
         })
+      } else {
+        const newExpiry = mediaExpiryFromNow()
+        await supabase
+          .from('projects')
+          .update({ media_expires_at: newExpiry })
+          .eq('id', projectId)
+          .eq('user_id', user.id)
+          .or(`media_expires_at.is.null,media_expires_at.lt.${newExpiry}`)
+          .catch(() => {})
       }
     }
 

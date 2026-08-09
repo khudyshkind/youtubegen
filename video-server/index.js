@@ -122,6 +122,16 @@ function computeMediaExpiry(updatedAt) {
   return new Date(new Date(updatedAt).getTime() + RETENTION_MEDIA_HOURS * 3_600_000).toISOString()
 }
 
+// Extend media_expires_at to now+RETENTION when new media is written.
+// Uses a GREATEST guard (only updates if null or current < new) so manually set
+// far-future dates (e.g. the Aug-13 owner override) are never shortened.
+async function extendMediaExpiry(projectId) {
+  const newExpiry = computeMediaExpiry(new Date().toISOString())
+  const filter = `id=eq.${projectId}&or=(media_expires_at.is.null,media_expires_at.lt.${encodeURIComponent(newExpiry)})`
+  await sbPatch('projects', filter, { media_expires_at: newExpiry })
+    .catch(e => console.warn(`[extendMediaExpiry] project=${projectId}:`, e.message))
+}
+
 // ── R2 S3-compatible helpers for retention cleanup ────────────────────────────
 // Mirrors the AWS4 signing used in uploadVideoToR2 but for ListObjectsV2 and
 // DeleteObjects.  Returns [] / noop when R2 is not configured so callers are safe.
@@ -5092,6 +5102,7 @@ async function processVideoJob(jobId, body) {
           status: 'generating_seo',
         })
         console.log(`[job:${jobId}] projects.video_url written`)
+        await extendMediaExpiry(project_id)
       } catch (projErr) {
         console.warn(`[job:${jobId}] projects update non-fatal:`, projErr.message)
         Sentry.captureException(projErr, { extra: { jobId, project_id, stage: 'projects_video_url' } })
@@ -6805,6 +6816,7 @@ async function processAudioJob(job) {
         }
       )
       console.log(`[audio-job:${jobId}] projects.audio_url written, status=${completionStatus}`)
+      await extendMediaExpiry(job.project_id)
     } catch (projErr) {
       console.warn(`[audio-job:${jobId}] projects update non-fatal:`, projErr.message)
       Sentry.captureException(projErr, { extra: { jobId, project_id: job.project_id, stage: 'projects_audio_url' } })

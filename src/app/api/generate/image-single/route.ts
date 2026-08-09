@@ -9,6 +9,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import type { SceneImage } from '@/lib/types'
 import { getStyleConfig, DEFAULT_STYLE_CONFIG } from '@/lib/image-style-configs'
 import type { StyleConfig } from '@/lib/image-style-configs'
+import { mediaExpiryFromNow } from '@/lib/media-expiry'
 
 export const maxDuration = 120
 
@@ -317,6 +318,15 @@ export async function POST(request: NextRequest) {
       .update({ scene_images: updated })
       .eq('id', project_id)
       .eq('user_id', user.id)
+
+    const newExpiry = mediaExpiryFromNow()
+    await supabase
+      .from('projects')
+      .update({ media_expires_at: newExpiry })
+      .eq('id', project_id)
+      .eq('user_id', user.id)
+      .or(`media_expires_at.is.null,media_expires_at.lt.${newExpiry}`)
+      .catch(() => {})
 
     await spendCredits(user.id, cost, `image_${engine}`, project_id)
 
