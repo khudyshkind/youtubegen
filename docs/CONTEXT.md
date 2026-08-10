@@ -24,7 +24,16 @@ Lefiro (ранее YouTubeGen) — сервис генерации faceless-ви
 
 - **Фронт + API:** Next.js (App Router) на **Vercel** (план Hobby — жёсткий потолок функции 300с; коммерческое использование формально требует Pro $20/мес). Деплой автоматом из git push.
   - ⚠️ **[2026-08-10] Vercel Fluid Active CPU лимит исчерпан** (4 ч из 4 ч). Единственный Fluid (SSE) маршрут: `generate/images/route.ts` (ReadableStream, `text/event-stream`, maxDuration=300). Все остальные маршруты — Lambda billing (отдельный лимит). При превышении Vercel приостанавливает проект.
-  - ⚠️ **[2026-08-10] Все Vercel-деплои с 02:29 завершаются ошибкой** — TS-ошибка `audio/route.ts:902`: `.catch()` не существует на `PostgrestFilterBuilder`. Введено в `8ce60f4`. Продакшен на деплое до этого коммита (pre-`8ce60f4`).
+    - **[2026-08-11 разведка]** Источник 272 мин Fluid CPU — тестовые прогоны images SSE (20–40 генераций при разработке). Build failures ≠ Fluid CPU (они в отдельном счётчике Build CPU Minutes). Проверить точные цифры: Vercel → Observability → Functions, фильтр по маршруту `generate/images`, смотреть суммарный Duration.
+  - ✅ **[2026-08-10 → 29db530] TS-ошибка в `audio/route.ts:902` устранена.** `.catch()` на `PostgrestFilterBuilder` убрано из 6 файлов. Деплои восстановлены.
+  - **[2026-08-11 разведка] Источник 503 986 Function Invocations — Navbar polling.** `Navbar.tsx:119`: `setInterval(fetchCredits, 10_000)` — `/api/profile` вызывается каждые 10 с для любой залогиненной вкладки (dashboard, studio, billing, settings, analytics — везде стоит Navbar). Это Lambda-вызовы, не Fluid CPU. ~3.9 постоянных вкладок разработчика за 30 дней = ~503K. Сводная таблица polling-интервалов:
+    | Маршрут | Интервал | Условие |
+    |---|---|---|
+    | `/api/profile` (Navbar) | **10 с, непрерывно** | любая залогиненная вкладка |
+    | `/api/generate/audio/status` | 3 с | только во время аудиогенерации |
+    | `/api/generate/video/status` | 3 с | только во время рендера |
+    | `/api/generate/images-async/status` | 5 с | только во время Railway image job |
+    | `/api/telegram/link` (GET) | 1 раз на маунт | переход на Step5 или Step6 |
 - **БД / Auth / Storage:** Supabase (план Free — 50 МБ/файл, 1 ГБ хранилища, 500 МБ БД). `scene_images` хранится как JSONB.
 - **Видео-рендер:** отдельный **video-server** на **Railway** (Node + ffmpeg + Whisper). Один процесс на всё: рендер, кроны, Telegram-бот, вебхуки. Сам пишет `projects.video_url`. Deploy Watch Paths включают `video-server/**` и `knowledge/**`. Все обращения к Supabase — сырым fetch через `sbHeaders()` под `SUPABASE_SERVICE_ROLE_KEY` (17 точек).
 - **Рендер-ферма:** VGF (VeryGoodFFmpeg) — внешний ffmpeg-as-a-service, 16 vCPU, 6ч на задание, тариф ступенчатый (2 ГБ бесплатно, $0.50/ГБ до 10, $0.10/ГБ на 10–100, тарифицируется вход+выход). ⚠️ **auto-recharge DISABLED** — при исчерпании баланса возможны ночные падения. API баланса у VGF нет.
