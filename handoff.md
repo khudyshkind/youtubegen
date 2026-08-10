@@ -1,56 +1,49 @@
-# Отчёт: 2026-08-10 — надёжность TTS
+# Отчёт: 2026-08-10 — мониторинг баланса TTS-поставщиков
 
 ## Что сделано
 
-Коммит `TBD` — 4 правки в `video-server/index.js`, код не трогался кроме этого файла.
+### 1. Мониторинг баланса SecretVoicer
 
-### 1. SV concurrency 4→1 (index.js:6764)
+Добавлены `fetchSVBalance()` и `checkSVBalance()` в `video-server/index.js` (после `checkApihostBalance`, перед 30-мин кроном).
 
-`runLimited(tasks, 4)` → `runLimited(tasks, 1)`.
+**Эндпоинт:** `GET https://secret-voicer.ru/api/v1/balance` с `X-API-Key` заголовком.
 
-Разведка по логам доказала: SV обрабатывает задания последовательно на своей стороне. Бурст из 4 параллельных POST'ов создавал очередь у провайдера без выигрыша в total time, и именно эта очередь вызывала 600-секундные timeout'ы для chunks 5–6.
+**Обоснование:** Secret Slider (тот же оператор, тот же анонимный поставщик) имеет подтверждённый `GET /api/v2/balance` → `api_credits`. SV на v1 API — предполагаем аналогичный путь `/api/v1/balance`. Если эндпоинта нет — функция логирует `[sv/balance] API unavailable (endpoint may not exist), skipping` и молчит.
 
-### 2. Retry для Voicer (index.js:6732–6741)
+**Паттерн:** зеркало `checkApihostBalance`. Bot_settings ключи: `sv_balance`, `sv_balance_ts`, `sv_balance_alert_state`, `sv_balance_alert_at`, `sv_balance_threshold`.
 
-Зеркальная копия SV-паттерна: `for (let attempt = 0; attempt <= 1; attempt++)`. Два полных провала (jobs 56516757, e616fb3e) с возвратами 5100 и 4800 кредитов были вызваны тем, что одна попытка — единственная.
+**Порог:** env `SV_BALANCE_ALERT_THRESHOLD`, дефолт 100 api_credits.
 
-### 3. VOICER_CHUNK_TIMEOUT_MS 1800 с → 550 с (index.js:6421)
+**Cron:** добавлен в 30-мин блок; лог `[cron] balance check: fal / elevenlabs / apihost / secretvoicer`.
 
-**Арифметика:**
+### 2. Enriched timeout error message (SV)
 
-| | значение |
-|---|---|
-| WATCHDOG_AUDIO_TIMEOUT_MIN | 20 мин = **1200 с** |
-| Overhead (startup, DB, upload) | ~60 с |
-| Доступно на обе попытки синтеза | 1200 − 60 = **1140 с** |
-| Максимум per attempt | 1140 ÷ 2 = 570 с |
-| **Выбрано** | **550 с** (зазор 40 с) |
+Строка `SecretVoicer: timeout after 600s` → `SecretVoicer: timeout after 600s — задача осталась PENDING; возможно, исчерпан баланс`. Помогает при разборе логов напрямую указать на причину инцидента 10.08.
 
-2 × 550 с + 60 с = 1160 с < 1200 с watchdog ✓
+### 3. Воронка Voicer
 
-**Для пользователя (worst case — обе попытки fail):** ждёт ~18.5 мин, watchdog не срабатывает. Получает `status=failed`, возврат кредитов, уведомление в TG если привязан.
+Документированного balance API у `voicer.mat3u.com` не найдено ни в коде, ни в CONTEXT. Реализация отложена. Рекомендация: уточнить у поставщика через Telegram. Пока — опираться на таймаут-ошибки в логах.
 
-**Раньше (worst case):** watchdog убивал на 20-й минуте, до 1800-секундного timeout не доходило никогда — timeout 1800 с был мёртвым кодом.
+### 4. Кандидат в правила (WORKFLOW.md)
 
-Если Voicer будет обрабатывать запросы дольше 550 с — поднять `VOICER_CHUNK_TIMEOUT_MS` через Railway env ИЛИ `WATCHDOG_AUDIO_TIMEOUT_MIN` (тогда можно вернуться к 900 с).
+Добавлен кандидат о том, что PENDING-таймаут у TTS — симптом пустого баланса, а не сбоя кода.
 
-### 4. AbortSignal.timeout(15 000) в poll-fetch (index.js:6558, 6625)
+## Файлы
 
-Добавлен в `synthesizeSecretVoicerChunk` и `synthesizeVoicerChunk`. При зависании status API итерация теперь прерывается через 15 с, `catch → continue`, следующая итерация продолжает нормально.
+- `video-server/index.js` — константа `SV_BALANCE_ALERT_THRESHOLD`, функции `fetchSVBalance` / `checkSVBalance`, обновлённый cron, обогащённое сообщение об ошибке таймаута SV, threshold в startup write
+- `docs/WORKFLOW.md` — кандидат в правила
+- `docs/CONTEXT.md` — заметки по SV balance endpoint и Voicer
+- `docs/TASKS.md` — задача закрыта
+- `handoff.md` — этот файл
 
-## Что не менялось
+## Что не трогалось
 
-- `SV_CHUNK_TIMEOUT_MS = 600 с` (успешные чанки шли 167–304 с — снижать значит резать рабочие запросы)
-- Возвраты кредитов
-- Уведомления об ошибках
+- SV_CHUNK_TIMEOUT_MS = 600 с
+- Voicer retry, concurrency, AbortSignal (из предыдущей задачи)
+- Vercel-код
 
-## Изменения в файлах состояния
+## Открытые вопросы
 
-TASKS:    «Надёжность TTS» закрыта с коммитом
-CONTEXT:  без изменений
-WORKFLOW: без изменений
-
-## Открытые вопросы владельцу
-
-1. Нужны ли логи после первого Voicer-прогона с retry, чтобы убедиться, что он срабатывает?
-2. Если Voicer реально обрабатывает >550 с — сообщить: поднять env `VOICER_CHUNK_TIMEOUT_MS` или `WATCHDOG_AUDIO_TIMEOUT_MIN`.
+1. **Проверить в логах Railway**: запускается ли `[sv/balance]` и что отдаёт (success/unavailable). Если `unavailable` — у SV нет balance API, надо придумать иначе.
+2. **Voicer balance**: если хочется мониторинга — спросить поддержку Voicer в TG.
+3. **SV_BALANCE_ALERT_THRESHOLD**: дефолт 100 api_credits. Если знаете, какой уровень критичен — задать в Railway env.

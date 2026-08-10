@@ -3044,11 +3044,13 @@ async function cleanupExpiredMedia() {
   }
 }
 
-// ── Balance monitoring — fal.ai, ElevenLabs, APIHOST ─────────────────────────
+// ── Balance monitoring — fal.ai, ElevenLabs, APIHOST, SecretVoicer ───────────
 const FAL_ADMIN_KEY                    = env('FAL_ADMIN_KEY') || env('FAL_KEY')
 const FAL_BALANCE_THRESHOLD            = parseFloat(env('FAL_BALANCE_ALERT_THRESHOLD')      || '10')
 const ELEVENLABS_CHARS_ALERT_THRESHOLD = parseInt  (env('ELEVENLABS_CHARS_ALERT_THRESHOLD') || '50000')
 const APIHOST_BALANCE_ALERT_THRESHOLD  = parseFloat(env('APIHOST_BALANCE_ALERT_THRESHOLD')  || '100')
+// SV uses api_credits (same operator as Secret Slider which has confirmed GET /api/v2/balance → api_credits)
+const SV_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SV_BALANCE_ALERT_THRESHOLD')       || '100')
 
 // Send billing-exhaustion alert from Railway with 1h dedup per service.
 async function notifyBillingErrorRailway(service, route) {
@@ -3328,14 +3330,93 @@ async function checkApihostBalance() {
   }
 }
 
-// ── Balance check — every 30 minutes (fal.ai · ElevenLabs · APIHOST) ──────────
-// ELEVENLABS_API_KEY and APIHOST_API_KEY must be set as Railway env vars.
+// ── SecretVoicer api_credits balance ──────────────────────────────────────────
+// Same operator as Secret Slider (confirmed GET /api/v2/balance → api_credits).
+// SV is on v1 API, so endpoint is /api/v1/balance. Falls back gracefully on 404.
+async function fetchSVBalance() {
+  const apiKey = env('SECRETVOICER_API_KEY')
+  if (!apiKey) return { error: 'no_key' }
+  const controller = new AbortController()
+  const t = setTimeout(() => controller.abort(), 10_000)
+  try {
+    const res = await fetch(`${SV_BASE}/balance`, {
+      headers: { 'X-API-Key': apiKey },
+      signal: controller.signal,
+    })
+    if (res.status === 401 || res.status === 403) return { error: 'unauthorized' }
+    if (!res.ok) return { error: 'unavailable' }
+    const data = await res.json()
+    const balance = data.api_credits ?? data.credits ?? data.balance ?? null
+    if (typeof balance !== 'number') return { error: 'unavailable' }
+    return { balance }
+  } catch {
+    return { error: 'unavailable' }
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+async function checkSVBalance() {
+  const tag = '[sv/balance]'
+  const result = await fetchSVBalance()
+
+  if ('balance' in result) {
+    await setSetting('sv_balance',    String(result.balance))
+    await setSetting('sv_balance_ts', new Date().toISOString())
+    console.log(`${tag} balance=${result.balance} api_credits`)
+  }
+
+  if (!OWNER_ID) return
+
+  if (result.error === 'no_key')       { console.warn(`${tag} SECRETVOICER_API_KEY not set on Railway — add to Railway env`); return }
+  if (result.error === 'unauthorized') { console.warn(`${tag} key unauthorized`); return }
+  if (result.error === 'unavailable')  { console.warn(`${tag} API unavailable (endpoint may not exist), skipping`); return }
+
+  const { balance } = result
+  const alertState      = await getSetting('sv_balance_alert_state')
+  const alertAt         = await getSetting('sv_balance_alert_at')
+  const hoursSinceAlert = alertAt ? (Date.now() - new Date(alertAt).getTime()) / 3_600_000 : Infinity
+
+  if (balance < SV_BALANCE_ALERT_THRESHOLD) {
+    const shouldAlert = alertState !== 'low' || hoursSinceAlert >= 24
+    if (shouldAlert) {
+      const tgResult = await tgApi('sendMessage', {
+        chat_id: OWNER_ID,
+        text: `⚠️ SecretVoicer баланс низкий!\n\nТекущий баланс: ${balance} api_credits\nПорог: ${SV_BALANCE_ALERT_THRESHOLD} api_credits\n\nПополнить: https://secret-voicer.ru`,
+      })
+      if (tgResult?.ok) {
+        await setSetting('sv_balance_alert_state', 'low')
+        await setSetting('sv_balance_alert_at',    new Date().toISOString())
+      } else {
+        console.error(`${tag} tg alert failed:`, JSON.stringify(tgResult))
+      }
+    }
+    return
+  }
+
+  if (alertState === 'low') {
+    const tgResult = await tgApi('sendMessage', {
+      chat_id: OWNER_ID,
+      text: `✅ SecretVoicer баланс восстановлен\n\nТекущий баланс: ${balance} api_credits`,
+    })
+    if (tgResult?.ok) {
+      await setSetting('sv_balance_alert_state', '')
+      await setSetting('sv_balance_alert_at',    '')
+    } else {
+      console.error(`${tag} restored alert failed:`, JSON.stringify(tgResult))
+    }
+  }
+}
+
+// ── Balance check — every 30 minutes (fal.ai · ElevenLabs · APIHOST · SecretVoicer) ──────────
+// ELEVENLABS_API_KEY, APIHOST_API_KEY, SECRETVOICER_API_KEY must be set as Railway env vars.
 // If missing, the corresponding check logs a warning and skips silently.
 cron.schedule('*/30 * * * *', async () => {
-  console.log('[cron] balance check: fal / elevenlabs / apihost')
+  console.log('[cron] balance check: fal / elevenlabs / apihost / secretvoicer')
   try { await checkFalBalance()        } catch (err) { console.error('[cron/fal-balance]', err.message);        Sentry.captureException(err, { extra: { cron: 'checkFalBalance' } }) }
   try { await checkElevenLabsBalance() } catch (err) { console.error('[cron/elevenlabs-balance]', err.message); Sentry.captureException(err, { extra: { cron: 'checkElevenLabsBalance' } }) }
   try { await checkApihostBalance()    } catch (err) { console.error('[cron/apihost-balance]', err.message);    Sentry.captureException(err, { extra: { cron: 'checkApihostBalance' } }) }
+  try { await checkSVBalance()         } catch (err) { console.error('[cron/sv-balance]', err.message);         Sentry.captureException(err, { extra: { cron: 'checkSVBalance' } }) }
 }, { timezone: 'UTC' })
 
 // ── Daily DB backup cron — 03:00 UTC ─────────────────────────────────────────
@@ -6578,7 +6659,7 @@ async function synthesizeSecretVoicerChunk(text, voiceId, settings, jobId) {
     }
     // PENDING / LOCAL_PROCESSING → continue polling
   }
-  throw new Error(`SecretVoicer: timeout after ${SV_CHUNK_TIMEOUT_MS / 1000}s`)
+  throw new Error(`SecretVoicer: timeout after ${SV_CHUNK_TIMEOUT_MS / 1000}s — задача осталась PENDING; возможно, исчерпан баланс`)
 }
 
 // Submit one text chunk to Voicer; poll until completed.
@@ -7011,6 +7092,7 @@ app.listen(PORT, async () => {
     setSetting('fal_balance_threshold',        String(FAL_BALANCE_THRESHOLD)),
     setSetting('elevenlabs_chars_threshold',   String(ELEVENLABS_CHARS_ALERT_THRESHOLD)),
     setSetting('apihost_balance_threshold',    String(APIHOST_BALANCE_ALERT_THRESHOLD)),
+    setSetting('sv_balance_threshold',         String(SV_BALANCE_ALERT_THRESHOLD)),
   ]).catch(err => console.warn('[startup] threshold write failed:', err.message))
   console.log('[bot] starting cron jobs...')
 
