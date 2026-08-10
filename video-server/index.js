@@ -921,7 +921,7 @@ async function runConsultant(chatId, queryText) {
     const aiRes = await claude().messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1000,
-      system: consultantSystem(),
+      system: [{ type: 'text', text: consultantSystem(), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: queryText }],
     })
     const raw    = (aiRes.content[0]?.type === 'text' ? aiRes.content[0].text : '').trim()
