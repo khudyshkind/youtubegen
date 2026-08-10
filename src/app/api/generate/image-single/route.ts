@@ -326,7 +326,6 @@ export async function POST(request: NextRequest) {
       .eq('id', project_id)
       .eq('user_id', user.id)
       .or(`media_expires_at.is.null,media_expires_at.lt.${newExpiry}`)
-      .catch(() => {})
 
     await spendCredits(user.id, cost, `image_${engine}`, project_id)
 

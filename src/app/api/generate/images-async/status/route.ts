@@ -77,7 +77,6 @@ export async function GET(request: NextRequest) {
           .eq('id', projectId)
           .eq('user_id', user.id)
           .or(`media_expires_at.is.null,media_expires_at.lt.${newExpiry}`)
-          .catch(() => {})
       }
     }
 

@@ -98,7 +98,6 @@ export async function GET(request: NextRequest) {
           .update({ media_expires_at: newExpiry })
           .eq('id', job.project_id)
           .or(`media_expires_at.is.null,media_expires_at.lt.${newExpiry}`)
-          .catch(() => {})
 
         // Won the write race → spend credits exactly once
         await spendCredits(user.id, 2, 'video', job.project_id)

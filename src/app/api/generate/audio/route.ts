@@ -899,7 +899,6 @@ export async function POST(request: NextRequest) {
         .eq('id', audioPid)
         .eq('user_id', user.id)
         .or(`media_expires_at.is.null,media_expires_at.lt.${newExpiry}`)
-        .catch(() => {})
     }
 
     void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id: project_id ?? toolRunId, chunks: chunks.length, tool_run })
