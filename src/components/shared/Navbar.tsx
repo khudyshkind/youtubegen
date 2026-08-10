@@ -116,9 +116,24 @@ export default function Navbar() {
 
   useEffect(() => {
     if (!user) return
-    const interval = setInterval(fetchCredits, 10_000)
-    return () => clearInterval(interval)
+    const lastFetchTs = { current: 0 }
+    function handleVisibility() {
+      if (document.visibilityState !== 'hidden') {
+        const now = Date.now()
+        if (now - lastFetchTs.current >= 60_000) {
+          lastFetchTs.current = now
+          void fetchCredits()
+        }
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
   }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refresh balance when user opens billing page (may have received credits via bot payment)
+  useEffect(() => {
+    if (user && pathname === '/billing') void fetchCredits()
+  }, [pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSignOut() {
     setMenuOpen(false)

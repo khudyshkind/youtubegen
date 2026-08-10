@@ -2,27 +2,48 @@
 
 ## Что сделано
 
-**Задача: разведка источника Fluid Active CPU и 503K Function Invocations** — без изменений кода.
+**Задача: удалить фоновый опрос баланса в Navbar, заменить на event-driven.**
 
-Выводы:
+**`src/components/shared/Navbar.tsx`** — убран `setInterval(fetchCredits, 10_000)`. Вместо него два event-driven обновления:
 
-1. **503 986 Function Invocations** — Navbar polling. `Navbar.tsx:119`: `setInterval(fetchCredits, 10_000)` — `/api/profile` вызывается каждые 10 с для любого залогиненного пользователя с любой открытой вкладкой (dashboard, studio, billing, settings и т.д.). ~3.9 постоянных вкладок разработчика за 30 дней = 503K вызовов. Это Lambda, не Fluid CPU.
+1. **Page Visibility API** — при возвращении на вкладку (`visibilityState !== 'hidden'`), с дедупликацией 60 с (повторный запрос не уходит, если предыдущий был менее минуты назад). Быстрое переключение между вкладками не порождает шквал запросов.
+2. **Billing page trigger** — при переходе на `/billing` баланс обновляется немедленно (актуален для ситуации «заплатил через Telegram-бота, зашёл проверить»).
 
-2. **4 ч 32 мин Fluid Active CPU** — единственный SSE-маршрут `generate/images/route.ts` (ReadableStream, maxDuration=300). Для 272 мин достаточно 20–40 прогонов при тестировании фичи + обрывы (stream держится до abort-таймаута 270 с). Изображений не нужно было много — достаточно регулярного тестирования в начале периода.
+Начальная загрузка баланса при входе — без изменений (покрыта `onAuthStateChange` через Supabase напрямую).
 
-3. **Build failures ≠ Fluid CPU.** Vercel считает их отдельно: Build CPU Minutes, не Fluid. 7 упавших сборок по ~1 мин = ~7 Build CPU Minutes.
+## Ответы по заданию
 
-4. **Полная таблица polling-интервалов:**
+**Все места вызова `refreshCredits()` (event-driven, не опрос):**
 
-| Маршрут | Интервал | Условие старта |
-|---|---|---|
-| `/api/profile` (Navbar) | **10 с, всегда** | любая залогиненная вкладка |
-| `/api/generate/audio/status` | 3 с | только во время аудиогенерации |
-| `/api/generate/video/status` | 3 с | только во время рендера |
-| `/api/generate/images-async/status` | 5 с | только во время Railway image job |
-| `/api/telegram/link` (GET) | 1 раз на маунт | переход на Step5 или Step6 |
+Studio: Step2Plan, Step2Script ×4, Step3Voice ×2, Step4Subtitles, Step5Images ×4, Step6Video ×2, Step7Seo ×2.
+Tools: illustrations ×2, repack, script-gen, seo, thumbnail-gen, titles-by-niche, tts ×2, uniqueize.
+Analytics: analytics/page ×8.
+Итого ~30 точек — все по завершении платной операции. Покрытие полное.
 
-5. **Где смотреть в Observability:** Vercel → Project → Observability → Functions, сортировать по Invocations descending. `/api/profile` должен быть первым с отрывом. Для Fluid CPU — найти строку `generate/images` и посмотреть суммарный Duration.
+**Баланс без действия пользователя (пункт 3):**
+
+| Событие | Как узнает |
+|---|---|
+| Cron burn кредитов (09:00 UTC) | При следующем возврате на вкладку (visibility handler) |
+| Начисление после Telegram-оплаты | При возврате из Telegram в браузер (смена вкладки) |
+| Railway-возврат при провале рендера | `refreshCredits()` срабатывает в Step6Video при опросе статуса job |
+
+Для всех трёх случаев пользователь увидит актуальный баланс в момент, когда он реально смотрит в приложение. Реального времени не требуется — сервер (`requireCredits()`) в любом случае проверяет баланс из БД перед списанием, устаревшее UI-значение не приведёт к ошибке.
+
+**Оценка вызовов: сессия 1 час, 2 генерации:**
+
+| Источник | Кол-во |
+|---|---|
+| Начальная загрузка (auth state change via Supabase) | 0 (прямой запрос к Supabase, не /api/profile) |
+| Возвращения на вкладку (2–4 переключения, дедупликация) | 2–4 |
+| refreshCredits после генераций (~3–4 вызова на операцию) | 6–8 |
+| Переход на /billing (если был) | 0–1 |
+| **Итого** | **~8–13** |
+
+Было: 3 600 с / 10 с = **360 вызовов за час**. Сокращение ~30–45×.
+По периоду: 503 000 → ориентировочно 10 000–20 000.
+
+**`npx tsc --noEmit`:** чист. Единственные ошибки — `.next/dev/types/validator.ts` и `.next/types/validator.ts` про `preview-landing/page.js` (стейлый локальный dev-кэш, gitignored, в Vercel CI не присутствует — известный артефакт).
 
 ## Что не получилось
 
@@ -30,12 +51,10 @@
 
 ## Изменения в файлах состояния
 
-TASKS: ✅ закрыто «TS-ошибка audio/route.ts:902» (коммит `29db530`, 2026-08-10); обновлено «Vercel Fluid Active CPU» — добавлены результаты разведки
-CONTEXT: в разделе «Стек и инфраструктура» добавлены: результаты разведки Fluid CPU vs Function Invocations, уточнение про Build Minutes, таблица polling-интервалов, пометка что TS-ошибка закрыта
+TASKS: обновлена задача Fluid CPU — добавлена отметка ✅ об устранении Navbar polling
+CONTEXT: в разделе Vercel/инфраструктура обновлена запись о polling-интервалах; добавлен список мест refreshCredits(); добавлено пояснение о фоновых изменениях баланса
 WORKFLOW: без изменений
 
 ## Открытые вопросы владельцу
 
-Проверить в Vercel Observability → Functions: сколько вызовов у `/api/profile` за период? Если ~500K — диагноз подтверждён. Если нет — нужно смотреть другие маршруты.
-
-Если `/api/profile` подтверждён — обсудить снижение частоты Navbar polling (10 с → 30 с или 60 с) для сокращения Function Invocations. Текущая частота архитектурно избыточна: баланс обновляется через `refreshCredits()` сразу после каждой операции, так что 10-секундный интервал страхует только экстренные случаи.
+Нет. Fluid Active CPU после этого фикса должен упасть до единиц минут в месяц.

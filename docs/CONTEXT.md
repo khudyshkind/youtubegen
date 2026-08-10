@@ -26,10 +26,12 @@ Lefiro (ранее YouTubeGen) — сервис генерации faceless-ви
   - ⚠️ **[2026-08-10] Vercel Fluid Active CPU лимит исчерпан** (4 ч из 4 ч). Единственный Fluid (SSE) маршрут: `generate/images/route.ts` (ReadableStream, `text/event-stream`, maxDuration=300). Все остальные маршруты — Lambda billing (отдельный лимит). При превышении Vercel приостанавливает проект.
     - **[2026-08-11 разведка]** Источник 272 мин Fluid CPU — тестовые прогоны images SSE (20–40 генераций при разработке). Build failures ≠ Fluid CPU (они в отдельном счётчике Build CPU Minutes). Проверить точные цифры: Vercel → Observability → Functions, фильтр по маршруту `generate/images`, смотреть суммарный Duration.
   - ✅ **[2026-08-10 → 29db530] TS-ошибка в `audio/route.ts:902` устранена.** `.catch()` на `PostgrestFilterBuilder` убрано из 6 файлов. Деплои восстановлены.
-  - **[2026-08-11 разведка] Источник 503 986 Function Invocations — Navbar polling.** `Navbar.tsx:119`: `setInterval(fetchCredits, 10_000)` — `/api/profile` вызывается каждые 10 с для любой залогиненной вкладки (dashboard, studio, billing, settings, analytics — везде стоит Navbar). Это Lambda-вызовы, не Fluid CPU. ~3.9 постоянных вкладок разработчика за 30 дней = ~503K. Сводная таблица polling-интервалов:
+  - **[2026-08-11 разведка] Источник 503 986 Function Invocations — Navbar polling.** `Navbar.tsx:119`: `setInterval(fetchCredits, 10_000)` — `/api/profile` вызывается каждые 10 с для любой залогиненной вкладки (dashboard, studio, billing, settings, analytics — везде стоит Navbar). Это Lambda-вызовы, не Fluid CPU. ~3.9 постоянных вкладок разработчика за 30 дней = ~503K.
+  - **✅ [2026-08-11] Navbar polling удалён.** `setInterval` убран. Баланс обновляется только по событиям: (1) Page Visibility API — при возврате на вкладку, дедупликация 60 с; (2) при переходе на `/billing`; (3) через `refreshCredits()` после любого API-ответа генерации. Сервер всегда проверяет баланс независимо в `requireCredits()` (запрос к БД) — устаревшее UI-значение не приведёт к ошибке списания. Места вызова `refreshCredits()`: все studio steps (Step2Plan, Step2Script ×4, Step3Voice ×2, Step4Subtitles, Step5Images ×4, Step6Video ×2, Step7Seo ×2), все tools (illustrations ×2, repack, script-gen, seo, thumbnail-gen, titles-by-niche, tts ×2, uniqueize), analytics/page ×8. Фоновые изменения баланса (cron burn, Telegram-оплата, Railway-возврат) отображаются при следующем возвращении на вкладку.
+  - **Фактические polling-интервалы после фикса:**
     | Маршрут | Интервал | Условие |
     |---|---|---|
-    | `/api/profile` (Navbar) | **10 с, непрерывно** | любая залогиненная вкладка |
+    | `/api/profile` (Navbar) | **только по событию** | tab visible + 60 с дедупликация; /billing; старт |
     | `/api/generate/audio/status` | 3 с | только во время аудиогенерации |
     | `/api/generate/video/status` | 3 с | только во время рендера |
     | `/api/generate/images-async/status` | 5 с | только во время Railway image job |
