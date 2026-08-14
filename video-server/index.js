@@ -2779,9 +2779,10 @@ async function b2MediaDeleteObjects(keys) {
   const body = '<Delete>' + keys.map(k => `<Object><Key>${k}</Key></Object>`).join('') + '</Delete>'
   const bodyHash = crypto.createHash('sha256').update(body).digest('hex')
   const { fullUrl, headers } = b2MediaSign('POST', '', 'delete', 'application/xml', bodyHash)
+  const bodyMd5 = crypto.createHash('md5').update(body).digest('base64')
   const res = await fetch(fullUrl, {
     method: 'POST',
-    headers: { ...headers, 'Content-Length': String(Buffer.byteLength(body)) },
+    headers: { ...headers, 'Content-Length': String(Buffer.byteLength(body)), 'Content-MD5': bodyMd5 },
     body,
   })
   if (!res.ok) {
