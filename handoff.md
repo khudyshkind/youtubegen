@@ -1,22 +1,54 @@
-# Отчёт: 2026-08-13
+# Отчёт: 2026-08-14
 
 ## Что сделано
 
-**Задача: добавить 7 открытых хвостов в TASKS.md перед сменой чата.**
+**Задача: починить B2 batch delete — добавить Content-MD5 в b2MediaDeleteObjects.**
 
-Также исправлен хеш коммита в уже существующем пункте (TBD → `fdb9280`).
+### Изменение кода (коммит `a5f1e78`)
 
-### Добавленные / обновлённые пункты TASKS.md
+**`video-server/index.js:2782`** — одна новая строка и расширение `headers`:
 
-| # | Пункт | Раздел | Действие |
-|---|---|---|---|
-| 1 | 🔴 49 проектов: срок истечения медиа 2026-08-13 | 🔴 КРИТИЧНОЕ | добавлен (перед Vercel Fluid CPU) |
-| 2 | Vercel Fluid CPU — нет карты, перерасход не снят | 🔴 КРИТИЧНОЕ | дополнен ⚠️ к существующему пункту; TBD → `fdb9280` |
-| 3 | 6 проектов завязли в `generating_*` более месяца | ⚙️ ИНФРАСТРУКТУРА | добавлен |
-| 4 | B2 batch delete: HTTP 400 из-за `Content-MD5` | ⚙️ ИНФРАСТРУКТУРА | добавлен отдельным пунктом (ранее — inline в «уборка медиа») |
-| 5 | Живой тест newcomer_share — «электронная танцевальная» | 📊 АНАЛИТИКА | добавлен |
-| 6 | Разделить ключи Anthropic по проектам | 🔒 БЕЗОПАСНОСТЬ | добавлен, `<!-- owner: owner -->` |
-| 7 | Свести 12 кандидатов WORKFLOW.md | 🏢 БИЗНЕС | добавлен с перечнем всех 12, `<!-- owner: owner -->` |
+```diff
++  const bodyMd5 = crypto.createHash('md5').update(body).digest('base64')
+   const res = await fetch(fullUrl, {
+     method: 'POST',
+-    headers: { ...headers, 'Content-Length': String(Buffer.byteLength(body)) },
++    headers: { ...headers, 'Content-Length': String(Buffer.byteLength(body)), 'Content-MD5': bodyMd5 },
+     body,
+   })
+```
+
+- MD5 вычисляется от той же строки `body`, что уходит в `fetch` — один экземпляр, нет дублирования.
+- `crypto` уже объявлен на строке 44 (`const crypto = require('crypto')`), импорт не добавлялся.
+- Логирование ошибок B2 не изменено.
+
+### Проверки перед пушем
+
+- `node --check video-server/index.js` → OK
+- `node scripts/eslint.undef-check.mjs` → `no-undef: 0 errors in video-server/index.js`
+
+### Живой тест после деплоя
+
+```
+POST https://s3.us-east-005.backblazeb2.com/youtubegen-videos?delete
+Content-MD5: V/w1g2Kv6NsU+V+rorODeg==
+HTTP status: 200
+Response body: <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+    <Deleted>
+        <DeleteMarker>true</DeleteMarker>
+        ...
+        <Key>test-probe-cc/b2-md5-probe.txt</Key>
+    </Deleted>
+</DeleteResult>
+```
+
+HTTP 200. До фикса было HTTP 400. B2 принял заголовок и вернул `<Deleted>`.  
+16 orphan-файлов в `temp/` (1,16 МБ, с прогона 14.08 04:00 UTC) будут удалены при следующем прогоне крона (15.08 04:00 UTC).
+
+### Railway
+
+Деплой прошёл, статус **Online** (подтверждён `railway status` после ожидания).
 
 ## Что не получилось
 
@@ -24,12 +56,11 @@
 
 ## Изменения в файлах состояния
 
-TASKS: добавлены 7 новых пунктов, исправлен хеш коммита fdb9280 в Fluid CPU пункте
+TASKS: B2 batch delete HTTP 400 помечен `[x]`, добавлены хеш коммита и результат live-теста
 CONTEXT: без изменений
 WORKFLOW: без изменений
 
 ## Открытые вопросы владельцу
 
-1. **49 проектов (пункт 1)** — крон запускается в 09:00 UTC. Если сейчас до этого времени — сдвинуть `media_expires_at` вручную на нужные проекты. Если уже после — файлы могут быть удалены.
-2. **Vercel (пункт 2)** — нет привязанной карты. Если текущий период превышен, проекты могут быть приостановлены. Рекомендую: проверить Usage сегодня.
-3. **6 stuck-проектов (пункт 3)** — можно сбросить статус прямым `UPDATE projects SET status='completed' WHERE ...` в Supabase для конкретных id.
+1. В логах вчерашнего крона `thresholds: free=undefinedh paid=undefinedh` — строка 2836 обращается к `.free` / `.paid` числа `72`. Не влияет на работу, но вводит в заблуждение. Убрать или заменить на `порог=${RETENTION_MEDIA_HOURS}h` при следующей правке функции.
+2. `test-b2-delete-md5.mjs` — зонд оставлен в `scripts/`, закоммитить или удалить?
