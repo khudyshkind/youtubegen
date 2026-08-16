@@ -46,11 +46,13 @@ const STYLE_LABELS: Record<ImageStyleKey, string> = {
 
 const ENGINE_OPTIONS: { key: EngineType; labelKey: string; credits: number }[] = [
   { key: 'flux_schnell', labelKey: 'tools.ill_engine_fast',    credits: CREDIT_COSTS.image_flux_schnell },
-  // secretslider исключён: инструмент не имеет асинхронной развилки, синхронный путь
-  // упирается в maxDuration=300; инцидент task 63252 от 2026-08-16.
+  { key: 'secretslider', labelKey: 'tools.ill_engine_photo',   credits: CREDIT_COSTS.image_secretslider },
   { key: 'flux',         labelKey: 'tools.ill_engine_quality', credits: CREDIT_COSTS.image_flux },
   { key: 'nano_banana',  labelKey: 'tools.ill_engine_pro',     credits: CREDIT_COSTS.image_nano_banana },
 ]
+
+// Max consecutive failed poll responses before aborting (mirrors Step5Images)
+const POLL_FAIL_THRESHOLD = 5
 
 function parseEngine(s: string): EngineType {
   if (s === 'flux' || s === 'flux_schnell' || s === 'nano_banana' || s === 'secretslider') return s
@@ -232,6 +234,112 @@ export default function IllustrationsTool({
     }
   }
 
+  // Async path for secretslider: submits to Railway via /api/generate/images-async,
+  // then polls /api/generate/images-async/status every 5 s until completed or failed.
+  // Called from handleGenerate when engine === 'secretslider'.
+  async function handleGenerateAsync(count: number, pid: string, topic: string) {
+    const submitRes = await fetch('/api/generate/images-async', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        script: text,
+        topic,
+        duration_sec: count * 10,
+        image_count: count,
+        project_id: pid,
+        image_interval: 10,
+        engine: 'secretslider',
+        image_style: effectiveStyleValue ?? undefined,
+        custom_style: effectiveCustomStyle ?? undefined,
+      }),
+    })
+
+    if (!submitRes.ok) {
+      const ct = submitRes.headers.get('content-type') ?? ''
+      if (!ct.includes('application/json')) throw new Error(t('tools.ill_err_gen'))
+      const errJson = await submitRes.json() as { ok: boolean; error?: string; code?: string }
+      if (errJson.code === 'NO_CREDITS') throw new Error(`${t('tools.ill_err_no_credits')} (${count * costPerImage} кр.)`)
+      throw new Error(errJson.error ?? t('tools.ill_err_gen'))
+    }
+
+    const submitJson = await submitRes.json() as { ok: boolean; data?: { job_id: string }; error?: string; code?: string }
+    if (!submitJson.ok) {
+      if (submitJson.code === 'NO_CREDITS') throw new Error(`${t('tools.ill_err_no_credits')} (${count * costPerImage} кр.)`)
+      throw new Error(submitJson.error ?? t('tools.ill_err_gen'))
+    }
+
+    const jobId = submitJson.data?.job_id
+    if (!jobId) throw new Error(t('tools.ill_err_gen'))
+
+    setProgress({ completed: 0, total: count })
+
+    let consecutiveFailures = 0
+    await new Promise<void>((resolve, reject) => {
+      const iv = setInterval(async () => {
+        try {
+          const statusRes = await fetch(
+            `/api/generate/images-async/status?job_id=${jobId}&project_id=${pid}`,
+          )
+          const ct = statusRes.headers.get('content-type') ?? ''
+          if (!statusRes.ok || !ct.includes('application/json')) {
+            if (++consecutiveFailures >= POLL_FAIL_THRESHOLD) {
+              clearInterval(iv)
+              reject(new Error(t('tools.ill_err_gen')))
+            }
+            return
+          }
+          consecutiveFailures = 0
+
+          const j = await statusRes.json() as {
+            ok: boolean
+            status: string
+            progress: number
+            scene_images?: SceneImage[]
+            error_message?: string | null
+          }
+
+          if (!j.ok) {
+            clearInterval(iv)
+            reject(new Error(j.error_message ?? t('tools.ill_err_gen')))
+            return
+          }
+
+          setProgress({ completed: Math.round((j.progress / 100) * count), total: count })
+
+          if (j.status === 'completed') {
+            clearInterval(iv)
+            const ts = Date.now()
+            const finalImages = (j.scene_images ?? []).map((img) => ({
+              ...img,
+              url: img.url ? `${img.url}?t=${ts}` : img.url,
+            }))
+            setImages(finalImages)
+            const spent = finalImages.filter((img) => img.url).length * costPerImage
+            setCreditsSpent(spent)
+            void refreshCredits()
+            // finalize: marks project completed and restores image_style routing slug
+            fetch('/api/tools/illustrations/finalize', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ project_id: pid, credits_spent: spent }),
+            }).catch(() => {})
+            setSavedId(pid)
+            setPhase('done')
+            resolve()
+          } else if (j.status === 'failed') {
+            clearInterval(iv)
+            reject(new Error(j.error_message ?? t('tools.ill_err_gen')))
+          }
+        } catch (pollErr) {
+          if (++consecutiveFailures >= POLL_FAIL_THRESHOLD) {
+            clearInterval(iv)
+            reject(pollErr)
+          }
+        }
+      }, 5_000)
+    })
+  }
+
   // countArg lets caller pass count directly (manual mode — avoids React async state issue)
   async function handleGenerate(countArg?: number) {
     const count = countArg ?? sceneCount
@@ -262,6 +370,11 @@ export default function IllustrationsTool({
       if (!initJson.ok) throw new Error(initJson.error ?? 'Ошибка создания проекта')
       const pid = initJson.data!.project_id
       setProjectId(pid)
+
+      if (engine === 'secretslider') {
+        await handleGenerateAsync(count, pid, autoTitle)
+        return
+      }
 
       const genRes = await fetch('/api/generate/images', {
         method: 'POST',
