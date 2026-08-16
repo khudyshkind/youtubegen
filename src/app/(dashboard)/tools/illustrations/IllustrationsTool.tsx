@@ -46,7 +46,8 @@ const STYLE_LABELS: Record<ImageStyleKey, string> = {
 
 const ENGINE_OPTIONS: { key: EngineType; labelKey: string; credits: number }[] = [
   { key: 'flux_schnell', labelKey: 'tools.ill_engine_fast',    credits: CREDIT_COSTS.image_flux_schnell },
-  { key: 'secretslider', labelKey: 'tools.ill_engine_photo',   credits: CREDIT_COSTS.image_secretslider },
+  // secretslider исключён: инструмент не имеет асинхронной развилки, синхронный путь
+  // упирается в maxDuration=300; инцидент task 63252 от 2026-08-16.
   { key: 'flux',         labelKey: 'tools.ill_engine_quality', credits: CREDIT_COSTS.image_flux },
   { key: 'nano_banana',  labelKey: 'tools.ill_engine_pro',     credits: CREDIT_COSTS.image_nano_banana },
 ]
