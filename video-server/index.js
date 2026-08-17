@@ -72,6 +72,24 @@ const app = express()
 app.use('/webhooks/secretslider', express.raw({ type: 'application/json', limit: '2mb' }))
 app.use(express.json({ limit: '2mb' }))
 
+// ── SS async webhook/poll coordination ────────────────────────────────────────
+// When a webhook event arrives for an active SS task, a signal is placed here.
+// The active poll loop in imgGenerateSecretSlider reads the signal at the start
+// of each iteration: if present, skips the next sleep and re-polls SS immediately
+// to get the final status and image URLs through the normal code path.
+// This keeps all finalization logic (upload, credits, project update) in one place.
+const ssWebhookSignals = new Map() // jobId → { originalStatus, failed, arrivedAt }
+
+// Event deduplication: prevents double-processing when SS re-delivers an event.
+// Stored in-memory; survives the expected re-delivery window (minutes to hours).
+const ssProcessedEventIds = new Map() // event_id → processedAt (ms)
+
+setInterval(() => {
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000
+  for (const [k, v] of ssProcessedEventIds) if (v < cutoff) ssProcessedEventIds.delete(k)
+  for (const [k, v] of ssWebhookSignals) if (v.arrivedAt < cutoff) ssWebhookSignals.delete(k)
+}, 15 * 60 * 1000).unref()
+
 const API_SECRET            = env('RAILWAY_API_SECRET')
 const SUPABASE_URL          = env('NEXT_PUBLIC_SUPABASE_URL')
 const SUPABASE_SERVICE_KEY  = env('SUPABASE_SERVICE_ROLE_KEY')
@@ -6185,6 +6203,15 @@ async function imgGenerateSecretSlider(prompts, jobId) {
   form.append('prompts', JSON.stringify(prompts))
   form.append('num_images', '1')
   form.append('aspect_ratio', '16:9')
+  // style is intentionally omitted: tested anime/photorealism/default against the same prompt —
+  // visual output and resolution (1376×768) were identical across all values. Generation time
+  // differs (59s–1450s) but visual style is controlled exclusively by the prompt's fluxSuffix.
+
+  const ssWebhookSecret = process.env.SECRETSLIDER_WEBHOOK_SECRET
+  if (ssWebhookSecret && jobId) {
+    form.append('webhook_url', `${SERVER_URL}/webhooks/secretslider`)
+    form.append('webhook_secret', ssWebhookSecret)
+  }
 
   const genRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/generate`, {
     method: 'POST',
@@ -6211,12 +6238,32 @@ async function imgGenerateSecretSlider(prompts, jobId) {
     console.log(`[images-async] provider task id: ${taskId}`)
   }
 
+  function ssResolveUrl(u) {
+    if (!u) return u
+    if (u.startsWith('/')) return `${IMG_SS_ORIGIN}${u}`
+    if (u.startsWith('http://')) return `https://${u.slice(7)}`
+    return u
+  }
+
   const t0 = Date.now()
   const deadline = t0 + pollMaxMs
   let polls = 0
   let lastPoll = null
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, IMG_SS_POLL_MS))
+    // If a webhook delivered the task outcome while we were sleeping, skip the next
+    // sleep and immediately re-poll SS to get the authoritative final status + URLs.
+    const whSig = jobId ? ssWebhookSignals.get(jobId) : undefined
+    if (whSig) {
+      ssWebhookSignals.delete(jobId)
+      if (whSig.failed) {
+        throw new Error(`[secretslider] task ${taskId} ${whSig.originalStatus} (webhook)`)
+      }
+      console.log(`[secretslider] webhook shortcut: task=${taskId} event=${whSig.originalStatus} — polling now`)
+      // Fall through without sleeping: next fetch will return the completed state.
+    } else {
+      await new Promise(r => setTimeout(r, IMG_SS_POLL_MS))
+    }
+
     const elapsed = Math.round((Date.now() - t0) / 1000)
 
     const pollRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/task/${taskId}`, {
@@ -6234,20 +6281,20 @@ async function imgGenerateSecretSlider(prompts, jobId) {
     lastPoll = poll
     console.log(`[secretslider] poll ${elapsed}s status=${poll.status} image_count=${poll.results?.image_count ?? '?'}`)
 
-    if (poll.status === 'failed') throw new Error(`[secretslider] task ${taskId} failed`)
+    if (poll.status === 'failed' || poll.status === 'canceled') {
+      throw new Error(`[secretslider] task ${taskId} ${poll.status}`)
+    }
 
-    if (poll.status === 'completed') {
+    if (poll.status === 'completed' || poll.status === 'partial_success') {
       const urls = poll.results?.image_urls ?? []
-      if (urls.length !== prompts.length) {
-        throw new Error(`[secretslider] image_count mismatch: expected ${prompts.length}, got ${urls.length}`)
+      const resolvedUrls = urls.map(ssResolveUrl)
+      if (poll.status === 'completed' && resolvedUrls.length !== prompts.length) {
+        throw new Error(`[secretslider] image_count mismatch: expected ${prompts.length}, got ${resolvedUrls.length}`)
       }
       const duration = Math.round((Date.now() - t0) / 1000)
-      console.log(`[secretslider] task done: task=${taskId} prompts=${prompts.length} duration=${duration}s polls=${polls}`)
-      return urls.map(u => {
-        if (u.startsWith('/')) return `${IMG_SS_ORIGIN}${u}`
-        if (u.startsWith('http://')) return `https://${u.slice(7)}`
-        return u
-      })
+      const partial = resolvedUrls.length < prompts.length
+      console.log(`[secretslider] task done: task=${taskId} prompts=${prompts.length} urls=${resolvedUrls.length} duration=${duration}s polls=${polls}`)
+      return { urls: resolvedUrls, status: poll.status, partial }
     }
   }
   // One final check — task may have completed during the last poll interval
@@ -6257,13 +6304,10 @@ async function imgGenerateSecretSlider(prompts, jobId) {
   }).catch(() => null)
   const finalPoll = finalRes?.ok ? await finalRes.json().catch(() => null) : null
   const finalUrls = finalPoll?.results?.image_urls ?? []
-  if (finalPoll?.status === 'completed' && finalUrls.length === prompts.length) {
-    console.log(`[secretslider] RECOVERED after poll timeout: task=${taskId}`)
-    return finalUrls.map(u => {
-      if (u.startsWith('/')) return `${IMG_SS_ORIGIN}${u}`
-      if (u.startsWith('http://')) return `https://${u.slice(7)}`
-      return u
-    })
+  if ((finalPoll?.status === 'completed' || finalPoll?.status === 'partial_success') && finalUrls.length > 0) {
+    console.log(`[secretslider] RECOVERED after poll timeout: task=${taskId} status=${finalPoll.status}`)
+    const resolvedUrls = finalUrls.map(ssResolveUrl)
+    return { urls: resolvedUrls, status: finalPoll.status, partial: resolvedUrls.length < prompts.length }
   }
   const waited = Math.round((Date.now() - t0) / 1000)
   const lastStatus = finalPoll?.status ?? lastPoll?.status ?? 'unreachable'
@@ -6335,18 +6379,24 @@ async function processImageJob(jobId, body) {
       return styledPrompt
     })
 
-    const ssUrls = await imgGenerateSecretSlider(allStyledPrompts, jobId)
-    console.log(`[image-job:${jobId}] secretslider returned ${ssUrls.length} URLs in ${((Date.now() - t0Request) / 1000).toFixed(1)}s`)
+    const ssResult = await imgGenerateSecretSlider(allStyledPrompts, jobId)
+    const ssUrls = ssResult.urls
+    const ssPartial = ssResult.partial
+    if (ssPartial) {
+      console.log(`[image-job:${jobId}] secretslider partial: ${ssUrls.length}/${allStyledPrompts.length} URLs (status=${ssResult.status}) in ${((Date.now() - t0Request) / 1000).toFixed(1)}s`)
+    } else {
+      console.log(`[image-job:${jobId}] secretslider returned ${ssUrls.length} URLs in ${((Date.now() - t0Request) / 1000).toFixed(1)}s`)
+    }
     await updateImageJob(jobId, { progress: 70 })
 
-    const sceneImages = new Array(scenes.length)
+    const sceneImages = new Array(ssUrls.length)
     let successCount = 0
     let failCount = 0
     let chargedCredits = 0
     // Set to { stoppedAt: i, reason: string } when deduct_credits fails — triggers early stop after loop.
     let creditExhausted = null
 
-    for (let i = 0; i < scenes.length; i++) {
+    for (let i = 0; i < ssUrls.length; i++) {
       const scn = scenes[i]
       const styledPrompt = allStyledPrompts[i]
       const ssUrl = ssUrls[i]
@@ -7074,9 +7124,12 @@ async function recoverOrphanedImageJobs() {
 }
 
 // ── POST /webhooks/secretslider ──────────────────────────────────────────────
-// Receives event notifications from Secret Slider. No business logic here:
-// image_jobs, credits, and generation paths are not touched.
-app.post('/webhooks/secretslider', (req, res) => {
+// Receives task-lifecycle events from Secret Slider.
+// After signature verification and dedup, signals the active poll loop in
+// imgGenerateSecretSlider (via ssWebhookSignals) so it can skip its next sleep
+// and immediately re-poll SS API to get the final status and image URLs.
+// All finalization logic (upload, credits, project update) stays in processImageJob.
+app.post('/webhooks/secretslider', async (req, res) => {
   const SS_WH_SECRET = env('SECRETSLIDER_WEBHOOK_SECRET')
   if (!SS_WH_SECRET) {
     console.warn('[ss-webhook] SECRETSLIDER_WEBHOOK_SECRET not configured — refusing request')
@@ -7113,7 +7166,50 @@ app.post('/webhooks/secretslider', (req, res) => {
   const { event: evType, event_id, task_id, status, completed_subtasks, failed_subtasks } = event
   console.log(`[ss-webhook] event=${evType} event_id=${event_id} task_id=${task_id} status=${status} completed=${completed_subtasks} failed=${failed_subtasks}`)
 
-  res.status(200).json({ ok: true })
+  // ── 1. Event deduplication ─────────────────────────────────────────────────
+  // ssProcessedEventIds is a Map<event_id, processedAt> pruned every 2 h.
+  if (event_id && ssProcessedEventIds.has(String(event_id))) {
+    console.log(`[ss-webhook] duplicate event_id=${event_id} — no-op`)
+    return res.status(200).json({ ok: true, duplicate: true })
+  }
+  if (event_id) ssProcessedEventIds.set(String(event_id), Date.now())
+
+  // ── 2. Find image_job by provider_task_id ──────────────────────────────────
+  let job = null
+  if (task_id) {
+    try {
+      const rows = await sbGet('image_jobs', `provider_task_id=eq.${task_id}&select=id,status`)
+      job = Array.isArray(rows) ? rows[0] : null
+    } catch (e) {
+      console.error('[ss-webhook] image_jobs lookup failed:', e.message)
+    }
+  }
+
+  if (!job) {
+    console.warn(`[ss-webhook] no image_job for task_id=${task_id} — no-op`)
+    return res.status(200).json({ ok: true, note: 'no matching job' })
+  }
+
+  // ── 3. Skip if job is already past processing ──────────────────────────────
+  if (job.status !== 'processing') {
+    console.log(`[ss-webhook] job=${job.id.slice(0, 8)} already status=${job.status} — no-op`)
+    return res.status(200).json({ ok: true, note: 'already terminal' })
+  }
+
+  // ── 4. Signal the active poll loop ─────────────────────────────────────────
+  // Determine whether this event represents a fatal outcome (fail/cancel) or
+  // a success/partial outcome the poll loop should finalize normally.
+  const failed = evType === 'task.failed' || evType === 'task.canceled'
+    || status === 'failed' || status === 'canceled'
+  const originalStatus = status ?? evType
+
+  // ssWebhookSignals is read at the start of each poll iteration in
+  // imgGenerateSecretSlider. The loop skips its next sleep and re-polls
+  // SS API immediately, then finalizes through the normal code path.
+  ssWebhookSignals.set(job.id, { originalStatus, failed, arrivedAt: Date.now() })
+  console.log(`[ss-webhook] signaled job=${job.id.slice(0, 8)} originalStatus=${originalStatus} failed=${failed}`)
+
+  return res.status(200).json({ ok: true })
 })
 
 // Must be added AFTER all routes
