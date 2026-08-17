@@ -75,13 +75,25 @@ try {
   const dbUrl = process.env.DATABASE_URL
   if (!dbUrl) { console.warn('[migration] DATABASE_URL not set — skipping'); return }
   try {
+    // Parse URL manually to avoid libpq misinterpreting usernames with dots (e.g. postgres.xxx)
+    const u = new URL(dbUrl)
+    const host = u.hostname
+    const port = u.port || '5432'
+    const user = decodeURIComponent(u.username)
+    const pass = decodeURIComponent(u.password)
+    const db   = u.pathname.replace(/^\//, '') || 'postgres'
     const sqls = [
       `ALTER TABLE public.image_jobs ADD COLUMN IF NOT EXISTS cost_per_image integer not null default 0`,
       `ALTER TABLE public.image_jobs DROP CONSTRAINT IF EXISTS image_jobs_status_check`,
       `ALTER TABLE public.image_jobs ADD CONSTRAINT image_jobs_status_check CHECK (status IN ('pending','processing','finalizing','completed','failed'))`,
     ]
-    const connStr = dbUrl.includes('sslmode') ? dbUrl : dbUrl + '?sslmode=require'
-    for (const sql of sqls) execSync(`psql "${connStr}" -c "${sql}"`, { stdio: 'pipe', timeout: 10_000 })
+    for (const sql of sqls) {
+      execSync(`psql -h "${host}" -p "${port}" -U "${user}" -d "${db}" --no-password -c "${sql}"`, {
+        stdio: 'pipe',
+        timeout: 15_000,
+        env: { ...process.env, PGPASSWORD: pass, PGSSLMODE: 'require' },
+      })
+    }
     console.log('[migration] image_jobs schema ok (cost_per_image + finalizing status)')
   } catch (e) {
     console.warn('[migration] image_jobs schema skipped:', String(e.stderr || e.message).slice(0, 300))
