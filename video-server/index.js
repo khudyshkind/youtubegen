@@ -69,36 +69,6 @@ try {
   }
 }
 
-// Schema migration: add cost_per_image column and 'finalizing' status to image_jobs.
-// Idempotent — IF NOT EXISTS / DROP IF EXISTS make re-runs safe.
-;(function runImageJobsSchemaMigration() {
-  const dbUrl = process.env.DATABASE_URL
-  if (!dbUrl) { console.warn('[migration] DATABASE_URL not set — skipping'); return }
-  try {
-    // Parse URL manually to avoid libpq misinterpreting usernames with dots (e.g. postgres.xxx)
-    const u = new URL(dbUrl)
-    const host = u.hostname
-    const port = u.port || '5432'
-    const user = decodeURIComponent(u.username)
-    const pass = decodeURIComponent(u.password)
-    const db   = u.pathname.replace(/^\//, '') || 'postgres'
-    const sqls = [
-      `ALTER TABLE public.image_jobs ADD COLUMN IF NOT EXISTS cost_per_image integer not null default 0`,
-      `ALTER TABLE public.image_jobs DROP CONSTRAINT IF EXISTS image_jobs_status_check`,
-      `ALTER TABLE public.image_jobs ADD CONSTRAINT image_jobs_status_check CHECK (status IN ('pending','processing','finalizing','completed','failed'))`,
-    ]
-    for (const sql of sqls) {
-      execSync(`psql -h "${host}" -p "${port}" -U "${user}" -d "${db}" --no-password -c "${sql}"`, {
-        stdio: 'pipe',
-        timeout: 15_000,
-        env: { ...process.env, PGPASSWORD: pass, PGSSLMODE: 'require' },
-      })
-    }
-    console.log('[migration] image_jobs schema ok (cost_per_image + finalizing status)')
-  } catch (e) {
-    console.warn('[migration] image_jobs schema skipped:', String(e.stderr || e.message).slice(0, 300))
-  }
-})()
 
 const app = express()
 // Must be registered before express.json so the body stream isn't consumed before HMAC verification.
@@ -113,6 +83,11 @@ app.use(express.json({ limit: '2mb' }))
 // This keeps all finalization logic (upload, credits, project update) in one place.
 const ssWebhookSignals = new Map() // jobId → { originalStatus, failed, arrivedAt }
 
+// In-memory finalization claim lock. Single-instance Railway deployment means this is
+// sufficient for atomicity between the webhook handler and the poll loop.
+// jobId → claimedAt (ms)
+const ssFinalizationClaimed = new Map()
+
 // Event deduplication: prevents double-processing when SS re-delivers an event.
 // Stored in-memory; survives the expected re-delivery window (minutes to hours).
 const ssProcessedEventIds = new Map() // event_id → processedAt (ms)
@@ -121,6 +96,7 @@ setInterval(() => {
   const cutoff = Date.now() - 2 * 60 * 60 * 1000
   for (const [k, v] of ssProcessedEventIds) if (v < cutoff) ssProcessedEventIds.delete(k)
   for (const [k, v] of ssWebhookSignals) if (v.arrivedAt < cutoff) ssWebhookSignals.delete(k)
+  for (const [k, v] of ssFinalizationClaimed) if (v < cutoff) ssFinalizationClaimed.delete(k)
 }, 15 * 60 * 1000).unref()
 
 const API_SECRET            = env('RAILWAY_API_SECRET')
@@ -5502,7 +5478,6 @@ app.post('/generate-images', verifySecret, async (req, res) => {
       topic: topic ?? '',
       duration_sec: duration_sec ?? null,
       credits_charged,
-      cost_per_image,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -7030,7 +7005,7 @@ async function recoverOrphanedImageJobs() {
   try {
     const staleIso = new Date(Date.now() - 15 * 60 * 1000).toISOString()
     const orphans = await sbGet('image_jobs',
-      `or=(status.eq.pending,status.eq.processing,status.eq.finalizing)&created_at=lt.${staleIso}&select=id,user_id,project_id,credits_charged,credits_refunded_at`)
+      `or=(status.eq.pending,status.eq.processing)&created_at=lt.${staleIso}&select=id,user_id,project_id,credits_charged,credits_refunded_at`)
     if (!Array.isArray(orphans) || !orphans.length) {
       console.log('[startup/image-recovery] no stale image jobs')
       return
@@ -7056,25 +7031,13 @@ async function recoverOrphanedImageJobs() {
 
 // ── SS job finalization helpers ───────────────────────────────────────────────
 
-// Atomically transitions image_job status 'processing' → 'finalizing'.
 // Returns true if THIS caller claimed finalization rights, false if another caller
-// already claimed (or the job is no longer in processing state).
-// The underlying SQL is: UPDATE image_jobs SET status='finalizing' WHERE id=? AND status='processing'
-// Supabase REST with Prefer:return=representation returns the updated rows; empty = not claimed.
-async function claimImageJobForFinalization(jobId) {
-  const url = `${SUPABASE_URL}/rest/v1/image_jobs?id=eq.${jobId}&status=eq.processing`
-  const res = await fetch(url, {
-    method: 'PATCH',
-    headers: sbHeaders(),
-    body: JSON.stringify({ status: 'finalizing', updated_at: new Date().toISOString() }),
-    signal: AbortSignal.timeout(10_000),
-  })
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '')
-    throw new Error(`claimImageJobForFinalization: ${res.status} ${txt.slice(0, 200)}`)
-  }
-  const rows = res.status === 204 ? [] : await res.json().catch(() => [])
-  return Array.isArray(rows) && rows.length > 0
+// already claimed. In-memory lock is sufficient because Railway runs a single instance —
+// the webhook handler and the poll loop share the same process and Map.
+function claimImageJobForFinalization(jobId) {
+  if (ssFinalizationClaimed.has(jobId)) return false
+  ssFinalizationClaimed.set(jobId, Date.now())
+  return true
 }
 
 // Shared finalization: upload images, charge credits per image, update job status.
@@ -7228,7 +7191,7 @@ app.post('/webhooks/secretslider', async (req, res) => {
   let job = null
   if (task_id) {
     try {
-      const rows = await sbGet('image_jobs', `provider_task_id=eq.${task_id}&select=id,status,user_id,project_id,engine,cost_per_image,image_interval,image_style,duration_sec`)
+      const rows = await sbGet('image_jobs', `provider_task_id=eq.${task_id}&select=id,status,user_id,project_id,engine,image_interval,image_style,duration_sec`)
       job = Array.isArray(rows) ? rows[0] : null
     } catch (e) {
       console.error('[ss-webhook] image_jobs lookup failed:', e.message)
@@ -7250,17 +7213,8 @@ app.post('/webhooks/secretslider', async (req, res) => {
   const isFailed = evType === 'task.failed' || evType === 'task.canceled'
     || status === 'failed' || status === 'canceled'
 
-  // ── 5. Atomic claim — only one caller (webhook or poll loop) finalizes ─────
-  // SQL equivalent: UPDATE image_jobs SET status='finalizing' WHERE id=? AND status='processing'
-  // Supabase PATCH with status=eq.processing filter + Prefer:return=representation.
-  // Returns the updated row if we claimed it; empty array if another process was first.
-  let claimed = false
-  try {
-    claimed = await claimImageJobForFinalization(job.id)
-  } catch (claimErr) {
-    console.error('[ss-webhook] claim failed:', claimErr.message)
-    return res.status(200).json({ ok: true, note: 'claim error — poll loop will finalize' })
-  }
+  // ── 5. Claim — only one caller (webhook or poll loop) finalizes ─────────────
+  const claimed = claimImageJobForFinalization(job.id)
 
   if (!claimed) {
     // Poll loop already claimed finalization — signal it to skip sleep (optimization).
@@ -7307,14 +7261,17 @@ app.post('/webhooks/secretslider', async (req, res) => {
 
   if (ssUrls.length === 0) {
     console.warn(`[ss-webhook] job=${job.id.slice(0, 8)} no URLs from SS — releasing claim`)
-    // Release the claim so the poll loop can finalize when it next polls
-    await updateImageJob(job.id, { status: 'processing', updated_at: new Date().toISOString() })
+    // Release in-memory claim so the poll loop can finalize
+    ssFinalizationClaimed.delete(job.id)
     ssWebhookSignals.set(job.id, { originalStatus: status ?? evType, failed: false, arrivedAt: Date.now() })
     return res.status(200).json({ ok: true, note: 'no URLs yet — poll loop will finalize' })
   }
 
-  const finalResult = await finalizeImageJobFromSsUrls(job.id, ssUrls, job, null, null)
-  console.log(`[ss-webhook] job=${job.id.slice(0, 8)} finalized result=${finalResult.reason} images=${finalResult.validImages?.length ?? 0}`)
+  // cost_per_image is not stored in DB — read from Railway env (same value Vercel sends in body).
+  // Set SS_COST_PER_IMAGE Railway env var to match CREDIT_COSTS.image_secretslider in types.ts.
+  const ssCostPerImage = parseInt(process.env.SS_COST_PER_IMAGE ?? '200', 10) || 200
+  const finalResult = await finalizeImageJobFromSsUrls(job.id, ssUrls, { ...job, cost_per_image: ssCostPerImage }, null, null)
+  console.log(`[ss-webhook] job=${job.id.slice(0, 8)} finalized result=${finalResult.reason} images=${finalResult.validImages?.length ?? 0} cost_per_image=${ssCostPerImage}`)
 
   notifyUserJobDone(job.user_id, finalResult.ok ? 'images' : 'images_failed',
     finalResult.ok ? { count: finalResult.validImages.length } : undefined).catch(() => {})
