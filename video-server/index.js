@@ -1,5 +1,7 @@
 'use strict'
 
+// index.js
+
 // Strips BOM (U+FEFF, char code 65279) and trims whitespace.
 // Mirrors src/lib/env.ts — duplicated here because video-server is standalone CJS with no shared build.
 function env(key) {
