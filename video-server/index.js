@@ -80,10 +80,11 @@ try {
       `ALTER TABLE public.image_jobs DROP CONSTRAINT IF EXISTS image_jobs_status_check`,
       `ALTER TABLE public.image_jobs ADD CONSTRAINT image_jobs_status_check CHECK (status IN ('pending','processing','finalizing','completed','failed'))`,
     ]
-    for (const sql of sqls) execSync(`psql "${dbUrl}" -c "${sql}"`, { stdio: 'pipe', timeout: 10_000 })
+    const connStr = dbUrl.includes('sslmode') ? dbUrl : dbUrl + '?sslmode=require'
+    for (const sql of sqls) execSync(`psql "${connStr}" -c "${sql}"`, { stdio: 'pipe', timeout: 10_000 })
     console.log('[migration] image_jobs schema ok (cost_per_image + finalizing status)')
   } catch (e) {
-    console.warn('[migration] image_jobs schema skipped:', String(e.stderr || e.message).slice(0, 120))
+    console.warn('[migration] image_jobs schema skipped:', String(e.stderr || e.message).slice(0, 300))
   }
 })()
 
