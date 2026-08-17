@@ -6203,9 +6203,10 @@ async function imgGenerateSecretSlider(prompts, jobId) {
   form.append('prompts', JSON.stringify(prompts))
   form.append('num_images', '1')
   form.append('aspect_ratio', '16:9')
-  // style is intentionally omitted: tested anime/photorealism/default against the same prompt —
-  // visual output and resolution (1376×768) were identical across all values. Generation time
-  // differs (59s–1450s) but visual style is controlled exclusively by the prompt's fluxSuffix.
+  form.append('style', 'default')
+  // style=default is required for predictable ~60s generation time. Without it, SS uses a slow
+  // queue (observed: 43+ min for task 63644). Visual output and resolution (1376×768) are identical
+  // across styles — visual style is controlled exclusively by the prompt's fluxSuffix.
 
   const ssWebhookSecret = process.env.SECRETSLIDER_WEBHOOK_SECRET
   if (ssWebhookSecret && jobId) {
