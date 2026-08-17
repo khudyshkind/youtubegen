@@ -69,6 +69,24 @@ try {
   }
 }
 
+// Schema migration: add cost_per_image column and 'finalizing' status to image_jobs.
+// Idempotent — IF NOT EXISTS / DROP IF EXISTS make re-runs safe.
+;(function runImageJobsSchemaMigration() {
+  const dbUrl = process.env.DATABASE_URL
+  if (!dbUrl) { console.warn('[migration] DATABASE_URL not set — skipping'); return }
+  try {
+    const sqls = [
+      `ALTER TABLE public.image_jobs ADD COLUMN IF NOT EXISTS cost_per_image integer not null default 0`,
+      `ALTER TABLE public.image_jobs DROP CONSTRAINT IF EXISTS image_jobs_status_check`,
+      `ALTER TABLE public.image_jobs ADD CONSTRAINT image_jobs_status_check CHECK (status IN ('pending','processing','finalizing','completed','failed'))`,
+    ]
+    for (const sql of sqls) execSync(`psql "${dbUrl}" -c "${sql}"`, { stdio: 'pipe', timeout: 10_000 })
+    console.log('[migration] image_jobs schema ok (cost_per_image + finalizing status)')
+  } catch (e) {
+    console.warn('[migration] image_jobs schema skipped:', String(e.stderr || e.message).slice(0, 120))
+  }
+})()
+
 const app = express()
 // Must be registered before express.json so the body stream isn't consumed before HMAC verification.
 app.use('/webhooks/secretslider', express.raw({ type: 'application/json', limit: '2mb' }))
@@ -5450,7 +5468,8 @@ app.post('/synthesize-audio', verifySecret, async (req, res) => {
 
 app.post('/generate-images', verifySecret, async (req, res) => {
   const { project_id, user_id, engine = 'secretslider', image_count, image_interval = 10,
-    image_style, custom_style, script, topic, duration_sec, credits_charged = 0 } = req.body
+    image_style, custom_style, script, topic, duration_sec, credits_charged = 0,
+    cost_per_image = 0 } = req.body
   if (!user_id) return res.status(400).json({ ok: false, error: 'user_id required' })
   if (!image_count || image_count < 1) return res.status(400).json({ ok: false, error: 'image_count required' })
   if (!script?.trim()) return res.status(400).json({ ok: false, error: 'script required' })
@@ -5470,6 +5489,7 @@ app.post('/generate-images', verifySecret, async (req, res) => {
       topic: topic ?? '',
       duration_sec: duration_sec ?? null,
       credits_charged,
+      cost_per_image,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -6205,16 +6225,16 @@ async function imgGenerateSecretSlider(prompts, jobId) {
   form.append('prompts', JSON.stringify(prompts))
   form.append('num_images', '1')
   form.append('aspect_ratio', '16:9')
-  form.append('style', 'default')
-  // style=default is required for predictable ~60s generation time. Without it, SS uses a slow
-  // queue (observed: 43+ min for task 63644). Visual output and resolution (1376×768) are identical
-  // across styles — visual style is controlled exclusively by the prompt's fluxSuffix.
 
   const ssWebhookSecret = process.env.SECRETSLIDER_WEBHOOK_SECRET
-  if (ssWebhookSecret && jobId) {
-    form.append('webhook_url', `${SERVER_URL}/webhooks/secretslider`)
+  const webhookUrl = (ssWebhookSecret && jobId) ? `${SERVER_URL}/webhooks/secretslider` : null
+  if (webhookUrl) {
+    form.append('webhook_url', webhookUrl)
     form.append('webhook_secret', ssWebhookSecret)
   }
+
+  // Log request body (for diagnostics — webhook_secret replaced with length)
+  console.log(`[secretslider] POST /api/v2/generate fields: mode=visual num_images=1 aspect_ratio=16:9 prompts_count=${prompts.length} webhook_url=${webhookUrl ?? '(none)'} webhook_secret_len=${ssWebhookSecret ? ssWebhookSecret.length : 0}`)
 
   const genRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/generate`, {
     method: 'POST',
@@ -6233,9 +6253,10 @@ async function imgGenerateSecretSlider(prompts, jobId) {
     throw new Error(`[secretslider] POST /generate returned ${genRes.status}: ${body.slice(0, 300)}`)
   }
 
-  const { task_id: taskId } = await genRes.json()
+  const genJson = await genRes.json()
+  const { task_id: taskId, webhook_registered } = genJson
   if (!taskId) throw new Error('[secretslider] no task_id in response')
-  console.log(`[secretslider] task=${taskId} prompts=${prompts.length}`)
+  console.log(`[secretslider] POST /api/v2/generate response: task_id=${taskId} webhook_registered=${webhook_registered ?? 'n/a'} full=${JSON.stringify(genJson)}`)
   if (jobId) {
     await updateImageJob(jobId, { provider_task_id: taskId })
     console.log(`[images-async] provider task id: ${taskId}`)
@@ -6392,133 +6413,27 @@ async function processImageJob(jobId, body) {
     }
     await updateImageJob(jobId, { progress: 70 })
 
-    const sceneImages = new Array(ssUrls.length)
-    let successCount = 0
-    let failCount = 0
-    let chargedCredits = 0
-    // Set to { stoppedAt: i, reason: string } when deduct_credits fails — triggers early stop after loop.
-    let creditExhausted = null
-
-    for (let i = 0; i < ssUrls.length; i++) {
-      const scn = scenes[i]
-      const styledPrompt = allStyledPrompts[i]
-      const ssUrl = ssUrls[i]
-      try {
-        const storagePath = project_id ? `${user_id}/${project_id}/scene_ss_${i}.jpg` : null
-        const t0Upload = Date.now()
-        const url = project_id
-          ? await uploadImageUrlToStorage(ssUrl, storagePath)
-          : ssUrl
-        const uploadMs = Date.now() - t0Upload
-        const audioFp = duration_sec != null ? Math.round(duration_sec) : undefined
-        sceneImages[i] = {
-          scene_index: i, prompt: styledPrompt, url,
-          scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end,
-          engine, audio_fingerprint: audioFp,
-        }
-        successCount++
-        // Charge one credit per successfully uploaded image (mirrors images/route.ts:1279).
-        // credits_charged tracks cumulative total in DB so watchdog/recovery can refund exactly.
-        if (cost_per_image > 0) {
-          const chargeRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/deduct_credits`, {
-            method: 'POST',
-            headers: sbHeaders(),
-            body: JSON.stringify({
-              p_user_id:    user_id,
-              p_amount:     cost_per_image,
-              p_operation:  `image_${engine}`,
-              p_project_id: project_id ?? null,
-            }),
-            signal: AbortSignal.timeout(10_000),
-          })
-          if (chargeRes.ok) {
-            const chargeJson = await chargeRes.json().catch(() => null)
-            if (chargeJson?.success) {
-              chargedCredits += cost_per_image
-            } else {
-              // HTTP 200 + success:false = insufficient balance — stop loop.
-              // Image at index i is uploaded (storage file exists) but NOT charged and NOT included in paidImages.
-              console.warn(`[image-job:${jobId}] deduct_credits scene ${i + 1}: insufficient balance (remaining=${chargeJson?.remaining ?? '?'}) — stopping`)
-              creditExhausted = { stoppedAt: i, reason: `insufficient, remaining=${chargeJson?.remaining ?? '?'}` }
-            }
-          } else {
-            console.warn(`[image-job:${jobId}] deduct_credits scene ${i + 1} http=${chargeRes.status} — stopping`)
-            creditExhausted = { stoppedAt: i, reason: `deduct_credits http=${chargeRes.status}` }
-          }
-        }
-        console.log(`[image-job:${jobId}] scene ${i + 1} upload: ${uploadMs}ms url=${url?.slice(0, 80) ?? 'NULL'}`)
-      } catch (err) {
-        failCount++
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error(`[image-job:${jobId}] scene ${i + 1} upload FAILED:`, msg)
-        sceneImages[i] = {
-          scene_index: i, prompt: styledPrompt, url: null,
-          scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end,
-          engine, audio_fingerprint: duration_sec != null ? Math.round(duration_sec) : undefined,
-        }
-      }
-      const progress = 70 + Math.round(((i + 1) / scenes.length) * 25)
-      await updateImageJob(jobId, { progress, credits_charged: chargedCredits })
-      if (creditExhausted) break
-    }
-
-    // ── Credit-exhausted early stop ────────────────────────────────────────
-    // Paid images (indices 0..stoppedAt-1) stay with the user; no refund for them.
-    // Image at stoppedAt was uploaded but NOT charged — excluded from paidImages.
-    if (creditExhausted) {
-      const paidImages = sceneImages.slice(0, creditExhausted.stoppedAt).filter(Boolean)
-      const paidCount = cost_per_image > 0 ? chargedCredits / cost_per_image : paidImages.length
-      const errMsg = `Недостаточно кредитов — сгенерировано ${paidCount} из ${scenes.length} иллюстраций`
-      console.warn(`[image-job:${jobId}] credit stop: ${creditExhausted.reason}; paid=${paidCount}/${scenes.length}`)
-      await updateImageJob(jobId, {
-        status: 'failed',
-        progress: 70 + Math.round((creditExhausted.stoppedAt / scenes.length) * 25),
-        credits_charged: chargedCredits,
-        scene_images: paidImages.length > 0 ? paidImages : null,
-        error_message: errMsg,
-        completed_at: new Date().toISOString(),
-      })
-      if (project_id) {
-        if (paidImages.length > 0) {
-          await sbPatch('projects', `id=eq.${project_id}&user_id=eq.${user_id}`, {
-            scene_images: paidImages,
-            image_interval: interval,
-            image_style: image_style ?? null,
-            status: 'draft',
-          }).catch(e => console.warn(`[image-job:${jobId}] project partial write failed:`, e.message))
-        } else {
-          await sbPatch('projects', `id=eq.${project_id}&status=eq.generating_images`, { status: 'failed' })
-            .catch(e => console.warn(`[image-job:${jobId}] project failure mark (no paid images) failed:`, e.message))
-        }
-      }
+    // Atomically claim finalization rights. If the webhook handler already claimed it
+    // (arrived before the poll loop detected completion), it will finalize independently.
+    const claimed = await claimImageJobForFinalization(jobId)
+    if (!claimed) {
+      console.log(`[image-job:${jobId}] finalization already claimed by webhook handler — poll loop done`)
       return
     }
-    // ── end credit-exhausted handler ───────────────────────────────────────
 
-    const validImages = sceneImages.filter(Boolean)
+    const finalResult = await finalizeImageJobFromSsUrls(
+      jobId, ssUrls,
+      { user_id, project_id, engine, cost_per_image, image_interval: interval, image_style, duration_sec },
+      scenes, allStyledPrompts
+    )
+
     const totalSec = ((Date.now() - t0Request) / 1000).toFixed(1)
-    console.log(`[image-job:${jobId}] SUMMARY: engine=${engine} created=${successCount} failed=${failCount} total_sec=${totalSec}s`)
-
-    await updateImageJob(jobId, {
-      status: 'completed',
-      progress: 100,
-      scene_images: validImages,
-      completed_at: new Date().toISOString(),
-    })
-
+    console.log(`[image-job:${jobId}] total_sec=${totalSec}s result=${finalResult.reason}`)
     if (Date.now() - t0Request > 90_000) {
-      notifyUserJobDone(user_id, 'images', { count: validImages.length }).catch(() => {})
+      if (finalResult.ok) notifyUserJobDone(user_id, 'images', { count: finalResult.validImages.length }).catch(() => {})
+      else notifyUserJobDone(user_id, 'images_failed').catch(() => {})
     }
 
-    if (project_id) {
-      await sbPatch('projects', `id=eq.${project_id}&user_id=eq.${user_id}`, {
-        scene_images: validImages,
-        image_interval: interval,
-        image_style: image_style ?? null,
-        status: 'draft',
-      }).catch(e => console.warn(`[image-job:${jobId}] project final write failed:`, e.message))
-      console.log(`[image-job:${jobId}] project updated with ${validImages.length} images`)
-    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`[image-job:${jobId}] failed:`, msg)
@@ -7102,7 +7017,7 @@ async function recoverOrphanedImageJobs() {
   try {
     const staleIso = new Date(Date.now() - 15 * 60 * 1000).toISOString()
     const orphans = await sbGet('image_jobs',
-      `or=(status.eq.pending,status.eq.processing)&created_at=lt.${staleIso}&select=id,user_id,project_id,credits_charged,credits_refunded_at`)
+      `or=(status.eq.pending,status.eq.processing,status.eq.finalizing)&created_at=lt.${staleIso}&select=id,user_id,project_id,credits_charged,credits_refunded_at`)
     if (!Array.isArray(orphans) || !orphans.length) {
       console.log('[startup/image-recovery] no stale image jobs')
       return
@@ -7124,6 +7039,125 @@ async function recoverOrphanedImageJobs() {
     console.error('[startup/image-recovery] failed:', e.message)
     Sentry.captureException(e, { extra: { fn: 'recoverOrphanedImageJobs' } })
   }
+}
+
+// ── SS job finalization helpers ───────────────────────────────────────────────
+
+// Atomically transitions image_job status 'processing' → 'finalizing'.
+// Returns true if THIS caller claimed finalization rights, false if another caller
+// already claimed (or the job is no longer in processing state).
+// The underlying SQL is: UPDATE image_jobs SET status='finalizing' WHERE id=? AND status='processing'
+// Supabase REST with Prefer:return=representation returns the updated rows; empty = not claimed.
+async function claimImageJobForFinalization(jobId) {
+  const url = `${SUPABASE_URL}/rest/v1/image_jobs?id=eq.${jobId}&status=eq.processing`
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: sbHeaders(),
+    body: JSON.stringify({ status: 'finalizing', updated_at: new Date().toISOString() }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '')
+    throw new Error(`claimImageJobForFinalization: ${res.status} ${txt.slice(0, 200)}`)
+  }
+  const rows = res.status === 204 ? [] : await res.json().catch(() => [])
+  return Array.isArray(rows) && rows.length > 0
+}
+
+// Shared finalization: upload images, charge credits per image, update job status.
+// Called by both the poll loop (with full scene metadata) and the webhook handler (scenes=null).
+// Does not throw — all errors are caught internally and result in status='failed'.
+async function finalizeImageJobFromSsUrls(jobId, ssUrls, jobRow, scenes, allStyledPrompts) {
+  const { user_id, project_id, engine, cost_per_image = 0, image_interval, image_style, duration_sec } = jobRow
+  const interval = Math.max(3, Math.min(300, image_interval ?? 10))
+
+  const sceneImages = new Array(ssUrls.length)
+  let chargedCredits = 0
+  let creditExhausted = null
+
+  for (let i = 0; i < ssUrls.length; i++) {
+    if (creditExhausted !== null) break
+    const ssUrl = ssUrls[i]
+    const scn = scenes?.[i]
+    const styledPrompt = allStyledPrompts?.[i]
+    try {
+      const storagePath = project_id ? `${user_id}/${project_id}/scene_ss_${i}.jpg` : null
+      const t0Upload = Date.now()
+      const url = project_id ? await uploadImageUrlToStorage(ssUrl, storagePath) : ssUrl
+      const uploadMs = Date.now() - t0Upload
+      sceneImages[i] = {
+        scene_index: i,
+        prompt: styledPrompt ?? ssUrl,
+        url,
+        engine,
+        ...(scn ? { scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end } : {}),
+        ...(duration_sec != null ? { audio_fingerprint: Math.round(duration_sec) } : {}),
+      }
+      console.log(`[image-job:${jobId}] scene ${i + 1} upload: ${uploadMs}ms url=${url?.slice(0, 80) ?? 'NULL'}`)
+
+      if (cost_per_image > 0) {
+        const chargeRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/deduct_credits`, {
+          method: 'POST',
+          headers: sbHeaders(),
+          body: JSON.stringify({ p_user_id: user_id, p_amount: cost_per_image, p_operation: `image_${engine}`, p_project_id: project_id ?? null }),
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (chargeRes.ok) {
+          const chargeJson = await chargeRes.json().catch(() => null)
+          if (chargeJson?.success) {
+            chargedCredits += cost_per_image
+          } else {
+            console.warn(`[image-job:${jobId}] deduct_credits scene ${i + 1}: insufficient balance (remaining=${chargeJson?.remaining ?? '?'}) — stopping`)
+            creditExhausted = i
+          }
+        } else {
+          console.warn(`[image-job:${jobId}] deduct_credits scene ${i + 1} http=${chargeRes.status} — stopping`)
+          creditExhausted = i
+        }
+      }
+      await updateImageJob(jobId, { progress: 70 + Math.round(((i + 1) / ssUrls.length) * 25), credits_charged: chargedCredits })
+    } catch (err) {
+      console.error(`[image-job:${jobId}] scene ${i + 1} upload FAILED:`, err instanceof Error ? err.message : String(err))
+      sceneImages[i] = { scene_index: i, prompt: styledPrompt ?? '', url: null, engine }
+    }
+  }
+
+  if (creditExhausted !== null) {
+    const paidImages = sceneImages.slice(0, creditExhausted).filter(Boolean)
+    const paidCount = cost_per_image > 0 ? Math.round(chargedCredits / cost_per_image) : paidImages.length
+    const errMsg = `Недостаточно кредитов — сгенерировано ${paidCount} из ${ssUrls.length} иллюстраций`
+    console.warn(`[image-job:${jobId}] credit stop: paid=${paidCount}/${ssUrls.length}`)
+    await updateImageJob(jobId, {
+      status: 'failed', progress: 70 + Math.round((creditExhausted / ssUrls.length) * 25),
+      credits_charged: chargedCredits, scene_images: paidImages.length > 0 ? paidImages : null,
+      error_message: errMsg, completed_at: new Date().toISOString(),
+    })
+    if (project_id) {
+      if (paidImages.length > 0) {
+        await sbPatch('projects', `id=eq.${project_id}&user_id=eq.${user_id}`, {
+          scene_images: paidImages, image_interval: interval, image_style: image_style ?? null, status: 'draft',
+        }).catch(e => console.warn(`[image-job:${jobId}] project partial write:`, e.message))
+      } else {
+        await sbPatch('projects', `id=eq.${project_id}&status=eq.generating_images`, { status: 'failed' }).catch(() => {})
+      }
+    }
+    return { ok: false, reason: 'credit_exhausted', validImages: paidImages, chargedCredits }
+  }
+
+  const validImages = sceneImages.filter(Boolean)
+  console.log(`[image-job:${jobId}] SUMMARY: engine=${engine} created=${validImages.length} failed=${ssUrls.length - validImages.length}`)
+  await updateImageJob(jobId, {
+    status: 'completed', progress: 100, scene_images: validImages,
+    credits_charged: chargedCredits, completed_at: new Date().toISOString(),
+  })
+
+  if (project_id) {
+    await sbPatch('projects', `id=eq.${project_id}&user_id=eq.${user_id}`, {
+      scene_images: validImages, image_interval: interval, image_style: image_style ?? null, status: 'draft',
+    }).catch(e => console.warn(`[image-job:${jobId}] project final write:`, e.message))
+  }
+
+  return { ok: true, reason: 'completed', validImages, chargedCredits }
 }
 
 // ── POST /webhooks/secretslider ──────────────────────────────────────────────
@@ -7181,7 +7215,7 @@ app.post('/webhooks/secretslider', async (req, res) => {
   let job = null
   if (task_id) {
     try {
-      const rows = await sbGet('image_jobs', `provider_task_id=eq.${task_id}&select=id,status`)
+      const rows = await sbGet('image_jobs', `provider_task_id=eq.${task_id}&select=id,status,user_id,project_id,engine,cost_per_image,image_interval,image_style,duration_sec`)
       job = Array.isArray(rows) ? rows[0] : null
     } catch (e) {
       console.error('[ss-webhook] image_jobs lookup failed:', e.message)
@@ -7199,20 +7233,80 @@ app.post('/webhooks/secretslider', async (req, res) => {
     return res.status(200).json({ ok: true, note: 'already terminal' })
   }
 
-  // ── 4. Signal the active poll loop ─────────────────────────────────────────
-  // Determine whether this event represents a fatal outcome (fail/cancel) or
-  // a success/partial outcome the poll loop should finalize normally.
-  const failed = evType === 'task.failed' || evType === 'task.canceled'
+  // ── 4. Determine outcome ───────────────────────────────────────────────────
+  const isFailed = evType === 'task.failed' || evType === 'task.canceled'
     || status === 'failed' || status === 'canceled'
-  const originalStatus = status ?? evType
 
-  // ssWebhookSignals is read at the start of each poll iteration in
-  // imgGenerateSecretSlider. The loop skips its next sleep and re-polls
-  // SS API immediately, then finalizes through the normal code path.
-  ssWebhookSignals.set(job.id, { originalStatus, failed, arrivedAt: Date.now() })
-  console.log(`[ss-webhook] signaled job=${job.id.slice(0, 8)} originalStatus=${originalStatus} failed=${failed}`)
+  // ── 5. Atomic claim — only one caller (webhook or poll loop) finalizes ─────
+  // SQL equivalent: UPDATE image_jobs SET status='finalizing' WHERE id=? AND status='processing'
+  // Supabase PATCH with status=eq.processing filter + Prefer:return=representation.
+  // Returns the updated row if we claimed it; empty array if another process was first.
+  let claimed = false
+  try {
+    claimed = await claimImageJobForFinalization(job.id)
+  } catch (claimErr) {
+    console.error('[ss-webhook] claim failed:', claimErr.message)
+    return res.status(200).json({ ok: true, note: 'claim error — poll loop will finalize' })
+  }
 
-  return res.status(200).json({ ok: true })
+  if (!claimed) {
+    // Poll loop already claimed finalization — signal it to skip sleep (optimization).
+    ssWebhookSignals.set(job.id, { originalStatus: status ?? evType, failed: isFailed, arrivedAt: Date.now() })
+    console.log(`[ss-webhook] job=${job.id.slice(0, 8)} claim lost — signaled poll loop`)
+    return res.status(200).json({ ok: true, note: 'poll loop owns finalization' })
+  }
+
+  console.log(`[ss-webhook] signaled job=${job.id.slice(0, 8)} claimed=true isFailed=${isFailed}`)
+
+  // ── 6. Finalize independently (webhook path) ───────────────────────────────
+  // The poll loop may not be running (server restart). Finalize directly here.
+  if (isFailed) {
+    const errMsg = `SS task ${status ?? evType}`
+    console.warn(`[ss-webhook] job=${job.id.slice(0, 8)} SS failed — marking job failed`)
+    await updateImageJob(job.id, { status: 'failed', error_message: errMsg, completed_at: new Date().toISOString() })
+    if (job.project_id) {
+      await sbPatch('projects', `id=eq.${job.project_id}&status=eq.generating_images`, { status: 'failed' }).catch(() => {})
+    }
+    const refund = await refundImageJobCredits(job.id, job.user_id, job.project_id)
+    if (!refund.ok && refund.amount > 0) {
+      await recordRefundIncident(job.id, job.user_id, refund.amount, 'image', refund.error)
+    }
+    return res.status(200).json({ ok: true, note: 'finalized as failed' })
+  }
+
+  // Fetch SS task to get image URLs
+  const ssApiKey = process.env.SECRETSLIDER_API_KEY
+  let ssUrls = []
+  try {
+    const taskRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/task/${task_id}`, {
+      headers: { 'X-API-Key': ssApiKey, 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (taskRes.ok) {
+      const taskJson = await taskRes.json()
+      ssUrls = (taskJson.results?.image_urls ?? []).map(u =>
+        u.startsWith('/') ? `${IMG_SS_ORIGIN}${u}` : u.startsWith('http://') ? `https://${u.slice(7)}` : u
+      )
+    }
+  } catch (fetchErr) {
+    console.error('[ss-webhook] SS task fetch failed:', fetchErr.message)
+  }
+
+  if (ssUrls.length === 0) {
+    console.warn(`[ss-webhook] job=${job.id.slice(0, 8)} no URLs from SS — releasing claim`)
+    // Release the claim so the poll loop can finalize when it next polls
+    await updateImageJob(job.id, { status: 'processing', updated_at: new Date().toISOString() })
+    ssWebhookSignals.set(job.id, { originalStatus: status ?? evType, failed: false, arrivedAt: Date.now() })
+    return res.status(200).json({ ok: true, note: 'no URLs yet — poll loop will finalize' })
+  }
+
+  const finalResult = await finalizeImageJobFromSsUrls(job.id, ssUrls, job, null, null)
+  console.log(`[ss-webhook] job=${job.id.slice(0, 8)} finalized result=${finalResult.reason} images=${finalResult.validImages?.length ?? 0}`)
+
+  notifyUserJobDone(job.user_id, finalResult.ok ? 'images' : 'images_failed',
+    finalResult.ok ? { count: finalResult.validImages.length } : undefined).catch(() => {})
+
+  return res.status(200).json({ ok: true, note: `finalized:${finalResult.reason}` })
 })
 
 // Must be added AFTER all routes

@@ -658,7 +658,7 @@ create table if not exists public.image_jobs (
   user_id             uuid        not null,
   engine              text        not null default 'secretslider',
   status              text        not null default 'pending'
-                        check (status in ('pending', 'processing', 'completed', 'failed')),
+                        check (status in ('pending', 'processing', 'finalizing', 'completed', 'failed')),
   progress            integer     not null default 0,
   script              text,
   topic               text,
@@ -669,6 +669,7 @@ create table if not exists public.image_jobs (
   custom_style        text,
   scene_images        jsonb,
   credits_charged     integer     not null default 0,
+  cost_per_image      integer     not null default 0,
   credits_refunded_at timestamptz,
   error_message       text,
   created_at          timestamptz not null default now(),
