@@ -68,6 +68,8 @@ try {
 }
 
 const app = express()
+// Must be registered before express.json so the body stream isn't consumed before HMAC verification.
+app.use('/webhooks/secretslider', express.raw({ type: 'application/json', limit: '2mb' }))
 app.use(express.json({ limit: '2mb' }))
 
 const API_SECRET            = env('RAILWAY_API_SECRET')
@@ -7070,6 +7072,49 @@ async function recoverOrphanedImageJobs() {
     Sentry.captureException(e, { extra: { fn: 'recoverOrphanedImageJobs' } })
   }
 }
+
+// ── POST /webhooks/secretslider ──────────────────────────────────────────────
+// Receives event notifications from Secret Slider. No business logic here:
+// image_jobs, credits, and generation paths are not touched.
+app.post('/webhooks/secretslider', (req, res) => {
+  const SS_WH_SECRET = env('SECRETSLIDER_WEBHOOK_SECRET')
+  if (!SS_WH_SECRET) {
+    console.warn('[ss-webhook] SECRETSLIDER_WEBHOOK_SECRET not configured — refusing request')
+    return res.status(503).json({ ok: false, error: 'webhook not configured' })
+  }
+
+  const sigHeader = req.headers['x-slider-signature']
+  if (!sigHeader) {
+    return res.status(403).json({ ok: false, error: 'missing X-Slider-Signature' })
+  }
+
+  const eqIdx = sigHeader.indexOf('=')
+  if (eqIdx < 0 || sigHeader.slice(0, eqIdx) !== 'sha256') {
+    return res.status(403).json({ ok: false, error: 'invalid signature format' })
+  }
+  const sigHex = sigHeader.slice(eqIdx + 1)
+
+  const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)
+  const expected = crypto.createHmac('sha256', SS_WH_SECRET).update(rawBody).digest()
+  const actual   = Buffer.from(sigHex, 'hex')
+
+  // timingSafeEqual requires equal-length buffers; length mismatch means wrong signature.
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
+    return res.status(403).json({ ok: false, error: 'invalid signature' })
+  }
+
+  let event
+  try {
+    event = JSON.parse(rawBody.toString('utf8'))
+  } catch {
+    return res.status(400).json({ ok: false, error: 'invalid JSON body' })
+  }
+
+  const { event: evType, event_id, task_id, status, completed_subtasks, failed_subtasks } = event
+  console.log(`[ss-webhook] event=${evType} event_id=${event_id} task_id=${task_id} status=${status} completed=${completed_subtasks} failed=${failed_subtasks}`)
+
+  res.status(200).json({ ok: true })
+})
 
 // Must be added AFTER all routes
 Sentry.setupExpressErrorHandler(app)
