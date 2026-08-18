@@ -84,10 +84,6 @@ app.use(express.json({ limit: '2mb' }))
 // Poll-loop optimization only — not a safety gate. DB handles atomicity.
 const ssWebhookSignals = new Map() // jobId → { originalStatus, failed, arrivedAt }
 
-// Fallback for claimImageJobForFinalization when DB column is not yet available (migration pending).
-// Dropped on process restart — acceptable risk while migration is pending.
-const _ssClaimFallbackMap = new Map()
-
 setInterval(() => {
   const cutoff = Date.now() - 2 * 60 * 60 * 1000
   for (const [k, v] of ssWebhookSignals) if (v.arrivedAt < cutoff) ssWebhookSignals.delete(k)
@@ -324,22 +320,14 @@ async function claimImageJobForFinalization(jobId) {
     console.log(`[claimFinalization] job=${jobId.slice(0, 8)} won=${won} (db)`)
     return won
   } catch (e) {
-    // Column not yet added (migration pending) — fall back to in-memory Map.
-    // Safe within a single process; loses atomicity across restarts until migration is applied.
-    console.warn(`[claimFinalization] DB unavailable (migration pending?): ${e.message} — using fallback Map`)
-    if (_ssClaimFallbackMap.has(jobId)) return false
-    _ssClaimFallbackMap.set(jobId, Date.now())
-    return true
+    console.error('[claimFinalization] DB error:', e.message)
+    return false
   }
 }
 
 async function releaseImageJobClaim(jobId) {
-  try {
-    await sbPatch('image_jobs', `id=eq.${jobId}`, { finalization_claimed_at: null })
-  } catch (e) {
-    console.warn('[releaseImageJobClaim] DB unavailable:', e.message)
-    _ssClaimFallbackMap.delete(jobId)
-  }
+  await sbPatch('image_jobs', `id=eq.${jobId}`, { finalization_claimed_at: null })
+    .catch(e => console.warn('[releaseImageJobClaim]', e.message))
 }
 
 // Returns true if this is a new event (not duplicate), false if already seen.
