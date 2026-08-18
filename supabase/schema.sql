@@ -658,7 +658,7 @@ create table if not exists public.image_jobs (
   user_id             uuid        not null,
   engine              text        not null default 'secretslider',
   status              text        not null default 'pending'
-                        check (status in ('pending', 'processing', 'finalizing', 'completed', 'failed')),
+                        check (status in ('pending', 'processing', 'finalizing', 'completed', 'failed', 'awaiting_webhook')),
   progress            integer     not null default 0,
   script              text,
   topic               text,
@@ -701,3 +701,14 @@ create table if not exists public.ss_processed_events (
 );
 create index if not exists ss_processed_events_at_idx on public.ss_processed_events (processed_at);
 grant all on public.ss_processed_events to service_role;
+
+-- Migration: add awaiting_webhook to image_jobs status check constraint.
+-- Required for the poll-timeout fallback path: processImageJob sets this status when
+-- IMAGES_ASYNC_POLL_MAX_MIN is exceeded but the SS task is still running; the webhook
+-- handler finalises when the real webhook arrives (up to WATCHDOG_IMAGES_TIMEOUT_MIN).
+-- Run in Supabase SQL Editor:
+alter table public.image_jobs
+  drop constraint if exists image_jobs_status_check;
+alter table public.image_jobs
+  add constraint image_jobs_status_check
+    check (status in ('pending', 'processing', 'finalizing', 'completed', 'failed', 'awaiting_webhook'));
