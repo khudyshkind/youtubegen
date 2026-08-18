@@ -360,6 +360,15 @@ Lefiro (ранее YouTubeGen) — сервис генерации faceless-ви
 - **15 эндпоинтов работают, но отсутствуют в OpenAPI-спецификации** (21 задокументированная операция — неполный список): `generate-prompts`, `tasks`, `user-styles`, `generate-video`, `generate-preview`, `preview-variants`, `regenerate-image`, `generate-variation`, `task/{id}/download`.
 - **Вебхук-приёмник подключён к генерации** — `POST /webhooks/secretslider` на Railway, HMAC-SHA256. `webhook_url` и `webhook_secret` передаются при постановке задачи в SS. Webhook сигнализирует активному poll-циклу (`ssWebhookSignals` Map), тот пропускает следующий sleep и немедленно перепрашивает SS API — вся финализация (upload, кредиты, project) остаётся в одном месте. Идемпотентность через `ssProcessedEventIds` Map (event_id → timestamp, чистится раз в 2 ч). Опрос сохранён как fallback.
 
+**Живая приёмка вебхук-пути (2026-08-18, коммит `6d61c5b`):**
+- **JSON vs multipart:** `webhook_url` регистрируется только при `Content-Type: application/json` (`webhook_registered: true`). В `multipart/form-data` (`mode=visual`) поставщик игнорирует `webhook_url` → ответ `webhook_registered: null`. Текущий код `generateImagesSecretSlider` работает в multipart — вебхук не регистрируется на стороне SS; работает только poll-цикл.
+- **Финализация — оба пути:** и вебхук, и poll-цикл могут завершить job. Защита от двойного списания: **DB-атомарный claim** `PATCH image_jobs WHERE id=? AND finalization_claimed_at IS NULL RETURNING id` — 1 строка = выиграл, 0 строк = уже забрали.
+- **Дедупликация в БД:** таблица `ss_processed_events (event_id PRIMARY KEY)` — заменяет in-memory `ssProcessedEventIds` Map. Повторная доставка того же `event_id` возвращает `{"ok":true,"duplicate":true}`, списаний нет.
+- **Поставщик присылает два вебхука с разными `event_id` на одно событие** — наблюдалось живьём: `84e60658` и `a0a68b18` доставлены одновременно в 10:33:34.647 UTC на одну задачу. Штатный сценарий, не аномалия.
+- **Результат гонки (3 клеймера: 2 вебхука + poll):** выиграл webhook #1, `finalization_claimed_at: 2026-08-18T10:33:35.222`, `credit_transactions=2` (−400 кр). Счётчик не изменился после dedup-теста.
+
+**Удержание персонажа:** движок не удерживает персонажа автоматически. «The same man» без физических признаков игнорируется — визуальная преемственность только через повтор черт в промпте (`brown hair`, `blue jacket`, `red backpack` и т. п.). Проверено на задаче 64127 (2 сцены, один и тот же мужчина с рюкзаком на лугу).
+
 **Вывод для превью:** движок не годится. Нет ни одного из рычагов, которыми сокращается число попыток, а именно попытки, а не цена единицы, составляют затратную часть.
 
 ### Асинхронный пайплайн генерации иллюстраций (Δ11)

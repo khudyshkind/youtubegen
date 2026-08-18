@@ -93,3 +93,64 @@
 - cancel больше не вызывался
 - Новых задач в SS не создавалось
 - Кредиты вручную не начислялись и не возвращались
+
+---
+
+# Handoff — 2026-08-18
+
+## Цель сессии
+
+Полный acceptance-тест вебхук-пути (image_jobs → Secret Slider webhook → finalization, DB-claim, dedup), документирование результатов в файлы состояния.
+
+---
+
+## Ключевые факты, установленные сегодня
+
+### Acceptance-тест вебхук-пути (пункты 4–7, все пройдены)
+
+- **Инструмент запуска:** `railway run --service ytgen-video-server node <live-test.mjs>` — переменные Railway подставляются автоматически.
+- **job_id:** `23d6f4d5-b70a-482d-98b9-300c92f0faab`, task_id: `64127`.
+- **webhook_registered: true** — подтверждено из Railway-логов.
+- **scene_images:** 2 SS URL напрямую (тест с `project_id=null` → ветка `uploadImageUrlToStorage` не задействована).
+- **credit_transactions:** ровно 2 (−200 каждое), итого −400 кр, `op=image_secretslider`.
+- **finalization_claimed_at:** `2026-08-18T10:33:35.222+00:00`.
+- **Гонка (пункт 5):** SS доставил 2 вебхука с разными event_id (`84e60658`, `a0a68b18`) одновременно + poll-цикл → 3 клеймера, победил 1 (webhook #1), DB-claim отработал атомарно.
+- **Dedup (пункт 6):** первая доставка — `{"ok":true,"note":"already terminal"}`; вторая — `{"ok":true,"duplicate":true}`; credit_transactions не изменился.
+- **ss_processed_events:** 5 записей после теста, включая `acceptance-dedup-23d6f4d5`.
+
+### JSON vs multipart: webhook_url не регистрируется в multipart
+
+- `Content-Type: application/json` → `webhook_registered: true`.
+- `multipart/form-data` (`mode=visual`, текущий продакшн) → `webhook_registered: null`.
+- Следствие: в продакшне SS вебхук не отправляет — основной механизм poll-цикл. Вебхук-инфраструктура готова для будущего JSON-режима.
+
+### Что не проверено
+
+- Ветка `uploadImageUrlToStorage` при `project_id != null` (строка `index.js:7114`). В тесте `project_id=null`. В продакшне `project_id` всегда задан — ветка не прогонялась.
+
+---
+
+## Изменения файлов
+
+| файл | что изменено |
+|---|---|
+| `docs/CONTEXT.md` | +блок «Живая приёмка вебхук-пути 2026-08-18»: JSON vs multipart, DB-claim, ss_processed_events, dual-webhook; +удержание персонажа |
+| `docs/TASKS.md` | Пункт 3 «Асимметрия путей secretslider» закрыт `[x]`, коммит `6d61c5b`, результаты приёмки; отмечено непроверенное: ветка Storage upload |
+| `docs/handoff.md` | Добавлена секция 2026-08-18 (этот файл) |
+
+---
+
+## Открытые вопросы
+
+1. **multipart vs JSON-режим** — продакшн-путь не регистрирует `webhook_url`. Уточнить: поддерживает ли SS JSON + `num_images` + `aspect_ratio`? Если да — перевести постановку задачи на JSON и вебхук станет основным путём.
+2. **Storage upload branch** — `uploadImageUrlToStorage` при `project_id != null` не тестировалась. Проверить прогоном со студии (там `project_id` всегда задан).
+3. **Открытые вопросы из 2026-08-17** — `style='default'` невалидный (вне 106 значений), задача 63252 (11 картинок без image_job), `mode=visual` с именованными полями (`subject_image` и т. п.) — не закрыты.
+
+---
+
+## Что НЕ делалось (по соглашению)
+
+- Секреты не выводились
+- `railway up` не использовался
+- Кредиты вручную не начислялись и не возвращались
+- Новых задач в SS не создавалось (кроме acceptance-теста: 2 картинки)
