@@ -81,22 +81,16 @@ app.use(express.json({ limit: '2mb' }))
 // of each iteration: if present, skips the next sleep and re-polls SS immediately
 // to get the final status and image URLs through the normal code path.
 // This keeps all finalization logic (upload, credits, project update) in one place.
+// Poll-loop optimization only — not a safety gate. DB handles atomicity.
 const ssWebhookSignals = new Map() // jobId → { originalStatus, failed, arrivedAt }
 
-// In-memory finalization claim lock. Single-instance Railway deployment means this is
-// sufficient for atomicity between the webhook handler and the poll loop.
-// jobId → claimedAt (ms)
-const ssFinalizationClaimed = new Map()
-
-// Event deduplication: prevents double-processing when SS re-delivers an event.
-// Stored in-memory; survives the expected re-delivery window (minutes to hours).
-const ssProcessedEventIds = new Map() // event_id → processedAt (ms)
+// Fallback for claimImageJobForFinalization when DB column is not yet available (migration pending).
+// Dropped on process restart — acceptable risk while migration is pending.
+const _ssClaimFallbackMap = new Map()
 
 setInterval(() => {
   const cutoff = Date.now() - 2 * 60 * 60 * 1000
-  for (const [k, v] of ssProcessedEventIds) if (v < cutoff) ssProcessedEventIds.delete(k)
   for (const [k, v] of ssWebhookSignals) if (v.arrivedAt < cutoff) ssWebhookSignals.delete(k)
-  for (const [k, v] of ssFinalizationClaimed) if (v < cutoff) ssFinalizationClaimed.delete(k)
 }, 15 * 60 * 1000).unref()
 
 const API_SECRET            = env('RAILWAY_API_SECRET')
@@ -306,6 +300,71 @@ async function sbPatch(table, qs, body) {
   const res = await fetch(url, { method: 'PATCH', headers: sbHeaders(), body: JSON.stringify(body) })
   if (!res.ok) throw new Error(`sbPatch ${table}: ${res.status} ${await res.text().catch(() => '')}`)
   return res.status === 204 ? [] : res.json()
+}
+
+// ── SS finalization claim & event dedup (DB-backed, survives restarts) ────────
+//
+// Atomic claim query (Supabase REST PATCH = conditional UPDATE):
+//   UPDATE image_jobs
+//   SET finalization_claimed_at = now()
+//   WHERE id = '{jobId}' AND finalization_claimed_at IS NULL
+//   RETURNING id;
+//   → 1 row = we own the claim; 0 rows = already claimed.
+//
+// Requires migration: ALTER TABLE image_jobs ADD COLUMN IF NOT EXISTS finalization_claimed_at timestamptz;
+//
+async function claimImageJobForFinalization(jobId) {
+  try {
+    const rows = await sbPatch(
+      'image_jobs',
+      `id=eq.${jobId}&finalization_claimed_at=is.null`,
+      { finalization_claimed_at: new Date().toISOString() }
+    )
+    const won = Array.isArray(rows) && rows.length > 0
+    console.log(`[claimFinalization] job=${jobId.slice(0, 8)} won=${won} (db)`)
+    return won
+  } catch (e) {
+    // Column not yet added (migration pending) — fall back to in-memory Map.
+    // Safe within a single process; loses atomicity across restarts until migration is applied.
+    console.warn(`[claimFinalization] DB unavailable (migration pending?): ${e.message} — using fallback Map`)
+    if (_ssClaimFallbackMap.has(jobId)) return false
+    _ssClaimFallbackMap.set(jobId, Date.now())
+    return true
+  }
+}
+
+async function releaseImageJobClaim(jobId) {
+  try {
+    await sbPatch('image_jobs', `id=eq.${jobId}`, { finalization_claimed_at: null })
+  } catch (e) {
+    console.warn('[releaseImageJobClaim] DB unavailable:', e.message)
+    _ssClaimFallbackMap.delete(jobId)
+  }
+}
+
+// Returns true if this is a new event (not duplicate), false if already seen.
+// Requires migration: CREATE TABLE ss_processed_events (event_id text PRIMARY KEY, ...);
+// INSERT ON CONFLICT DO NOTHING; empty result = duplicate event.
+async function markWebhookEventProcessed(eventId) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/ss_processed_events`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation,resolution=ignore-duplicates',
+      },
+      body: JSON.stringify({ event_id: String(eventId) }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) return true // fail open: process the event
+    const rows = await res.json()
+    return Array.isArray(rows) && rows.length > 0
+  } catch (e) {
+    console.error('[markWebhookEventProcessed] exception:', e.message)
+    return true // fail open
+  }
 }
 
 async function updateJob(jobId, data) {
@@ -6183,7 +6242,7 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${imgFmtSec(b.start)}�
   }))
 }
 
-async function imgGenerateSecretSlider(prompts, jobId) {
+async function imgGenerateSecretSlider(prompts, jobId, opts = {}) {
   const apiKey = env('SECRETSLIDER_API_KEY')
   if (!apiKey) throw new Error('[secretslider] SECRETSLIDER_API_KEY not configured')
 
@@ -6208,28 +6267,39 @@ async function imgGenerateSecretSlider(prompts, jobId) {
     console.warn('[secretslider] tasks/active check failed, proceeding:', err instanceof Error ? err.message : String(err))
   }
 
-  const form = new FormData()
-  form.append('mode', 'visual')
-  form.append('prompts', JSON.stringify(prompts))
-  form.append('num_images', '1')
-  form.append('aspect_ratio', '16:9')
-
   const ssWebhookSecret = process.env.SECRETSLIDER_WEBHOOK_SECRET
   const webhookUrl = (ssWebhookSecret && jobId) ? `${SERVER_URL}/webhooks/secretslider` : null
-  if (webhookUrl) {
-    form.append('webhook_url', webhookUrl)
-    form.append('webhook_secret', ssWebhookSecret)
+
+  let genRes
+  if (opts.subjectImageBlob) {
+    // Multipart path: only when a subject_image file blob is provided (not the default path).
+    // NOTE: SS API does not register webhook_url in multipart mode (returns webhook_registered=null).
+    const form = new FormData()
+    form.append('mode', 'visual')
+    form.append('prompts', JSON.stringify(prompts))
+    form.append('num_images', '1')
+    form.append('aspect_ratio', '16:9')
+    if (webhookUrl) { form.append('webhook_url', webhookUrl); form.append('webhook_secret', ssWebhookSecret) }
+    form.append('subject_image', opts.subjectImageBlob, 'reference.jpg')
+    console.log(`[secretslider] POST multipart: prompts=${prompts.length} webhook=${webhookUrl ?? '(none)'}`)
+    genRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/generate`, {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
+      body: form,
+      signal: AbortSignal.timeout(30_000),
+    })
+  } else {
+    // JSON path (default): SS registers webhook_url and returns webhook_registered=true.
+    const body = { mode: 'visual', prompts, num_images: 1, aspect_ratio: '16:9' }
+    if (webhookUrl) { body.webhook_url = webhookUrl; body.webhook_secret = ssWebhookSecret }
+    console.log(`[secretslider] POST json: prompts=${prompts.length} webhook=${webhookUrl ?? '(none)'}`)
+    genRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/generate`, {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey, 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    })
   }
-
-  // Log request body (for diagnostics — webhook_secret replaced with length)
-  console.log(`[secretslider] POST /api/v2/generate fields: mode=visual num_images=1 aspect_ratio=16:9 prompts_count=${prompts.length} webhook_url=${webhookUrl ?? '(none)'} webhook_secret_len=${ssWebhookSecret ? ssWebhookSecret.length : 0}`)
-
-  const genRes = await fetch(`${IMG_SS_ORIGIN}/api/v2/generate`, {
-    method: 'POST',
-    headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
-    body: form,
-    signal: AbortSignal.timeout(30_000),
-  })
   if (genRes.status === 429) {
     const body = await genRes.text().catch(() => '')
     let retrySec = 0
@@ -6245,6 +6315,9 @@ async function imgGenerateSecretSlider(prompts, jobId) {
   const { task_id: taskId, webhook_registered } = genJson
   if (!taskId) throw new Error('[secretslider] no task_id in response')
   console.log(`[secretslider] POST /api/v2/generate response: task_id=${taskId} webhook_registered=${webhook_registered ?? 'n/a'} full=${JSON.stringify(genJson)}`)
+  if (webhookUrl && webhook_registered !== true) {
+    console.warn(`[secretslider] webhook_registered=${webhook_registered ?? 'null'} — task will be finalized by poll loop only`)
+  }
   if (jobId) {
     await updateImageJob(jobId, { provider_task_id: taskId })
     console.log(`[images-async] provider task id: ${taskId}`)
@@ -7031,15 +7104,6 @@ async function recoverOrphanedImageJobs() {
 
 // ── SS job finalization helpers ───────────────────────────────────────────────
 
-// Returns true if THIS caller claimed finalization rights, false if another caller
-// already claimed. In-memory lock is sufficient because Railway runs a single instance —
-// the webhook handler and the poll loop share the same process and Map.
-function claimImageJobForFinalization(jobId) {
-  if (ssFinalizationClaimed.has(jobId)) return false
-  ssFinalizationClaimed.set(jobId, Date.now())
-  return true
-}
-
 // Shared finalization: upload images, charge credits per image, update job status.
 // Called by both the poll loop (with full scene metadata) and the webhook handler (scenes=null).
 // Does not throw — all errors are caught internally and result in status='failed'.
@@ -7180,12 +7244,14 @@ app.post('/webhooks/secretslider', async (req, res) => {
   console.log(`[ss-webhook] event=${evType} event_id=${event_id} task_id=${task_id} status=${status} completed=${completed_subtasks} failed=${failed_subtasks}`)
 
   // ── 1. Event deduplication ─────────────────────────────────────────────────
-  // ssProcessedEventIds is a Map<event_id, processedAt> pruned every 2 h.
-  if (event_id && ssProcessedEventIds.has(String(event_id))) {
-    console.log(`[ss-webhook] duplicate event_id=${event_id} — no-op`)
-    return res.status(200).json({ ok: true, duplicate: true })
+  // DB-backed: INSERT bot_settings key=ss_evtid:{event_id} ON CONFLICT DO NOTHING.
+  if (event_id) {
+    const isNew = await markWebhookEventProcessed(event_id)
+    if (!isNew) {
+      console.log(`[ss-webhook] duplicate event_id=${event_id} — no-op`)
+      return res.status(200).json({ ok: true, duplicate: true })
+    }
   }
-  if (event_id) ssProcessedEventIds.set(String(event_id), Date.now())
 
   // ── 2. Find image_job by provider_task_id ──────────────────────────────────
   let job = null
@@ -7212,12 +7278,15 @@ app.post('/webhooks/secretslider', async (req, res) => {
   // ── 4. Determine outcome ───────────────────────────────────────────────────
   const isFailed = evType === 'task.failed' || evType === 'task.canceled'
     || status === 'failed' || status === 'canceled'
+  const isPartial = evType === 'task.partial_success' || status === 'partial_success'
+  if (isPartial) console.log(`[ss-webhook] job=${job.id.slice(0, 8)} partial_success — finalizing with available images`)
 
   // ── 5. Claim — only one caller (webhook or poll loop) finalizes ─────────────
-  const claimed = claimImageJobForFinalization(job.id)
+  // DB-atomic: INSERT bot_settings key=ss_fclaim:{jobId} ON CONFLICT DO NOTHING.
+  const claimed = await claimImageJobForFinalization(job.id)
 
   if (!claimed) {
-    // Poll loop already claimed finalization — signal it to skip sleep (optimization).
+    // Another handler already claimed — signal poll loop as optimization (it may skip sleep).
     ssWebhookSignals.set(job.id, { originalStatus: status ?? evType, failed: isFailed, arrivedAt: Date.now() })
     console.log(`[ss-webhook] job=${job.id.slice(0, 8)} claim lost — signaled poll loop`)
     return res.status(200).json({ ok: true, note: 'poll loop owns finalization' })
@@ -7261,8 +7330,7 @@ app.post('/webhooks/secretslider', async (req, res) => {
 
   if (ssUrls.length === 0) {
     console.warn(`[ss-webhook] job=${job.id.slice(0, 8)} no URLs from SS — releasing claim`)
-    // Release in-memory claim so the poll loop can finalize
-    ssFinalizationClaimed.delete(job.id)
+    await releaseImageJobClaim(job.id)
     ssWebhookSignals.set(job.id, { originalStatus: status ?? evType, failed: false, arrivedAt: Date.now() })
     return res.status(200).json({ ok: true, note: 'no URLs yet — poll loop will finalize' })
   }

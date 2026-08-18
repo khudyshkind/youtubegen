@@ -683,3 +683,21 @@ create index if not exists image_jobs_project_id_idx  on public.image_jobs (proj
 create index if not exists image_jobs_created_at_idx  on public.image_jobs (created_at);
 
 grant all on public.image_jobs to service_role;
+
+-- Migration: finalization_claimed_at — DB-atomic claim (replaces in-memory Map).
+-- Claimed by webhook handler or poll loop via PATCH WHERE finalization_claimed_at IS NULL.
+-- Run in Supabase SQL Editor:
+--   ALTER TABLE public.image_jobs
+--     ADD COLUMN IF NOT EXISTS finalization_claimed_at timestamptz;
+alter table public.image_jobs
+  add column if not exists finalization_claimed_at timestamptz;
+
+-- Migration: SS webhook event dedup table (replaces ssProcessedEventIds in-memory Map).
+-- INSERT ON CONFLICT DO NOTHING; rows with event_id already present are duplicates.
+-- Run in Supabase SQL Editor:
+create table if not exists public.ss_processed_events (
+  event_id     text        primary key,
+  processed_at timestamptz not null default now()
+);
+create index if not exists ss_processed_events_at_idx on public.ss_processed_events (processed_at);
+grant all on public.ss_processed_events to service_role;
