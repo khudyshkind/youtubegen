@@ -3876,6 +3876,26 @@ async function runWatchdog() {
     }
   } catch (e) { console.warn(`${tag} image_jobs query failed:`, e.message) }
 
+  // Expire awaiting_webhook jobs after 4 hours: SS is unlikely to deliver at that point.
+  // 4 h = 8× our poll_max (30 min); gives headroom for extreme SS queue delays seen in practice.
+  try {
+    const cutoffWebhook = new Date(now - 4 * 60 * 60_000).toISOString()
+    const wRows = await sbGet('image_jobs',
+      `status=eq.awaiting_webhook&updated_at=lt.${cutoffWebhook}&select=id,project_id,user_id,credits_charged,credits_refunded_at,updated_at`)
+    for (const row of (Array.isArray(wRows) ? wRows : [])) {
+      const ageMin = Math.round((now - new Date(row.updated_at).getTime()) / 60_000)
+      console.log(`${tag} image_job ${row.id.slice(0, 8)} awaiting_webhook expired (${ageMin}min > 240min)`)
+      if (!WATCHDOG_DRY_RUN) {
+        await updateImageJob(row.id, { status: 'failed', error_message: 'Вебхук от поставщика не получен в течение 4 часов' })
+        if (row.project_id) {
+          await sbPatch('projects', `id=eq.${row.project_id}&status=eq.generating_images`, { status: 'failed' })
+            .catch(e => console.warn(`${tag} project reset for ${row.id}:`, e.message))
+        }
+      }
+      resets.push({ type: 'image_job_webhook', id: row.id, project_id: row.project_id, ageMin, creditsCharged: row.credits_charged ?? 0, needsRefund: false })
+    }
+  } catch (e) { console.warn(`${tag} awaiting_webhook query failed:`, e.message) }
+
   if (resets.length === 0) { console.log(`${tag} clean`); return }
 
   if (!OWNER_ID) return
@@ -6386,7 +6406,7 @@ async function imgGenerateSecretSlider(prompts, jobId, opts = {}) {
   const lastStatus = finalPoll?.status ?? lastPoll?.status ?? 'unreachable'
   const lastImages = finalPoll?.results?.image_urls?.length ?? lastPoll?.results?.image_urls?.length ?? 0
   console.log(`[secretslider] task NOT done: task=${taskId} prompts=${prompts.length} waited=${waited}s last_status=${lastStatus} images=${lastImages}`)
-  throw new Error('Генерация не завершилась в отведённое время. Кредиты за неполученные изображения не списаны. Попробуйте повторить.')
+  throw Object.assign(new Error('Генерация не завершилась в отведённое время. Ожидаем вебхук от поставщика.'), { ssTimeout: true })
 }
 
 async function processImageJob(jobId, body) {
@@ -6485,6 +6505,17 @@ async function processImageJob(jobId, body) {
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    // SS poll timeout: don't declare failure yet — wait for webhook finalization.
+    // Credits haven't been charged, so no refund needed.
+    if (err?.ssTimeout === true) {
+      console.log(`[image-job:${jobId}] poll timeout → awaiting_webhook`)
+      await updateImageJob(jobId, { status: 'awaiting_webhook', progress: 50, error_message: null })
+      if (OWNER_ID) {
+        tgApi('sendMessage', { chat_id: OWNER_ID, text: `⏳ image_job ${jobId.slice(0, 8)} awaiting_webhook (SS >${Math.round((Date.now() - t0Request) / 60_000)}min)` })
+          .catch(() => {})
+      }
+      return
+    }
     console.error(`[image-job:${jobId}] failed:`, msg)
     Sentry.captureException(err, { extra: { jobId, project_id, user_id, engine } })
     await updateImageJob(jobId, { status: 'failed', error_message: msg })
@@ -7245,7 +7276,7 @@ app.post('/webhooks/secretslider', async (req, res) => {
   let job = null
   if (task_id) {
     try {
-      const rows = await sbGet('image_jobs', `provider_task_id=eq.${task_id}&select=id,status,user_id,project_id,engine,image_interval,image_style,duration_sec`)
+      const rows = await sbGet('image_jobs', `provider_task_id=eq.${task_id}&select=id,status,finalization_claimed_at,user_id,project_id,engine,image_interval,image_style,duration_sec`)
       job = Array.isArray(rows) ? rows[0] : null
     } catch (e) {
       console.error('[ss-webhook] image_jobs lookup failed:', e.message)
@@ -7257,9 +7288,15 @@ app.post('/webhooks/secretslider', async (req, res) => {
     return res.status(200).json({ ok: true, note: 'no matching job' })
   }
 
-  // ── 3. Skip if job is already past processing ──────────────────────────────
-  if (job.status !== 'processing') {
-    console.log(`[ss-webhook] job=${job.id.slice(0, 8)} already status=${job.status} — no-op`)
+  // ── 3. Skip if finalization already claimed or job completed ──────────────
+  // Use finalization_claimed_at as the idempotency gate so that jobs that
+  // timed out into awaiting_webhook (or even failed) are still finalized.
+  if (job.finalization_claimed_at) {
+    console.log(`[ss-webhook] job=${job.id.slice(0, 8)} already finalized (claimed) — no-op`)
+    return res.status(200).json({ ok: true, note: 'already claimed' })
+  }
+  if (job.status === 'completed') {
+    console.log(`[ss-webhook] job=${job.id.slice(0, 8)} already completed — no-op`)
     return res.status(200).json({ ok: true, note: 'already terminal' })
   }
 

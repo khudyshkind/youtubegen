@@ -631,10 +631,23 @@ export default function Step5Images() {
             })))
             void refreshCredits()
             resolve()
+          } else if (statusJson.status === 'awaiting_webhook') {
+            // Poll timeout on Railway — SS is still generating, webhook will finalize.
+            // Keep polling; show informational progress text.
+            setProgress({ completed: 0, total: count })
           } else if (statusJson.status === 'failed') {
             clearInterval(iv)
             if (projectId) localStorage.removeItem(jobStoreKey(projectId))
-            reject(new Error(statusJson.error_message ?? t('step5.err_gen')))
+            const rawMsg = statusJson.error_message ?? t('step5.err_gen')
+            if (rawMsg.startsWith('SS_BUSY:')) {
+              const secs = parseInt(rawMsg.slice('SS_BUSY:'.length), 10) || 0
+              reject(new Error(secs > 0
+                ? t('step5.err_ss_busy_wait').replace('{secs}', String(secs))
+                : t('step5.err_ss_busy')
+              ))
+            } else {
+              reject(new Error(rawMsg))
+            }
           }
         } catch (pollErr) {
           consecutiveFailures++
