@@ -118,6 +118,8 @@ function buildPrompt(
 
 
 export async function POST(request: NextRequest) {
+  let alertUserId: string | undefined
+  let alertProjectId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -125,6 +127,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
+    alertUserId = user.id
 
     const body = await request.json() as {
       script?: string
@@ -145,6 +148,7 @@ export async function POST(request: NextRequest) {
       output_lang = 'ru',
       project_id,
     } = body
+    alertProjectId = project_id ?? undefined
 
     if (!script?.trim()) {
       return NextResponse.json({ ok: false, error: 'Текст не может быть пустым' }, { status: 400 })
@@ -258,8 +262,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/enhance-script] error:', msg)
-    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/enhance-script').catch(() => {})
-    else await notifyError('/generate/enhance-script', msg).catch(() => {})
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/enhance-script', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
+    else await notifyError('/generate/enhance-script', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка усиления текста' }, { status: 500 })
   }
 }

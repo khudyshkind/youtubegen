@@ -1,6 +1,11 @@
 import { createServiceClient } from './supabase-server'
 import { env } from './env'
 
+export interface AlertCtx {
+  userId?: string
+  projectId?: string
+}
+
 export async function sendTelegramAlert(text: string): Promise<void> {
   const botToken = env('TELEGRAM_BOT_TOKEN')
   const ownerId = env('TELEGRAM_OWNER_ID')
@@ -30,16 +35,46 @@ export function isBillingError(msg: string): boolean {
   )
 }
 
+async function buildUserBlock(ctx?: AlertCtx): Promise<string> {
+  const uid = ctx?.userId
+  if (!uid) return '👤 <i>пользователь не определён</i>'
+  try {
+    const svc = createServiceClient()
+    const { data } = await svc
+      .from('profiles')
+      .select('email, plan, plan_credits, purchased_credits')
+      .eq('id', uid)
+      .single()
+    if (!data) return `👤 <i>пользователь не определён</i> <code>${uid.slice(0, 8)}</code>`
+    const p = data as { email?: string; plan?: string; plan_credits?: number; purchased_credits?: number }
+    const plan = p.plan ?? '?'
+    const isPaying = plan !== 'free'
+    const balance = (p.plan_credits ?? 0) + (p.purchased_credits ?? 0)
+    const lines = [
+      `👤 ${p.email ?? uid}`,
+      `Тариф: <b>${plan}</b>${isPaying ? ' ✓' : ''}`,
+      `Кредиты: ${new Intl.NumberFormat('ru-RU').format(balance)}`,
+    ]
+    if (ctx?.projectId) lines.push(`Проект: <code>${ctx.projectId.slice(0, 8)}</code>`)
+    return lines.join('\n')
+  } catch {
+    return `👤 <i>пользователь не определён</i> <code>${uid.slice(0, 8)}</code>`
+  }
+}
+
 // Generic generation-error alert with 1-hour dedup per route+error-class.
 // Covers timeouts, overload (529), rate-limit (429), and unexpected crashes.
 // Safe to call with .catch(() => {}) — never throws to the caller.
-export async function notifyError(route: string, msg: string): Promise<void> {
+export async function notifyError(route: string, msg: string, ctx?: AlertCtx): Promise<void> {
   const errorClass = /timeout|TimeoutError|ETIMEDOUT/i.test(msg) ? 'timeout'
     : /529|overloaded/i.test(msg) ? 'overload'
     : /429|rate.?limit/i.test(msg) ? 'rate_limit'
     : 'error'
+  const buildMsg = (userBlock: string) =>
+    `🟡 <b>Generation error</b>\n\n${userBlock}\n\nRoute: <code>${route}</code>\nClass: <b>${errorClass}</b>\n<code>${msg.slice(0, 200)}</code>\n${new Date().toUTCString()}`
   try {
     const svc = createServiceClient()
+    const userBlock = await buildUserBlock(ctx)
     const threshold = new Date(Date.now() - 60 * 60 * 1000).toISOString()
     const now = new Date().toISOString()
     const alertKey = `error_alert_ts:${route}:${errorClass}`
@@ -50,21 +85,18 @@ export async function notifyError(route: string, msg: string): Promise<void> {
       .lt('value', threshold)
       .select('key')
     if ((updated?.length ?? 0) > 0) {
-      await sendTelegramAlert(
-        `🟡 <b>Generation error</b>\nRoute: <code>${route}</code>\nClass: <b>${errorClass}</b>\n<code>${msg.slice(0, 200)}</code>\n${new Date().toUTCString()}`
-      )
+      await sendTelegramAlert(buildMsg(userBlock))
       return
     }
     const { error: insertErr } = await svc.from('bot_settings').insert({ key: alertKey, value: now })
     if (!insertErr) {
-      await sendTelegramAlert(
-        `🟡 <b>Generation error</b>\nRoute: <code>${route}</code>\nClass: <b>${errorClass}</b>\n<code>${msg.slice(0, 200)}</code>\n${new Date().toUTCString()}`
-      )
+      await sendTelegramAlert(buildMsg(userBlock))
     }
   } catch {
-    await sendTelegramAlert(
-      `🟡 <b>Generation error</b>\nRoute: <code>${route}</code>\nClass: <b>${errorClass}</b>\n<code>${msg.slice(0, 200)}</code>\n${new Date().toUTCString()}`
-    ).catch(() => {})
+    const userBlock = ctx?.userId
+      ? `👤 <code>${ctx.userId.slice(0, 8)}</code>`
+      : '👤 <i>пользователь не определён</i>'
+    await sendTelegramAlert(buildMsg(userBlock)).catch(() => {})
   }
 }
 
@@ -107,9 +139,12 @@ export async function notifyUserTelegram(userId: string, text: string): Promise<
 // Send a billing-exhaustion alert to Telegram with 1-hour dedup via bot_settings.
 // Uses atomic UPDATE-if-old + INSERT-if-missing to avoid sending N alerts under parallel load.
 // Safe to call with .catch(() => {}) — never throws to the caller.
-export async function notifyBillingError(service: string, route: string): Promise<void> {
+export async function notifyBillingError(service: string, route: string, ctx?: AlertCtx): Promise<void> {
+  const buildMsg = (userBlock: string) =>
+    `🔴 <b>Billing error: ${service}</b>\n\n${userBlock}\n\nRoute: <code>${route}</code>\n${new Date().toUTCString()}\n<a href="https://console.anthropic.com/settings/billing">Пополнить баланс →</a>`
   try {
     const svc = createServiceClient()
+    const userBlock = await buildUserBlock(ctx)
     const threshold = new Date(Date.now() - 60 * 60 * 1000).toISOString()
     const now = new Date().toISOString()
 
@@ -124,9 +159,7 @@ export async function notifyBillingError(service: string, route: string): Promis
 
     if ((updated?.length ?? 0) > 0) {
       // We won the race — exactly one concurrent call gets here.
-      await sendTelegramAlert(
-        `🔴 <b>Billing error: ${service}</b>\nRoute: <code>${route}</code>\n${new Date().toUTCString()}\n<a href="https://console.anthropic.com/settings/billing">Пополнить баланс →</a>`
-      )
+      await sendTelegramAlert(buildMsg(userBlock))
       return
     }
 
@@ -136,15 +169,14 @@ export async function notifyBillingError(service: string, route: string): Promis
       .insert({ key: alertKey, value: now })
 
     if (!insertErr) {
-      await sendTelegramAlert(
-        `🔴 <b>Billing error: ${service}</b>\nRoute: <code>${route}</code>\n${new Date().toUTCString()}\n<a href="https://console.anthropic.com/settings/billing">Пополнить баланс →</a>`
-      )
+      await sendTelegramAlert(buildMsg(userBlock))
     }
     // If insertErr = duplicate key: another concurrent call already inserted, skip.
   } catch {
     // DB unreachable — send alert anyway (better noisy than silent)
-    await sendTelegramAlert(
-      `🔴 <b>Billing error: ${service}</b>\nRoute: <code>${route}</code>\n${new Date().toUTCString()}\n<a href="https://console.anthropic.com/settings/billing">Пополнить баланс →</a>`
-    ).catch(() => {})
+    const userBlock = ctx?.userId
+      ? `👤 <code>${ctx.userId.slice(0, 8)}</code>`
+      : '👤 <i>пользователь не определён</i>'
+    await sendTelegramAlert(buildMsg(userBlock)).catch(() => {})
   }
 }

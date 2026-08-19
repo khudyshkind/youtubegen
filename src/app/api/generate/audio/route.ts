@@ -536,6 +536,7 @@ async function uploadTextToStorage(text: string, userId: string, projectId: stri
 export async function POST(request: NextRequest) {
   const t0Request = Date.now()
   let userId: string | null = null
+  let alertProjectId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -563,6 +564,7 @@ export async function POST(request: NextRequest) {
       apihost_lang = 'ru-RU',
       apihost_pitch = 1.0,
     } = body
+    alertProjectId = project_id ?? undefined
 
     if (!text || !voice_id) {
       return NextResponse.json({ ok: false, error: 'Текст и голос обязательны' }, { status: 400 })
@@ -924,7 +926,7 @@ export async function POST(request: NextRequest) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/audio] unexpected error:', msg)
     Sentry.captureException(error)
-    await notifyError('/generate/audio', msg).catch(() => {})
+    await notifyError('/generate/audio', msg, { userId: userId ?? undefined, projectId: alertProjectId }).catch(() => {})
     if (userId && Date.now() - t0Request > 90_000) {
       const appUrl = env('NEXT_PUBLIC_APP_URL') || ''
       await notifyUserTelegram(

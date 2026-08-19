@@ -9,16 +9,20 @@ import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 export const maxDuration = 30
 
 export async function POST(request: NextRequest) {
+  let alertUserId: string | undefined
+  let alertProjectId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
+    alertUserId = user.id
 
     const formData = await request.formData()
     const file = formData.get('image') as File | null
     const projectId = formData.get('project_id') as string | null
+    alertProjectId = projectId ?? undefined
 
     if (!file) {
       return NextResponse.json({ ok: false, error: 'Изображение обязательно' }, { status: 400 })
@@ -91,8 +95,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analyze-style]', msg)
-    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/analyze-style').catch(() => {})
-    else await notifyError('/generate/analyze-style', msg).catch(() => {})
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/analyze-style', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
+    else await notifyError('/generate/analyze-style', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка анализа стиля' }, { status: 500 })
   }
 }

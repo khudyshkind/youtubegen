@@ -249,10 +249,12 @@ export async function POST(req: NextRequest) {
   let lang = 'ru'
   let userHasKey = false
   let plan = 'free'
+  let alertUserId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
+    alertUserId = user.id
 
     const body = await req.json() as { channel?: string; lang?: string; ui_lang?: string }
     const channelInput = body.channel?.trim() ?? ''
@@ -683,7 +685,7 @@ export async function POST(req: NextRequest) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[analytics/channel] fatal error:', msg)
     if (isYouTubeKeyError(msg)) return youTubeKeyErrorResponse(lang)
-    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/analytics/channel').catch(() => {})
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/analytics/channel', { userId: alertUserId }).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Сервис временно недоступен — попробуйте позже' }, { status: 500 })
   }
 }

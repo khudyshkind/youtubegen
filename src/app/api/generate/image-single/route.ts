@@ -218,6 +218,8 @@ async function generateGptMini(
 }
 
 export async function POST(request: NextRequest) {
+  let alertUserId: string | undefined
+  let alertProjectId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -225,9 +227,11 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
+    alertUserId = user.id
 
     const body: SingleImageRequest = await request.json()
     const { project_id, scene_index, prompt, engine = 'flux', image_style, custom_style } = body
+    alertProjectId = project_id ?? undefined
 
     if (!project_id || scene_index === undefined || !prompt?.trim()) {
       return NextResponse.json(
@@ -343,8 +347,8 @@ export async function POST(request: NextRequest) {
     if (msg.includes('верификация') || msg.toLowerCase().includes('verif')) {
       return NextResponse.json({ ok: false, error: msg }, { status: 403 })
     }
-    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/image-single').catch(() => {})
-    else await notifyError('/generate/image-single', msg).catch(() => {})
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/image-single', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
+    else await notifyError('/generate/image-single', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка генерации иллюстрации' }, { status: 500 })
   }
 }

@@ -589,15 +589,19 @@ async function createThumbnailBuffer(bgDataUrl: string, title: string, refStyle?
 // ─── Route ─────────────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  let alertUserId: string | undefined
+  let alertProjectId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
+    alertUserId = user.id
 
     const body: ThumbnailRequest = await request.json()
     const { project_id, title, topic, bg_url, dry_run, custom_prompt, ref_style, ref_url, text_mode = 'overlay', image_style } = body
+    alertProjectId = project_id ?? undefined
 
     if (!title?.trim() || !topic?.trim()) {
       return NextResponse.json(
@@ -765,8 +769,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[thumbnail]', msg)
-    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/thumbnail').catch(() => {})
-    else await notifyError('/generate/thumbnail', msg).catch(() => {})
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/thumbnail', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
+    else await notifyError('/generate/thumbnail', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка генерации превью' }, { status: 500 })
   }
 }

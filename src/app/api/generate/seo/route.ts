@@ -127,6 +127,8 @@ Tags should cover: main topic entity, key subtopics, related concepts, content f
 OUTPUT LANGUAGE: Write all output (titles, description, hashtags, tags) in the same language as the video topic and script provided.`
 
 export async function POST(request: NextRequest) {
+  let alertUserId: string | undefined
+  let alertProjectId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -134,12 +136,14 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
+    alertUserId = user.id
 
     const check = await requireCredits(user.id, 'seo', supabase)
     if (!check.ok) return NextResponse.json(check, { status: 402 })
 
     const { script, topic, project_id, duration_minutes = 5, subtitle_blocks, lang: clientLang }: SeoRequest =
       await request.json()
+    alertProjectId = project_id ?? undefined
 
     // Language resolution: DB is authoritative when project_id is known.
     // Priority: projects.language (DB) → clientLang → undefined (model auto-detects).
@@ -231,8 +235,8 @@ ${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, descrip
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/seo]', msg)
-    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/seo').catch(() => {})
-    else await notifyError('/generate/seo', msg).catch(() => {})
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/seo', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
+    else await notifyError('/generate/seo', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     if (isAnthropicOverload(error)) {
       return NextResponse.json({ ok: false, error: 'Нейросеть перегружена — попробуйте через минуту', code: 'OVERLOADED' }, { status: 503 })
     }

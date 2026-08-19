@@ -3130,17 +3130,38 @@ const APIHOST_BALANCE_ALERT_THRESHOLD  = parseFloat(env('APIHOST_BALANCE_ALERT_T
 const SV_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SV_BALANCE_ALERT_THRESHOLD')       || '100')
 
 // Send billing-exhaustion alert from Railway with 1h dedup per service.
-async function notifyBillingErrorRailway(service, route) {
+async function notifyBillingErrorRailway(service, route, userId, projectId) {
   const key = `billing_alert_ts:${service.toLowerCase()}`
   try {
     const lastAlert = await getSetting(key)
     const hoursSince = lastAlert ? (Date.now() - new Date(lastAlert).getTime()) / 3_600_000 : Infinity
     if (hoursSince < 1) return
     await setSetting(key, new Date().toISOString())
+
+    let userBlock = '👤 пользователь не определён'
+    if (userId) {
+      try {
+        const rows = await sbGet('profiles', `id=eq.${encodeURIComponent(userId)}&select=email,plan,plan_credits,purchased_credits`)
+        const p = rows?.[0]
+        if (p) {
+          const plan = p.plan ?? '?'
+          const isPaying = plan !== 'free'
+          const balance = (p.plan_credits ?? 0) + (p.purchased_credits ?? 0)
+          const lines = [
+            `👤 ${p.email ?? userId}`,
+            `Тариф: ${plan}${isPaying ? ' ✓' : ''}`,
+            `Кредиты: ${balance.toLocaleString('ru-RU')}`,
+          ]
+          if (projectId) lines.push(`Проект: ${String(projectId).slice(0, 8)}`)
+          userBlock = lines.join('\n')
+        }
+      } catch { /* non-fatal — send alert without user info */ }
+    }
+
     if (OWNER_ID) {
       await tgApi('sendMessage', {
         chat_id: OWNER_ID,
-        text: `🔴 Billing error: ${service}\nRoute: ${route}\n${new Date().toUTCString()}`,
+        text: `🔴 Billing error: ${service}\n\n${userBlock}\n\nRoute: ${route}\n${new Date().toUTCString()}`,
       }).catch(() => {})
     }
   } catch {
@@ -6993,7 +7014,7 @@ async function processAudioJob(job) {
     if (job.engine === 'secretvoicer' || job.engine === 'voicer') {
       if (/HTTP 402|quota|balance|credit|insufficient|payment required/i.test(msg)) {
         const svcName = job.engine === 'secretvoicer' ? 'SecretVoicer' : 'Voicer'
-        await notifyBillingErrorRailway(svcName, `/audio-job:${jobId}`).catch(() => {})
+        await notifyBillingErrorRailway(svcName, `/audio-job:${jobId}`, job.user_id, job.project_id).catch(() => {})
       }
     }
     if (Date.now() - t0Job > 90_000) {

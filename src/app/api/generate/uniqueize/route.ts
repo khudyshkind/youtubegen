@@ -277,6 +277,8 @@ async function processText(
 }
 
 export async function POST(request: NextRequest) {
+  let alertUserId: string | undefined
+  let alertProjectId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -284,9 +286,11 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
+    alertUserId = user.id
 
     const body = await request.json() as { script?: string; project_id?: string; mode?: string; output_lang?: string }
     const { script, project_id, mode = 'unique', output_lang = 'ru' } = body
+    alertProjectId = project_id ?? undefined
     const outputLang = Object.keys(LANG_NAMES).includes(output_lang) ? output_lang : 'ru'
 
     if (!script?.trim()) {
@@ -345,8 +349,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/uniqueize] error:', msg)
-    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/uniqueize').catch(() => {})
-    else await notifyError('/generate/uniqueize', msg).catch(() => {})
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/uniqueize', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
+    else await notifyError('/generate/uniqueize', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка обработки текста' }, { status: 500 })
   }
 }

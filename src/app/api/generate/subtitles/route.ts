@@ -42,6 +42,8 @@ async function resolveAudioUrl(rawUrl: string): Promise<string> {
 }
 
 export async function POST(request: NextRequest) {
+  let alertUserId: string | undefined
+  let alertProjectId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const {
@@ -54,6 +56,7 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       )
     }
+    alertUserId = user.id
 
     // Require at least 1 minute worth of credits before transcription
     const minCost = CREDIT_COSTS.subtitles_per_minute
@@ -63,6 +66,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { audio_url, storage_path, storage_bucket, project_id, language }: SubtitlesRequest = await request.json()
+    alertProjectId = project_id ?? undefined
 
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, language, stage: 'subtitles' })
@@ -167,7 +171,7 @@ export async function POST(request: NextRequest) {
         { status: 402 }
       )
     }
-    await notifyError('/generate/subtitles', msg).catch(() => {})
+    await notifyError('/generate/subtitles', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     return NextResponse.json(
       { ok: false, error: 'Ошибка генерации субтитров' },
       { status: 500 }

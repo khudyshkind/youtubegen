@@ -74,6 +74,8 @@ function parseSections(raw: string): PlanSection[] {
 }
 
 export async function POST(request: NextRequest) {
+  let alertUserId: string | undefined
+  let alertProjectId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -81,6 +83,7 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
+    alertUserId = user.id
 
     const cost = CREDIT_COSTS.plan
     const check = await requireCreditsAmount(user.id, cost, supabase)
@@ -88,6 +91,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const { topic, duration_minutes, language, narrative_style, tone, project_id } = body
+    alertProjectId = project_id ?? undefined
 
     if (!topic?.trim()) {
       return NextResponse.json({ ok: false, error: 'Тема не указана' }, { status: 400 })
@@ -155,8 +159,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[generate/plan]', msg)
-    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/plan').catch(() => {})
-    else await notifyError('/generate/plan', msg).catch(() => {})
+    if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/plan', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
+    else await notifyError('/generate/plan', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     if (isAnthropicOverload(error)) {
       return NextResponse.json({ ok: false, error: 'Нейросеть перегружена — попробуйте через минуту', code: 'OVERLOADED' }, { status: 503 })
     }

@@ -524,6 +524,8 @@ async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): 
 }
 
 export async function POST(request: NextRequest) {
+  let alertUserId: string | undefined
+  let alertProjectId: string | undefined
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -531,9 +533,11 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ ok: false, error: 'Необходима авторизация' }, { status: 401 })
     }
+    alertUserId = user.id
 
     const body: ScriptRequest = await request.json()
     const { project_id, plan_sections, ...scriptParams } = body
+    alertProjectId = project_id ?? undefined
     const { model } = scriptParams
 
     Sentry.setUser({ id: user.id })
@@ -721,9 +725,9 @@ export async function POST(request: NextRequest) {
     console.error('[generate/script]', msg)
     Sentry.captureException(error)
     if (isBillingError(msg)) {
-      await notifyBillingError('Anthropic', '/generate/script').catch(() => {})
+      await notifyBillingError('Anthropic', '/generate/script', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     } else {
-      await notifyError('/generate/script', msg).catch(() => {})
+      await notifyError('/generate/script', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     }
     if (isAnthropicOverload(error)) {
       return NextResponse.json({ ok: false, error: 'Нейросеть перегружена — попробуйте через минуту', code: 'OVERLOADED' }, { status: 503 })

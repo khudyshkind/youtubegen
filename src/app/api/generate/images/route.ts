@@ -252,6 +252,8 @@ async function generateScenesFromSubtitles(
   subtitleBlocks: SubtitleBlock[],
   styleConfig: StyleConfig,
   fallbackTopic: string,
+  userId?: string,
+  projectId?: string,
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
 
@@ -373,7 +375,7 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
     const pct = ((sceneFallbackCount / imageCount) * 100).toFixed(0)
     const alertMsg = `${sceneFallbackCount} of ${imageCount} scenes fallback (${pct}%)${lastChunkFailInfo ? ` — ${lastChunkFailInfo}` : ''}`
     console.error(`[images/subtitles] ALERT scenes_fallback: ${alertMsg}`)
-    await notifyError('/generate/images/scenes', alertMsg).catch(() => {})
+    await notifyError('/generate/images/scenes', alertMsg, { userId, projectId }).catch(() => {})
   }
 
   const rawPromptsForInject = promptResults.map(r => r.prompt)
@@ -445,6 +447,8 @@ async function generateScenesFromScript(
   imageCount: number,
   styleConfig: StyleConfig,
   fallbackTopic: string,
+  userId?: string,
+  projectId?: string,
 ): Promise<SceneInfo[]> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
 
@@ -563,7 +567,7 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
     const pct = ((sceneFallbackCount / imageCount) * 100).toFixed(0)
     const alertMsg = `${sceneFallbackCount} of ${imageCount} scenes fallback (${pct}%)${lastChunkFailInfo ? ` — ${lastChunkFailInfo}` : ''}`
     console.error(`[images/script] ALERT scenes_fallback: ${alertMsg}`)
-    await notifyError('/generate/images/scenes', alertMsg).catch(() => {})
+    await notifyError('/generate/images/scenes', alertMsg, { userId, projectId }).catch(() => {})
   }
 
   const rawPromptsForInject = promptResults.map(r => r.prompt)
@@ -1015,8 +1019,8 @@ export async function POST(request: NextRequest) {
 
         const t0Claude = Date.now()
         const scenes = hasSubtitles
-          ? await generateScenesFromSubtitles(effectiveTopic, count, duration_sec, resolvedSubtitleBlocks!, styleConfig, fallbackTopic)
-          : await generateScenesFromScript(script, effectiveTopic, duration_sec, count, styleConfig, fallbackTopic)
+          ? await generateScenesFromSubtitles(effectiveTopic, count, duration_sec, resolvedSubtitleBlocks!, styleConfig, fallbackTopic, user.id, project_id ?? undefined)
+          : await generateScenesFromScript(script, effectiveTopic, duration_sec, count, styleConfig, fallbackTopic, user.id, project_id ?? undefined)
         const claudeSec = ((Date.now() - t0Claude) / 1000).toFixed(1)
 
         console.log(`[images] scenes generated: ${scenes.length}`)
@@ -1249,8 +1253,8 @@ export async function POST(request: NextRequest) {
           } catch { /* controller may already be closed */ }
         } else {
           Sentry.captureException(error)
-          if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/images').catch(() => {})
-          else await notifyError('/generate/images', msg).catch(() => {})
+          if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/images', { userId: user.id, projectId: project_id ?? undefined }).catch(() => {})
+          else await notifyError('/generate/images', msg, { userId: user.id, projectId: project_id ?? undefined }).catch(() => {})
           try {
             controller.enqueue(send({ type: 'error', error: 'Ошибка генерации иллюстраций' }))
             controller.close()
