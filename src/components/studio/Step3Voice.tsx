@@ -593,10 +593,10 @@ export default function Step3Voice() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (engine === 'secretvoicer' && svVoices.length === 0 && !svVoicesLoading) {
+    if ((engine === 'secretvoicer' || engine === 'voicer') && svVoices.length === 0 && !svVoicesLoading) {
       loadSvVoices()
     }
-    if ((engine === 'elevenlabs' || engine === 'voicer') && voices.length === 0 && !voicesLoading) {
+    if (engine === 'elevenlabs' && voices.length === 0 && !voicesLoading) {
       loadVoices(voiceLanguage)
     }
     if (engine === 'google' && googleVoices.length === 0 && !googleVoicesLoading) {
@@ -805,9 +805,10 @@ export default function Step3Voice() {
     try {
       const voiceIdToUse =
         engine === 'secretvoicer' ? svVoiceId :
-        engine === 'openai' ? openaiVoice :
-        engine === 'google' ? googleVoice :
-        engine === 'apihost' ? apihostVoiceId :
+        engine === 'voicer'       ? svVoiceId :
+        engine === 'openai'       ? openaiVoice :
+        engine === 'google'       ? googleVoice :
+        engine === 'apihost'      ? apihostVoiceId :
         voiceSettings.voiceId
 
       const res = await fetch('/api/generate/audio', {
@@ -867,8 +868,8 @@ export default function Step3Voice() {
 
   const canGenerate = !loading && !uploading && !!script && (
     engine === 'secretvoicer' ? !!svVoiceId && !svVoicesLoading :
+    engine === 'voicer'       ? !!svVoiceId && !svVoicesLoading :
     engine === 'elevenlabs'   ? !!voiceSettings.voiceId && !voicesLoading :
-    engine === 'voicer'       ? !!voiceSettings.voiceId && !voicesLoading :
     engine === 'openai'       ? !!openaiVoice :
     engine === 'apihost'      ? !!apihostVoiceId && !apihostVoicesLoading :
     !!googleVoice
@@ -904,7 +905,13 @@ export default function Step3Voice() {
             <button
               key={eng.id}
               type="button"
-              onClick={() => { if (!eng.soon && !isPremiumLocked) { engineTouchedRef.current = true; setEngine(eng.id) } }}
+              onClick={() => {
+                if (!eng.soon && !isPremiumLocked && eng.id !== engine) {
+                  engineTouchedRef.current = true
+                  setVoiceSettings({ voiceId: '' })
+                  setEngine(eng.id)
+                }
+              }}
               disabled={!!eng.soon || isPremiumLocked}
               className="relative flex flex-col gap-1 p-3 rounded-xl text-left transition-all disabled:cursor-not-allowed"
               style={eng.soon || isPremiumLocked
@@ -963,9 +970,19 @@ export default function Step3Voice() {
         </div>
       )}
 
-      {/* ── SecretVoicer voices ── */}
-      {engine === 'secretvoicer' && (
+      {/* ── SecretVoicer / Voicer voices (share SV catalog) ── */}
+      {(engine === 'secretvoicer' || engine === 'voicer') && (
         <>
+          {engine === 'voicer' && (
+            <div className="rounded-xl p-3 flex flex-col gap-1.5"
+              style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
+              <div className="flex items-center gap-2.5">
+                <span className="text-base">💎</span>
+                <p className="text-xs text-violet-300/90">Профессиональные голоса через премиум-сервер. Качество выше, стоимость ниже.</p>
+              </div>
+              <p className="text-xs text-violet-400/70 pl-7">⏱ Синтез занимает 2–4 минуты — не закрывайте вкладку.</p>
+            </div>
+          )}
           {svVoicesError && !svVoicesLoading && (
             <div className="flex items-start gap-3 rounded-xl px-4 py-3"
               style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
@@ -1046,19 +1063,9 @@ export default function Step3Voice() {
         </>
       )}
 
-      {/* ── ElevenLabs / Voicer (Premium) voices ── */}
-      {(engine === 'elevenlabs' || engine === 'voicer') && (
+      {/* ── ElevenLabs voices ── */}
+      {engine === 'elevenlabs' && (
         <>
-          {engine === 'voicer' && (
-            <div className="rounded-xl p-3 flex flex-col gap-1.5"
-              style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
-              <div className="flex items-center gap-2.5">
-                <span className="text-base">💎</span>
-                <p className="text-xs text-violet-300/90">Профессиональные голоса через премиум-сервер. Качество выше, стоимость ниже.</p>
-              </div>
-              <p className="text-xs text-violet-400/70 pl-7">⏱ Синтез занимает 2–4 минуты — не закрывайте вкладку.</p>
-            </div>
-          )}
           {voicesError && !voicesLoading && (
             <div className="flex items-start gap-3 rounded-xl px-4 py-3"
               style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>

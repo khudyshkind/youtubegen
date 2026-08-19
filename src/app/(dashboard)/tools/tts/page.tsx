@@ -281,6 +281,16 @@ function TtsContent() {
   async function handleGenerate() {
     if (!text.trim()) { setError(t('tools.err_empty')); return }
     if (!voiceId) { setError('Выберите голос'); return }
+    if (SV_VOICE_ENGINES.includes(engine) && svVoices.length > 0 && !svVoices.some(v => v.voice_id === voiceId)) {
+      setError('Голос несовместим с этим движком — выберите другой голос')
+      setVoiceId('')
+      return
+    }
+    if (engine === 'elevenlabs' && elevenVoices.length > 0 && !elevenVoices.some(v => v.voice_id === voiceId)) {
+      setError('Голос несовместим с этим движком — выберите другой голос')
+      setVoiceId('')
+      return
+    }
     setError('')
     setAudioUrl('')
     setSavedId(null)
@@ -375,7 +385,11 @@ function TtsContent() {
                 <button
                   key={e}
                   type="button"
-                  onClick={() => meta.available && setEngine(e)}
+                  onClick={() => {
+                    if (!meta.available || e === engine) return
+                    setVoiceId('')
+                    setEngine(e)
+                  }}
                   disabled={!meta.available}
                   className="flex flex-col gap-1.5 p-4 rounded-xl text-left transition-all"
                   style={engineStyle(e, meta.available)}
