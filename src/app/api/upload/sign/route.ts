@@ -23,9 +23,9 @@ interface SignRequest {
   project_id?: string
   index?: number
   content_type?: string
-  // tool_audio / tool_image_reference only — validated server-side
   file_size?: number
   file_name?: string
+  phase?: 'upload' | 'read'  // studio audio only
 }
 
 export async function POST(request: NextRequest) {
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: SignRequest = await request.json()
-    const { type, project_id, index = 0, content_type, file_size, file_name } = body
+    const { type, project_id, index = 0, content_type, file_size, file_name, phase } = body
 
     // ── tool_image_reference: standalone reference image for style analysis ────
     if (type === 'tool_image_reference') {
@@ -115,28 +115,81 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // ── studio paths (audio + image) — unchanged ───────────────────────────────
+    // ── studio paths (audio + image) ──────────────────────────────────────────
     if (!project_id) {
       return NextResponse.json({ ok: false, error: 'project_id обязателен' }, { status: 400 })
     }
 
-    const serviceClient = createServiceClient()
-    let bucket: string
-    let storagePath: string
-    let mimeType: string
-
+    // ── studio audio ───────────────────────────────────────────────────────────
     if (type === 'audio') {
-      bucket = 'audio'
-      storagePath = `${user.id}/${project_id}/audio.mp3`
-      mimeType = content_type ?? 'audio/mpeg'
-    } else {
-      bucket = 'images'
-      storagePath = `${user.id}/${project_id}/scene_${String(index).padStart(2, '0')}.jpg`
-      mimeType = content_type ?? 'image/jpeg'
+      const studioPhase = phase ?? 'upload'
+      const storagePath = `${user.id}/${project_id}/audio.mp3`
+
+      if (studioPhase === 'read') {
+        // File confirmed uploaded — return proxy URL (never expires, survives stampAudioUrl)
+        // and persist to projects.audio_url so the project restores correctly on reload.
+        const accessUrl = `/api/audio/${project_id}`
+        await supabase.from('projects')
+          .update({ audio_url: accessUrl })
+          .eq('id', project_id)
+          .eq('user_id', user.id)
+        console.log('[upload/sign] studio audio confirmed', { user_id: user.id, project_id, result: 'ok' })
+        return NextResponse.json({ ok: true, data: { access_url: accessUrl } })
+      }
+
+      // upload phase — validate then issue signed upload URL
+      if (content_type && !ALLOWED_AUDIO_MIMES.has(content_type)) {
+        return NextResponse.json(
+          { ok: false, error: 'Поддерживаются mp3/m4a/aac/ogg/wav до 25 МБ', code: 'INVALID_FORMAT' },
+          { status: 400 },
+        )
+      }
+      if (file_name) {
+        const ext = getExt(file_name)
+        if (!ALLOWED_AUDIO_EXTS.has(ext)) {
+          return NextResponse.json(
+            { ok: false, error: 'Поддерживаются mp3/m4a/aac/ogg/wav до 25 МБ', code: 'INVALID_FORMAT' },
+            { status: 400 },
+          )
+        }
+      }
+      if (file_size !== undefined && file_size > MAX_AUDIO_UPLOAD_BYTES) {
+        return NextResponse.json(
+          { ok: false, error: 'Файл слишком большой. Максимум 25 МБ', code: 'FILE_TOO_LARGE' },
+          { status: 400 },
+        )
+      }
+
+      const svcAudio = createServiceClient()
+      const { data: upData, error: upErr } = await svcAudio.storage
+        .from('audio')
+        .createSignedUploadUrl(storagePath)
+      if (upErr || !upData) {
+        console.error('[upload/sign studio audio]', upErr?.message)
+        console.log('[upload/sign] studio audio', { user_id: user.id, project_id, file_size, result: 'url_error' })
+        return NextResponse.json({ ok: false, error: 'Не удалось создать URL для загрузки' }, { status: 500 })
+      }
+
+      console.log('[upload/sign] studio audio', { user_id: user.id, project_id, file_size, result: 'url_issued' })
+      return NextResponse.json({
+        ok: true,
+        data: {
+          signed_url:   upData.signedUrl,
+          token:        upData.token,
+          path:         storagePath,
+          bucket:       'audio',
+          content_type: content_type ?? 'audio/mpeg',
+        },
+      })
     }
 
+    // ── studio image ───────────────────────────────────────────────────────────
+    const serviceClient = createServiceClient()
+    const storagePath = `${user.id}/${project_id}/scene_${String(index).padStart(2, '0')}.jpg`
+    const mimeType = content_type ?? 'image/jpeg'
+
     const { data, error } = await serviceClient.storage
-      .from(bucket)
+      .from('images')
       .createSignedUploadUrl(storagePath)
 
     if (error || !data) {
@@ -144,23 +197,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Не удалось создать URL для загрузки' }, { status: 500 })
     }
 
-    let accessUrl: string
-    if (type === 'audio') {
-      const { data: readData, error: readErr } = await serviceClient.storage
-        .from(bucket)
-        .createSignedUrl(storagePath, 3600)
-      if (readErr || !readData?.signedUrl) {
-        console.error('[upload/sign audio] createSignedUrl failed:', readErr?.message)
-        return NextResponse.json(
-          { ok: false, error: 'Не удалось создать ссылку на аудио — попробуйте загрузить файл заново' },
-          { status: 500 },
-        )
-      }
-      accessUrl = readData.signedUrl
-    } else {
-      const { data: { publicUrl } } = serviceClient.storage.from(bucket).getPublicUrl(storagePath)
-      accessUrl = publicUrl
-    }
+    const { data: { publicUrl } } = serviceClient.storage.from('images').getPublicUrl(storagePath)
 
     return NextResponse.json({
       ok: true,
@@ -168,8 +205,8 @@ export async function POST(request: NextRequest) {
         signed_url:   data.signedUrl,
         token:        data.token,
         path:         storagePath,
-        access_url:   accessUrl,
-        bucket,
+        access_url:   publicUrl,
+        bucket:       'images',
         content_type: mimeType,
       },
     })

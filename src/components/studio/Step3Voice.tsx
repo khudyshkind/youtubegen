@@ -757,21 +757,39 @@ export default function Step3Voice() {
     setUploadError('')
     setUploading(true)
     try {
+      // Step 1 — get signed upload URL; server validates format and size
       const signRes = await fetch('/api/upload/sign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'audio', project_id: projectId, content_type: file.type || 'audio/mpeg' }),
+        body: JSON.stringify({
+          type: 'audio',
+          phase: 'upload',
+          project_id: projectId,
+          content_type: file.type || 'audio/mpeg',
+          file_size: file.size,
+          file_name: file.name,
+        }),
       })
       const signJson = await signRes.json()
       if (!signJson.ok) throw new Error(signJson.error)
-      const { signed_url, access_url } = signJson.data
-      const uploadRes = await fetch(signed_url, {
+
+      // Step 2 — upload directly to Supabase Storage
+      const uploadRes = await fetch(signJson.data.signed_url, {
         method: 'PUT',
         headers: { 'Content-Type': file.type || 'audio/mpeg' },
         body: file,
       })
       if (!uploadRes.ok) throw new Error(t('step3.err_upload'))
-      setAudioUrl(stampAudioUrl(access_url, Date.now()))
+
+      // Step 3 — confirm upload; server returns proxy URL and saves to projects.audio_url
+      const readRes = await fetch('/api/upload/sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'audio', phase: 'read', project_id: projectId }),
+      })
+      const readJson = await readRes.json()
+      if (!readJson.ok) throw new Error(readJson.error)
+      setAudioUrl(stampAudioUrl(readJson.data.access_url, Date.now()))
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : t('step3.err_upload'))
     } finally {
@@ -1550,7 +1568,7 @@ export default function Step3Voice() {
             style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
             {t('step3.skip')}
           </button>
-          <input ref={audioFileRef} type="file" accept="audio/mpeg,audio/wav,audio/mp3,.mp3,.wav"
+          <input ref={audioFileRef} type="file" accept=".mp3,.m4a,.aac,.ogg,.wav"
             className="hidden" onChange={handleAudioUpload} />
         </div>
       )}
