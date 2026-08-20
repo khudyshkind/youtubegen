@@ -5,6 +5,7 @@ import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { hasCredits, spendCredits } from '@/lib/credits'
 import { isBillingError, notifyBillingError, notifyError, notifyUserTelegram } from '@/lib/telegram'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS, ENGINE_DISPLAY, IMAGE_COUNT_MAX } from '@/lib/types'
 import type { SceneImage, SubtitleBlock } from '@/lib/types'
@@ -964,11 +965,13 @@ export async function POST(request: NextRequest) {
   const encoder = new TextEncoder()
   const send = (data: object) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
 
+  let _opLogId: string | null = null
   const stream = new ReadableStream({
     async start(controller) {
       let generationSucceeded = false
       let t0Request = Date.now()
       try {
+        _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: 'images', provider: engine })
         if (project_id) {
           await supabase
             .from('projects')
@@ -1234,6 +1237,7 @@ export async function POST(request: NextRequest) {
           ).catch(() => {})
         }
 
+        await finishOpLog(_opLogId, { status: 'done', creditsSpent: chargedCount * costPerImage })
         controller.enqueue(send({
           type: 'done',
           images: validImages,
@@ -1244,6 +1248,7 @@ export async function POST(request: NextRequest) {
         controller.close()
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error)
+        void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
         console.error('[generate/images] stream error:', msg)
         if (Date.now() - t0Request > 90_000) {
           const appUrl = env('NEXT_PUBLIC_APP_URL') || ''

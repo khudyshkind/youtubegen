@@ -6,6 +6,7 @@ import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 import {
   countWords, calcMaxTokens, isGuardOk,
   runChunked, ChunkCallFn, CHUNK_THRESHOLD,
@@ -279,6 +280,7 @@ async function processText(
 export async function POST(request: NextRequest) {
   let alertUserId: string | undefined
   let alertProjectId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -310,6 +312,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
     }
 
+    _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: `uniqueize_${mode}`, provider: 'claude-sonnet-4-6' })
+
     const inputWords = countWords(script)
     const maxTokens  = calcMaxTokens(script)
     console.log(`[uniqueize] mode=${mode} output_lang=${outputLang} maxTokens=${maxTokens} inputWords=${inputWords}`)
@@ -319,12 +323,14 @@ export async function POST(request: NextRequest) {
     if (mode === 'unique') {
       const r = await processText(client, buildUniqueizePrompt(outputLang), script, inputWords, maxTokens, 'unique')
       if (r === null) {
+        void finishOpLog(_opLogId, { status: 'failed', errorText: 'UNIQUEIZE_TRUNCATED: unique mode' })
         return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
       }
       result = r
     } else if (mode === 'human') {
       const r = await processText(client, buildHumanizePrompt(outputLang), script, inputWords, maxTokens, 'human')
       if (r === null) {
+        void finishOpLog(_opLogId, { status: 'failed', errorText: 'UNIQUEIZE_TRUNCATED: human mode' })
         return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
       }
       result = r
@@ -332,11 +338,13 @@ export async function POST(request: NextRequest) {
       // both: uniqueize first, then humanise the result; neither step may truncate
       const r1 = await processText(client, buildUniqueizePrompt(outputLang), script, inputWords, maxTokens, 'unique')
       if (r1 === null) {
+        void finishOpLog(_opLogId, { status: 'failed', errorText: 'UNIQUEIZE_TRUNCATED: both/unique step' })
         return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
       }
       const r1Words = countWords(r1)
       const r2 = await processText(client, buildHumanizePrompt(outputLang), r1, r1Words, calcMaxTokens(r1), 'human')
       if (r2 === null) {
+        void finishOpLog(_opLogId, { status: 'failed', errorText: 'UNIQUEIZE_TRUNCATED: both/human step' })
         return NextResponse.json({ ok: false, error: 'Не удалось обработать текст целиком — попробуйте ещё раз или разбейте текст на части', code: 'UNIQUEIZE_TRUNCATED' }, { status: 422 })
       }
       result = r2
@@ -344,10 +352,12 @@ export async function POST(request: NextRequest) {
 
     await spendCredits(user.id, creditCost, `uniqueize_${mode}`, project_id)
     void trackEvent(user.id, 'step_completed', { step: 'uniqueize', mode, project_id })
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: creditCost })
 
     return NextResponse.json({ ok: true, data: { script: result } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[generate/uniqueize] error:', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/uniqueize', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     else await notifyError('/generate/uniqueize', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})

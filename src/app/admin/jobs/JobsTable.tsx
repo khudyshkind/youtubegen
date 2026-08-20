@@ -2,57 +2,73 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-type JobStatus = 'queued' | 'running' | 'done' | 'failed'
-type JobType = 'audio' | 'video' | 'image'
+type JobStatus = 'running' | 'done' | 'failed'
 
 type Job = {
   id: string
-  type: JobType
+  op_type: string
+  category: string
+  provider: string | null
   user_id: string
   project_id: string | null
-  engine: string | null
-  status_raw: string
   status: JobStatus
   credits: number
+  credits_refunded: number
   error: string | null
-  created_at: string
+  started_at: string
   completed_at: string | null
   email: string | null
   plan: string | null
 }
 
 const STATUS_LABELS: Record<JobStatus, string> = {
-  queued: 'В очереди',
   running: 'Выполняется',
   done: 'Готово',
   failed: 'Упало',
 }
 
-const STATUS_RAW_MAP: Record<string, JobStatus> = {
-  pending: 'queued',
-  processing: 'running',
-  finalizing: 'running',
-  awaiting_webhook: 'running',
-  completed: 'done',
-  failed: 'failed',
-}
-
 const STATUS_COLORS: Record<JobStatus, string> = {
-  queued: 'bg-gray-100 text-gray-600',
   running: 'bg-yellow-100 text-yellow-800',
   done: 'bg-green-100 text-green-700',
   failed: 'bg-red-100 text-red-700',
 }
 
-const TYPE_LABELS: Record<JobType, string> = {
+const CATEGORY_LABELS: Record<string, string> = {
+  text: 'Текст',
   audio: 'Озвучка',
-  video: 'Рендер',
   image: 'Иллюстрации',
+  video: 'Рендер',
+  subtitles: 'Субтитры',
+  thumbnail: 'Превью',
+  other: 'Другое',
 }
 
-function fmtDuration(created: string, completed: string | null): string {
+const OP_TYPE_SHORT: Record<string, string> = {
+  script: 'сценарий',
+  plan: 'план',
+  repack: 'репак',
+  seo: 'SEO',
+  enhance_script: 'улучшение',
+  style_analysis: 'стиль',
+  titles_by_niche: 'заголовки',
+  channel_analysis: 'аналитика',
+  subtitles: 'субтитры',
+  thumbnail: 'превью',
+  video_render: 'рендер',
+  images: 'иллюстрации (async)',
+}
+
+function opTypeLabel(opType: string): string {
+  if (OP_TYPE_SHORT[opType]) return OP_TYPE_SHORT[opType]
+  if (opType.startsWith('uniqueize_')) return `уникализация (${opType.split('_')[1] ?? ''})`
+  if (opType.startsWith('audio_')) return `озвучка (${opType.replace('audio_', '')})`
+  if (opType.startsWith('image_')) return `иллюстр. (${opType.replace('image_', '')})`
+  return opType
+}
+
+function fmtDuration(started: string, completed: string | null): string {
   if (!completed) return '—'
-  const ms = new Date(completed).getTime() - new Date(created).getTime()
+  const ms = new Date(completed).getTime() - new Date(started).getTime()
   if (ms <= 0) return '—'
   const s = Math.round(ms / 1000)
   if (s < 60) return `${s} с`
@@ -138,7 +154,6 @@ export default function JobsTable() {
             className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300"
           >
             <option value="all">Все статусы</option>
-            <option value="queued">В очереди</option>
             <option value="running">Выполняется</option>
             <option value="done">Готово</option>
             <option value="failed">Упало</option>
@@ -146,16 +161,19 @@ export default function JobsTable() {
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-xs text-gray-500 font-medium">Тип задачи</span>
+          <span className="text-xs text-gray-500 font-medium">Тип операции</span>
           <select
             value={typeFilter}
             onChange={e => setTypeFilter(e.target.value)}
             className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300"
           >
             <option value="all">Все типы</option>
+            <option value="text">Текст (сценарий, план, SEO...)</option>
             <option value="audio">Озвучка</option>
-            <option value="video">Рендер</option>
             <option value="image">Иллюстрации</option>
+            <option value="video">Рендер</option>
+            <option value="subtitles">Субтитры</option>
+            <option value="thumbnail">Превью</option>
           </select>
         </div>
 
@@ -197,7 +215,7 @@ export default function JobsTable() {
         )}
         {!loading && !fetchError && (
           <>
-            <span className="font-medium text-gray-700">{jobs.length} задач</span>
+            <span className="font-medium text-gray-700">{jobs.length} операций</span>
             {runningCount > 0 && (
               <span className="text-yellow-700 font-medium">{runningCount} выполняется</span>
             )}
@@ -224,7 +242,7 @@ export default function JobsTable() {
                 <th className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Время</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Пользователь</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Тариф</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Тип</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Операция</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Статус</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Длительность</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Кредиты</th>
@@ -242,14 +260,14 @@ export default function JobsTable() {
               {!loading && jobs.length === 0 && !fetchError && (
                 <tr>
                   <td colSpan={8} className="px-4 py-12 text-center text-gray-400">
-                    Задач не найдено
+                    Операций не найдено
                   </td>
                 </tr>
               )}
               {jobs.map(job => (
-                <tr key={`${job.type}-${job.id}`} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
+                <tr key={job.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap font-mono text-xs">
-                    {fmtDateTime(job.created_at)}
+                    {fmtDateTime(job.started_at)}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     {job.email ? (
@@ -269,25 +287,25 @@ export default function JobsTable() {
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <span className="text-gray-700">
-                      {TYPE_LABELS[job.type]}
-                      {job.engine && (
-                        <span className="text-gray-400 ml-1 text-xs">({job.engine})</span>
-                      )}
+                      {opTypeLabel(job.op_type)}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${STATUS_COLORS[job.status]}`}>
-                      {STATUS_LABELS[job.status]}
-                    </span>
-                    {job.status_raw !== job.status && job.status_raw !== 'completed' && job.status_raw !== 'failed' && job.status_raw !== 'pending' && (
-                      <span className="ml-1 text-gray-400 text-xs">({job.status_raw})</span>
+                    {job.provider && job.provider !== job.op_type && (
+                      <span className="text-gray-400 ml-1 text-xs">({job.provider})</span>
                     )}
                   </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${STATUS_COLORS[job.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                      {STATUS_LABELS[job.status] ?? job.status}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 whitespace-nowrap text-gray-600 font-mono text-xs">
-                    {fmtDuration(job.created_at, job.completed_at)}
+                    {fmtDuration(job.started_at, job.completed_at)}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap font-mono text-xs text-gray-700">
                     {fmtCredits(job.credits)}
+                    {job.credits_refunded > 0 && (
+                      <span className="text-gray-400 ml-1">(−{fmtCredits(job.credits_refunded)})</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 max-w-md">
                     {job.error ? (
@@ -304,44 +322,6 @@ export default function JobsTable() {
           </table>
         </div>
       )}
-
-      {/* Status mapping reference */}
-      <details className="mt-2">
-        <summary className="text-xs text-gray-400 cursor-pointer select-none hover:text-gray-600">
-          Маппинг статусов
-        </summary>
-        <div className="mt-2 overflow-x-auto">
-          <table className="text-xs border border-gray-200 rounded-lg overflow-hidden">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-3 py-2 text-left text-gray-600 font-medium">Статус в БД</th>
-                <th className="px-3 py-2 text-left text-gray-600 font-medium">Таблица</th>
-                <th className="px-3 py-2 text-left text-gray-600 font-medium">Отображение</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 bg-white">
-              {[
-                { raw: 'pending', tables: 'audio_jobs, video_jobs, image_jobs', display: 'В очереди' },
-                { raw: 'processing', tables: 'audio_jobs, video_jobs, image_jobs', display: 'Выполняется' },
-                { raw: 'finalizing', tables: 'image_jobs', display: 'Выполняется' },
-                { raw: 'awaiting_webhook', tables: 'image_jobs', display: 'Выполняется' },
-                { raw: 'completed', tables: 'audio_jobs, video_jobs, image_jobs', display: 'Готово' },
-                { raw: 'failed', tables: 'audio_jobs, video_jobs, image_jobs', display: 'Упало' },
-              ].map(row => (
-                <tr key={row.raw}>
-                  <td className="px-3 py-2 font-mono text-gray-700">{row.raw}</td>
-                  <td className="px-3 py-2 text-gray-500">{row.tables}</td>
-                  <td className="px-3 py-2">
-                    <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[STATUS_RAW_MAP[row.raw]]}`}>
-                      {row.display}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
     </div>
   )
 }

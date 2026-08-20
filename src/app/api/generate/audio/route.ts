@@ -8,6 +8,7 @@ import { audioCost, ENGINE_DISPLAY } from '@/lib/types'
 import type { AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { env } from '@/lib/env'
 import { notifyError, notifyUserTelegram } from '@/lib/telegram'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 import { mediaExpiryFromNow } from '@/lib/media-expiry'
 
 export const maxDuration = 300
@@ -557,6 +558,7 @@ export async function POST(request: NextRequest) {
   const t0Request = Date.now()
   let userId: string | null = null
   let alertProjectId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -706,6 +708,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, job_id, status: 'pending' })
     }
     // ── Sync path: ElevenLabs / OpenAI / Google / APIHOST ────────────────────
+    _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: `audio_${engine}`, provider: engine })
 
     // Strip structural markers before TTS — they must not be spoken aloud.
     // Cost was already calculated from the original text length (correct behaviour:
@@ -728,6 +731,7 @@ export async function POST(request: NextRequest) {
     if (engine === 'openai') {
       const openaiKey = env('OPENAI_API_KEY')
       if (!openaiKey) {
+        void finishOpLog(_opLogId, { status: 'failed', errorText: 'openai key missing' })
         return NextResponse.json({ ok: false, error: `Движок ${ENGINE_DISPLAY.openai.name} временно недоступен` }, { status: 503 })
       }
 
@@ -738,6 +742,7 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           console.error(`[generate/audio] OpenAI chunk ${i + 1}/${chunks.length} failed:`, msg)
+          void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
           return NextResponse.json({ ok: false, error: `Ошибка синтеза речи ${ENGINE_DISPLAY.openai.name} (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
         }
       }
@@ -746,6 +751,7 @@ export async function POST(request: NextRequest) {
     } else if (engine === 'google') {
       const googleKey = env('GOOGLE_TTS_API_KEY')
       if (!googleKey) {
+        void finishOpLog(_opLogId, { status: 'failed', errorText: 'google key missing' })
         return NextResponse.json({ ok: false, error: `Движок ${ENGINE_DISPLAY.google.name} временно недоступен` }, { status: 503 })
       }
 
@@ -759,6 +765,7 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           console.error(`[generate/audio] Google chunk ${i + 1}/${chunks.length} failed:`, msg)
+          void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
           return NextResponse.json({ ok: false, error: `Ошибка синтеза речи ${ENGINE_DISPLAY.google.name} (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
         }
       }
@@ -789,6 +796,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[generate/audio] APIHOST submit failed:', msg)
+        void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
         return NextResponse.json({ ok: false, error: 'Сервис синтеза речи недоступен. Попробуйте позже.' }, { status: 502 })
       }
 
@@ -805,6 +813,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[generate/audio] APIHOST poll failed:', msg)
+        void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
         return NextResponse.json({ ok: false, error: 'Синтез речи не завершился вовремя. Попробуйте позже.' }, { status: 504 })
       }
 
@@ -821,6 +830,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[generate/audio] APIHOST download failed:', msg)
+        void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
         return NextResponse.json({ ok: false, error: 'Ошибка загрузки аудио. Попробуйте позже.' }, { status: 502 })
       }
 
@@ -846,6 +856,7 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           console.error(`[generate/audio] ElevenLabs chunk ${i + 1}/${chunks.length} failed:`, msg)
+          void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
           return NextResponse.json({ ok: false, error: `Ошибка синтеза речи ${ENGINE_DISPLAY.elevenlabs.name} (фрагмент ${i + 1}/${chunks.length})` }, { status: 502 })
         }
       }
@@ -853,6 +864,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (audioBuffer.byteLength === 0) {
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'empty audio buffer' })
       return NextResponse.json({ ok: false, error: 'Получен пустой аудио буфер' }, { status: 502 })
     }
 
@@ -883,6 +895,7 @@ export async function POST(request: NextRequest) {
 
     if (uploadError) {
       console.error('[generate/audio] Supabase upload error:', uploadError.message)
+      void finishOpLog(_opLogId, { status: 'failed', errorText: uploadError.message.slice(0, 500) })
       return NextResponse.json({ ok: false, error: 'Ошибка загрузки аудио' }, { status: 500 })
     }
 
@@ -924,6 +937,7 @@ export async function POST(request: NextRequest) {
     }
 
     void trackEvent(user.id, 'step_completed', { step: 'audio', engine, project_id: project_id ?? toolRunId, chunks: chunks.length, tool_run })
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: cost })
 
     if (Date.now() - t0Request > 90_000) {
       const appUrl = env('NEXT_PUBLIC_APP_URL') || ''
@@ -944,6 +958,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[generate/audio] unexpected error:', msg)
     Sentry.captureException(error)
     await notifyError('/generate/audio', msg, { userId: userId ?? undefined, projectId: alertProjectId }).catch(() => {})

@@ -14,6 +14,7 @@ import type { ThumbnailTextMode, TextOverlayParams } from '@/lib/thumbnail-text-
 import { getStyleConfig } from '@/lib/image-style-configs'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 import { mediaExpiryFromNow } from '@/lib/media-expiry'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 
 const MONTSERRAT_BLACK = readFileSync(
   join(process.cwd(), 'public', 'fonts', 'Montserrat-Black.ttf'),
@@ -591,6 +592,7 @@ async function createThumbnailBuffer(bgDataUrl: string, title: string, refStyle?
 export async function POST(request: NextRequest) {
   let alertUserId: string | undefined
   let alertProjectId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -632,6 +634,8 @@ export async function POST(request: NextRequest) {
 
     const check = await requireCredits(user.id, 'thumbnail', supabase)
     if (!check.ok) return NextResponse.json(check, { status: 402 })
+
+    _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: 'thumbnail', provider: text_mode === 'ai' ? (env('THUMBNAIL_AI_TEXT_ENGINE') || 'fal-ai') : 'fal-ai' })
 
     // tool_run mode: no project_id supplied → create a placeholder record now so files are
     // stored under its UUID and retention can find them via thumbnail_url IS NOT NULL
@@ -755,6 +759,7 @@ export async function POST(request: NextRequest) {
 
     await spendCredits(user.id, CREDIT_COSTS.thumbnail, 'thumbnail', project_id ?? toolRunId ?? undefined)
 
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: CREDIT_COSTS.thumbnail })
     const ts = Date.now()
     return NextResponse.json({
       ok: true,
@@ -769,6 +774,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[thumbnail]', msg)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/thumbnail', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     else await notifyError('/generate/thumbnail', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     return NextResponse.json({ ok: false, error: 'Ошибка генерации превью' }, { status: 500 })

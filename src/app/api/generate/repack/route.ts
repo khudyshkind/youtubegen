@@ -7,6 +7,7 @@ import { isAnthropicOverload, withAnthropicRetry } from '@/lib/anthropic-retry'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 
 export const maxDuration = 120
 
@@ -87,6 +88,7 @@ ${script}`
 }
 
 export async function POST(request: NextRequest) {
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -110,6 +112,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Текст слишком длинный (макс 30 000 символов)' }, { status: 400 })
     }
 
+    _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: 'repack', provider: 'claude-sonnet-4-6' })
+
     const prompt = buildPrompt(script.trim(), language)
     const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 90_000, maxRetries: 0 })
 
@@ -125,6 +129,7 @@ export async function POST(request: NextRequest) {
     const raw = block.type === 'text' ? block.text : ''
 
     if (!raw) {
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'empty model response' })
       return NextResponse.json({ ok: false, error: 'Модель вернула пустой ответ' }, { status: 502 })
     }
 
@@ -137,14 +142,17 @@ export async function POST(request: NextRequest) {
       formats = parsed
     } catch {
       console.error('[generate/repack] parse error, raw tail:', raw.slice(-300))
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'parse error' })
       return NextResponse.json({ ok: false, error: 'Ошибка разбора ответа модели' }, { status: 502 })
     }
 
     await spendCredits(user.id, cost, 'repack', project_id ?? null)
 
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: cost })
     return NextResponse.json({ ok: true, data: { formats } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[generate/repack]', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/repack').catch(() => {})
     else await notifyError('/generate/repack', msg).catch(() => {})

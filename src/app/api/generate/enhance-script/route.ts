@@ -5,6 +5,7 @@ import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 import {
   countWords, calcMaxTokens, isGuardOk,
   runChunked, ChunkCallFn, CHUNK_THRESHOLD,
@@ -120,6 +121,7 @@ function buildPrompt(
 export async function POST(request: NextRequest) {
   let alertUserId: string | undefined
   let alertProjectId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -193,6 +195,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
     }
 
+    _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: 'enhance_script', provider: 'claude-sonnet-4-6' })
+
     const systemPrompt = buildPrompt(hook, hookType, cta, pauses, outputLang)
     const maxTokens  = calcMaxTokens(script)
     const inputWords = countWords(script)
@@ -230,6 +234,7 @@ export async function POST(request: NextRequest) {
 
         if (!result2 || !isGuardOk(msg2.stop_reason, result2, inputWords)) {
           console.error(`[enhance-script] guard fail attempt=2 outputWords=${countWords(result2)} — aborting, credits not charged`)
+          void finishOpLog(_opLogId, { status: 'failed', errorText: 'ENHANCE_TRUNCATED: guard fail attempt=2' })
           return NextResponse.json({
             ok: false,
             error: 'Не удалось оживить текст целиком — попробуйте ещё раз или разбейте текст на части',
@@ -247,6 +252,7 @@ export async function POST(request: NextRequest) {
       }
       const r = await runChunked(script, callFn, 'enhance-script')
       if (r === null) {
+        void finishOpLog(_opLogId, { status: 'failed', errorText: 'ENHANCE_TRUNCATED: chunked runChunked returned null' })
         return NextResponse.json({
           ok: false,
           error: 'Не удалось оживить текст целиком — попробуйте ещё раз или разбейте текст на части',
@@ -257,10 +263,12 @@ export async function POST(request: NextRequest) {
     }
 
     await spendCredits(user.id, CREDIT_COSTS.enhance, 'enhance_script', project_id)
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: CREDIT_COSTS.enhance })
 
     return NextResponse.json({ ok: true, data: { script: result } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[generate/enhance-script] error:', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/enhance-script', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     else await notifyError('/generate/enhance-script', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})

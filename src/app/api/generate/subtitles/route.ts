@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { notifyError } from '@/lib/telegram'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
@@ -44,6 +45,7 @@ async function resolveAudioUrl(rawUrl: string): Promise<string> {
 export async function POST(request: NextRequest) {
   let alertUserId: string | undefined
   let alertProjectId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const {
@@ -67,6 +69,7 @@ export async function POST(request: NextRequest) {
 
     const { audio_url, storage_path, storage_bucket, project_id, language }: SubtitlesRequest = await request.json()
     alertProjectId = project_id ?? undefined
+    _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: 'subtitles', provider: 'whisper' })
 
     Sentry.setUser({ id: user.id })
     Sentry.setContext('generate', { project_id, language, stage: 'subtitles' })
@@ -148,6 +151,7 @@ export async function POST(request: NextRequest) {
     const durationMinutes = duration_seconds > 0 ? duration_seconds / 60 : 1
     const cost = Math.max(minCost, Math.ceil(durationMinutes) * CREDIT_COSTS.subtitles_per_minute)
     await spendCredits(user.id, cost, 'subtitles', project_id)
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: cost })
 
     if (project_id) {
       await supabase
@@ -172,6 +176,7 @@ export async function POST(request: NextRequest) {
         { status: 402 }
       )
     }
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     await notifyError('/generate/subtitles', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     return NextResponse.json(
       { ok: false, error: 'Ошибка генерации субтитров' },

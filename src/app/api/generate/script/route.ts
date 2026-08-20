@@ -5,6 +5,7 @@ import * as Sentry from '@sentry/nextjs'
 import { createServerSupabase } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 import { trackEvent } from '@/lib/analytics'
 import { env } from '@/lib/env'
 import type { ScriptParams, PlanSection, ScriptModel } from '@/lib/types'
@@ -526,6 +527,7 @@ async function generateChunkedScript(p: ScriptParams, sections: PlanSection[]): 
 export async function POST(request: NextRequest) {
   let alertUserId: string | undefined
   let alertProjectId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -560,6 +562,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(check, { status: 402 })
     }
 
+    _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: 'script', provider: model })
+
     if (scriptParams.duration_minutes >= CHUNKED_THRESHOLD) {
       // ── Chunked path: parallel section generation ─────────────────────────
       // This client is used only for generateInternalPlan (plan JSON, small output).
@@ -580,6 +584,7 @@ export async function POST(request: NextRequest) {
 
       const script = await generateChunkedScript(scriptParams, usedSections)
       if (script === null) {
+        void finishOpLog(_opLogId, { status: 'failed', errorText: 'SCRIPT_TRUNCATED: chunked generation' })
         return NextResponse.json({
           ok: false,
           error: 'Не удалось сгенерировать сценарий полностью — попробуйте ещё раз.',
@@ -604,6 +609,7 @@ export async function POST(request: NextRequest) {
       }
 
       void trackEvent(user.id, 'step_completed', { step: 'script', model, project_id, chunked: true })
+      void finishOpLog(_opLogId, { status: 'done', creditsSpent: cost })
       return NextResponse.json({ ok: true, data: { script } })
     }
 
@@ -641,6 +647,7 @@ export async function POST(request: NextRequest) {
     let normStop = normaliseStop(gen.stopReason)
 
     if (!gen.text) {
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'empty model response' })
       return NextResponse.json({ ok: false, error: 'Модель вернула пустой ответ' }, { status: 502 })
     }
 
@@ -687,9 +694,11 @@ export async function POST(request: NextRequest) {
           await supabase.from('projects').update(shortUpdate).eq('id', project_id).eq('user_id', user.id)
         }
         void trackEvent(user.id, 'step_completed', { step: 'script', model, project_id, short: true })
+        void finishOpLog(_opLogId, { status: 'done', creditsSpent: cost })
         return NextResponse.json({ ok: true, data: { script: gen.text, script_short: true, actual_words: actualWords, target_words: targetWords } })
       }
       console.error(`[generate/script] guard fail: words=${actualWords} stop=${normStop} — aborting, credits not charged`)
+      void finishOpLog(_opLogId, { status: 'failed', errorText: `SCRIPT_TRUNCATED: guard fail words=${actualWords} stop=${normStop}` })
       return NextResponse.json({
         ok: false,
         error: 'Не удалось сгенерировать сценарий полностью — попробуйте ещё раз.',
@@ -719,9 +728,11 @@ export async function POST(request: NextRequest) {
     }
 
     void trackEvent(user.id, 'step_completed', { step: 'script', model, project_id })
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: cost })
     return NextResponse.json({ ok: true, data: { script } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[generate/script]', msg)
     Sentry.captureException(error)
     if (isBillingError(msg)) {

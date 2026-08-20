@@ -5,12 +5,14 @@ import { requireCreditsAmount, spendCredits } from '@/lib/credits'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 
 export const maxDuration = 30
 
 export async function POST(request: NextRequest) {
   let alertUserId: string | undefined
   let alertProjectId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -36,6 +38,8 @@ export async function POST(request: NextRequest) {
     if (!check.ok) {
       return NextResponse.json({ ok: false, error: 'Недостаточно кредитов', code: 'NO_CREDITS' }, { status: 402 })
     }
+
+    _opLogId = await startOpLog({ userId: user.id, projectId: projectId ?? null, opType: 'style_analysis', provider: 'claude-haiku-4-5-20251001' })
 
     const buffer = Buffer.from(await file.arrayBuffer())
     const base64 = buffer.toString('base64')
@@ -66,6 +70,7 @@ export async function POST(request: NextRequest) {
     const styleDescription = block.type === 'text' ? block.text.trim() : ''
 
     if (!styleDescription) {
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'empty style description' })
       return NextResponse.json({ ok: false, error: 'Не удалось определить стиль' }, { status: 502 })
     }
 
@@ -91,9 +96,11 @@ export async function POST(request: NextRequest) {
 
     await spendCredits(user.id, CREDIT_COSTS.style_analysis, 'style_analysis', projectId ?? undefined)
 
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: CREDIT_COSTS.style_analysis })
     return NextResponse.json({ ok: true, data: { style_description: styleDescription, ref_url: refUrl } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[analyze-style]', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/analyze-style', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     else await notifyError('/generate/analyze-style', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})

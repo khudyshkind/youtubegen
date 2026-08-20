@@ -6,6 +6,7 @@ import { CREDIT_COSTS } from '@/lib/types'
 import { env } from '@/lib/env'
 import { parseClaudeJson } from '@/lib/parse-claude-json'
 import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse } from '@/lib/youtube-quota'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 
 export const maxDuration = 120
 
@@ -106,6 +107,7 @@ IMPORTANT: Return ONLY valid JSON. No \`\`\`json. Start with { and end with }.`
 
 export async function POST(request: NextRequest) {
   let lang = 'ru'
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -124,6 +126,8 @@ export async function POST(request: NextRequest) {
     const cost = CREDIT_COSTS.titles_by_niche
     const check = await requireCreditsAmount(user.id, cost, supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
+
+    _opLogId = await startOpLog({ userId: user.id, projectId: null, opType: 'titles_by_niche', provider: 'claude-sonnet-5' })
 
     const ytKey = env('YOUTUBE_API_KEY')
 
@@ -192,6 +196,7 @@ export async function POST(request: NextRequest) {
     const parsed = parseClaudeJson<TitlesOutput>(textBlock.text, 'titles-by-niche')
 
     await spendCredits(user.id, cost, 'titles_by_niche')
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: cost })
 
     return NextResponse.json({
       ok: true,
@@ -209,6 +214,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof YouTubeQuotaError) return quotaExceededResponse(lang)
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[titles-by-niche]', msg)
     return NextResponse.json({ ok: false, error: 'Ошибка генерации названий' }, { status: 500 })
   }

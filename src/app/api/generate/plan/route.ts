@@ -8,6 +8,7 @@ import { parseClaudeJsonArray } from '@/lib/parse-claude-json'
 import type { PlanSection } from '@/lib/types'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 import { isAnthropicOverload, withAnthropicRetry } from '@/lib/anthropic-retry'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 
 const LANGUAGE_NAMES: Record<string, string> = {
   ru: 'Russian', en: 'English', es: 'Spanish', fr: 'French',
@@ -76,6 +77,7 @@ function parseSections(raw: string): PlanSection[] {
 export async function POST(request: NextRequest) {
   let alertUserId: string | undefined
   let alertProjectId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -96,6 +98,8 @@ export async function POST(request: NextRequest) {
     if (!topic?.trim()) {
       return NextResponse.json({ ok: false, error: 'Тема не указана' }, { status: 400 })
     }
+
+    _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: 'plan', provider: 'claude-sonnet-4-6' })
 
     const sectionCount = calcSectionCount(duration_minutes ?? 5)
     const planMaxTokens = sectionCount * 150 + 500
@@ -123,6 +127,7 @@ export async function POST(request: NextRequest) {
       stopReason = retry.stopReason
       if (stopReason === 'max_tokens') {
         console.error(`[generate/plan] max_tokens attempt=2 — aborting, credits not charged`)
+        void finishOpLog(_opLogId, { status: 'failed', errorText: 'PLAN_TRUNCATED: max_tokens after retry' })
         return NextResponse.json({
           ok: false,
           error: 'Не удалось сгенерировать план целиком — попробуйте ещё раз.',
@@ -131,17 +136,22 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!raw) return NextResponse.json({ ok: false, error: 'Модель вернула пустой ответ' }, { status: 502 })
+    if (!raw) {
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'empty model response' })
+      return NextResponse.json({ ok: false, error: 'Модель вернула пустой ответ' }, { status: 502 })
+    }
 
     let sections: PlanSection[]
     try {
       sections = parseSections(raw)
     } catch {
       console.error('[generate/plan] parse error, raw tail:', raw.slice(-300))
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'plan parse error' })
       return NextResponse.json({ ok: false, error: 'Ошибка разбора плана от модели' }, { status: 502 })
     }
 
     if (sections.length === 0) {
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'empty sections returned' })
       return NextResponse.json({ ok: false, error: 'Модель вернула пустой план' }, { status: 502 })
     }
 
@@ -155,9 +165,11 @@ export async function POST(request: NextRequest) {
         .eq('user_id', user.id)
     }
 
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: cost })
     return NextResponse.json({ ok: true, data: { sections } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[generate/plan]', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/plan', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     else await notifyError('/generate/plan', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})

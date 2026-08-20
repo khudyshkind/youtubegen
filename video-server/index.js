@@ -298,6 +298,31 @@ async function sbPatch(table, qs, body) {
   return res.status === 204 ? [] : res.json()
 }
 
+// ── operation_log helper ─────────────────────────────────────────────────────
+// Fire-and-forget single row insert: started_at = createdAt (job creation time),
+// completed_at = now(). Never throws — log errors go to console.error only.
+async function writeOpLog({ userId, projectId, opType, provider, status, creditsSpent, creditsRefunded, errorText, startedAt }) {
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/operation_log`
+    const body = {
+      user_id:          userId,
+      project_id:       projectId ?? null,
+      op_type:          opType,
+      provider:         provider ?? null,
+      status,
+      credits_spent:    creditsSpent ?? 0,
+      credits_refunded: creditsRefunded ?? 0,
+      error_text:       errorText ?? null,
+      started_at:       startedAt ?? new Date().toISOString(),
+      completed_at:     new Date().toISOString(),
+    }
+    const res = await fetch(url, { method: 'POST', headers: sbHeaders(), body: JSON.stringify(body) })
+    if (!res.ok) console.error('[writeOpLog] insert failed:', res.status, await res.text().catch(() => ''))
+  } catch (e) {
+    console.error('[writeOpLog] error:', e instanceof Error ? e.message : String(e))
+  }
+}
+
 // ── SS finalization claim & event dedup (DB-backed, survives restarts) ────────
 //
 // Atomic claim query (Supabase REST PATCH = conditional UPDATE):
@@ -5552,6 +5577,20 @@ async function processVideoJob(jobId, body) {
     })
     console.log(`[job:${jobId}] done →`, publicUrl)
 
+    // Write operation_log row for the completed video render
+    sbGet('video_jobs', `id=eq.${jobId}&select=credits_charged,created_at`).then(rows => {
+      const vj = Array.isArray(rows) ? rows[0] : null
+      writeOpLog({
+        userId:       user_id,
+        projectId:    project_id,
+        opType:       'video_render',
+        provider:     'ffmpeg',
+        status:       'done',
+        creditsSpent: vj?.credits_charged ?? 0,
+        startedAt:    vj?.created_at ?? undefined,
+      }).catch(() => {})
+    }).catch(() => {})
+
     if (Date.now() - t0Job > 90_000) {
       notifyUserJobDone(user_id, 'video').catch(() => {})
     }
@@ -7246,6 +7285,20 @@ async function processAudioJob(job) {
       completed_at: new Date().toISOString(),
     })
 
+    // Write operation_log row for the completed audio synthesis
+    sbGet('audio_jobs', `id=eq.${jobId}&select=credits_charged,created_at`).then(rows => {
+      const aj = Array.isArray(rows) ? rows[0] : null
+      writeOpLog({
+        userId:       job.user_id,
+        projectId:    job.project_id,
+        opType:       `audio_${job.engine}`,
+        provider:     job.engine,
+        status:       'done',
+        creditsSpent: aj?.credits_charged ?? 0,
+        startedAt:    aj?.created_at ?? undefined,
+      }).catch(() => {})
+    }).catch(() => {})
+
     if (Date.now() - t0Job > 90_000) {
       notifyUserJobDone(job.user_id, 'audio').catch(() => {})
     }
@@ -7511,10 +7564,25 @@ async function finalizeImageJobFromSsUrls(jobId, ssUrls, jobRow, scenes, allStyl
 
   const validImages = sceneImages.filter(Boolean)
   console.log(`[image-job:${jobId}] SUMMARY: engine=${engine} created=${validImages.length} failed=${ssUrls.length - validImages.length}`)
+  const completedAt = new Date().toISOString()
   await updateImageJob(jobId, {
     status: 'completed', progress: 100, scene_images: validImages,
-    credits_charged: chargedCredits, completed_at: new Date().toISOString(),
+    credits_charged: chargedCredits, completed_at: completedAt,
   })
+
+  // Write operation_log row for the completed image batch
+  sbGet('image_jobs', `id=eq.${jobId}&select=created_at`).then(rows => {
+    const ij = Array.isArray(rows) ? rows[0] : null
+    writeOpLog({
+      userId:       user_id,
+      projectId:    project_id,
+      opType:       'images',
+      provider:     engine,
+      status:       'done',
+      creditsSpent: chargedCredits,
+      startedAt:    ij?.created_at ?? undefined,
+    }).catch(() => {})
+  }).catch(() => {})
 
   if (project_id) {
     await sbPatch('projects', `id=eq.${project_id}&user_id=eq.${user_id}`, {

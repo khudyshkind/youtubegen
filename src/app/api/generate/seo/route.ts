@@ -8,6 +8,7 @@ import { parseClaudeJson } from '@/lib/parse-claude-json'
 import type { SeoData, SubtitleBlock } from '@/lib/types'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
 import { isAnthropicOverload, withAnthropicRetry } from '@/lib/anthropic-retry'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 
 interface SeoRequest {
   script: string
@@ -129,6 +130,7 @@ OUTPUT LANGUAGE: Write all output (titles, description, hashtags, tags) in the s
 export async function POST(request: NextRequest) {
   let alertUserId: string | undefined
   let alertProjectId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -144,6 +146,7 @@ export async function POST(request: NextRequest) {
     const { script, topic, project_id, duration_minutes = 5, subtitle_blocks, lang: clientLang }: SeoRequest =
       await request.json()
     alertProjectId = project_id ?? undefined
+    _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: 'seo', provider: 'claude-sonnet-4-6' })
 
     // Language resolution: DB is authoritative when project_id is known.
     // Priority: projects.language (DB) → clientLang → undefined (model auto-detects).
@@ -231,9 +234,11 @@ ${chaptersBlock}${lang ? `\n\nOUTPUT LANGUAGE: Write ALL output (titles, descrip
         .eq('user_id', user.id)
     }
 
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: CREDIT_COSTS.seo })
     return NextResponse.json({ ok: true, data: { seo } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[generate/seo]', msg)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/generate/seo', { userId: alertUserId, projectId: alertProjectId }).catch(() => {})
     else await notifyError('/generate/seo', msg, { userId: alertUserId, projectId: alertProjectId }).catch(() => {})

@@ -17,7 +17,7 @@ export default async function AdminJobsPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Журнал задач</h1>
         <p className="text-gray-500 text-sm mt-1">
-          audio_jobs · image_jobs · video_jobs — последние N дней, новые сверху
+          operation_log — все операции продукта, последние N дней, новые сверху
         </p>
       </div>
       <JobsTable />

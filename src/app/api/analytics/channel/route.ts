@@ -8,6 +8,7 @@ import { YouTubeQuotaError, checkYouTubeQuota, quotaExceededResponse, byokQuotaR
 import { resolveAnalyticsContext } from '@/lib/analytics-gate'
 import { env } from '@/lib/env'
 import { isBillingError, notifyBillingError } from '@/lib/telegram'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 import { fetchChannelFeed } from '@/lib/youtube-rss'
 import { detectChannelInput } from '@/lib/youtube-channel'
 
@@ -250,6 +251,7 @@ export async function POST(req: NextRequest) {
   let userHasKey = false
   let plan = 'free'
   let alertUserId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -324,6 +326,8 @@ export async function POST(req: NextRequest) {
     const actualCost = cost(CREDIT_COSTS.channel_analysis)
     const check = await requireCreditsAmount(user.id, actualCost, supabase)
     if (!check.ok) return NextResponse.json({ ok: false, error: check.error, code: check.code }, { status: 402 })
+
+    _opLogId = await startOpLog({ userId: user.id, projectId: null, opType: 'channel_analysis', provider: 'claude-sonnet-4-6' })
 
     // ── Step 1: channels.list — 1 quota unit (same price regardless of parts) ─
     let quotaUsed = 0
@@ -638,6 +642,7 @@ export async function POST(req: NextRequest) {
     console.log('[channel] analysis merged ok')
 
     await spendCredits(user.id, actualCost, 'channel_analysis')
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: actualCost })
 
     // ── Write cache ───────────────────────────────────────────────────────────
     try {
@@ -683,6 +688,7 @@ export async function POST(req: NextRequest) {
       return (userHasKey && plan === 'free') ? byokQuotaResponse(lang) : quotaExceededResponse(lang)
     }
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[analytics/channel] fatal error:', msg)
     if (isYouTubeKeyError(msg)) return youTubeKeyErrorResponse(lang)
     if (isBillingError(msg)) await notifyBillingError('Anthropic', '/analytics/channel', { userId: alertUserId }).catch(() => {})

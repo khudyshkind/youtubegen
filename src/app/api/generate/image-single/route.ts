@@ -4,6 +4,7 @@ import { fal } from '@fal-ai/client'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
 import { requireCredits, spendCredits } from '@/lib/credits'
 import { isBillingError, notifyBillingError, notifyError } from '@/lib/telegram'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 import { env } from '@/lib/env'
 import { CREDIT_COSTS } from '@/lib/types'
 import type { SceneImage } from '@/lib/types'
@@ -220,6 +221,7 @@ async function generateGptMini(
 export async function POST(request: NextRequest) {
   let alertUserId: string | undefined
   let alertProjectId: string | undefined
+  let _opLogId: string | null = null
   try {
     const supabase = await createServerSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -248,6 +250,8 @@ export async function POST(request: NextRequest) {
 
     const check = await requireCredits(user.id, costKey, supabase)
     if (!check.ok) return NextResponse.json(check, { status: 402 })
+
+    _opLogId = await startOpLog({ userId: user.id, projectId: project_id ?? null, opType: `image_${engine}`, provider: engine })
 
     const styleConfig: StyleConfig = custom_style?.trim()
       ? {
@@ -333,9 +337,11 @@ export async function POST(request: NextRequest) {
 
     await spendCredits(user.id, cost, `image_${engine}`, project_id)
 
+    void finishOpLog(_opLogId, { status: 'done', creditsSpent: cost })
     return NextResponse.json({ ok: true, data: { image: newImage } })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    void finishOpLog(_opLogId, { status: 'failed', errorText: msg.slice(0, 500) })
     console.error('[image-single]', msg)
     if (msg.startsWith('NSFW_FILTERED')) {
       return NextResponse.json({
