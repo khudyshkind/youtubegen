@@ -496,14 +496,15 @@ async function submitApihostJob(
     const body = await res.text().catch(() => '')
     throw new Error(`APIHOST submit HTTP ${res.status}: ${body.slice(0, 300)}`)
   }
-  const json = (await res.json()) as { status?: number; process?: string; id?: string; hold?: number }
+  const json = (await res.json()) as { status?: number; process?: string; id?: string; hold?: number | string }
   const pid = json.process ?? json.id
   if (!pid) throw new Error('APIHOST: no process ID in submit response')
-  // Persist remaining balance for admin panel (non-blocking)
-  if (typeof json.hold === 'number') {
+  // Persist remaining balance for admin panel (non-blocking; hold can be string or number)
+  const holdNum = json.hold !== undefined && json.hold !== null ? Number(json.hold) : NaN
+  if (!isNaN(holdNum)) {
     const svc = createServiceClient()
     void svc.from('bot_settings').upsert([
-      { key: 'apihost_balance',    value: String(json.hold) },
+      { key: 'apihost_balance',    value: String(holdNum) },
       { key: 'apihost_balance_ts', value: new Date().toISOString() },
     ], { onConflict: 'key' })
   }
