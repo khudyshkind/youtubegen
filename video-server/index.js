@@ -3128,8 +3128,7 @@ const ELEVENLABS_CHARS_ALERT_THRESHOLD = parseInt  (env('ELEVENLABS_CHARS_ALERT_
 const APIHOST_BALANCE_ALERT_THRESHOLD  = parseFloat(env('APIHOST_BALANCE_ALERT_THRESHOLD')  || '100')
 // SV uses api_credits (same operator as Secret Slider which has confirmed GET /api/v2/balance → api_credits)
 const SV_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SV_BALANCE_ALERT_THRESHOLD')       || '100')
-// TEST: threshold set to 9999999999 to force alert on next cron tick; restore to '100000' after verification
-const SS_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SS_BALANCE_ALERT_THRESHOLD')       || '9999999999')
+const SS_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SS_BALANCE_ALERT_THRESHOLD')       || '100000')
 
 // Send billing-exhaustion alert from Railway with 1h dedup per service.
 async function notifyBillingErrorRailway(service, route, userId, projectId) {
@@ -3555,11 +3554,9 @@ async function checkSSBalance() {
   if (balance < SS_BALANCE_ALERT_THRESHOLD) {
     const shouldAlert = alertState !== 'low' || hoursSinceAlert >= 24
     if (shouldAlert) {
-      const tgText = `⚠️ Secret Slider баланс низкий!\n\nТекущий баланс: ${balance.toLocaleString('ru')} api_credits\nПорог: ${SS_BALANCE_ALERT_THRESHOLD.toLocaleString('ru')} api_credits\n\nПополнить: https://secretslider.com`
-      console.log(`${tag} [TEST] TG message:\n---\n${tgText}\n---`)
       const tgResult = await tgApi('sendMessage', {
         chat_id: OWNER_ID,
-        text: tgText,
+        text: `⚠️ Secret Slider баланс низкий!\n\nТекущий баланс: ${balance.toLocaleString('ru')} api_credits\nПорог: ${SS_BALANCE_ALERT_THRESHOLD.toLocaleString('ru')} api_credits\n\nПополнить: https://secretslider.com`,
       })
       if (tgResult?.ok) {
         await setSetting('ss_balance_alert_state', 'low')
@@ -3656,13 +3653,6 @@ cron.schedule('30 * * * *', async () => {
   try { await checkAnthropicBilling() } catch (err) { console.error('[cron/anthropic-billing]', err.message) }
 }, { timezone: 'UTC' })
 
-// TEST: one-shot startup call to verify SS balance alert fires — REMOVE AFTER VERIFICATION
-setImmediate(async () => {
-  console.log('[TEST] startup: running checkSSBalance with test threshold')
-  try { await checkSSBalance() } catch (err) { console.error('[TEST] checkSSBalance error:', err.message) }
-  console.log('[TEST] startup: running checkAnthropicBilling')
-  try { await checkAnthropicBilling() } catch (err) { console.error('[TEST] checkAnthropicBilling error:', err.message) }
-})
 
 // ── Daily DB backup cron — 03:00 UTC ─────────────────────────────────────────
 cron.schedule('0 3 * * *', async () => {
