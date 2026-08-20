@@ -3128,7 +3128,8 @@ const ELEVENLABS_CHARS_ALERT_THRESHOLD = parseInt  (env('ELEVENLABS_CHARS_ALERT_
 const APIHOST_BALANCE_ALERT_THRESHOLD  = parseFloat(env('APIHOST_BALANCE_ALERT_THRESHOLD')  || '100')
 // SV uses api_credits (same operator as Secret Slider which has confirmed GET /api/v2/balance → api_credits)
 const SV_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SV_BALANCE_ALERT_THRESHOLD')       || '100')
-const SS_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SS_BALANCE_ALERT_THRESHOLD')       || '100000')
+// TEST: threshold set to 9999999999 to force alert on next cron tick; restore to '100000' after verification
+const SS_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SS_BALANCE_ALERT_THRESHOLD')       || '9999999999')
 
 // Send billing-exhaustion alert from Railway with 1h dedup per service.
 async function notifyBillingErrorRailway(service, route, userId, projectId) {
@@ -3554,9 +3555,11 @@ async function checkSSBalance() {
   if (balance < SS_BALANCE_ALERT_THRESHOLD) {
     const shouldAlert = alertState !== 'low' || hoursSinceAlert >= 24
     if (shouldAlert) {
+      const tgText = `⚠️ Secret Slider баланс низкий!\n\nТекущий баланс: ${balance.toLocaleString('ru')} api_credits\nПорог: ${SS_BALANCE_ALERT_THRESHOLD.toLocaleString('ru')} api_credits\n\nПополнить: https://secretslider.com`
+      console.log(`${tag} [TEST] TG message:\n---\n${tgText}\n---`)
       const tgResult = await tgApi('sendMessage', {
         chat_id: OWNER_ID,
-        text: `⚠️ Secret Slider баланс низкий!\n\nТекущий баланс: ${balance.toLocaleString('ru')} api_credits\nПорог: ${SS_BALANCE_ALERT_THRESHOLD.toLocaleString('ru')} api_credits\n\nПополнить: https://secretslider.com`,
+        text: tgText,
       })
       if (tgResult?.ok) {
         await setSetting('ss_balance_alert_state', 'low')
@@ -3652,6 +3655,14 @@ cron.schedule('30 * * * *', async () => {
   console.log('[cron] anthropic billing probe')
   try { await checkAnthropicBilling() } catch (err) { console.error('[cron/anthropic-billing]', err.message) }
 }, { timezone: 'UTC' })
+
+// TEST: one-shot startup call to verify SS balance alert fires — REMOVE AFTER VERIFICATION
+setImmediate(async () => {
+  console.log('[TEST] startup: running checkSSBalance with test threshold')
+  try { await checkSSBalance() } catch (err) { console.error('[TEST] checkSSBalance error:', err.message) }
+  console.log('[TEST] startup: running checkAnthropicBilling')
+  try { await checkAnthropicBilling() } catch (err) { console.error('[TEST] checkAnthropicBilling error:', err.message) }
+})
 
 // ── Daily DB backup cron — 03:00 UTC ─────────────────────────────────────────
 cron.schedule('0 3 * * *', async () => {
@@ -6679,8 +6690,11 @@ async function processImageJob(jobId, body) {
       console.log(`[image-job:${jobId}] poll timeout → awaiting_webhook`)
       await updateImageJob(jobId, { status: 'awaiting_webhook', progress: 50, error_message: null })
       if (OWNER_ID) {
-        tgApi('sendMessage', { chat_id: OWNER_ID, text: `⏳ image_job ${jobId.slice(0, 8)} awaiting_webhook (SS >${Math.round((Date.now() - t0Request) / 60_000)}min)` })
-          .catch(() => {})
+        const waitMin = Math.round((Date.now() - t0Request) / 60_000)
+        tgApi('sendMessage', {
+          chat_id: OWNER_ID,
+          text: `⏳ image_job ${jobId.slice(0, 8)}: ждём вебхук Secret Slider (${waitMin} мин)\n\nЗадача выполняется на стороне поставщика — результат придёт автоматически. Действий не требуется.`,
+        }).catch(() => {})
       }
       return
     }
