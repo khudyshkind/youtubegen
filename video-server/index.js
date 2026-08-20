@@ -3128,7 +3128,7 @@ const ELEVENLABS_CHARS_ALERT_THRESHOLD = parseInt  (env('ELEVENLABS_CHARS_ALERT_
 const APIHOST_BALANCE_ALERT_THRESHOLD  = parseFloat(env('APIHOST_BALANCE_ALERT_THRESHOLD')  || '100')
 // SV uses api_credits (same operator as Secret Slider which has confirmed GET /api/v2/balance → api_credits)
 const SV_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SV_BALANCE_ALERT_THRESHOLD')       || '100')
-const SS_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SS_BALANCE_ALERT_THRESHOLD')       || '100000')
+const SS_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SS_BALANCE_ALERT_THRESHOLD')       || '500')
 
 // Send billing-exhaustion alert from Railway with 1h dedup per service.
 async function notifyBillingErrorRailway(service, route, userId, projectId) {
