@@ -3354,27 +3354,16 @@ async function checkElevenLabsBalance() {
 }
 
 // ── APIHOST ruble balance ──────────────────────────────────────────────────────
+// APIHOST has no dedicated balance endpoint. The remaining balance (hold field)
+// is returned in every synthesize response and written to bot_settings by the Vercel audio route.
 async function fetchApihostBalance() {
   const apiKey = env('APIHOST_API_KEY')
   if (!apiKey) return { error: 'no_key' }
-  const controller = new AbortController()
-  const t = setTimeout(() => controller.abort(), 10_000)
-  try {
-    const res = await fetch('https://apihost.ru/api/v1/balance', {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: controller.signal,
-    })
-    if (res.status === 401 || res.status === 403) return { error: 'unauthorized' }
-    if (!res.ok) return { error: 'unavailable' }
-    const data = await res.json()
-    const balance = data.balance ?? data.amount ?? data.rub ?? null
-    if (typeof balance !== 'number') return { error: 'unavailable' }
-    return { balance }
-  } catch {
-    return { error: 'unavailable' }
-  } finally {
-    clearTimeout(t)
-  }
+  const balanceStr = await getSetting('apihost_balance')
+  if (!balanceStr) return { error: 'unavailable' }
+  const balance = parseFloat(balanceStr)
+  if (isNaN(balance)) return { error: 'unavailable' }
+  return { balance }
 }
 
 async function checkApihostBalance() {
@@ -3382,16 +3371,13 @@ async function checkApihostBalance() {
   const result = await fetchApihostBalance()
 
   if ('balance' in result) {
-    await setSetting('apihost_balance',    String(result.balance))
-    await setSetting('apihost_balance_ts', new Date().toISOString())
-    console.log(`${tag} balance=${result.balance} RUB`)
+    console.log(`${tag} balance=${result.balance} ₽ (from last synthesize response)`)
   }
 
   if (!OWNER_ID) return
 
   if (result.error === 'no_key') { console.warn(`${tag} APIHOST_API_KEY not set on Railway — add to Railway env`); return }
-  if (result.error === 'unauthorized') { console.warn(`${tag} key unauthorized`); return }
-  if (result.error === 'unavailable')  { console.warn(`${tag} API unavailable, skipping`); return }
+  if (result.error === 'unavailable')  { console.log(`${tag} no synthesize-derived balance yet, skipping`); return }
 
   const { balance } = result
   const alertState      = await getSetting('apihost_balance_alert_state')
@@ -3697,9 +3683,11 @@ async function checkApihostSynthHealth() {
   const timer = setTimeout(() => controller.abort(), 8_000)
   let httpCode = 0
   try {
-    // /api/v1/balance returns 404 — API structure has changed, mark as down
-    const res = await fetch('https://apihost.ru/api/v1/balance', {
-      headers: { Authorization: `Bearer ${apiKey}` },
+    // POST /api/v1/speaker is a lightweight voice-list call (no synthesis, no credits)
+    const res = await fetch('https://apihost.ru/api/v1/speaker', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server: 0 }),
       signal: controller.signal,
     })
     httpCode = res.status

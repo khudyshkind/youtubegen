@@ -467,7 +467,8 @@ async function synthesizeGoogleChunk(
   return Buffer.from(json.audioContent, 'base64')
 }
 
-// APIHOST: submit one synthesis job, returns processId
+// APIHOST: submit one synthesis job, returns processId.
+// Captures `hold` (remaining balance ₽) and persists it to bot_settings for the admin panel.
 async function submitApihostJob(
   text: string,
   voiceId: string,
@@ -478,16 +479,34 @@ async function submitApihostJob(
     method: 'POST',
     headers,
     body: JSON.stringify({
-      data: [{ lang: opts.lang, speaker: Number(voiceId), text, rate: opts.rate, pitch: opts.pitch, type: 'mp3', pause: '0' }],
+      data: [{
+        lang: opts.lang,
+        speaker: voiceId,        // string, per API docs
+        emotion: '',             // required field; empty = no emotion override
+        text,
+        rate_hertz: '48000',     // required field; 48 kHz default
+        rate: opts.rate,
+        pitch: opts.pitch,
+        type: 'mp3',
+        pause: '0',
+      }],
     }),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`APIHOST submit HTTP ${res.status}: ${body.slice(0, 300)}`)
   }
-  const json = (await res.json()) as { process?: string; id?: string }
+  const json = (await res.json()) as { status?: number; process?: string; id?: string; hold?: number }
   const pid = json.process ?? json.id
   if (!pid) throw new Error('APIHOST: no process ID in submit response')
+  // Persist remaining balance for admin panel (non-blocking)
+  if (typeof json.hold === 'number') {
+    const svc = createServiceClient()
+    void svc.from('bot_settings').upsert([
+      { key: 'apihost_balance',    value: String(json.hold) },
+      { key: 'apihost_balance_ts', value: new Date().toISOString() },
+    ], { onConflict: 'key' })
+  }
   return pid
 }
 

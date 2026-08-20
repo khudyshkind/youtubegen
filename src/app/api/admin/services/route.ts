@@ -509,27 +509,33 @@ async function checkApihost(): Promise<ServiceResult> {
   const apiKey = env('APIHOST_API_KEY')
   if (!apiKey) return unconfigured(base, 'APIHOST_API_KEY')
   try {
-    const res = await safeFetch('https://apihost.ru/api/v1/balance', {
-      headers: { Authorization: `Bearer ${apiKey}` },
+    // APIHOST has no balance endpoint. Verify key via POST /api/v1/speaker (lightweight voice list).
+    // Balance is captured from synthesize `hold` field and stored in bot_settings by the audio route.
+    const res = await safeFetch('https://apihost.ru/api/v1/speaker', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server: 0 }),
     })
     if (res.status === 401 || res.status === 403) {
       return { ...base, status: 'error', metrics: [], error: 'Ключ недействителен' }
     }
     if (!res.ok) {
-      // Balance endpoint unavailable — key is set, show as ok
-      return {
-        ...base, status: 'ok',
-        metrics: [
-          { label: 'Статус', value: '✓ Ключ настроен' },
-          { label: 'Баланс', value: '↗ apihost.ru', url: 'https://apihost.ru' },
-        ],
-      }
+      return { ...base, status: 'error', metrics: [], error: `HTTP ${res.status}` }
     }
-    const data = await res.json() as Record<string, unknown>
-    const balance = (data.balance ?? data.amount ?? data.rub ?? null) as number | null
-    const balanceStr = balance !== null ? `${Number(balance).toLocaleString('ru-RU')} ₽` : '—'
-    const thresholdRaw = await readBotSetting('apihost_balance_threshold')
+    const data = await res.json() as { speaker?: unknown[] }
+    const voiceCount = Array.isArray(data.speaker) ? data.speaker.length : 0
+
+    // Read last-known balance from bot_settings (written after each synthesize call)
+    const [balanceRaw, balanceTsRaw, thresholdRaw] = await Promise.all([
+      readBotSetting('apihost_balance'),
+      readBotSetting('apihost_balance_ts'),
+      readBotSetting('apihost_balance_threshold'),
+    ])
+    const balance = balanceRaw ? parseFloat(balanceRaw) : null
     const threshold = thresholdRaw ? parseFloat(thresholdRaw) : 100
+    const balanceStr = balance !== null
+      ? `${Number(balance).toLocaleString('ru-RU')} ₽${balanceTsRaw ? ` (${new Date(balanceTsRaw).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : ''}`
+      : '— (нет синтезов с новой версией)'
     const thresholdStr = `${threshold.toLocaleString('ru-RU')} ₽`
     const status: Status = balance !== null && balance < threshold ? 'warn' : 'ok'
     const statusLabel = status === 'warn' ? 'Баланс низкий' : undefined
@@ -537,8 +543,10 @@ async function checkApihost(): Promise<ServiceResult> {
       ...base, status, ...(statusLabel ? { statusLabel } : {}),
       metrics: [
         { label: 'Статус', value: '✓ Ключ активен' },
-        { label: 'Баланс', value: balanceStr },
+        { label: 'Доступно голосов', value: `${voiceCount.toLocaleString('ru')} (все серверы)` },
+        { label: 'Баланс (последний синтез)', value: balanceStr },
         { label: 'Порог алерта', value: thresholdStr },
+        { label: 'API документация', value: '↗ apihost.ru/info/api-text-to-speech', url: 'https://apihost.ru/info/api-text-to-speech/' },
       ],
     }
   } catch (err) {
