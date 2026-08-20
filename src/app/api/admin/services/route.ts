@@ -17,6 +17,7 @@ interface Metric {
 export interface ServiceResult {
   key: string
   name: string
+  uiName?: string          // user-facing alias shown in the product UI
   icon: string
   link: string
   status: Status
@@ -110,7 +111,7 @@ async function checkAnthropic(): Promise<ServiceResult> {
 }
 
 async function checkOpenAI(): Promise<ServiceResult> {
-  const base = { key: 'openai', name: 'OpenAI (Whisper)', icon: '🎤', link: 'https://platform.openai.com/usage' }
+  const base = { key: 'openai', name: 'OpenAI (Whisper · TTS · Images)', uiName: '«Voice Plus» · «Vision Ultra»', icon: '🎤', link: 'https://platform.openai.com/usage' }
   const apiKey = env('OPENAI_API_KEY')
   if (!apiKey) return unconfigured(base, 'OPENAI_API_KEY')
   try {
@@ -140,7 +141,7 @@ async function checkOpenAI(): Promise<ServiceResult> {
 }
 
 async function checkElevenLabs(): Promise<ServiceResult> {
-  const base = { key: 'elevenlabs', name: 'ElevenLabs (TTS)', icon: '🔊', link: 'https://elevenlabs.io/app/subscription' }
+  const base = { key: 'elevenlabs', name: 'ElevenLabs (TTS)', uiName: '«Voice Studio»', icon: '🔊', link: 'https://elevenlabs.io/app/subscription' }
   const apiKey = env('ELEVENLABS_API_KEY')
   if (!apiKey) return unconfigured(base, 'ELEVENLABS_API_KEY')
   try {
@@ -188,7 +189,7 @@ async function checkElevenLabs(): Promise<ServiceResult> {
 }
 
 async function checkFal(): Promise<ServiceResult> {
-  const base = { key: 'fal', name: 'fal.ai (Flux / Изображения)', icon: '🎨', link: 'https://fal.ai/dashboard' }
+  const base = { key: 'fal', name: 'fal.ai (Изображения)', uiName: '«Vision Classic» · «Vision Fast» · «Vision Pro»', icon: '🎨', link: 'https://fal.ai/dashboard' }
   const adminKey  = env('FAL_ADMIN_KEY') || env('FAL_KEY')
   const threshold = parseFloat(env('FAL_BALANCE_ALERT_THRESHOLD') || '10')
 
@@ -501,6 +502,7 @@ async function checkApihost(): Promise<ServiceResult> {
   const base = {
     key: 'apihost',
     name: 'APIHOST.RU (TTS)',
+    uiName: '«Voice Lite»',
     icon: '🎙️',
     link: 'https://apihost.ru',
   }
@@ -549,6 +551,7 @@ async function checkGoogleCloud(): Promise<ServiceResult> {
   const base = {
     key: 'google_cloud',
     name: 'Google Cloud (TTS)',
+    uiName: '«Voice Global»',
     icon: '☁️',
     link: 'https://console.cloud.google.com',
   }
@@ -733,7 +736,7 @@ async function fetchRailwayStats(): Promise<RailwayStats | null> {
 // ─── New service checks ────────────────────────────────────────────────────────
 
 async function checkSecretVoicer(): Promise<ServiceResult> {
-  const base = { key: 'secretvoicer', name: 'SecretVoicer (TTS)', icon: '🗣️', link: 'https://secret-voicer.ru' }
+  const base = { key: 'secretvoicer', name: 'SecretVoicer (TTS)', uiName: '«Voice Standard»', icon: '🗣️', link: 'https://secret-voicer.ru' }
   const apiKey = env('SECRETVOICER_API_KEY')
   if (!apiKey) return unconfigured(base, 'SECRETVOICER_API_KEY')
   try {
@@ -785,7 +788,7 @@ async function checkSecretVoicer(): Promise<ServiceResult> {
 }
 
 async function checkVoicer(): Promise<ServiceResult> {
-  const base = { key: 'voicer', name: 'Voicer (Премиум TTS)', icon: '🔉', link: 'https://voicer.mat3u.com' }
+  const base = { key: 'voicer', name: 'Voicer (Премиум TTS)', uiName: '«Voice Pro»', icon: '🔉', link: 'https://voicer.mat3u.com' }
   const apiKey = env('VOICER_API_KEY')
   if (!apiKey) return unconfigured(base, 'VOICER_API_KEY')
   try {
@@ -938,26 +941,26 @@ export async function GET() {
     checkVGF(railwayStats),
   ])
 
-  const FALLBACKS: Pick<ServiceResult, 'key' | 'name' | 'icon' | 'link'>[] = [
-    { key: 'anthropic',    name: 'Anthropic',          icon: '🤖', link: 'https://console.anthropic.com' },
-    { key: 'openai',       name: 'OpenAI',             icon: '🎤', link: 'https://platform.openai.com' },
-    { key: 'elevenlabs',   name: 'ElevenLabs',         icon: '🔊', link: 'https://elevenlabs.io' },
-    { key: 'fal',          name: 'fal.ai',             icon: '🎨', link: 'https://fal.ai' },
-    { key: 'resend',       name: 'Resend',             icon: '📧', link: 'https://resend.com' },
-    { key: 'railway',      name: 'Railway',            icon: '🎬', link: 'https://railway.app' },
-    { key: 'supabase',     name: 'Supabase',           icon: '🗄️', link: 'https://supabase.com' },
-    { key: 'paddle',       name: 'Paddle',             icon: '💳', link: 'https://vendors.paddle.com' },
-    { key: 'github',       name: 'GitHub',             icon: '📦', link: 'https://github.com' },
-    { key: 'vercel',       name: 'Vercel',             icon: '▲',  link: 'https://vercel.com' },
-    { key: 'youtube_api',  name: 'YouTube Data API v3',icon: '▶️', link: 'https://console.cloud.google.com/apis/api/youtube.googleapis.com' },
-    { key: 'apihost',      name: 'APIHOST.RU (TTS)',   icon: '🎙️', link: 'https://apihost.ru' },
-    { key: 'google_cloud', name: 'Google Cloud (TTS)', icon: '☁️', link: 'https://console.cloud.google.com' },
-    { key: 'db_backup',    name: 'Бэкап БД',          icon: '💾', link: 'https://railway.app' },
-    { key: 'secretvoicer', name: 'SecretVoicer (TTS)', icon: '🗣️', link: 'https://secret-voicer.ru' },
-    { key: 'voicer',       name: 'Voicer (Премиум TTS)',icon: '🔉', link: 'https://voicer.mat3u.com' },
-    { key: 'gemini',       name: 'Gemini (Превью)',    icon: '✨', link: 'https://aistudio.google.com' },
-    { key: 'b2',           name: 'Backblaze B2 (Видео)',icon: '💿', link: 'https://secure.backblaze.com/b2_buckets.htm' },
-    { key: 'vgf',          name: 'VGF (Рендер видео)', icon: '🎞️', link: 'https://verygoodffmpeg.com' },
+  const FALLBACKS: Pick<ServiceResult, 'key' | 'name' | 'uiName' | 'icon' | 'link'>[] = [
+    { key: 'anthropic',    name: 'Anthropic',                           icon: '🤖', link: 'https://console.anthropic.com' },
+    { key: 'openai',       name: 'OpenAI (Whisper · TTS · Images)',     uiName: '«Voice Plus» · «Vision Ultra»',                    icon: '🎤', link: 'https://platform.openai.com' },
+    { key: 'elevenlabs',   name: 'ElevenLabs (TTS)',                    uiName: '«Voice Studio»',                                   icon: '🔊', link: 'https://elevenlabs.io' },
+    { key: 'fal',          name: 'fal.ai (Изображения)',                uiName: '«Vision Classic» · «Vision Fast» · «Vision Pro»',  icon: '🎨', link: 'https://fal.ai' },
+    { key: 'resend',       name: 'Resend',                              icon: '📧', link: 'https://resend.com' },
+    { key: 'railway',      name: 'Railway',                             icon: '🎬', link: 'https://railway.app' },
+    { key: 'supabase',     name: 'Supabase',                            icon: '🗄️', link: 'https://supabase.com' },
+    { key: 'paddle',       name: 'Paddle',                              icon: '💳', link: 'https://vendors.paddle.com' },
+    { key: 'github',       name: 'GitHub',                              icon: '📦', link: 'https://github.com' },
+    { key: 'vercel',       name: 'Vercel',                              icon: '▲',  link: 'https://vercel.com' },
+    { key: 'youtube_api',  name: 'YouTube Data API v3',                 icon: '▶️', link: 'https://console.cloud.google.com/apis/api/youtube.googleapis.com' },
+    { key: 'apihost',      name: 'APIHOST.RU (TTS)',                    uiName: '«Voice Lite»',                                     icon: '🎙️', link: 'https://apihost.ru' },
+    { key: 'google_cloud', name: 'Google Cloud (TTS)',                  uiName: '«Voice Global»',                                   icon: '☁️', link: 'https://console.cloud.google.com' },
+    { key: 'db_backup',    name: 'Бэкап БД',                           icon: '💾', link: 'https://railway.app' },
+    { key: 'secretvoicer', name: 'SecretVoicer (TTS)',                  uiName: '«Voice Standard»',                                 icon: '🗣️', link: 'https://secret-voicer.ru' },
+    { key: 'voicer',       name: 'Voicer (Премиум TTS)',                uiName: '«Voice Pro»',                                      icon: '🔉', link: 'https://voicer.mat3u.com' },
+    { key: 'gemini',       name: 'Gemini (Превью)',                     icon: '✨', link: 'https://aistudio.google.com' },
+    { key: 'b2',           name: 'Backblaze B2 (Видео)',                icon: '💿', link: 'https://secure.backblaze.com/b2_buckets.htm' },
+    { key: 'vgf',          name: 'VGF (Рендер видео)',                  icon: '🎞️', link: 'https://verygoodffmpeg.com' },
   ]
 
   const services: ServiceResult[] = results.map((r, i) => {

@@ -52,6 +52,9 @@ function ServiceCard({ svc }: { svc: ServiceResult }) {
           <div className="text-2xl leading-none">{svc.icon}</div>
           <div>
             <p className="font-semibold text-gray-800 text-sm leading-tight">{svc.name}</p>
+            {svc.uiName && (
+              <p className="text-xs text-indigo-500 font-medium mt-0.5 leading-tight">{svc.uiName}</p>
+            )}
             <span
               className={`inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full text-xs font-medium border ${STATUS_BADGE[svc.status] ?? STATUS_BADGE.unconfigured}`}
             >
