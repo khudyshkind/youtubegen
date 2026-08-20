@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (engine !== 'secretslider') {
-    return NextResponse.json({ ok: false, error: `Async path поддерживает только secretslider, получен: ${engine}` }, { status: 400 })
+    return NextResponse.json({ ok: false, error: 'Неверный движок генерации иллюстраций' }, { status: 400 })
   }
 
   const count = Math.max(1, Math.min(IMAGE_COUNT_MAX, image_count ?? 1))
