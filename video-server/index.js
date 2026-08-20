@@ -7572,7 +7572,9 @@ app.listen(PORT, async () => {
     setSetting('elevenlabs_chars_threshold',   String(ELEVENLABS_CHARS_ALERT_THRESHOLD)),
     setSetting('apihost_balance_threshold',    String(APIHOST_BALANCE_ALERT_THRESHOLD)),
     setSetting('sv_balance_threshold',         String(SV_BALANCE_ALERT_THRESHOLD)),
+    setSetting('ss_balance_threshold',         String(SS_BALANCE_ALERT_THRESHOLD)),
   ]).catch(err => console.warn('[startup] threshold write failed:', err.message))
+  console.log(`[startup/thresholds] fal=$${FAL_BALANCE_THRESHOLD} elevenlabs=${ELEVENLABS_CHARS_ALERT_THRESHOLD}ch apihost=${APIHOST_BALANCE_ALERT_THRESHOLD}₽ sv=${SV_BALANCE_ALERT_THRESHOLD} ss=${SS_BALANCE_ALERT_THRESHOLD} api_credits`)
   console.log('[bot] starting cron jobs...')
 
   console.log('[boot] OWNER_ID:', OWNER_ID || '(not set)')
