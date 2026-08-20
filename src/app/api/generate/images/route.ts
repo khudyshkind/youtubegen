@@ -254,7 +254,7 @@ async function generateScenesFromSubtitles(
   fallbackTopic: string,
   userId?: string,
   projectId?: string,
-): Promise<SceneInfo[]> {
+): Promise<{ scenes: SceneInfo[]; fallbackCount: number }> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
 
   const groups = splitSubtitlesIntoGroups(subtitleBlocks, imageCount)
@@ -386,11 +386,14 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(s.start)}–${
     promptResults = promptResults.map((r, i) => ({ ...r, prompt: injectedPrompts[i] }))
   }
 
-  return promptResults.map((p, i) => ({
-    ...p,
-    timecode_start: fmtSec(scenesWithText[i].start),
-    timecode_end: fmtSec(scenesWithText[i].end),
-  }))
+  return {
+    scenes: promptResults.map((p, i) => ({
+      ...p,
+      timecode_start: fmtSec(scenesWithText[i].start),
+      timecode_end: fmtSec(scenesWithText[i].end),
+    })),
+    fallbackCount: sceneFallbackCount,
+  }
 }
 
 function splitScriptByWords(script: string, n: number): string[] {
@@ -449,7 +452,7 @@ async function generateScenesFromScript(
   fallbackTopic: string,
   userId?: string,
   projectId?: string,
-): Promise<SceneInfo[]> {
+): Promise<{ scenes: SceneInfo[]; fallbackCount: number }> {
   const anthropic = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY'), timeout: 120_000 })
 
   const blocks = splitScriptByWords(script, imageCount)
@@ -578,11 +581,14 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${fmtSec(b.start)}–${
     promptResults = promptResults.map((r, i) => ({ ...r, prompt: injectedPrompts[i] }))
   }
 
-  return promptResults.map((p, i) => ({
-    ...p,
-    timecode_start: fmtSec(blocksWithTimecodes[i].start),
-    timecode_end: fmtSec(blocksWithTimecodes[i].end),
-  }))
+  return {
+    scenes: promptResults.map((p, i) => ({
+      ...p,
+      timecode_start: fmtSec(blocksWithTimecodes[i].start),
+      timecode_end: fmtSec(blocksWithTimecodes[i].end),
+    })),
+    fallbackCount: sceneFallbackCount,
+  }
 }
 
 async function generateImageFluxSchnell(
@@ -1018,10 +1024,13 @@ export async function POST(request: NextRequest) {
         console.log(`[scenes] fallbackTopic source: ${fallbackTopicSource} → "${fallbackTopic}"`)
 
         const t0Claude = Date.now()
-        const scenes = hasSubtitles
+        const { scenes, fallbackCount } = hasSubtitles
           ? await generateScenesFromSubtitles(effectiveTopic, count, duration_sec, resolvedSubtitleBlocks!, styleConfig, fallbackTopic, user.id, project_id ?? undefined)
           : await generateScenesFromScript(script, effectiveTopic, duration_sec, count, styleConfig, fallbackTopic, user.id, project_id ?? undefined)
         const claudeSec = ((Date.now() - t0Claude) / 1000).toFixed(1)
+        if (fallbackCount === count) {
+          throw Object.assign(new Error('ALL_SCENES_FALLBACK'), { allScenesFallback: true })
+        }
 
         console.log(`[images] scenes generated: ${scenes.length}`)
         console.log(`[images] claude_phase: ${scenes.length} scenes, ${claudeSec}s`)
@@ -1249,6 +1258,14 @@ export async function POST(request: NextRequest) {
           console.log(`[secretslider] BUSY: retry_after=${waitSec}s`)
           try {
             controller.enqueue(send({ type: 'error', code: 'BUSY_SECRETSLIDER', retry_after: waitSec }))
+            controller.close()
+          } catch { /* controller may already be closed */ }
+        } else if ((error as { allScenesFallback?: boolean })?.allScenesFallback === true) {
+          // Claude API unavailable — all scenes got generic fallback prompts. No credits charged.
+          console.error('[images] ALL_SCENES_FALLBACK: Claude API unavailable during scene generation')
+          await notifyBillingError('Anthropic', '/generate/images/scenes', { userId: user.id, projectId: project_id ?? undefined }).catch(() => {})
+          try {
+            controller.enqueue(send({ type: 'error', code: 'ALL_SCENES_FALLBACK', error: 'Claude API временно недоступен — промпты сцен не сгенерированы. Кредиты не списаны. Попробуйте снова позже.' }))
             controller.close()
           } catch { /* controller may already be closed */ }
         } else {

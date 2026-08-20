@@ -3128,6 +3128,7 @@ const ELEVENLABS_CHARS_ALERT_THRESHOLD = parseInt  (env('ELEVENLABS_CHARS_ALERT_
 const APIHOST_BALANCE_ALERT_THRESHOLD  = parseFloat(env('APIHOST_BALANCE_ALERT_THRESHOLD')  || '100')
 // SV uses api_credits (same operator as Secret Slider which has confirmed GET /api/v2/balance → api_credits)
 const SV_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SV_BALANCE_ALERT_THRESHOLD')       || '100')
+const SS_BALANCE_ALERT_THRESHOLD       = parseFloat(env('SS_BALANCE_ALERT_THRESHOLD')       || '100000')
 
 // Send billing-exhaustion alert from Railway with 1h dedup per service.
 async function notifyBillingErrorRailway(service, route, userId, projectId) {
@@ -3506,15 +3507,150 @@ async function checkSVBalance() {
   }
 }
 
-// ── Balance check — every 30 minutes (fal.ai · ElevenLabs · APIHOST · SecretVoicer) ──────────
-// ELEVENLABS_API_KEY, APIHOST_API_KEY, SECRETVOICER_API_KEY must be set as Railway env vars.
+async function fetchSSBalance() {
+  const apiKey = process.env.SECRETSLIDER_API_KEY
+  if (!apiKey) return { error: 'no_key' }
+  const controller = new AbortController()
+  const t = setTimeout(() => controller.abort(), 10_000)
+  try {
+    const res = await fetch('https://secretslider.com/api/v2/balance', {
+      headers: { 'X-API-Key': apiKey },
+      signal: controller.signal,
+    })
+    if (res.status === 401 || res.status === 403) return { error: 'unauthorized' }
+    if (!res.ok) return { error: 'unavailable' }
+    const data = await res.json()
+    const balance = data.api_credits ?? data.credits ?? data.balance ?? null
+    if (typeof balance !== 'number') return { error: 'unavailable' }
+    return { balance }
+  } catch {
+    return { error: 'unavailable' }
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+async function checkSSBalance() {
+  const tag = '[ss/balance]'
+  const result = await fetchSSBalance()
+
+  if ('balance' in result) {
+    await setSetting('ss_balance',    String(result.balance))
+    await setSetting('ss_balance_ts', new Date().toISOString())
+    console.log(`${tag} balance=${result.balance} api_credits`)
+  }
+
+  if (!OWNER_ID) return
+
+  if (result.error === 'no_key')       { console.warn(`${tag} SECRETSLIDER_API_KEY not set`); return }
+  if (result.error === 'unauthorized') { console.warn(`${tag} key unauthorized`); return }
+  if (result.error === 'unavailable')  { console.warn(`${tag} API unavailable, skipping`); return }
+
+  const { balance } = result
+  const alertState      = await getSetting('ss_balance_alert_state')
+  const alertAt         = await getSetting('ss_balance_alert_at')
+  const hoursSinceAlert = alertAt ? (Date.now() - new Date(alertAt).getTime()) / 3_600_000 : Infinity
+
+  if (balance < SS_BALANCE_ALERT_THRESHOLD) {
+    const shouldAlert = alertState !== 'low' || hoursSinceAlert >= 24
+    if (shouldAlert) {
+      const tgResult = await tgApi('sendMessage', {
+        chat_id: OWNER_ID,
+        text: `⚠️ Secret Slider баланс низкий!\n\nТекущий баланс: ${balance.toLocaleString('ru')} api_credits\nПорог: ${SS_BALANCE_ALERT_THRESHOLD.toLocaleString('ru')} api_credits\n\nПополнить: https://secretslider.com`,
+      })
+      if (tgResult?.ok) {
+        await setSetting('ss_balance_alert_state', 'low')
+        await setSetting('ss_balance_alert_at',    new Date().toISOString())
+      } else {
+        console.error(`${tag} tg alert failed:`, JSON.stringify(tgResult))
+      }
+    }
+    return
+  }
+
+  if (alertState === 'low') {
+    const tgResult = await tgApi('sendMessage', {
+      chat_id: OWNER_ID,
+      text: `✅ Secret Slider баланс восстановлен\n\nТекущий баланс: ${balance.toLocaleString('ru')} api_credits`,
+    })
+    if (tgResult?.ok) {
+      await setSetting('ss_balance_alert_state', '')
+      await setSetting('ss_balance_alert_at',    '')
+    } else {
+      console.error(`${tag} restored alert failed:`, JSON.stringify(tgResult))
+    }
+  }
+}
+
+// Probe Anthropic billing by running a real (minimal) inference call — /v1/models returns 200
+// even at zero balance, so an actual messages.create is the only reliable check.
+// Cost: ~$0.00025 per call (haiku, 1 input token, 1 output token). Runs hourly = ~$0.18/month.
+async function checkAnthropicBilling() {
+  const tag = '[anthropic/billing]'
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn(`${tag} ANTHROPIC_API_KEY not set — skipping`)
+    return
+  }
+
+  try {
+    await claude().messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'x' }],
+    })
+    // Success — clear any active billing alert
+    await setSetting('anthropic_billing_ok_ts', new Date().toISOString())
+    console.log(`${tag} billing OK`)
+    const alertState = await getSetting('anthropic_billing_alert_state')
+    if (alertState === 'error' && OWNER_ID) {
+      await tgApi('sendMessage', {
+        chat_id: OWNER_ID,
+        text: `✅ Anthropic API восстановлен\n\n${new Date().toUTCString()}`,
+      }).catch(() => {})
+      await setSetting('anthropic_billing_alert_state', '')
+      await setSetting('anthropic_billing_alert_at',    '')
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const isBilling = /credit balance|billing_error|insufficient_credits|credit_balance_too_low/.test(msg)
+    if (isBilling) {
+      console.error(`${tag} BILLING EXHAUSTED: ${msg.slice(0, 200)}`)
+      const alertState = await getSetting('anthropic_billing_alert_state')
+      const alertAt    = await getSetting('anthropic_billing_alert_at')
+      const hoursSince = alertAt ? (Date.now() - new Date(alertAt).getTime()) / 3_600_000 : Infinity
+      if ((alertState !== 'error' || hoursSince >= 4) && OWNER_ID) {
+        await tgApi('sendMessage', {
+          chat_id: OWNER_ID,
+          text: `🔴 Anthropic баланс исчерпан!\n\nПромпты сцен будут заменены дефолтными.\nОшибка: ${msg.slice(0, 200)}\n\nПополнить: https://console.anthropic.com\n\n${new Date().toUTCString()}`,
+        }).catch(() => {})
+        await setSetting('anthropic_billing_alert_state', 'error')
+        await setSetting('anthropic_billing_alert_at',    new Date().toISOString())
+      }
+    } else {
+      // Network error or overload — not a billing issue, log only
+      console.warn(`${tag} non-billing error (skipping alert): ${msg.slice(0, 150)}`)
+    }
+  }
+}
+
+// ── Balance check — every 30 minutes (fal.ai · ElevenLabs · APIHOST · SecretVoicer · SecretSlider) ──────────
+// ELEVENLABS_API_KEY, APIHOST_API_KEY, SECRETVOICER_API_KEY, SECRETSLIDER_API_KEY must be set as Railway env vars.
 // If missing, the corresponding check logs a warning and skips silently.
 cron.schedule('*/30 * * * *', async () => {
-  console.log('[cron] balance check: fal / elevenlabs / apihost / secretvoicer')
+  console.log('[cron] balance check: fal / elevenlabs / apihost / secretvoicer / secretslider')
   try { await checkFalBalance()        } catch (err) { console.error('[cron/fal-balance]', err.message);        Sentry.captureException(err, { extra: { cron: 'checkFalBalance' } }) }
   try { await checkElevenLabsBalance() } catch (err) { console.error('[cron/elevenlabs-balance]', err.message); Sentry.captureException(err, { extra: { cron: 'checkElevenLabsBalance' } }) }
   try { await checkApihostBalance()    } catch (err) { console.error('[cron/apihost-balance]', err.message);    Sentry.captureException(err, { extra: { cron: 'checkApihostBalance' } }) }
   try { await checkSVBalance()         } catch (err) { console.error('[cron/sv-balance]', err.message);         Sentry.captureException(err, { extra: { cron: 'checkSVBalance' } }) }
+  try { await checkSSBalance()         } catch (err) { console.error('[cron/ss-balance]', err.message);         Sentry.captureException(err, { extra: { cron: 'checkSSBalance' } }) }
+}, { timezone: 'UTC' })
+
+// ── Anthropic billing probe — every hour ─────────────────────────────────────
+// Makes a real 1-token inference call to detect billing exhaustion early.
+// Cost ≈ $0.00025/call = $0.18/month. Runs independently from the monitor cron.
+cron.schedule('30 * * * *', async () => {
+  console.log('[cron] anthropic billing probe')
+  try { await checkAnthropicBilling() } catch (err) { console.error('[cron/anthropic-billing]', err.message) }
 }, { timezone: 'UTC' })
 
 // ── Daily DB backup cron — 03:00 UTC ─────────────────────────────────────────
@@ -6119,11 +6255,14 @@ ${chunk.map((s, i) => `Сцена ${chunkStart + i + 1} [${imgFmtSec(s.start)}�
     promptResults = promptResults.map((r, i) => ({ ...r, prompt: injectedPrompts[i] }))
   }
 
-  return promptResults.map((p, i) => ({
-    ...p,
-    timecode_start: imgFmtSec(scenesWithText[i].start),
-    timecode_end: imgFmtSec(scenesWithText[i].end),
-  }))
+  return {
+    scenes: promptResults.map((p, i) => ({
+      ...p,
+      timecode_start: imgFmtSec(scenesWithText[i].start),
+      timecode_end: imgFmtSec(scenesWithText[i].end),
+    })),
+    fallbackCount: sceneFallbackCount,
+  }
 }
 
 function imgSplitScriptByWords(script, n) {
@@ -6264,11 +6403,14 @@ ${chunk.map((b, i) => `Сцена ${chunkStart + i + 1} [${imgFmtSec(b.start)}�
     promptResults = promptResults.map((r, i) => ({ ...r, prompt: injectedPrompts[i] }))
   }
 
-  return promptResults.map((p, i) => ({
-    ...p,
-    timecode_start: imgFmtSec(blocksWithTimecodes[i].start),
-    timecode_end: imgFmtSec(blocksWithTimecodes[i].end),
-  }))
+  return {
+    scenes: promptResults.map((p, i) => ({
+      ...p,
+      timecode_start: imgFmtSec(blocksWithTimecodes[i].start),
+      timecode_end: imgFmtSec(blocksWithTimecodes[i].end),
+    })),
+    fallbackCount: sceneFallbackCount,
+  }
 }
 
 async function imgGenerateSecretSlider(prompts, jobId, opts = {}) {
@@ -6473,12 +6615,17 @@ async function processImageJob(jobId, body) {
     await updateImageJob(jobId, { progress: 10 })
 
     const t0Claude = Date.now()
-    const scenes = hasSubtitles
+    const { scenes, fallbackCount } = hasSubtitles
       ? await imgGenerateScenesFromSubtitles(effectiveTopic, count, duration_sec ?? 300, subtitleBlocks, styleConfig, fallbackTopic, jobId)
       : await imgGenerateScenesFromScript(script ?? '', effectiveTopic, duration_sec ?? 300, count, styleConfig)
     const claudeSec = ((Date.now() - t0Claude) / 1000).toFixed(1)
-    console.log(`[image-job:${jobId}] claude done: ${scenes.length} scenes in ${claudeSec}s`)
-    await updateImageJob(jobId, { progress: 30 })
+    console.log(`[image-job:${jobId}] claude done: ${scenes.length} scenes in ${claudeSec}s fallback=${fallbackCount}`)
+    await updateImageJob(jobId, { progress: 30, fallback_scene_count: fallbackCount })
+    if (fallbackCount === count) {
+      const fbErr = new Error(`ALL_SCENES_FALLBACK: все ${count} сцен получили дефолтный промпт (Claude API недоступен)`)
+      fbErr.allScenesFallback = true
+      throw fbErr
+    }
 
     if (engine !== 'secretslider') {
       throw new Error(`[image-job] engine '${engine}' is not supported on Railway; only secretslider`)
@@ -6537,8 +6684,11 @@ async function processImageJob(jobId, body) {
       }
       return
     }
+    const isAllFallback = err?.allScenesFallback === true
     console.error(`[image-job:${jobId}] failed:`, msg)
-    Sentry.captureException(err, { extra: { jobId, project_id, user_id, engine } })
+    if (!isAllFallback) {
+      Sentry.captureException(err, { extra: { jobId, project_id, user_id, engine } })
+    }
     await updateImageJob(jobId, { status: 'failed', error_message: msg })
     const imageRefund = await refundImageJobCredits(jobId, user_id, project_id)
     if (!imageRefund.ok && imageRefund.amount > 0) {
@@ -6548,7 +6698,9 @@ async function processImageJob(jobId, body) {
       await sbPatch('projects', `id=eq.${project_id}&status=eq.generating_images`, { status: 'failed' })
         .catch(e => console.warn(`[image-job:${jobId}] project failure mark failed:`, e.message))
     }
-    if (OWNER_ID) {
+    if (isAllFallback) {
+      await notifyBillingErrorRailway('Anthropic', `/image-job:${jobId}`, user_id, project_id).catch(() => {})
+    } else if (OWNER_ID) {
       tgApi('sendMessage', { chat_id: OWNER_ID, text: `⚠️ image_job ${jobId.slice(0, 8)} failed: ${msg.slice(0, 200)}` })
         .catch(() => {})
     }
