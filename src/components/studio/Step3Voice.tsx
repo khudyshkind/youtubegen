@@ -426,6 +426,7 @@ export default function Step3Voice() {
   const [planLoading, setPlanLoading] = useState(true)
   const [userPlan, setUserPlan] = useState<string>('free')
   const engineTouchedRef = useRef(false)
+  const [engineHealth, setEngineHealth] = useState<Record<string, 'ok' | 'down' | 'unknown'>>({});
 
   // SecretVoicer voices
   const [svVoices, setSvVoices] = useState<ApiVoice[]>([])
@@ -591,6 +592,12 @@ export default function Step3Voice() {
       })
       .catch(() => {})
       .finally(() => setPlanLoading(false))
+    fetch('/api/engines/health')
+      .then((r) => r.json())
+      .then((json: { ok: boolean; health?: Record<string, 'ok' | 'down' | 'unknown'> }) => {
+        if (json.ok && json.health) setEngineHealth(json.health)
+      })
+      .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -920,46 +927,54 @@ export default function Step3Voice() {
         <div className="grid grid-cols-2 gap-2">
           {visibleEngines.map((eng) => {
             const isPremiumLocked = !!eng.premiumOnly && userPlan === 'free'
+            const isDown = engineHealth[eng.id] === 'down'
+            const isDisabled = !!eng.soon || isPremiumLocked || isDown
             return (
             <button
               key={eng.id}
               type="button"
               onClick={() => {
-                if (!eng.soon && !isPremiumLocked && eng.id !== engine) {
+                if (!isDisabled && eng.id !== engine) {
                   engineTouchedRef.current = true
                   setVoiceSettings({ voiceId: '' })
                   setEngine(eng.id)
                 }
               }}
-              disabled={!!eng.soon || isPremiumLocked}
+              disabled={isDisabled}
               className="relative flex flex-col gap-1 p-3 rounded-xl text-left transition-all disabled:cursor-not-allowed"
-              style={eng.soon || isPremiumLocked
-                ? { background: 'rgba(255,255,255,0.02)', border: '2px solid rgba(255,255,255,0.05)', opacity: isPremiumLocked ? 0.65 : 0.5 }
+              style={isDisabled
+                ? { background: 'rgba(255,255,255,0.02)', border: '2px solid rgba(255,255,255,0.05)', opacity: isDown ? 0.45 : isPremiumLocked ? 0.65 : 0.5 }
                 : engine === eng.id
                 ? { background: 'rgba(124,58,237,0.15)', border: '2px solid rgba(124,58,237,0.5)' }
                 : { background: 'rgba(255,255,255,0.03)', border: '2px solid rgba(255,255,255,0.07)' }
               }
             >
-              {eng.soon && (
+              {eng.soon && !isDown && (
                 <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 rounded-full font-medium"
                   style={{ background: 'rgba(255,255,255,0.08)', color: '#64748B' }}>
                   {t('step3.soon')}
                 </span>
               )}
-              {isPremiumLocked && (
+              {isPremiumLocked && !isDown && (
                 <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 rounded-full font-medium"
                   style={{ background: 'rgba(124,58,237,0.12)', color: '#A78BFA' }}>
                   🔒 Платный
                 </span>
               )}
+              {isDown && (
+                <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 rounded-full font-medium"
+                  style={{ background: 'rgba(239,68,68,0.15)', color: '#F87171' }}>
+                  Недоступен
+                </span>
+              )}
               <div className="flex items-center gap-1.5">
                 <span className="text-base">{eng.medal}</span>
-                <span className={`text-xs font-bold ${engine === eng.id && !eng.soon && !isPremiumLocked ? 'text-violet-300' : 'text-slate-400'}`}>{eng.name}</span>
+                <span className={`text-xs font-bold ${engine === eng.id && !isDisabled ? 'text-violet-300' : 'text-slate-400'}`}>{eng.name}</span>
               </div>
               <p className="text-xs text-slate-500">{eng.quality}</p>
               <p className="text-xs text-slate-600">{eng.meta}</p>
               {!eng.soon && (
-                <p className={`text-xs font-semibold mt-0.5 ${engine === eng.id && !isPremiumLocked ? 'text-violet-400' : 'text-slate-500'}`}>
+                <p className={`text-xs font-semibold mt-0.5 ${engine === eng.id && !isDisabled ? 'text-violet-400' : 'text-slate-500'}`}>
                   {eng.costLabel}
                 </p>
               )}
@@ -1583,6 +1598,14 @@ export default function Step3Voice() {
 
       {error && (() => {
         const { headline, detail } = mapAudioError(error, t)
+        const isProviderError = /синтез|временно недоступен|Попробуйте/i.test(headline)
+        const AUDIO_ENGINE_ORDER: AudioEngine[] = ['secretvoicer', 'elevenlabs', 'voicer', 'openai']
+        const suggestEngine = isProviderError
+          ? AUDIO_ENGINE_ORDER.find(
+              (e) => e !== engine && engineHealth[e] === 'ok'
+            )
+          : undefined
+        const suggestName = suggestEngine ? ENGINES.find((e) => e.id === suggestEngine)?.name : undefined
         return (
           <div
             className="flex flex-col gap-1.5 rounded-xl px-4 py-3"
@@ -1590,6 +1613,20 @@ export default function Step3Voice() {
           >
             <p className="text-sm text-red-400">{headline}</p>
             {detail && <p className="text-xs text-red-700/60 font-mono break-all">{detail}</p>}
+            {suggestEngine && suggestName && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEngine(suggestEngine as AudioEngine)
+                  engineTouchedRef.current = true
+                  setVoiceSettings({ voiceId: '' })
+                }}
+                className="self-start mt-1 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                style={{ background: 'rgba(124,58,237,0.18)', color: '#C4B5FD', border: '1px solid rgba(124,58,237,0.3)' }}
+              >
+                Переключиться на {suggestName}
+              </button>
+            )}
           </div>
         )
       })()}

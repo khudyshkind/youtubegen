@@ -3582,6 +3582,138 @@ async function checkSSBalance() {
   }
 }
 
+// ── Engine synthesis health checks ───────────────────────────────────────────
+// Writes {engine}_synth_health ('ok'|'down') and {engine}_synth_health_ts to bot_settings.
+// Alerts owner on state transitions; repeated 'down' alerts deduped to once per hour.
+
+async function updateEngineHealth(engine, isAlive, httpCode) {
+  const status  = isAlive ? 'ok' : 'down'
+  const prevStatus = await getSetting(`${engine}_synth_health`)
+  const alertAt    = await getSetting(`${engine}_synth_alert_at`)
+  const hoursSince = alertAt ? (Date.now() - new Date(alertAt).getTime()) / 3_600_000 : Infinity
+
+  await setSetting(`${engine}_synth_health`,    status)
+  await setSetting(`${engine}_synth_health_ts`, new Date().toISOString())
+
+  if (!OWNER_ID) return
+
+  const stateChanged = prevStatus !== '' && prevStatus !== status
+  const shouldAlert  = stateChanged || (status === 'down' && hoursSince >= 1)
+  if (!shouldAlert) return
+
+  const names = { secretvoicer: 'SecretVoicer', elevenlabs: 'ElevenLabs', voicer: 'Voicer', apihost: 'APIHOST' }
+  const name  = names[engine] ?? engine
+  const text  = status === 'down'
+    ? `🔴 ${name} синтез недоступен (HTTP ${httpCode ?? '?'})\n\nПользователи не смогут использовать этот движок.\n\n${new Date().toUTCString()}`
+    : `✅ ${name} синтез восстановлен\n\n${new Date().toUTCString()}`
+
+  const result = await tgApi('sendMessage', { chat_id: OWNER_ID, text })
+  if (result?.ok) {
+    await setSetting(`${engine}_synth_alert_at`, new Date().toISOString())
+  } else {
+    console.error(`[health/${engine}] tg alert failed:`, JSON.stringify(result))
+  }
+}
+
+async function checkSVSynthHealth() {
+  const apiKey = process.env.SECRETVOICER_API_KEY
+  if (!apiKey) return
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8_000)
+  let httpCode = 0
+  try {
+    const res = await fetch(`${SV_BASE}/synthesize`, {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_id: 'probe-invalid-000', text: ' ' }),
+      signal: controller.signal,
+    })
+    httpCode = res.status
+    // 422 = validation error on invalid voice_id → synthesis endpoint alive
+    // 500 = synthesis service internal error → down
+    const isAlive = httpCode < 500 || httpCode === 404
+    console.log(`[health/sv-synth] HTTP ${httpCode} → ${isAlive ? 'ok' : 'down'}`)
+    await updateEngineHealth('secretvoicer', isAlive, httpCode)
+  } catch {
+    console.log('[health/sv-synth] timeout/connection error → down')
+    await updateEngineHealth('secretvoicer', false, 0)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function checkVoicerSynthHealth() {
+  const apiKey = process.env.VOICER_API_KEY
+  if (!apiKey) return
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8_000)
+  let httpCode = 0
+  try {
+    // GET a non-existent task ID — any real response (even 404) means the service is alive
+    const res = await fetch(`${VOICER_BASE}/voice/status/00000000-0000-0000-0000-000000000000`, {
+      headers: { 'X-API-Key': apiKey },
+      signal: controller.signal,
+    })
+    httpCode = res.status
+    const isAlive = httpCode < 500
+    console.log(`[health/voicer-synth] HTTP ${httpCode} → ${isAlive ? 'ok' : 'down'}`)
+    await updateEngineHealth('voicer', isAlive, httpCode)
+  } catch {
+    console.log('[health/voicer-synth] timeout/connection error → down')
+    await updateEngineHealth('voicer', false, 0)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function checkElevenLabsSynthHealth() {
+  const apiKey = process.env.ELEVENLABS_API_KEY
+  if (!apiKey) return
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8_000)
+  let httpCode = 0
+  try {
+    const res = await fetch('https://api.elevenlabs.io/v1/user', {
+      headers: { 'xi-api-key': apiKey },
+      signal: controller.signal,
+    })
+    httpCode = res.status
+    // 200/401/403 = API is responding; 5xx = outage
+    const isAlive = httpCode < 500
+    console.log(`[health/elevenlabs-synth] HTTP ${httpCode} → ${isAlive ? 'ok' : 'down'}`)
+    await updateEngineHealth('elevenlabs', isAlive, httpCode)
+  } catch {
+    console.log('[health/elevenlabs-synth] timeout/connection error → down')
+    await updateEngineHealth('elevenlabs', false, 0)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function checkApihostSynthHealth() {
+  const apiKey = process.env.APIHOST_API_KEY
+  if (!apiKey) return
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8_000)
+  let httpCode = 0
+  try {
+    // /api/v1/balance returns 404 — API structure has changed, mark as down
+    const res = await fetch('https://apihost.ru/api/v1/balance', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    })
+    httpCode = res.status
+    const isAlive = httpCode === 200 || httpCode === 401 || httpCode === 403
+    console.log(`[health/apihost-synth] HTTP ${httpCode} → ${isAlive ? 'ok' : 'down'}`)
+    await updateEngineHealth('apihost', isAlive, httpCode)
+  } catch {
+    console.log('[health/apihost-synth] timeout/connection error → down')
+    await updateEngineHealth('apihost', false, 0)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // Probe Anthropic billing by running a real (minimal) inference call — /v1/models returns 200
 // even at zero balance, so an actual messages.create is the only reliable check.
 // Cost: ~$0.00025 per call (haiku, 1 input token, 1 output token). Runs hourly = ~$0.18/month.
@@ -3643,6 +3775,15 @@ cron.schedule('*/30 * * * *', async () => {
   try { await checkApihostBalance()    } catch (err) { console.error('[cron/apihost-balance]', err.message);    Sentry.captureException(err, { extra: { cron: 'checkApihostBalance' } }) }
   try { await checkSVBalance()         } catch (err) { console.error('[cron/sv-balance]', err.message);         Sentry.captureException(err, { extra: { cron: 'checkSVBalance' } }) }
   try { await checkSSBalance()         } catch (err) { console.error('[cron/ss-balance]', err.message);         Sentry.captureException(err, { extra: { cron: 'checkSSBalance' } }) }
+}, { timezone: 'UTC' })
+
+// ── Engine synthesis health check — every 10 minutes ─────────────────────────
+cron.schedule('*/10 * * * *', async () => {
+  console.log('[cron] engine synth health checks')
+  try { await checkSVSynthHealth()         } catch (err) { console.error('[cron/sv-synth-health]', err.message);         Sentry.captureException(err, { extra: { cron: 'checkSVSynthHealth' } }) }
+  try { await checkVoicerSynthHealth()     } catch (err) { console.error('[cron/voicer-synth-health]', err.message);     Sentry.captureException(err, { extra: { cron: 'checkVoicerSynthHealth' } }) }
+  try { await checkElevenLabsSynthHealth() } catch (err) { console.error('[cron/elevenlabs-synth-health]', err.message); Sentry.captureException(err, { extra: { cron: 'checkElevenLabsSynthHealth' } }) }
+  try { await checkApihostSynthHealth()    } catch (err) { console.error('[cron/apihost-synth-health]', err.message);    Sentry.captureException(err, { extra: { cron: 'checkApihostSynthHealth' } }) }
 }, { timezone: 'UTC' })
 
 // ── Anthropic billing probe — every hour ─────────────────────────────────────
@@ -7575,6 +7716,15 @@ app.listen(PORT, async () => {
     setSetting('ss_balance_threshold',         String(SS_BALANCE_ALERT_THRESHOLD)),
   ]).catch(err => console.warn('[startup] threshold write failed:', err.message))
   console.log(`[startup/thresholds] fal=$${FAL_BALANCE_THRESHOLD} elevenlabs=${ELEVENLABS_CHARS_ALERT_THRESHOLD}ch apihost=${APIHOST_BALANCE_ALERT_THRESHOLD}₽ sv=${SV_BALANCE_ALERT_THRESHOLD} ss=${SS_BALANCE_ALERT_THRESHOLD} api_credits`)
+  // Run engine health checks immediately so first Vercel read isn't stale
+  setTimeout(async () => {
+    console.log('[startup] engine synth health checks')
+    try { await checkSVSynthHealth()         } catch (e) { console.warn('[startup/health/sv]', e.message) }
+    try { await checkVoicerSynthHealth()     } catch (e) { console.warn('[startup/health/voicer]', e.message) }
+    try { await checkElevenLabsSynthHealth() } catch (e) { console.warn('[startup/health/elevenlabs]', e.message) }
+    try { await checkApihostSynthHealth()    } catch (e) { console.warn('[startup/health/apihost]', e.message) }
+  }, 2_000)
+
   console.log('[bot] starting cron jobs...')
 
   console.log('[boot] OWNER_ID:', OWNER_ID || '(not set)')
