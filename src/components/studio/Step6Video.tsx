@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { sanitizeProviderError } from '@/lib/sanitize-error'
 import { useStudioStore } from '@/lib/studio-store'
 import { exportPrompts } from '@/lib/exportPrompts'
 import { CREDIT_COSTS } from '@/lib/types'
@@ -335,7 +336,7 @@ export default function Step6Video() {
           clearInterval(pollRef.current!); pollRef.current = null; pollTickRef.current = null
           void refreshCredits(); setRenderJobId(null)
           const refundNote = (json.credits_refunded ?? 0) > 0 ? `\n${json.credits_refunded} кр. возвращены на баланс` : ''
-          setRenderError((json.error_message ?? 'Ошибка рендеринга') + refundNote); setRenderState('error')
+          setRenderError((sanitizeProviderError(json.error_message) || 'Ошибка рендеринга') + refundNote); setRenderState('error')
         } else if (json.status === 'processing') {
           setRenderState('processing')
         }

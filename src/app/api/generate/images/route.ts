@@ -932,7 +932,7 @@ export async function POST(request: NextRequest) {
       code: 'TOO_MANY_FOR_SECRETSLIDER',
       // замеры дали разброс времени задачи 32–200+ с независимо от размера батча,
       // плюс ~3.5 с на заливку каждой картинки; при 30 шт расчёт даёт 375 с против maxDuration 300.
-      error: `Secret Slider поддерживает максимум 15 иллюстраций за запуск`,
+      error: `Генератор иллюстраций поддерживает максимум 15 иллюстраций за запуск`,
       maxAllowed: 15,
       requested: count,
     }, { status: 400 })
@@ -1265,7 +1265,7 @@ export async function POST(request: NextRequest) {
           console.error('[images] ALL_SCENES_FALLBACK: Claude API unavailable during scene generation')
           await notifyBillingError('Anthropic', '/generate/images/scenes', { userId: user.id, projectId: project_id ?? undefined }).catch(() => {})
           try {
-            controller.enqueue(send({ type: 'error', code: 'ALL_SCENES_FALLBACK', error: 'Claude API временно недоступен — промпты сцен не сгенерированы. Кредиты не списаны. Попробуйте снова позже.' }))
+            controller.enqueue(send({ type: 'error', code: 'ALL_SCENES_FALLBACK', error: 'ИИ-обработка временно недоступна — промпты сцен не сгенерированы. Кредиты не списаны. Попробуйте снова позже.' }))
             controller.close()
           } catch { /* controller may already be closed */ }
         } else {

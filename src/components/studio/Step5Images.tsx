@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { sanitizeProviderError } from '@/lib/sanitize-error'
 import { useStudioStore } from '@/lib/studio-store'
 import ConfirmModal from '@/components/shared/ConfirmModal'
 import { exportPrompts } from '@/lib/exportPrompts'
@@ -646,7 +647,7 @@ export default function Step5Images() {
                 : t('step5.err_ss_busy')
               ))
             } else {
-              reject(new Error(rawMsg))
+              reject(new Error(sanitizeProviderError(rawMsg) || t('step5.err_gen')))
             }
           }
         } catch (pollErr) {

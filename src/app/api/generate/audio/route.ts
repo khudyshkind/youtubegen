@@ -769,7 +769,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[generate/audio] APIHOST submit failed:', msg)
-        return NextResponse.json({ ok: false, error: `Ошибка отправки задачи ${ENGINE_DISPLAY.apihost.name} (${msg})` }, { status: 502 })
+        return NextResponse.json({ ok: false, error: 'Сервис синтеза речи недоступен. Попробуйте позже.' }, { status: 502 })
       }
 
       // Poll all jobs in parallel (each within 270s timeout)
@@ -785,7 +785,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[generate/audio] APIHOST poll failed:', msg)
-        return NextResponse.json({ ok: false, error: `${ENGINE_DISPLAY.apihost.name} синтез не завершился вовремя (${msg})` }, { status: 504 })
+        return NextResponse.json({ ok: false, error: 'Синтез речи не завершился вовремя. Попробуйте позже.' }, { status: 504 })
       }
 
       // Download all audio files in parallel
@@ -801,7 +801,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[generate/audio] APIHOST download failed:', msg)
-        return NextResponse.json({ ok: false, error: `Ошибка загрузки аудио с ${ENGINE_DISPLAY.apihost.name} (${msg})` }, { status: 502 })
+        return NextResponse.json({ ok: false, error: 'Ошибка загрузки аудио. Попробуйте позже.' }, { status: 502 })
       }
 
       audioBuffer = Buffer.concat(buffers.map((b, i) => i === 0 ? b : stripId3Tag(b)))

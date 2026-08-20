@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { sanitizeProviderError } from '@/lib/sanitize-error'
 import { useStudioStore, stampAudioUrl } from '@/lib/studio-store'
 import type { VoiceStyleType, AudioEngine, ApihostVoiceType } from '@/lib/types'
 import { CREDIT_COSTS, audioCost } from '@/lib/types'
@@ -68,10 +69,10 @@ const APIHOST_TYPE_ICONS: Record<ApihostVoiceType, string> = {
 
 function mapAudioError(raw: string, t: (k: string) => string): { headline: string; detail: string | null } {
   if (/maintenance_mode|HTTP 503|Service Unavailable/i.test(raw)) {
-    return { headline: t('step3.err_provider_maintenance'), detail: raw }
+    return { headline: t('step3.err_provider_maintenance'), detail: null }
   }
-  if (/HTTP \d{3}|Voicer|Error:|failed:|is empty|sync-only/i.test(raw) && !/[А-Яа-яЁё]/u.test(raw)) {
-    return { headline: t('step3.err_provider_generic'), detail: raw }
+  if (/HTTP \d{3}|Voicer|CENSORED|SecretVoicer|ElevenLabs|APIHOST|Error:|failed:|is empty|sync-only/i.test(raw)) {
+    return { headline: sanitizeProviderError(raw) || t('step3.err_provider_generic'), detail: null }
   }
   return { headline: raw, detail: null }
 }

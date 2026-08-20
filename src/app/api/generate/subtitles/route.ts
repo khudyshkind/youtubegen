@@ -134,8 +134,9 @@ export async function POST(request: NextRequest) {
 
     if (!transcribeJson.ok || !transcribeJson.data) {
       console.error('[subtitles] video-server returned error:', transcribeJson.error)
+      const { sanitizeProviderError } = await import('@/lib/sanitize-error')
       return NextResponse.json(
-        { ok: false, error: transcribeJson.error ?? 'Ошибка генерации субтитров' },
+        { ok: false, error: sanitizeProviderError(transcribeJson.error) || 'Ошибка генерации субтитров' },
         { status: 502 }
       )
     }
