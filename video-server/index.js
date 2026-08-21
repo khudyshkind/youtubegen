@@ -3654,21 +3654,24 @@ async function checkSVSynthHealth() {
       return
     }
 
-    // Step 2: probe synthesize with a real voice_id
+    // Step 2: probe synthesize with a real voice_id and a real short text.
+    // Only HTTP 200 with a task_id proves the synthesis engine accepted the job.
+    // Any 4xx on a valid request means the engine rejected it (maintenance, validation
+    // pipeline down, etc.). Any 5xx means the engine is down. Both map to isAlive=false.
     const res = await fetch(`${SV_BASE}/synthesize`, {
       method: 'POST',
       headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voice_id: probeVoiceId, text: ' ' }),
+      body: JSON.stringify({ voice_id: probeVoiceId, text: 'тест' }),
       signal: controller.signal,
     })
     httpCode = res.status
-    const isAlive = httpCode < 500
+    let taskId = null
 
     if (httpCode === 200) {
-      // Step 3: cancel the probe task immediately to avoid wasting resources
+      // Step 3: extract task_id and cancel immediately — probe is fire-and-cancel
       try {
         const json = await res.json()
-        const taskId = json.task_id ?? json.id ?? null
+        taskId = json.task_id ?? json.id ?? null
         if (taskId) {
           fetch(`${SV_BASE}/tasks/cancel`, {
             method: 'POST',
@@ -3679,7 +3682,9 @@ async function checkSVSynthHealth() {
       } catch { /* cancel is best-effort */ }
     }
 
-    console.log(`[health/sv-synth] HTTP ${httpCode} → ${isAlive ? 'ok' : 'down'}`)
+    // Only a 200 with a task_id confirms synthesis is working
+    const isAlive = httpCode === 200 && taskId !== null
+    console.log(`[health/sv-synth] HTTP ${httpCode} task_id=${taskId} → ${isAlive ? 'ok' : 'down'}`)
     await updateEngineHealth('secretvoicer', isAlive, httpCode)
   } catch {
     console.log('[health/sv-synth] timeout/connection error → down')
