@@ -3819,6 +3819,53 @@ async function checkAnthropicBilling() {
   }
 }
 
+// ── operation_log retention cleanup ──────────────────────────────────────────
+// Retention period: OP_LOG_RETENTION_DAYS env var (default 90).
+// Dry-run mode: set OP_LOG_DRY_RUN=true to log what would be deleted without touching data.
+async function cleanupOperationLog() {
+  const retentionDays = parseInt(process.env.OP_LOG_RETENTION_DAYS ?? '90', 10)
+  const dryRun = process.env.OP_LOG_DRY_RUN === 'true'
+  if (!isFinite(retentionDays) || retentionDays < 1) {
+    console.warn('[cleanup/operation_log] invalid OP_LOG_RETENTION_DAYS, skipping')
+    return
+  }
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString()
+  const svUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const svKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!svUrl || !svKey) return
+  const h = { apikey: svKey, Authorization: `Bearer ${svKey}`, Prefer: 'count=exact' }
+  try {
+    // Count total rows before any mutation
+    const rTotal = await fetch(`${svUrl}/rest/v1/operation_log?select=id&limit=1`, { headers: h })
+    const total = parseInt(rTotal.headers.get('content-range')?.split('/')[1] ?? '0', 10)
+    // Count rows eligible for deletion
+    const rOld = await fetch(
+      `${svUrl}/rest/v1/operation_log?select=id&started_at=lt.${encodeURIComponent(cutoff)}&limit=1`,
+      { headers: h },
+    )
+    const toDelete = parseInt(rOld.headers.get('content-range')?.split('/')[1] ?? '0', 10)
+
+    if (dryRun) {
+      console.log(`[cleanup/operation_log] DRY RUN: would_delete=${toDelete} (started_at < ${cutoff.slice(0, 10)}) would_remain=${total - toDelete} retention=${retentionDays}d total=${total}`)
+      return
+    }
+    if (toDelete === 0) {
+      console.log(`[cleanup/operation_log] nothing to delete (retention=${retentionDays}d cutoff=${cutoff.slice(0, 10)} total=${total})`)
+      return
+    }
+    await fetch(`${svUrl}/rest/v1/operation_log?started_at=lt.${encodeURIComponent(cutoff)}`, {
+      method: 'DELETE',
+      headers: h,
+    })
+    // Count remaining to confirm and report
+    const rAfter = await fetch(`${svUrl}/rest/v1/operation_log?select=id&limit=1`, { headers: h })
+    const remaining = parseInt(rAfter.headers.get('content-range')?.split('/')[1] ?? '0', 10)
+    console.log(`[cleanup/operation_log] deleted=${total - remaining} (started_at < ${cutoff.slice(0, 10)}) remaining=${remaining} retention=${retentionDays}d`)
+  } catch (err) {
+    console.error('[cleanup/operation_log] error:', err.message)
+  }
+}
+
 // ── Balance check — every 30 minutes (fal.ai · ElevenLabs · APIHOST · SecretVoicer · SecretSlider) ──────────
 // ELEVENLABS_API_KEY, APIHOST_API_KEY, SECRETVOICER_API_KEY, SECRETSLIDER_API_KEY must be set as Railway env vars.
 // If missing, the corresponding check logs a warning and skips silently.
@@ -3901,6 +3948,15 @@ cron.schedule('0 3 * * *', async () => {
 cron.schedule('0 4 * * *', async () => {
   console.log('[cron] media retention cleanup')
   try { await cleanupExpiredMedia() } catch (err) { console.error('[cron/retention]', err.message); Sentry.captureException(err, { extra: { cron: 'cleanupExpiredMedia' } }) }
+}, { timezone: 'UTC' })
+
+// ── Daily operation_log cleanup — 05:00 UTC ───────────────────────────────────
+// After media retention (04:00) and before subscriptions (09:00).
+// Retention: OP_LOG_RETENTION_DAYS (default 90). Dry-run: OP_LOG_DRY_RUN=true.
+// Does NOT touch audio_jobs, video_jobs, or image_jobs.
+cron.schedule('0 5 * * *', async () => {
+  console.log('[cron] operation_log cleanup')
+  try { await cleanupOperationLog() } catch (err) { console.error('[cron/operation_log]', err.message); Sentry.captureException(err, { extra: { cron: 'cleanupOperationLog' } }) }
 }, { timezone: 'UTC' })
 
 // ── Weekly stats cron — Monday 10:00 UTC ─────────────────────────────────────
