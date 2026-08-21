@@ -3630,19 +3630,55 @@ async function checkSVSynthHealth() {
   const apiKey = process.env.SECRETVOICER_API_KEY
   if (!apiKey) return
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 8_000)
+  const timer = setTimeout(() => controller.abort(), 15_000)
   let httpCode = 0
   try {
+    // Step 1: get a real voice_id — fake ids return 422 even during maintenance,
+    // masking 500s on the synthesis engine. A real voice_id surfaces real health.
+    let probeVoiceId = null
+    try {
+      const vRes = await fetch(`${SV_BASE}/voices`, {
+        headers: { 'X-API-Key': apiKey },
+        signal: controller.signal,
+      })
+      if (vRes.ok) {
+        const vJson = await vRes.json()
+        const voices = Array.isArray(vJson) ? vJson : (vJson.voices ?? vJson.data ?? [])
+        if (voices.length > 0) probeVoiceId = voices[0].voice_id ?? voices[0].id ?? null
+      }
+    } catch { /* voices endpoint failed — treat as down below */ }
+
+    if (!probeVoiceId) {
+      console.log('[health/sv-synth] could not fetch voice list → down')
+      await updateEngineHealth('secretvoicer', false, 0)
+      return
+    }
+
+    // Step 2: probe synthesize with a real voice_id
     const res = await fetch(`${SV_BASE}/synthesize`, {
       method: 'POST',
       headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voice_id: 'probe-invalid-000', text: ' ' }),
+      body: JSON.stringify({ voice_id: probeVoiceId, text: ' ' }),
       signal: controller.signal,
     })
     httpCode = res.status
-    // 422 = validation error on invalid voice_id → synthesis endpoint alive
-    // 500 = synthesis service internal error → down
-    const isAlive = httpCode < 500 || httpCode === 404
+    const isAlive = httpCode < 500
+
+    if (httpCode === 200) {
+      // Step 3: cancel the probe task immediately to avoid wasting resources
+      try {
+        const json = await res.json()
+        const taskId = json.task_id ?? json.id ?? null
+        if (taskId) {
+          fetch(`${SV_BASE}/tasks/cancel`, {
+            method: 'POST',
+            headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task_ids: [taskId] }),
+          }).catch(() => {})
+        }
+      } catch { /* cancel is best-effort */ }
+    }
+
     console.log(`[health/sv-synth] HTTP ${httpCode} → ${isAlive ? 'ok' : 'down'}`)
     await updateEngineHealth('secretvoicer', isAlive, httpCode)
   } catch {
