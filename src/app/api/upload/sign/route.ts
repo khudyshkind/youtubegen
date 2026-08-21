@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase, createServiceClient } from '@/lib/supabase-server'
+import { startOpLog, finishOpLog } from '@/lib/operation-log'
 import { randomUUID } from 'crypto'
 
 const MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024  // 25 MB — Whisper hard limit
@@ -103,6 +104,10 @@ export async function POST(request: NextRequest) {
 
       // Do NOT call createSignedUrl here: Supabase requires the object to exist first.
       // The signed read URL will be created in generate/subtitles after the upload completes.
+      // Log upload URL issuance — tool_audio has no server-side confirmation step.
+      startOpLog({ userId: user.id, projectId: null, opType: 'audio_upload', provider: 'user_upload' })
+        .then(id => finishOpLog(id, { status: 'done', creditsSpent: 0 }))
+        .catch(() => {})
       return NextResponse.json({
         ok: true,
         data: {
@@ -134,6 +139,10 @@ export async function POST(request: NextRequest) {
           .eq('id', project_id)
           .eq('user_id', user.id)
         console.log('[upload/sign] studio audio confirmed', { user_id: user.id, project_id, result: 'ok' })
+        // Log confirmed upload — file is in Storage at this point.
+        startOpLog({ userId: user.id, projectId: project_id ?? null, opType: 'audio_upload', provider: 'user_upload' })
+          .then(id => finishOpLog(id, { status: 'done', creditsSpent: 0 }))
+          .catch(() => {})
         return NextResponse.json({ ok: true, data: { access_url: accessUrl } })
       }
 
