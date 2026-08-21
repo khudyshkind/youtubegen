@@ -3831,6 +3831,33 @@ cron.schedule('*/30 * * * *', async () => {
   try { await checkSSBalance()         } catch (err) { console.error('[cron/ss-balance]', err.message);         Sentry.captureException(err, { extra: { cron: 'checkSSBalance' } }) }
 }, { timezone: 'UTC' })
 
+async function checkOpenAISynthHealth() {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) return
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8_000)
+  let httpCode = 0
+  try {
+    // GET /v1/models: free, no synthesis, no TTS cost.
+    // 200 = key valid + service up → alive.
+    // 401 = key invalid → TTS also fails → down.
+    // 5xx = service outage → down.
+    const res = await fetch('https://api.openai.com/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    })
+    httpCode = res.status
+    const isAlive = httpCode === 200
+    console.log(`[health/openai-synth] HTTP ${httpCode} → ${isAlive ? 'ok' : 'down'}`)
+    await updateEngineHealth('openai', isAlive, httpCode)
+  } catch {
+    console.log('[health/openai-synth] timeout/connection error → down')
+    await updateEngineHealth('openai', false, 0)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // ── Engine synthesis health check — every 10 minutes ─────────────────────────
 cron.schedule('*/10 * * * *', async () => {
   console.log('[cron] engine synth health checks')
@@ -3838,6 +3865,7 @@ cron.schedule('*/10 * * * *', async () => {
   try { await checkVoicerSynthHealth()     } catch (err) { console.error('[cron/voicer-synth-health]', err.message);     Sentry.captureException(err, { extra: { cron: 'checkVoicerSynthHealth' } }) }
   try { await checkElevenLabsSynthHealth() } catch (err) { console.error('[cron/elevenlabs-synth-health]', err.message); Sentry.captureException(err, { extra: { cron: 'checkElevenLabsSynthHealth' } }) }
   try { await checkApihostSynthHealth()    } catch (err) { console.error('[cron/apihost-synth-health]', err.message);    Sentry.captureException(err, { extra: { cron: 'checkApihostSynthHealth' } }) }
+  try { await checkOpenAISynthHealth()     } catch (err) { console.error('[cron/openai-synth-health]', err.message);     Sentry.captureException(err, { extra: { cron: 'checkOpenAISynthHealth' } }) }
 }, { timezone: 'UTC' })
 
 // ── Anthropic billing probe — every hour ─────────────────────────────────────
@@ -7820,6 +7848,7 @@ app.listen(PORT, async () => {
     try { await checkVoicerSynthHealth()     } catch (e) { console.warn('[startup/health/voicer]', e.message) }
     try { await checkElevenLabsSynthHealth() } catch (e) { console.warn('[startup/health/elevenlabs]', e.message) }
     try { await checkApihostSynthHealth()    } catch (e) { console.warn('[startup/health/apihost]', e.message) }
+    try { await checkOpenAISynthHealth()     } catch (e) { console.warn('[startup/health/openai]', e.message) }
   }, 2_000)
 
   console.log('[bot] starting cron jobs...')

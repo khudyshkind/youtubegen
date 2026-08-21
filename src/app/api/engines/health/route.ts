@@ -3,7 +3,7 @@ import { createServerSupabase, createServiceClient } from '@/lib/supabase-server
 
 export const maxDuration = 10
 
-const ENGINES = ['secretvoicer', 'elevenlabs', 'voicer', 'apihost'] as const
+const ENGINES = ['secretvoicer', 'elevenlabs', 'voicer', 'apihost', 'openai'] as const
 type EngineStatus = 'ok' | 'down' | 'unknown'
 
 async function readSetting(key: string): Promise<string | null> {
