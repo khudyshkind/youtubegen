@@ -295,7 +295,11 @@ export async function POST(req: NextRequest) {
 
     console.log('[trends] analysis merged ok, trends count:', analysis.trends.length)
 
-    await spendCredits(user.id, actualCost, 'trends')
+    const { ok: trendsSpendOk } = await spendCredits(user.id, actualCost, 'trends')
+    if (!trendsSpendOk) {
+      console.error(`[analytics/trends] spendCredits failed: cost=${actualCost} user=${user.id}`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     try {
       await svc.from('analytics_cache').upsert({

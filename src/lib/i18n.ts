@@ -253,12 +253,12 @@ export const translations = {
     'billing.upgrade':       'Перейти',
     'billing.downgrade':     'Понижение',
     'billing.renew_btn':     'Продлить',
-    'billing.free_btn':      'Бесплатный',
+    'billing.free_btn':      'Стартовый пакет',
     'billing.loading':       'Загрузка...',
     'billing.period':        '/мес',
     'billing.err_session':   'Ошибка создания сессии оплаты',
     'billing.err_conn':      'Ошибка соединения с сервером',
-    'billing.f_credits_once':    '10 000 кредитов (один раз)',
+    'billing.f_credits_once':    '1 000 стартовых кредитов на 30 дней',
     'billing.f_all_tools':       'Все инструменты генерации',
     'billing.f_email_support':   'Email-поддержка',
     'billing.f_priority_support':'Приоритетная поддержка',
@@ -327,7 +327,7 @@ export const translations = {
     'onboard.skippable_end': 'или заменить своими материалами',
     'onboard.credits_title': 'Система кредитов',
     'onboard.credits_desc':  'Каждая операция списывает кредиты',
-    'onboard.credits_gift':  '🎁 У вас 10 000 бесплатных кредитов — хватит на несколько видео',
+    'onboard.credits_gift':  '🎁 У вас 1 000 стартовых кредитов на 30 дней — хватит на пробные видео',
     'onboard.op':            'Операция',
     'onboard.credits_col':   'Кредиты',
     'onboard.all_ready':     'Всё готово!',
@@ -351,7 +351,7 @@ export const translations = {
     'landing.hero_h1_2':    'за 10 минут',
     'landing.hero_sub':     'Сценарий + Голос + Субтитры + Иллюстрации + SEO — полный пайплайн на ИИ. Вы только задаёте тему.',
     'landing.hero_cta':     'Начать бесплатно →',
-    'landing.hero_hint':    '10 000 кредитов бесплатно · Без карты',
+    'landing.hero_hint':    '1 000 стартовых кредитов · Без карты',
     'landing.pipeline_tag': 'Пайплайн',
     'landing.pipeline_h2':  'AI делает всё сам',
     'landing.pipeline_sub': '8 шагов от темы до готового видео. Ваша задача — ввести тему и нажать кнопку.',
@@ -366,8 +366,8 @@ export const translations = {
     'landing.pricing_tag':  'Тарифы',
     'landing.pricing_h2':   'Прозрачные цены',
     'landing.pricing_sub':  'Начните бесплатно — без карты и скрытых платежей',
-    'landing.free_credits': '10 000 бесплатных кредитов',
-    'landing.free_credits_suffix': 'при регистрации — без привязки карты',
+    'landing.free_credits': '1 000 стартовых кредитов',
+    'landing.free_credits_suffix': 'на 30 дней при регистрации — без карты',
     'landing.faq_tag':      'Вопросы',
     'landing.faq_h2':       'Часто спрашивают',
     'landing.cta_h2':       'Готовы начать?',
@@ -410,7 +410,7 @@ export const translations = {
     'landing.benefit5_title': 'SEO-оптимизация',
     'landing.benefit5_desc': 'AI автоматически пишет заголовок, описание и теги под алгоритм YouTube.',
     'landing.benefit6_title': 'Тарифы от $9/мес',
-    'landing.benefit6_desc': '10 000 бесплатных кредитов при регистрации. Без скрытых платежей и привязки карты.',
+    'landing.benefit6_desc': '1 000 стартовых кредитов на 30 дней при регистрации. Без скрытых платежей и привязки карты.',
 
     // ── Landing — testimonials ────────────────────────────────────────────────
     'landing.testimonials_h2b': 'Что говорят пользователи',
@@ -457,6 +457,7 @@ export const translations = {
     // ── Landing — pricing section ─────────────────────────────────────────────
     'landing.period':          '/мес',
     'landing.plan_popular':    '⭐ Популярный',
+    'landing.plan_name_free':  'Стартовый пакет',
     'landing.plan_free_price': 'Бесплатно',
     'landing.plan_cta_free':   'Начать бесплатно →',
     'landing.plan_cta_basic':  'Выбрать →',
@@ -464,14 +465,14 @@ export const translations = {
     'landing.plan_cta_pro':    'Выбрать →',
     'landing.plan_cta_agency': 'Выбрать →',
     'landing.plan_credits_mo':   'кредитов в месяц',
-    'landing.plan_credits_once': 'кредитов при регистрации',
+    'landing.plan_credits_once': 'стартовых кредитов · 30 дней',
     'landing.credits_note':    'Сценарий {cost_s_min}–{cost_s_max} кр · Озвучка {cost_v_min}–{cost_v_max}/1к симв · Субтитры {cost_sub} кр/мин · Иллюстрация {cost_i_min}–{cost_i_max} кр/шт · Видео {cost_vid} кр/мин · SEO {cost_seo} кр · Полное видео ~3 500–13 000 кр',
 
     // ── Landing — CTA section ─────────────────────────────────────────────────
     'landing.cta_h2_pre':   'Создай своё первое видео',
     'landing.cta_gradient': 'бесплатно',
     'landing.cta_sub2':     'Регистрация за 30 секунд — без карты, без обязательств',
-    'landing.cta_free_badge':'✓ 10 000 кредитов бесплатно',
+    'landing.cta_free_badge':'✓ 1 000 стартовых кредитов',
     'landing.cta_no_card':  '✓ Без кредитной карты',
     'landing.cta_cancel':   '✓ Отмена в любой момент',
 
@@ -479,7 +480,7 @@ export const translations = {
     'landing.footer_tagline': 'Автоматизация YouTube-контента с AI',
 
     // ── Hero section ──────────────────────────────────────────────────────────
-    'landing.hero_badge2':        '10 000 кредитов бесплатно при регистрации',
+    'landing.hero_badge2':        '1 000 стартовых кредитов на 30 дней при регистрации',
     'landing.hero_h1_pre':        'От идеи до',
     'landing.hero_h1_mid':        'YouTube-видео',
     'landing.hero_h1_post':       'за 10 минут',
@@ -503,7 +504,7 @@ export const translations = {
     'faq.q3': 'Это замена DaVinci Resolve или CapCut?',
     'faq.a3': 'Нет, это дополнение. Lefiro автоматизирует создание контента — сценарий, озвучку, иллюстрации. Для простых видео результат готов сразу. Для сложного монтажа можно скачать исходники и доработать в любом редакторе.',
     'faq.q4': 'Что такое кредиты?',
-    'faq.a4': 'Кредиты — внутренняя валюта сервиса. Сценарий — {cost_s_min}–{cost_s_max} кр., иллюстрация — {cost_i_min}–{cost_i_max} кр., видео — {cost_vid} кр./мин, SEO — {cost_seo} кр. Типичное 3-минутное видео (Vision Fast) стоит ~5 000–7 000 кредитов. При регистрации вы получаете 10 000 кредитов бесплатно.',
+    'faq.a4': 'Кредиты — внутренняя валюта сервиса. Сценарий — {cost_s_min}–{cost_s_max} кр., иллюстрация — {cost_i_min}–{cost_i_max} кр., видео — {cost_vid} кр./мин, SEO — {cost_seo} кр. Типичное 3-минутное видео (Vision Fast) стоит ~5 000–7 000 кредитов. При регистрации вы получаете 1 000 стартовых кредитов на 30 дней.',
     'faq.q5': 'Сколько стоит одно видео?',
     'faq.a5': 'Стоимость зависит от длины: видео рендерится за 300 кредитов/мин. Типичное 3-минутное видео с Vision Fast обходится в ~5 000–7 000 кредитов. На тарифе Starter ($19/мес, 200 000 кредитов) можно создать ~25–50 видео в месяц.',
     'faq.q6': 'Какие языки поддерживаются?',
@@ -534,7 +535,7 @@ export const translations = {
     'referral.share':    'Поделитесь ссылкой — друг получит бонус сразу, вы — когда он оплатит тариф',
     // ── Auth banner ───────────────────────────────────────────────────────────────
     // SYNC: число +3 000 = REFEREE_BONUS (lib/referral-config.ts)
-    'auth.ref_bonus_note': '🎁 Вас пригласил друг — вы получите +3 000 кредитов к стартовым 10 000 бесплатных!',
+    'auth.ref_bonus_note': '🎁 Вас пригласил друг — вы получите +3 000 кредитов к стартовым 1 000 на 30 дней!',
 
     // ── Step 1 extra ──────────────────────────────────────────────────────────────
     'step1.subtitle':       'Настройте видео перед генерацией сценария',
@@ -1743,12 +1744,12 @@ export const translations = {
     'billing.upgrade':       'Upgrade',
     'billing.downgrade':     'Downgrade',
     'billing.renew_btn':     'Renew',
-    'billing.free_btn':      'Free',
+    'billing.free_btn':      'Starter Pack',
     'billing.loading':       'Loading...',
     'billing.period':        '/mo',
     'billing.err_session':   'Payment session error',
     'billing.err_conn':      'Server connection error',
-    'billing.f_credits_once':    '10,000 credits (one-time)',
+    'billing.f_credits_once':    '1,000 starter credits for 30 days',
     'billing.f_all_tools':       'All generation tools',
     'billing.f_email_support':   'Email support',
     'billing.f_priority_support':'Priority support',
@@ -1817,7 +1818,7 @@ export const translations = {
     'onboard.skippable_end': 'or replaced with your own materials',
     'onboard.credits_title': 'Credits system',
     'onboard.credits_desc':  'Each operation deducts credits',
-    'onboard.credits_gift':  '🎁 You have 10,000 free credits — enough for several videos',
+    'onboard.credits_gift':  '🎁 You have 1,000 starter credits for 30 days — try out a few videos',
     'onboard.op':            'Operation',
     'onboard.credits_col':   'Credits',
     'onboard.all_ready':     'All set!',
@@ -1841,7 +1842,7 @@ export const translations = {
     'landing.hero_h1_2':    'in 10 minutes',
     'landing.hero_sub':     'Script + Voice + Subtitles + Illustrations + SEO — full AI pipeline. You only provide the topic.',
     'landing.hero_cta':     'Start free →',
-    'landing.hero_hint':    '10,000 free credits · No card required',
+    'landing.hero_hint':    '1,000 starter credits · No card required',
     'landing.pipeline_tag': 'Pipeline',
     'landing.pipeline_h2':  'AI does everything',
     'landing.pipeline_sub': '8 steps from topic to finished video. Your job — enter the topic and press a button.',
@@ -1856,8 +1857,8 @@ export const translations = {
     'landing.pricing_tag':  'Pricing',
     'landing.pricing_h2':   'Transparent pricing',
     'landing.pricing_sub':  'Start free — no card, no hidden fees',
-    'landing.free_credits': '10,000 free credits',
-    'landing.free_credits_suffix': 'upon registration — no card required',
+    'landing.free_credits': '1,000 starter credits',
+    'landing.free_credits_suffix': 'for 30 days · no card required',
     'landing.faq_tag':      'FAQ',
     'landing.faq_h2':       'Frequently asked',
     'landing.cta_h2':       'Ready to start?',
@@ -1900,7 +1901,7 @@ export const translations = {
     'landing.benefit5_title': 'SEO optimization',
     'landing.benefit5_desc': 'AI automatically writes a title, description and tags optimized for the YouTube algorithm.',
     'landing.benefit6_title': 'Plans from $9/mo',
-    'landing.benefit6_desc': '10,000 free credits upon registration. No hidden fees or card required.',
+    'landing.benefit6_desc': '1,000 starter credits for 30 days upon registration. No hidden fees or card required.',
 
     // ── Landing — testimonials ────────────────────────────────────────────────
     'landing.testimonials_h2b': 'What creators say',
@@ -1947,6 +1948,7 @@ export const translations = {
     // ── Landing — pricing section ─────────────────────────────────────────────
     'landing.period':          '/mo',
     'landing.plan_popular':    '⭐ Popular',
+    'landing.plan_name_free':  'Starter Pack',
     'landing.plan_free_price': 'Free',
     'landing.plan_cta_free':   'Get started free →',
     'landing.plan_cta_basic':  'Choose →',
@@ -1954,14 +1956,14 @@ export const translations = {
     'landing.plan_cta_pro':    'Choose →',
     'landing.plan_cta_agency': 'Choose →',
     'landing.plan_credits_mo':   'credits/mo',
-    'landing.plan_credits_once': 'credits on sign-up',
+    'landing.plan_credits_once': 'starter credits · 30 days',
     'landing.credits_note':    'Script {cost_s_min}–{cost_s_max} cr · Voice {cost_v_min}–{cost_v_max}/1k chars · Subtitles {cost_sub} cr/min · Image {cost_i_min}–{cost_i_max} cr/ea · Video {cost_vid} cr/min · SEO {cost_seo} cr · Full video ~3,500–13,000 cr',
 
     // ── Landing — CTA section ─────────────────────────────────────────────────
     'landing.cta_h2_pre':    'Create your first video',
     'landing.cta_gradient':  'for free',
     'landing.cta_sub2':      'Sign up in 30 seconds — no card, no commitments',
-    'landing.cta_free_badge':'✓ 10,000 free credits',
+    'landing.cta_free_badge':'✓ 1,000 starter credits',
     'landing.cta_no_card':   '✓ No credit card',
     'landing.cta_cancel':    '✓ Cancel anytime',
 
@@ -1969,7 +1971,7 @@ export const translations = {
     'landing.footer_tagline': 'YouTube content automation with AI',
 
     // ── Hero section ──────────────────────────────────────────────────────────
-    'landing.hero_badge2':        '10,000 free credits upon registration',
+    'landing.hero_badge2':        '1,000 starter credits for 30 days',
     'landing.hero_h1_pre':        'From idea to',
     'landing.hero_h1_mid':        'YouTube video',
     'landing.hero_h1_post':       'in 10 minutes',
@@ -1993,7 +1995,7 @@ export const translations = {
     'faq.q3': 'Is this a replacement for DaVinci Resolve or CapCut?',
     'faq.a3': "No, it's a complement. Lefiro automates content creation — scripts, voiceovers, illustrations. For simple videos the result is ready immediately. For complex editing you can download the source files and work in any editor.",
     'faq.q4': 'What are credits?',
-    'faq.a4': "Credits are the service's internal currency. Script — {cost_s_min}–{cost_s_max} cr., illustration — {cost_i_min}–{cost_i_max} cr., video — {cost_vid} cr./min, SEO — {cost_seo} cr. A typical 3-minute video (Vision Fast) costs ~5,000–7,000 credits. You get 10,000 free credits upon registration.",
+    'faq.a4': "Credits are the service's internal currency. Script — {cost_s_min}–{cost_s_max} cr., illustration — {cost_i_min}–{cost_i_max} cr., video — {cost_vid} cr./min, SEO — {cost_seo} cr. A typical 3-minute video (Vision Fast) costs ~5,000–7,000 credits. You get 1,000 starter credits for 30 days upon registration.",
     'faq.q5': 'How much does one video cost?',
     'faq.a5': "Cost depends on length: video renders at 300 credits/min. A typical 3-minute video with Vision Fast costs ~5,000–7,000 credits. The Starter plan ($19/mo, 200,000 credits) gives ~25–50 videos per month.",
     'faq.q6': 'What languages are supported?',
@@ -2024,7 +2026,7 @@ export const translations = {
     'referral.share':    'Share your link — your friend gets a bonus right away, you earn when they go paid',
     // ── Auth banner ───────────────────────────────────────────────────────────────
     // SYNC: number +3,000 = REFEREE_BONUS (lib/referral-config.ts)
-    'auth.ref_bonus_note': '🎁 A friend invited you — you get +3,000 credits on top of your 10,000 free starting credits!',
+    'auth.ref_bonus_note': '🎁 A friend invited you — you get +3,000 credits on top of your 1,000 starter credits for 30 days!',
 
     // ── Step 1 extra ──────────────────────────────────────────────────────────────
     'step1.subtitle':       'Configure your video before generating the script',

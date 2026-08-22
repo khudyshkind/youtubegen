@@ -252,9 +252,12 @@ export default function DashboardClient({ profile, projects }: Props) {
             </Link>
           </div>
           <p className="text-3xl font-bold text-slate-100 mb-2">{profile?.credits ?? 0}</p>
-          {profile?.plan !== 'free' && profile?.plan_credits != null && (
+          {profile?.plan_credits != null && (profile.plan !== 'free' || profile.plan_expires_at) && (
             <p className="text-xs text-slate-500 mb-1">
-              {lang === 'en' ? 'Plan' : 'Тарифных'}: {profile.plan_credits.toLocaleString()}
+              {profile.plan === 'free'
+                ? (lang === 'en' ? 'Starter' : 'Стартовых')
+                : (lang === 'en' ? 'Plan' : 'Тарифных')
+              }: {profile.plan_credits.toLocaleString()}
               {profile.plan_expires_at && (
                 <> · {lang === 'en' ? 'until' : 'до'} {new Date(profile.plan_expires_at).toLocaleDateString(lang === 'en' ? 'en-US' : 'ru-RU', { day: 'numeric', month: 'short' })}</>
               )}

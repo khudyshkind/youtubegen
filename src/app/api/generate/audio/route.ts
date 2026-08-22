@@ -693,7 +693,11 @@ export async function POST(request: NextRequest) {
       if (!job_id) throw new Error('Railway /synthesize-audio: no job_id in response')
 
       // D. Spend credits after job confirmed created — mirrors sync (spend after Storage upload)
-      await spendCredits(user.id, cost, `audio_${engine}`, effectivePid)
+      const { ok: audioSpendOk } = await spendCredits(user.id, cost, `audio_${engine}`, effectivePid)
+      if (!audioSpendOk) {
+        console.error(`[generate/audio] spendCredits failed: engine=${engine} cost=${cost} user=${user.id} — job queued without charge`)
+        return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+      }
 
       // E. Record credits_charged for future refund if worker reports failure (handled in Step 4-5)
       const asyncServiceClient = createServiceClient()
@@ -901,7 +905,12 @@ export async function POST(request: NextRequest) {
 
     const { data: { publicUrl } } = serviceClient.storage.from('audio').getPublicUrl(storagePath)
 
-    await spendCredits(user.id, cost, `audio_${engine}`, project_id ?? toolRunId ?? undefined)
+    const { ok: audioSyncSpendOk } = await spendCredits(user.id, cost, `audio_${engine}`, project_id ?? toolRunId ?? undefined)
+    if (!audioSyncSpendOk) {
+      console.error(`[generate/audio] spendCredits failed: engine=${engine} cost=${cost} user=${user.id} — sync path`)
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'spendCredits failed' })
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     if (project_id) {
       await supabase

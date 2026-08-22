@@ -385,7 +385,11 @@ export async function POST(req: NextRequest) {
 
     console.log('[niche] analysis merged ok')
 
-    await spendCredits(user.id, CREDIT_COSTS.niche_analysis, 'niche_analysis')
+    const { ok: nicheSpendOk } = await spendCredits(user.id, CREDIT_COSTS.niche_analysis, 'niche_analysis')
+    if (!nicheSpendOk) {
+      console.error(`[analytics/niche] spendCredits failed: cost=${CREDIT_COSTS.niche_analysis} user=${user.id}`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     try {
       await svc.from('analytics_cache').upsert({

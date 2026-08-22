@@ -115,7 +115,7 @@ export function audioCost(chars: number, engine: AudioEngine, apihostVoiceType?:
 }
 
 export const PLAN_CREDITS: Record<Plan, number> = {
-  free:      10000,
+  free:       1000,
   basic:     80000,
   starter:  200000,
   pro:      500000,

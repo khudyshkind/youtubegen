@@ -53,7 +53,7 @@ export default function LandingBody() {
 
   const PLANS = [
     {
-      name: 'Free',
+      name: t('landing.plan_name_free'),
       isFree: true,
       credits: PLAN_CREDITS['free'],
       features: [t('billing.f_script'), t('billing.f_audio_engines_5'), t('billing.f_all_tools')],

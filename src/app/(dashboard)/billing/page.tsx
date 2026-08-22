@@ -49,7 +49,7 @@ export default function BillingPage() {
   const PLANS = [
     {
       id: 'free' as Plan,
-      name: 'Free',
+      name: t('billing.free_btn'),
       price: planPrice('free'),
       period: '',
       highlight: false,
@@ -170,7 +170,7 @@ export default function BillingPage() {
             <p className="text-sm text-slate-400 mt-1">
               {t('billing.plan_label')}{' '}
               <span className="font-semibold capitalize text-violet-300">
-                {currentPlan} · {PLAN_CREDITS[currentPlan]} {t('billing.credits_unit')}{currentPlan !== 'free' ? t('billing.period') : ''}
+                {currentPlan === 'free' ? t('billing.free_btn') : currentPlan} · {PLAN_CREDITS[currentPlan]} {t('billing.credits_unit')}{currentPlan !== 'free' ? t('billing.period') : ''}
               </span>
             </p>
             {/* Wallet breakdown (paid plans) */}

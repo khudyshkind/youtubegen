@@ -94,7 +94,12 @@ export async function POST(request: NextRequest) {
       console.warn('[analyze-style] ref storage upload failed (non-fatal):', e instanceof Error ? e.message : e)
     }
 
-    await spendCredits(user.id, CREDIT_COSTS.style_analysis, 'style_analysis', projectId ?? undefined)
+    const { ok: styleSpendOk } = await spendCredits(user.id, CREDIT_COSTS.style_analysis, 'style_analysis', projectId ?? undefined)
+    if (!styleSpendOk) {
+      console.error(`[analyze-style] spendCredits failed: cost=${CREDIT_COSTS.style_analysis} user=${user.id}`)
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'spendCredits failed' })
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     void finishOpLog(_opLogId, { status: 'done', creditsSpent: CREDIT_COSTS.style_analysis })
     return NextResponse.json({ ok: true, data: { style_description: styleDescription, ref_url: refUrl } })

@@ -551,7 +551,11 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Spend credits ──────────────────────────────────────────────────────
-    await spendCredits(user.id, actualCost, 'channel_breakout')
+    const { ok: cbSpendOk } = await spendCredits(user.id, actualCost, 'channel_breakout')
+    if (!cbSpendOk) {
+      console.error(`[analytics/channel-breakout] spendCredits failed: cost=${actualCost} user=${user.id}`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     // ── Save to analytics_reports (non-fatal, cap 20) ─────────────────────
     try {

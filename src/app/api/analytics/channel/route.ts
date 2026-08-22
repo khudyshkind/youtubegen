@@ -641,7 +641,12 @@ export async function POST(req: NextRequest) {
 
     console.log('[channel] analysis merged ok')
 
-    await spendCredits(user.id, actualCost, 'channel_analysis')
+    const { ok: channelSpendOk } = await spendCredits(user.id, actualCost, 'channel_analysis')
+    if (!channelSpendOk) {
+      console.error(`[analytics/channel] spendCredits failed: cost=${actualCost} user=${user.id}`)
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'spendCredits failed' })
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
     void finishOpLog(_opLogId, { status: 'done', creditsSpent: actualCost })
 
     // ── Write cache ───────────────────────────────────────────────────────────

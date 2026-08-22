@@ -148,7 +148,11 @@ export async function POST(request: NextRequest) {
 
     const { job_id } = (await renderRes.json()) as { job_id: string }
 
-    await spendCredits(user.id, videoCost, 'video', project_id)
+    const { ok: videoSpendOk } = await spendCredits(user.id, videoCost, 'video', project_id)
+    if (!videoSpendOk) {
+      console.error(`[video/render] spendCredits failed: cost=${videoCost} user=${user.id} — job queued without charge`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     // Record amount charged so refundVideoJobCredits can look it up atomically.
     const { error: chargeWriteErr } = await svc

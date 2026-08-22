@@ -343,7 +343,11 @@ ${channelBlocks}
       steal_ideas:        insights.steal_ideas     ?? [],
     }
 
-    await spendCredits(user.id, actualCost, 'channels_compare')
+    const { ok: compareSpendOk } = await spendCredits(user.id, actualCost, 'channels_compare')
+    if (!compareSpendOk) {
+      console.error(`[analytics/compare] spendCredits failed: cost=${actualCost} user=${user.id}`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     try {
       const { data: old } = await svc

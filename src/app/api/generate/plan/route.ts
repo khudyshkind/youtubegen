@@ -155,7 +155,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Модель вернула пустой план' }, { status: 502 })
     }
 
-    await spendCredits(user.id, cost, 'plan', project_id)
+    const { ok: planSpendOk } = await spendCredits(user.id, cost, 'plan', project_id)
+    if (!planSpendOk) {
+      console.error(`[generate/plan] spendCredits failed: cost=${cost} user=${user.id}`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     if (project_id) {
       await supabase

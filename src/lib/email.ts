@@ -57,8 +57,8 @@ export async function sendWelcomeEmail(user: { email: string; name?: string | nu
     </p>
 
     <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:20px;margin-bottom:24px">
-      <p style="margin:0;font-size:15px;color:#991b1b;font-weight:700">🎁 Вам начислено 30 бесплатных кредитов!</p>
-      <p style="margin:6px 0 0;font-size:13px;color:#b91c1c">Этого хватит чтобы создать ваше первое видео с нуля.</p>
+      <p style="margin:0;font-size:15px;color:#991b1b;font-weight:700">🎁 Вам начислено 1 000 стартовых кредитов на 30 дней!</p>
+      <p style="margin:6px 0 0;font-size:13px;color:#b91c1c">Хватит на несколько пробных видео. Кредиты действуют 30 дней.</p>
     </div>
 
     ${btn('Создать первое видео →', `${APP()}/studio`)}

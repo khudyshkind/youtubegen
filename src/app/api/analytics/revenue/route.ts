@@ -128,7 +128,11 @@ export async function POST(req: NextRequest) {
       annual: { min: monthly_min * 12, max: monthly_max * 12, avg: monthly_avg * 12 },
     }
 
-    await spendCredits(user.id, CREDIT_COSTS.revenue_calc, 'revenue_calc')
+    const { ok: revenueSpendOk } = await spendCredits(user.id, CREDIT_COSTS.revenue_calc, 'revenue_calc')
+    if (!revenueSpendOk) {
+      console.error(`[analytics/revenue] spendCredits failed: cost=${CREDIT_COSTS.revenue_calc} user=${user.id}`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     // Save to history (non-fatal)
     const svc = createServiceClient()

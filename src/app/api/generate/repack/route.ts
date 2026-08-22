@@ -146,7 +146,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Ошибка разбора ответа модели' }, { status: 502 })
     }
 
-    await spendCredits(user.id, cost, 'repack', project_id ?? null)
+    const { ok: repackSpendOk } = await spendCredits(user.id, cost, 'repack', project_id ?? null)
+    if (!repackSpendOk) {
+      console.error(`[repack] spendCredits failed: cost=${cost} user=${user.id}`)
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'spendCredits failed' })
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     void finishOpLog(_opLogId, { status: 'done', creditsSpent: cost })
     return NextResponse.json({ ok: true, data: { formats } })

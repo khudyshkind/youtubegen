@@ -717,7 +717,11 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Spend credits ────────────────────────────────────────────────────
-    await spendCredits(user.id, actualCost, 'sub_niche_finder')
+    const { ok: subNicheSpendOk } = await spendCredits(user.id, actualCost, 'sub_niche_finder')
+    if (!subNicheSpendOk) {
+      console.error(`[analytics/sub-niche-finder] spendCredits failed: cost=${actualCost} user=${user.id}`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     // ── Cache write (non-fatal) ──────────────────────────────────────────
     try {

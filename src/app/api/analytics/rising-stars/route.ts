@@ -300,7 +300,11 @@ export async function POST(req: NextRequest) {
     console.log(`[rising] enriched channels for Claude: ${enriched.length}`)
 
     if (enriched.length === 0) {
-      await spendCredits(user.id, actualCost, 'rising_stars')
+      const { ok: rsEmptySpendOk } = await spendCredits(user.id, actualCost, 'rising_stars')
+      if (!rsEmptySpendOk) {
+        console.error(`[analytics/rising-stars] spendCredits failed (empty): cost=${actualCost} user=${user.id}`)
+        return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+      }
       try {
         await svc.from('analytics_reports').insert({
           user_id: user.id,
@@ -384,7 +388,11 @@ ${videoLines}`
       common_patterns: claudeResult.common_patterns ?? [],
     }
 
-    await spendCredits(user.id, actualCost, 'rising_stars')
+    const { ok: rsSpendOk } = await spendCredits(user.id, actualCost, 'rising_stars')
+    if (!rsSpendOk) {
+      console.error(`[analytics/rising-stars] spendCredits failed: cost=${actualCost} user=${user.id}`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     try {
       const { data: old } = await svc

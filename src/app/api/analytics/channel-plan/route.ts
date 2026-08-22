@@ -448,7 +448,11 @@ export async function POST(req: NextRequest) {
       seo_keywords: style.seo_keywords ?? { channel_description: [], video_tags: [], hashtags: [] },
     }
 
-    await spendCredits(user.id, actualCost, 'channel_plan')
+    const { ok: chanPlanSpendOk } = await spendCredits(user.id, actualCost, 'channel_plan')
+    if (!chanPlanSpendOk) {
+      console.error(`[analytics/channel-plan] spendCredits failed: cost=${actualCost} user=${user.id}`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     console.log('[channel-plan] saving report...')
     try {

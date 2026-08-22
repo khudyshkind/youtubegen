@@ -757,7 +757,12 @@ export async function POST(request: NextRequest) {
         .or(`media_expires_at.is.null,media_expires_at.lt.${newExpiry}`)
     }
 
-    await spendCredits(user.id, CREDIT_COSTS.thumbnail, 'thumbnail', project_id ?? toolRunId ?? undefined)
+    const { ok: thumbSpendOk } = await spendCredits(user.id, CREDIT_COSTS.thumbnail, 'thumbnail', project_id ?? toolRunId ?? undefined)
+    if (!thumbSpendOk) {
+      console.error(`[thumbnail] spendCredits failed: cost=${CREDIT_COSTS.thumbnail} user=${user.id}`)
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'spendCredits failed' })
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     void finishOpLog(_opLogId, { status: 'done', creditsSpent: CREDIT_COSTS.thumbnail })
     const ts = Date.now()

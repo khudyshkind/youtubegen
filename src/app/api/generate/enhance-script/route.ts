@@ -262,7 +262,12 @@ export async function POST(request: NextRequest) {
       result = r
     }
 
-    await spendCredits(user.id, CREDIT_COSTS.enhance, 'enhance_script', project_id)
+    const { ok: enhanceSpendOk } = await spendCredits(user.id, CREDIT_COSTS.enhance, 'enhance_script', project_id)
+    if (!enhanceSpendOk) {
+      console.error(`[enhance-script] spendCredits failed: cost=${CREDIT_COSTS.enhance} user=${user.id}`)
+      void finishOpLog(_opLogId, { status: 'failed', errorText: 'spendCredits failed' })
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
     void finishOpLog(_opLogId, { status: 'done', creditsSpent: CREDIT_COSTS.enhance })
 
     return NextResponse.json({ ok: true, data: { script: result } })

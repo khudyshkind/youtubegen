@@ -398,7 +398,11 @@ export async function POST(req: NextRequest) {
       insights:        insights.insights        ?? '',
     }
 
-    await spendCredits(user.id, actualCost, 'keywords_analysis')
+    const { ok: kwSpendOk } = await spendCredits(user.id, actualCost, 'keywords_analysis')
+    if (!kwSpendOk) {
+      console.error(`[analytics/keywords] spendCredits failed: cost=${actualCost} user=${user.id}`)
+      return NextResponse.json({ ok: false, error: 'Ошибка списания кредитов' }, { status: 402 })
+    }
 
     try {
       await svc.from('analytics_cache').upsert({
