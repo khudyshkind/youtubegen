@@ -34,5 +34,15 @@ export async function GET() {
     }
   }
 
+  // VGF (video render backend) — derived from billing alert; no cron, purely reactive
+  const vgfAlertTs = await readSetting('billing_alert_ts:vgf')
+  if (vgfAlertTs) {
+    const ageH = (now - new Date(vgfAlertTs).getTime()) / 3_600_000
+    // Alert stays "down" for 24h after last billing error; after that → unknown (might have recovered)
+    health['vgf'] = ageH < 24 ? 'down' : 'unknown'
+  } else {
+    health['vgf'] = 'ok'
+  }
+
   return NextResponse.json({ ok: true, health })
 }

@@ -27,12 +27,12 @@ export async function GET(request: NextRequest) {
     const svc = createServiceClient()
 
     // Resolve job: by job_id (normal polling) or by project_id (resume after reload)
-    let job: { id: string; status: string; progress: number | null; video_url: string | null; error_message: string | null; project_id: string | null; user_id: string; credits_charged: number; credits_refunded_at: string | null; phase: string | null; phase_done: number | null; phase_total: number | null } | null = null
+    let job: { id: string; status: string; progress: number | null; video_url: string | null; error_message: string | null; project_id: string | null; user_id: string; credits_charged: number; credits_refunded_at: string | null; phase: string | null; phase_done: number | null; phase_total: number | null; created_at: string } | null = null
 
     if (jobId) {
       const { data, error } = await svc
         .from('video_jobs')
-        .select('id, status, progress, video_url, error_message, project_id, user_id, credits_charged, credits_refunded_at, phase, phase_done, phase_total')
+        .select('id, status, progress, video_url, error_message, project_id, user_id, credits_charged, credits_refunded_at, phase, phase_done, phase_total, created_at')
         .eq('id', jobId)
         .eq('user_id', user.id)
         .single()
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
       // Resume polling: find the latest non-failed job for this project
       const { data, error } = await svc
         .from('video_jobs')
-        .select('id, status, progress, video_url, error_message, project_id, user_id, credits_charged, credits_refunded_at, phase, phase_done, phase_total')
+        .select('id, status, progress, video_url, error_message, project_id, user_id, credits_charged, credits_refunded_at, phase, phase_done, phase_total, created_at')
         .eq('project_id', projectIdParam!)
         .eq('user_id', user.id)
         .neq('status', 'failed')
@@ -104,6 +104,20 @@ export async function GET(request: NextRequest) {
         void trackEvent(user.id, 'step_completed', { step: 'video', project_id: job.project_id })
         void trackEvent(user.id, 'video_downloaded', { project_id: job.project_id })
 
+        // Log to operation_log — atomic: only the bridged winner writes this
+        void svc.from('operation_log').insert({
+          user_id: user.id,
+          project_id: job.project_id,
+          op_type: 'video',
+          provider: 'railway',
+          status: 'done',
+          started_at: job.created_at,
+          completed_at: new Date().toISOString(),
+          credits_spent: job.credits_charged,
+          credits_refunded: 0,
+          error_text: null,
+        })
+
         // UPDATE #2 — advance status only if still at the video step.
         // No-op if status is already 'generating_seo' or 'completed'.
         await svc
@@ -161,6 +175,34 @@ export async function GET(request: NextRequest) {
           console.log(`[video/status] refund fallback: ${job.credits_charged} credits → ${user.id}`)
           job = { ...job, credits_refunded_at: new Date().toISOString() }
         }
+
+        const errMsg = job.error_message ?? ''
+
+        // VGF balance-tier error → set billing alert so admin dashboard turns orange
+        if (/VGF submit/i.test(errMsg) && /balance tier/i.test(errMsg)) {
+          void svc
+            .from('bot_settings')
+            .upsert({ key: 'billing_alert_ts:vgf', value: new Date().toISOString() })
+          console.warn(`[video/status] VGF balance tier exceeded — billing alert written. job=${job.id}`)
+          Sentry.captureMessage('VGF balance tier exceeded: video render rejected', {
+            level: 'warning',
+            extra: { job_id: job.id, error: errMsg.slice(0, 200) },
+          })
+        }
+
+        // Log to operation_log — atomic: only the claimed winner writes this
+        void svc.from('operation_log').insert({
+          user_id: user.id,
+          project_id: job.project_id,
+          op_type: 'video',
+          provider: 'railway',
+          status: 'failed',
+          started_at: job.created_at,
+          completed_at: new Date().toISOString(),
+          credits_spent: job.credits_charged,
+          credits_refunded: job.credits_charged,
+          error_text: errMsg.slice(0, 500) || null,
+        })
       }
     }
 

@@ -22,8 +22,16 @@ export function sanitizeProviderError(raw: string | null | undefined): string {
     return 'Сервис синтеза речи недоступен. Попробуйте позже.'
   }
 
-  // Secret Slider — image generation
-  if (/secretslider/i.test(s)) {
+  // VGF (Very Good FFMPEG) — Railway video render backend
+  // Error format: "clip_N(engine=...,url=...): VGF submit HTTP 400: {...}"
+  if (/VGF submit/i.test(s)) {
+    if (/balance tier/i.test(s))
+      return 'Ошибка рендеринга: баланс видео-сервиса VGF исчерпан. Попробуйте позже или обратитесь в поддержку.'
+    return 'Ошибка рендеринга видео. Попробуйте позже.'
+  }
+
+  // Secret Slider — image generation ([secretslider] prefix is the Vercel-side format)
+  if (/\[secretslider\]/i.test(s)) {
     if (/mismatch/i.test(s)) return 'Получены не все иллюстрации. Попробуйте ещё раз.'
     if (/timed?\s*out/i.test(s)) return 'Генерация иллюстраций заняла слишком долго. Попробуйте позже.'
     return 'Генерация иллюстраций не удалась. Попробуйте позже.'
