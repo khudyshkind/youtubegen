@@ -32,8 +32,10 @@ export function sanitizeProviderError(raw: string | null | undefined): string {
 
   // Secret Slider — image generation ([secretslider] prefix is the Vercel-side format)
   if (/\[secretslider\]/i.test(s)) {
+    if (/too_many_prompts/i.test(s)) return 'Слишком много иллюстраций в одном запросе (максимум 100). Уменьшите интервал или количество сцен и попробуйте снова.'
     if (/mismatch/i.test(s)) return 'Получены не все иллюстрации. Попробуйте ещё раз.'
     if (/timed?\s*out/i.test(s)) return 'Генерация иллюстраций заняла слишком долго. Попробуйте позже.'
+    if (/SS_BUSY/i.test(s)) return 'Сервис иллюстраций занят другой задачей. Попробуйте через несколько минут.'
     return 'Генерация иллюстраций не удалась. Попробуйте позже.'
   }
 

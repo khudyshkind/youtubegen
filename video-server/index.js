@@ -6905,6 +6905,13 @@ async function processImageJob(jobId, body) {
         ? projectTitle.split(/\s+/).slice(0, 8).join(' ')
         : (script ?? '').split(/\s+/).slice(0, 8).join(' ')
 
+    // Secret Slider limit: max 100 prompts per request. Reject early before spending
+    // Claude API tokens on scene generation that would fail at the SS submit stage.
+    const SS_MAX_PROMPTS = 100
+    if (count > SS_MAX_PROMPTS) {
+      throw new Error(`[secretslider] too_many_prompts: requested ${count} images, limit is ${SS_MAX_PROMPTS}. Reduce image_interval or video length.`)
+    }
+
     console.log(`[image-job:${jobId}] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
     await updateImageJob(jobId, { progress: 10 })
 
@@ -6995,6 +7002,24 @@ async function processImageJob(jobId, body) {
       await sbPatch('projects', `id=eq.${project_id}&status=eq.generating_images`, { status: 'failed' })
         .catch(e => console.warn(`[image-job:${jobId}] project failure mark failed:`, e.message))
     }
+
+    // Write operation_log — failures were not logged before; this is the gap that made
+    // ec89d698 invisible in the admin journal despite the job existing in image_jobs.
+    sbGet('image_jobs', `id=eq.${jobId}&select=credits_charged,created_at`).then(rows => {
+      const ij = Array.isArray(rows) ? rows[0] : null
+      writeOpLog({
+        userId:          user_id,
+        projectId:       project_id,
+        opType:          'images',
+        provider:        engine,
+        status:          'failed',
+        creditsSpent:    ij?.credits_charged ?? 0,
+        creditsRefunded: imageRefund.ok ? (imageRefund.amount ?? 0) : 0,
+        errorText:       msg.slice(0, 500),
+        startedAt:       ij?.created_at ?? undefined,
+      }).catch(() => {})
+    }).catch(() => {})
+
     if (isAllFallback) {
       await notifyBillingErrorRailway('Anthropic', `/image-job:${jobId}`, user_id, project_id).catch(() => {})
     } else if (OWNER_ID) {
