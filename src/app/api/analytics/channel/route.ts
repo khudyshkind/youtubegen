@@ -316,7 +316,7 @@ export async function POST(req: NextRequest) {
     console.log(`[channel] start input="${channelInput}" lang=${lang}`)
 
     // v5: deep scan (playlistItems+videos.list up to 200), deep_videos + deep_stats
-    const cacheKey = channelInput.toLowerCase().replace(/\s+/g, '-') + `|${lang}|v6`
+    const cacheKey = channelInput.toLowerCase().replace(/\s+/g, '-') + `|${lang}|v7`
 
     // ── Cache check ──────────────────────────────────────────────────────────
     try {
