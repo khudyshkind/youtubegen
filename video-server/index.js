@@ -6022,6 +6022,168 @@ app.post('/generate-images', verifySecret, async (req, res) => {
   }
 })
 
+// Resume a partial image job: send only the missing scene prompts (loaded from the
+// original job's styled_prompts) and merge the results into project.scene_images.
+app.post('/resume-images', verifySecret, async (req, res) => {
+  const { project_id, user_id, resume_job_id, engine = 'secretslider', image_interval = 10,
+    image_style, custom_style, duration_sec, cost_per_image = 0 } = req.body
+  if (!user_id) return res.status(400).json({ ok: false, error: 'user_id required' })
+  if (!resume_job_id) return res.status(400).json({ ok: false, error: 'resume_job_id required' })
+  if (!project_id) return res.status(400).json({ ok: false, error: 'project_id required' })
+
+  try {
+    // Load styled_prompts from original job (requires migration 020).
+    let origJob = null
+    try {
+      const origRows = await sbGet('image_jobs', `id=eq.${resume_job_id}&select=id,user_id,styled_prompts,image_count`)
+      origJob = Array.isArray(origRows) ? origRows[0] : null
+    } catch {
+      return res.status(503).json({ ok: false, error: 'Функция недоступна: migration 020 ещё не применена' })
+    }
+    if (!origJob) return res.status(404).json({ ok: false, error: 'Original job not found' })
+    if (origJob.user_id !== user_id) return res.status(403).json({ ok: false, error: 'Forbidden' })
+
+    const styledPrompts = origJob.styled_prompts
+    if (!Array.isArray(styledPrompts) || styledPrompts.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Original job has no stored prompts — re-run full generation' })
+    }
+
+    // Determine which scene indices are already done.
+    const projRows = await sbGet('projects', `id=eq.${project_id}&user_id=eq.${user_id}&select=scene_images`)
+    const proj = Array.isArray(projRows) ? projRows[0] : null
+    const existingSceneImages = Array.isArray(proj?.scene_images) ? proj.scene_images.filter(img => img?.url) : []
+    const doneIndices = new Set(existingSceneImages.map(img => img.scene_index))
+    const missingIndices = styledPrompts.map((_, i) => i).filter(i => !doneIndices.has(i))
+
+    if (missingIndices.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Все иллюстрации уже сгенерированы' })
+    }
+
+    const interval = Math.max(3, Math.min(300, image_interval ?? 10))
+    const rows = await sbPost('image_jobs', {
+      project_id, user_id, engine,
+      status: 'pending', progress: 0,
+      image_count: missingIndices.length, image_interval: interval,
+      image_style: image_style ?? null, custom_style: custom_style ?? null,
+      script: `resume:${resume_job_id}`, topic: `resume:${resume_job_id.slice(0, 8)}`,
+      duration_sec: duration_sec ?? null, credits_charged: 0,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    })
+    const jobId = Array.isArray(rows) ? rows[0]?.id : rows?.id
+    if (!jobId) throw new Error('image_jobs insert returned no id')
+    console.log(`[resume-job:${jobId}] from ${resume_job_id.slice(0, 8)}: ${missingIndices.length} missing of ${styledPrompts.length}`)
+
+    setImmediate(() => {
+      resumeImageJob(jobId, {
+        project_id, user_id, engine, cost_per_image, image_interval: interval, image_style,
+        styledPrompts, missingIndices, existingSceneImages, duration_sec,
+      }).catch(async (err) => {
+        console.error(`[resume-job:${jobId}] unhandled:`, err.message)
+        Sentry.captureException(err, { extra: { jobId, stage: 'resumeImageJob_unhandled' } })
+        await updateImageJob(jobId, { status: 'failed', error_message: `unhandled: ${err.message}` }).catch(() => {})
+      })
+    })
+
+    return res.json({ ok: true, job_id: jobId, status: 'pending', missing_count: missingIndices.length })
+  } catch (e) {
+    console.error('[resume-images] failed:', e.message)
+    Sentry.captureException(e)
+    return res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+async function resumeImageJob(jobId, { project_id, user_id, engine, cost_per_image, image_interval, image_style, styledPrompts, missingIndices, existingSceneImages, duration_sec }) {
+  const t0 = Date.now()
+  await updateImageJob(jobId, { status: 'processing', progress: 5 })
+  if (project_id) {
+    await sbPatch('projects', `id=eq.${project_id}&user_id=eq.${user_id}`, { status: 'generating_images' })
+      .catch(e => console.warn(`[resume-job:${jobId}] project status set failed:`, e.message))
+  }
+
+  try {
+    const missingPrompts = missingIndices.map(i => styledPrompts[i])
+    console.log(`[resume-job:${jobId}] resuming ${missingIndices.length} scenes (idx ${missingIndices[0]}..${missingIndices[missingIndices.length - 1]})`)
+
+    const SS_MAX = 100
+    const batchTotal = Math.ceil(missingPrompts.length / SS_MAX)
+    let collectedUrls = []
+    let batchError = null
+
+    for (let bi = 0; bi < batchTotal; bi++) {
+      const batchStart = bi * SS_MAX
+      const batchEnd = Math.min(batchStart + SS_MAX, missingPrompts.length)
+      const batchPrompts = missingPrompts.slice(batchStart, batchEnd)
+      await updateImageJob(jobId, { progress: 10 + Math.round(55 * bi / batchTotal) })
+      if (batchTotal > 1) console.log(`[resume-job:${jobId}] batch ${bi + 1}/${batchTotal}: ${batchPrompts.length} prompts`)
+      try {
+        const r = await imgGenerateSecretSlider(batchPrompts, jobId)
+        collectedUrls = collectedUrls.concat(r.urls)
+      } catch (err) {
+        batchError = err
+        console.warn(`[resume-job:${jobId}] batch ${bi + 1} FAILED: ${err instanceof Error ? err.message : String(err)}`)
+        break
+      }
+    }
+
+    if (collectedUrls.length === 0) {
+      throw batchError ?? new Error('[secretslider] resume: no URLs received')
+    }
+
+    // sceneIndexMap[i] = original scene index for URL i.
+    const sceneIndexMap = collectedUrls.map((_, i) => missingIndices[i])
+    const resumedPrompts = sceneIndexMap.map(i => styledPrompts[i])
+
+    await updateImageJob(jobId, { progress: 65 })
+
+    const claimed = await claimImageJobForFinalization(jobId)
+    if (!claimed) {
+      console.log(`[resume-job:${jobId}] finalization already claimed — done`)
+      return
+    }
+
+    const finalResult = await finalizeImageJobFromSsUrls(
+      jobId, collectedUrls,
+      { user_id, project_id, engine, cost_per_image, image_interval, image_style, duration_sec },
+      null, resumedPrompts,
+      { sceneIndexMap, existingSceneImages }
+    )
+
+    const totalAfter = existingSceneImages.length + collectedUrls.length
+    const stillMissing = styledPrompts.length - totalAfter
+    if (stillMissing > 0 && finalResult.ok) {
+      const resumeJobId = jobId
+      await updateImageJob(resumeJobId, {
+        error_message: `Догенерировано ${collectedUrls.length} сцен. Всё ещё не хватает ${stillMissing} иллюстраций.`,
+      })
+    }
+
+    const totalSec = ((Date.now() - t0) / 1000).toFixed(1)
+    console.log(`[resume-job:${jobId}] done in ${totalSec}s: +${collectedUrls.length} images, total ${totalAfter}/${styledPrompts.length}`)
+    if (Date.now() - t0 > 90_000) {
+      notifyUserJobDone(user_id, 'images', { count: totalAfter }).catch(() => {})
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[resume-job:${jobId}] failed:`, msg)
+    Sentry.captureException(err, { extra: { jobId, user_id, project_id } })
+    await updateImageJob(jobId, { status: 'failed', error_message: msg })
+    const refund = await refundImageJobCredits(jobId, user_id, project_id)
+    if (!refund.ok && refund.amount > 0) {
+      await recordRefundIncident(jobId, user_id, refund.amount, 'image', refund.error)
+    }
+    if (project_id) {
+      // If we have existing images, restore to draft. Otherwise mark failed.
+      const targetStatus = existingSceneImages.length > 0 ? 'draft' : 'failed'
+      await sbPatch('projects', `id=eq.${project_id}&status=eq.generating_images`, { status: targetStatus })
+        .catch(() => {})
+    }
+    if (OWNER_ID) {
+      tgApi('sendMessage', { chat_id: OWNER_ID, text: `⚠️ resume_job ${jobId.slice(0, 8)} failed: ${msg.slice(0, 200)}` })
+        .catch(() => {})
+    }
+  }
+}
+
 app.get('/image-status/:jobId', verifySecret, async (req, res) => {
   const { jobId } = req.params
   try {
@@ -6905,13 +7067,6 @@ async function processImageJob(jobId, body) {
         ? projectTitle.split(/\s+/).slice(0, 8).join(' ')
         : (script ?? '').split(/\s+/).slice(0, 8).join(' ')
 
-    // Secret Slider limit: max 100 prompts per request. Reject early before spending
-    // Claude API tokens on scene generation that would fail at the SS submit stage.
-    const SS_MAX_PROMPTS = 100
-    if (count > SS_MAX_PROMPTS) {
-      throw new Error(`[secretslider] too_many_prompts: requested ${count} images, limit is ${SS_MAX_PROMPTS}. Reduce image_interval or video length.`)
-    }
-
     console.log(`[image-job:${jobId}] mode=${hasSubtitles ? 'subtitle' : 'script'} count=${count}`)
     await updateImageJob(jobId, { progress: 10 })
 
@@ -6941,15 +7096,46 @@ async function processImageJob(jobId, body) {
       return styledPrompt
     })
 
-    const ssResult = await imgGenerateSecretSlider(allStyledPrompts, jobId)
-    const ssUrls = ssResult.urls
-    const ssPartial = ssResult.partial
-    if (ssPartial) {
-      console.log(`[image-job:${jobId}] secretslider partial: ${ssUrls.length}/${allStyledPrompts.length} URLs (status=${ssResult.status}) in ${((Date.now() - t0Request) / 1000).toFixed(1)}s`)
+    // Persist styled prompts for potential resume (avoids re-running Claude on partial failure).
+    await updateImageJob(jobId, { styled_prompts: allStyledPrompts }).catch(() => {})
+
+    const SS_MAX = 100
+    const batchTotal = Math.ceil(allStyledPrompts.length / SS_MAX)
+    let collectedUrls = []
+    let batchError = null
+
+    for (let bi = 0; bi < batchTotal; bi++) {
+      const batchStart = bi * SS_MAX
+      const batchEnd = Math.min(batchStart + SS_MAX, allStyledPrompts.length)
+      const batchPrompts = allStyledPrompts.slice(batchStart, batchEnd)
+      if (batchTotal > 1) {
+        await updateImageJob(jobId, { progress: 30 + Math.round(35 * bi / batchTotal) })
+        console.log(`[image-job:${jobId}] SS batch ${bi + 1}/${batchTotal}: scenes ${batchStart + 1}–${batchEnd} of ${allStyledPrompts.length}`)
+      }
+      try {
+        const r = await imgGenerateSecretSlider(batchPrompts, jobId)
+        collectedUrls = collectedUrls.concat(r.urls)
+        if (batchTotal > 1) console.log(`[image-job:${jobId}] batch ${bi + 1} OK: +${r.urls.length} (total ${collectedUrls.length}/${allStyledPrompts.length})`)
+      } catch (err) {
+        batchError = err
+        console.warn(`[image-job:${jobId}] batch ${bi + 1} FAILED: ${err instanceof Error ? err.message : String(err)}`)
+        break
+      }
+    }
+
+    if (collectedUrls.length === 0) {
+      // Re-throw so the catch block handles full failure (refund, log, notify).
+      throw batchError ?? new Error('[secretslider] all batches failed, no URLs received')
+    }
+
+    const isPartialBatch = collectedUrls.length < allStyledPrompts.length
+    const ssUrls = collectedUrls
+    if (isPartialBatch) {
+      console.log(`[image-job:${jobId}] secretslider partial: ${ssUrls.length}/${allStyledPrompts.length} URLs in ${((Date.now() - t0Request) / 1000).toFixed(1)}s`)
     } else {
       console.log(`[image-job:${jobId}] secretslider returned ${ssUrls.length} URLs in ${((Date.now() - t0Request) / 1000).toFixed(1)}s`)
     }
-    await updateImageJob(jobId, { progress: 70 })
+    await updateImageJob(jobId, { progress: 65 })
 
     // Atomically claim finalization rights. If the webhook handler already claimed it
     // (arrived before the poll loop detected completion), it will finalize independently.
@@ -6962,8 +7148,16 @@ async function processImageJob(jobId, body) {
     const finalResult = await finalizeImageJobFromSsUrls(
       jobId, ssUrls,
       { user_id, project_id, engine, cost_per_image, image_interval: interval, image_style, duration_sec },
-      scenes, allStyledPrompts
+      scenes.slice(0, ssUrls.length), allStyledPrompts.slice(0, ssUrls.length)
     )
+
+    // When batches ran partially, mark error_message so the UI can offer resume.
+    if (isPartialBatch && finalResult.ok) {
+      const missing = allStyledPrompts.length - ssUrls.length
+      await updateImageJob(jobId, {
+        error_message: `Сгенерировано ${ssUrls.length} из ${allStyledPrompts.length} иллюстраций. Нажмите «Догенерировать» для получения оставшихся ${missing}.`,
+      })
+    }
 
     const totalSec = ((Date.now() - t0Request) / 1000).toFixed(1)
     console.log(`[image-job:${jobId}] total_sec=${totalSec}s result=${finalResult.reason}`)
@@ -7635,7 +7829,8 @@ async function recoverOrphanedImageJobs() {
 // Shared finalization: upload images, charge credits per image, update job status.
 // Called by both the poll loop (with full scene metadata) and the webhook handler (scenes=null).
 // Does not throw — all errors are caught internally and result in status='failed'.
-async function finalizeImageJobFromSsUrls(jobId, ssUrls, jobRow, scenes, allStyledPrompts) {
+async function finalizeImageJobFromSsUrls(jobId, ssUrls, jobRow, scenes, allStyledPrompts, opts = {}) {
+  const { sceneIndexMap = null, existingSceneImages = null } = opts
   const { user_id, project_id, engine, cost_per_image = 0, image_interval, image_style, duration_sec } = jobRow
   const interval = Math.max(3, Math.min(300, image_interval ?? 10))
 
@@ -7648,20 +7843,21 @@ async function finalizeImageJobFromSsUrls(jobId, ssUrls, jobRow, scenes, allStyl
     const ssUrl = ssUrls[i]
     const scn = scenes?.[i]
     const styledPrompt = allStyledPrompts?.[i]
+    const globalIdx = sceneIndexMap ? sceneIndexMap[i] : i
     try {
-      const storagePath = project_id ? `${user_id}/${project_id}/scene_ss_${i}.jpg` : null
+      const storagePath = project_id ? `${user_id}/${project_id}/scene_ss_${globalIdx}.jpg` : null
       const t0Upload = Date.now()
       const url = project_id ? await uploadImageUrlToStorage(ssUrl, storagePath) : ssUrl
       const uploadMs = Date.now() - t0Upload
       sceneImages[i] = {
-        scene_index: i,
+        scene_index: globalIdx,
         prompt: styledPrompt ?? ssUrl,
         url,
         engine,
         ...(scn ? { scene: scn.scene, timecode_start: scn.timecode_start, timecode_end: scn.timecode_end } : {}),
         ...(duration_sec != null ? { audio_fingerprint: Math.round(duration_sec) } : {}),
       }
-      console.log(`[image-job:${jobId}] scene ${i + 1} upload: ${uploadMs}ms url=${url?.slice(0, 80) ?? 'NULL'}`)
+      console.log(`[image-job:${jobId}] scene ${globalIdx + 1} upload: ${uploadMs}ms url=${url?.slice(0, 80) ?? 'NULL'}`)
 
       if (cost_per_image > 0) {
         const chargeRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/deduct_credits`, {
@@ -7685,8 +7881,8 @@ async function finalizeImageJobFromSsUrls(jobId, ssUrls, jobRow, scenes, allStyl
       }
       await updateImageJob(jobId, { progress: 70 + Math.round(((i + 1) / ssUrls.length) * 25), credits_charged: chargedCredits })
     } catch (err) {
-      console.error(`[image-job:${jobId}] scene ${i + 1} upload FAILED:`, err instanceof Error ? err.message : String(err))
-      sceneImages[i] = { scene_index: i, prompt: styledPrompt ?? '', url: null, engine }
+      console.error(`[image-job:${jobId}] scene ${globalIdx + 1} upload FAILED:`, err instanceof Error ? err.message : String(err))
+      sceneImages[i] = { scene_index: globalIdx, prompt: styledPrompt ?? '', url: null, engine }
     }
   }
 
@@ -7712,8 +7908,11 @@ async function finalizeImageJobFromSsUrls(jobId, ssUrls, jobRow, scenes, allStyl
     return { ok: false, reason: 'credit_exhausted', validImages: paidImages, chargedCredits }
   }
 
-  const validImages = sceneImages.filter(Boolean)
-  console.log(`[image-job:${jobId}] SUMMARY: engine=${engine} created=${validImages.length} failed=${ssUrls.length - validImages.length}`)
+  const batchImages = sceneImages.filter(img => img?.url)
+  const validImages = existingSceneImages
+    ? [...existingSceneImages, ...batchImages].sort((a, b) => a.scene_index - b.scene_index)
+    : batchImages
+  console.log(`[image-job:${jobId}] SUMMARY: engine=${engine} created=${batchImages.length} failed=${ssUrls.length - batchImages.length}${existingSceneImages ? ` merged_total=${validImages.length}` : ''}`)
   const completedAt = new Date().toISOString()
   await updateImageJob(jobId, {
     status: 'completed', progress: 100, scene_images: validImages,

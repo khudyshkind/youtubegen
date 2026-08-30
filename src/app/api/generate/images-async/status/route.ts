@@ -9,7 +9,7 @@ export const maxDuration = 15
 
 interface ImageJobStatus {
   id: string
-  status: 'pending' | 'processing' | 'completed' | 'failed'
+  status: 'pending' | 'processing' | 'completed' | 'partial' | 'awaiting_webhook' | 'failed'
   progress: number
   scene_images?: SceneImage[] | null
   error_message?: string | null
@@ -53,9 +53,9 @@ export async function GET(request: NextRequest) {
 
     const job = await statusRes.json() as ImageJobStatus & { ok: boolean }
 
-    // On completion, write scene_images back to the project so the studio reflects the result.
+    // On completion (full or partial), write scene_images back to the project.
     // Guard: only if project_id is supplied and scene_images exist.
-    if (job.status === 'completed' && job.scene_images?.length && projectId) {
+    if ((job.status === 'completed') && job.scene_images?.length && projectId) {
       const { error: saveErr } = await supabase
         .from('projects')
         .update({

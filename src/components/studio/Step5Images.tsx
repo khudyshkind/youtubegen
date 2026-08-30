@@ -252,6 +252,8 @@ export default function Step5Images() {
   const editingPromptRef = useRef('')
   const [regenLoading, setRegenLoading] = useState<Set<number>>(new Set())
   const [regenErrors, setRegenErrors] = useState<Record<number, string>>({})
+  const [partialJobId, setPartialJobId] = useState<string | null>(null)
+  const [resumeLoading, setResumeLoading] = useState(false)
 
   // Style selector
   const [selectedStyleKey, setSelectedStyleKey] = useState<ImageStyleKey | 'none'>(() => {
@@ -662,6 +664,7 @@ export default function Step5Images() {
   }
 
   async function handleGenerateAsync(count: number) {
+    setPartialJobId(null)
     try {
       // Step 1: submit job to Railway via Next.js proxy
       const submitRes = await fetch('/api/generate/images-async', {
@@ -709,9 +712,66 @@ export default function Step5Images() {
       // Step 2: poll /api/generate/images-async/status every 5 seconds
       setProgress({ completed: 0, total: count })
       await pollUntilDone(jobId, count)
+
+      // Detect partial result: fewer images than requested (some batches failed).
+      const received = useStudioStore.getState().sceneImages
+      if (received.length > 0 && received.length < count) {
+        setPartialJobId(jobId)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('step5.err_gen'))
     } finally {
+      setLoading(false)
+      setProgress(null)
+    }
+  }
+
+  async function handleResume(resumeJobId: string, missingCount: number) {
+    if (!projectId || !resumeJobId) return
+    setResumeLoading(true)
+    setError('')
+    try {
+      const submitRes = await fetch('/api/generate/images-resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resume_job_id: resumeJobId,
+          project_id: projectId,
+          image_interval: imageInterval,
+          image_style: imageStyle ?? undefined,
+          custom_style: refStyle ?? undefined,
+          duration_sec: audioDurationSec,
+          missing_count: missingCount,
+        }),
+      })
+      if (!submitRes.ok) {
+        const errJson = await submitRes.json().catch(() => ({})) as { error?: string; code?: string }
+        if (errJson.code === 'NO_CREDITS') {
+          setError(`${t('step5.err_resume')} (недостаточно кредитов)`)
+        } else {
+          setError(errJson.error ?? t('step5.err_resume'))
+        }
+        return
+      }
+      const submitJson = await submitRes.json() as { ok: boolean; data?: { job_id: string; missing_count: number }; error?: string }
+      if (!submitJson.ok || !submitJson.data?.job_id) {
+        setError(submitJson.error ?? t('step5.err_resume'))
+        return
+      }
+      const { job_id: newJobId, missing_count: actualMissing } = submitJson.data
+      setPartialJobId(null)
+      setLoading(true)
+      setProgress({ completed: 0, total: actualMissing })
+      await pollUntilDone(newJobId, actualMissing)
+      // After resume polling ends, check if still partial.
+      const received = useStudioStore.getState().sceneImages
+      if (received.length > 0 && received.length < imageCount) {
+        setPartialJobId(newJobId)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('step5.err_resume'))
+    } finally {
+      setResumeLoading(false)
       setLoading(false)
       setProgress(null)
     }
@@ -1115,6 +1175,23 @@ export default function Step5Images() {
         </div>
       )}
 
+      {/* Batch-size warning: shown before launch when SS needs multiple sequential batches */}
+      {!loading && imageEngine === 'secretslider' && imageCount > 100 && (
+        <div
+          className="flex items-start gap-2 rounded-xl px-4 py-3"
+          style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.25)' }}
+        >
+          <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <p className="text-xs text-yellow-300 leading-relaxed">
+            {t('step5.warn_batched')
+              .replace('{batches}', String(Math.ceil(imageCount / 100)))
+              .replace('{batches}', String(Math.ceil(imageCount / 100)))}
+          </p>
+        </div>
+      )}
+
       <button
         type="button"
         onClick={() => void handleGenerate()}
@@ -1157,6 +1234,38 @@ export default function Step5Images() {
       )}
 
       {loading && tgLinked === false && <TelegramBanner />}
+
+      {/* Partial result banner: shown after generation when fewer images than requested */}
+      {!loading && !resumeLoading && partialJobId && sceneImages.length > 0 && sceneImages.length < imageCount && (
+        <div
+          className="flex items-center justify-between gap-3 rounded-xl px-4 py-3"
+          style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.25)' }}
+        >
+          <p className="text-xs text-yellow-300 leading-relaxed">
+            {t('step5.partial_result')
+              .replace('{done}', String(sceneImages.length))
+              .replace('{total}', String(imageCount))}
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleResume(partialJobId, imageCount - sceneImages.length)}
+            className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg text-yellow-300 hover:text-yellow-100 transition-colors"
+            style={{ background: 'rgba(234,179,8,0.15)', border: '1px solid rgba(234,179,8,0.3)' }}
+          >
+            {t('step5.resume_btn').replace('{missing}', String(imageCount - sceneImages.length))}
+          </button>
+        </div>
+      )}
+
+      {resumeLoading && (
+        <div
+          className="flex items-center gap-2 rounded-xl px-4 py-3"
+          style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}
+        >
+          <SpinnerIcon className="w-4 h-4 animate-spin text-violet-400 shrink-0" />
+          <span className="text-xs text-violet-300">{t('step5.resuming')}</span>
+        </div>
+      )}
 
       {!loading && (
         <div className="flex gap-2">
