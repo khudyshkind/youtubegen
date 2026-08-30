@@ -134,34 +134,54 @@ function getChannelPrompt1(lang: string): string {
   const isRu = lang !== 'en'
   return isRu ? `Ты опытный YouTube аналитик. На основе данных канала определи ключевые характеристики.
 
-ДАННЫЕ: будут переданы метрики канала и последние 15 длинных видео с РЕАЛЬНЫМИ датами, просмотрами и лайками.
+ДАННЫЕ: будут переданы метрики канала и последние длинные видео с РЕАЛЬНЫМИ датами, просмотрами и лайками.
+
+ДОСТУПНЫЕ ДАННЫЕ (используй только их):
+просмотры, лайки, комментарии, даты публикаций, длительность роликов, теги, субтитры, подписчики, средние просмотры по годам (поле «По годам»).
+
+ЗАПРЕЩЕНО упоминать — этих данных нет в источнике:
+• CTR (кликабельность обложек, click-through rate), показы (impressions)
+• Удержание аудитории, процент досмотра
+• Источники трафика, органический поиск, позиции в поиске YouTube
+• Монетизация, доход, eCPM
+Не включай запрещённые метрики ни в strengths, ни в weaknesses, ни в рекомендации.
 
 МЕТОДОЛОГИЯ:
 • upload_frequency — вычисли из реальных дат публикаций (например "2.1 длинных видео/нед."). Учти только длинные видео.
-• growth_trend — "Растёт" / "Стабильно" / "Снижается" — определи ТОЛЬКО по views_per_day (просмотры/день), а не по суммарным просмотрам. Видео с days_old < 7 ИГНОРИРУЙ в расчёте тренда — у них мало времени накопить просмотры, низкий счётчик НЕ означает провал. Сравни медиану views_per_day первой половины видео (старые) с медианой второй половины (новые).
+• growth_trend — "Растёт" / "Стабильно" / "Снижается". Используй поле «По годам» из данных: сравни средние просмотры последнего полного года с предыдущим. Если «По годам» отсутствует, используй поле "avg_views" последних видео.
 • best_topics — топ 3 темы с лучшими просмотрами (определи из названий).
 • worst_topics — 2 темы с наихудшими просмотрами.
-• strengths — 3 конкретные сильные стороны, основанные на данных.
-• weaknesses — 2 конкретные слабые стороны.
+• strengths — 3 конкретные сильные стороны, основанные на доступных данных (просмотры, вовлечённость, частота, длительность, теги).
+• weaknesses — 2 конкретные слабые стороны на основе доступных данных.
 
 ФОРМАТ — строго JSON без markdown:
-{"upload_frequency":"2.1 длинных видео/нед.","growth_trend":"Растёт","best_topics":["Тест-драйвы","Сравнения","Советы"],"worst_topics":["Влоги","Тюнинг"],"strengths":["Стабильный график","Высокий CTR на сравнениях","Экспертная подача"],"weaknesses":["Слабые миниатюры на б/у авто","Нет Shorts"]}
+{"upload_frequency":"2.1 длинных видео/нед.","growth_trend":"Растёт","best_topics":["Тест-драйвы","Сравнения","Советы"],"worst_topics":["Влоги","Тюнинг"],"strengths":["Стабильный график публикаций","Высокая вовлечённость (лайки/просмотры) на сравнениях","Длинные ролики с высоким числом просмотров"],"weaknesses":["Падение средних просмотров в последний год","Нет Shorts"]}
 
 ВАЖНО: Верни ТОЛЬКО валидный JSON на русском. Начни с {.`
     : `You are an experienced YouTube channel analyst. Based on channel data provided, identify key characteristics.
 
-DATA: channel metrics and last 15 long-form videos with REAL dates, views, and likes will be provided.
+DATA: channel metrics and long-form videos with REAL dates, views, and likes will be provided.
+
+AVAILABLE DATA (use only these):
+views, likes, comments, publication dates, video duration, tags, captions, subscribers, yearly avg views (field "yearly").
+
+FORBIDDEN — these metrics are NOT in the data source:
+• CTR (click-through rate), impressions
+• Audience retention, watch-through percentage
+• Traffic sources, organic search, YouTube search rankings
+• Monetization, revenue, eCPM
+Do NOT mention forbidden metrics in strengths, weaknesses, or recommendations.
 
 METHODOLOGY:
 • upload_frequency — compute from actual publication dates (e.g. "2.1 longs/week"). Long-form only.
-• growth_trend — "Growing" / "Stable" / "Declining" — ONLY base this on views_per_day (views per day), not raw view counts. Videos with days_old < 7 MUST be IGNORED for trend — they haven't had time to accumulate views, a low count does NOT mean failure. Compare median views_per_day of first half (older) vs second half (newer videos).
+• growth_trend — "Growing" / "Stable" / "Declining". Use the yearly data field: compare avg views of the last full year vs the previous year. If no yearly data, use avg_views of recent videos.
 • best_topics — top 3 topics with best views (from titles).
 • worst_topics — 2 topics with lowest views.
-• strengths — 3 specific channel strengths based on actual data.
-• weaknesses — 2 specific weaknesses.
+• strengths — 3 specific channel strengths based on available data (views, engagement, frequency, duration, tags).
+• weaknesses — 2 specific weaknesses based on available data.
 
 FORMAT — strict JSON without markdown:
-{"upload_frequency":"2.1 longs/week","growth_trend":"Growing","best_topics":["Test Drives","Comparisons","Buying Advice"],"worst_topics":["Vlogs","Tuning"],"strengths":["Consistent schedule","High CTR on comparisons","Expert delivery"],"weaknesses":["Weak thumbnails on used cars","No Shorts"]}
+{"upload_frequency":"2.1 longs/week","growth_trend":"Growing","best_topics":["Test Drives","Comparisons","Buying Advice"],"worst_topics":["Vlogs","Tuning"],"strengths":["Consistent publishing schedule","High engagement rate (likes/views) on comparisons","Long-form content with strong view counts"],"weaknesses":["Declining avg views in recent year","No Shorts"]}
 
 IMPORTANT: Return ONLY valid JSON in English. Start with {.`
 }
@@ -170,13 +190,22 @@ function getChannelPrompt2(lang: string): string {
   const isRu = lang !== 'en'
   return isRu ? `Ты опытный YouTube аналитик. На основе данных канала определи форматы видео и дай рекомендации.
 
-ДАННЫЕ: метрики, 15 длинных видео с просмотрами/лайками, топ всех времён.
+ДАННЫЕ: метрики, длинные видео с просмотрами/лайками, топ всех времён.
+
+ДОСТУПНЫЕ ДАННЫЕ (используй только их):
+просмотры, лайки, комментарии, длительность, теги, даты публикаций, субтитры.
+
+ЗАПРЕЩЕНО упоминать в рекомендациях:
+• CTR (кликабельность обложек, click-through rate), показы
+• Удержание аудитории, процент досмотра
+• Источники трафика, органический поиск, позиции в поиске
+• Монетизация, доход
 
 МЕТОДОЛОГИЯ:
 • Анализируй названия для определения форматов: тест-драйвы, обзоры, сравнения, топы, how-to, истории.
 • best_formats — топ 2-3 формата с наибольшими средними просмотрами. Поле avg_views — целое число.
 • worst_formats — 1-2 формата с наименьшими просмотрами. Поле avg_views — целое число.
-• recommendations — 3 конкретных совета. Используй данные о вовлечённости (лайки/просмотры) если они есть.
+• recommendations — 3 конкретных совета, основанных на вовлечённости (лайки/просмотры), частоте публикаций, длительности, тегах.
 
 ВАЖНО: НЕ включай поле "example".
 
@@ -186,13 +215,22 @@ function getChannelPrompt2(lang: string): string {
 ВАЖНО: Верни ТОЛЬКО валидный JSON на русском. Начни с {.`
     : `You are an experienced YouTube channel analyst. Based on channel data, identify video formats and give recommendations.
 
-DATA: metrics, 15 long-form videos with views/likes, all-time top.
+DATA: metrics, long-form videos with views/likes, all-time top.
+
+AVAILABLE DATA (use only these):
+views, likes, comments, duration, tags, publication dates, captions.
+
+FORBIDDEN — do NOT mention in recommendations:
+• CTR (click-through rate), impressions
+• Audience retention, watch-through percentage
+• Traffic sources, organic search, search rankings
+• Monetization, revenue
 
 METHODOLOGY:
 • Analyze titles to identify formats: test drives, reviews, comparisons, top lists, how-to, stories.
 • best_formats — top 2-3 formats with highest avg views. avg_views must be an integer.
 • worst_formats — 1-2 formats with lowest avg views. avg_views must be an integer.
-• recommendations — 3 specific actionable tips. Use engagement data (likes/views) if available.
+• recommendations — 3 specific actionable tips based on engagement (likes/views), publish frequency, duration, tags.
 
 IMPORTANT: Do NOT include "example" field.
 
@@ -476,16 +514,41 @@ export async function POST(req: NextRequest) {
 
     const nowMs = Date.now()
 
-    // ── Server-side trend (views_per_day, excluding <7-day videos) ─────────────
+    // ── Server-side trend (yearly avg views, mature videos ≥60d) ─────────────
+    // Bug fixed: previous vpd (views/days_old) made NEW videos look better because
+    // the denominator (days old) is small — a 60-day video with 8K views gets vpd=133
+    // while a 3-year-old peak video with 18K views gets vpd=16, falsely signalling
+    // "Growing" on a declining channel. Fix: compare raw median views per year,
+    // using only mature videos (≥60 days) so recent videos have had time to stabilise.
     let computedGrowthTrend = ''
     {
-      const eligible = deepVideos.filter(v => (nowMs - new Date(v.published).getTime()) / 86400000 >= 7)
-      if (eligible.length >= 4) {
-        const half = Math.floor(eligible.length / 2)
-        const vpd = (v: DeepVideoItem) => Math.round(v.views / Math.max(1, (nowMs - new Date(v.published).getTime()) / 86400000))
-        const medOlder = medianOf(eligible.slice(0, half).map(vpd))
-        const medNewer = medianOf(eligible.slice(half).map(vpd))
-        computedGrowthTrend = medNewer >= medOlder * 1.1 ? 'Растёт' : medNewer <= medOlder * 0.9 ? 'Снижается' : 'Стабильно'
+      const MATURE_DAYS = 60
+      const yearBuckets: Record<number, number[]> = {}
+      for (const v of deepVideos) {
+        const ageD = (nowMs - new Date(v.published).getTime()) / 86400000
+        if (ageD < MATURE_DAYS) continue
+        const year = new Date(v.published).getFullYear()
+        yearBuckets[year] ??= []
+        yearBuckets[year].push(v.views)
+      }
+      const validYears = (Object.keys(yearBuckets).map(Number) as number[])
+        .sort((a, b) => a - b)
+        .filter(y => (yearBuckets[y]?.length ?? 0) >= 2)
+      if (validYears.length >= 2) {
+        const lastY = validYears[validYears.length - 1]!
+        const prevY = validYears[validYears.length - 2]!
+        const medLast = medianOf(yearBuckets[lastY]!)
+        const medPrev = medianOf(yearBuckets[prevY]!)
+        computedGrowthTrend = medLast >= medPrev * 1.1 ? 'Растёт' : medLast <= medPrev * 0.9 ? 'Снижается' : 'Стабильно'
+      } else {
+        // Fallback: channels with content in a single calendar year
+        const eligible = deepVideos.filter(v => (nowMs - new Date(v.published).getTime()) / 86400000 >= MATURE_DAYS)
+        if (eligible.length >= 4) {
+          const half = Math.floor(eligible.length / 2)
+          const medOlder = medianOf(eligible.slice(0, half).map(v => v.views))
+          const medNewer = medianOf(eligible.slice(half).map(v => v.views))
+          computedGrowthTrend = medNewer >= medOlder * 1.1 ? 'Растёт' : medNewer <= medOlder * 0.9 ? 'Снижается' : 'Стабильно'
+        }
       }
     }
 
